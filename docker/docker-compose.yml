@@ -32,6 +32,13 @@ services:
       - APPDB_API_URL=https://appdb.oss.local/isw/api
       - APPDB_API_USER=isw
       - APPDB_API_PASS=Spyem_OtGheb4
+      # Disable proxy for internal hosts
+      - NO_PROXY=localhost,127.0.0.1,appdb.oss.local,.oss.local
+      - no_proxy=localhost,127.0.0.1,appdb.oss.local,.oss.local
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
     networks:
       - pypnm-net
     healthcheck:
