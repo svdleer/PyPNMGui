@@ -70,8 +70,8 @@ createApp({
         // Load CMTS list
         await this.loadCmtsList();
         
-        // Load all modems initially
-        await this.searchModems();
+        // Don't load mock modems - only show live data from CMTS
+        // await this.searchModems();
     },
     
     methods: {
