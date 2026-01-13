@@ -74,8 +74,8 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
     },
     
     "cm_proxy": {
-        "_comment": "Jump host to reach cable modems for SNMP",
-        "host": "hop-access1.ext.oss.local",
+        "_comment": "Jump host to reach cable modems for SNMP (disabled for now)",
+        "host": null,
         "port": 22,
         "username": "svdleer"
     },
