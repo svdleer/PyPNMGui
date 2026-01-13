@@ -1,0 +1,57 @@
+# PyPNM with Remote Agent Support - Docker Compose
+# SPDX-License-Identifier: Apache-2.0
+#
+# This compose file runs PyPNM with remote agent WebSocket support enabled.
+#
+# Usage:
+#   docker-compose -f docker-compose.pypnm.yml up -d
+#   docker-compose -f docker-compose.pypnm.yml logs -f
+
+services:
+  # ============================================
+  # PyPNM Server with Agent Support
+  # ============================================
+  pypnm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pypnm-agent
+      args:
+        PYPNM_VERSION: ${PYPNM_VERSION:-latest}
+    # Or use pre-built image:
+    # image: ghcr.io/pypnmapps/pypnm:latest
+    container_name: pypnm
+    restart: unless-stopped
+    ports:
+      - "${PYPNM_PORT:-8080}:8080"
+    volumes:
+      # PyPNM configuration
+      - ./config:/app/deploy/docker/config:ro
+      # Data persistence
+      - pypnm-data:/app/data
+      # Logs
+      - pypnm-logs:/app/logs
+    environment:
+      # Agent configuration
+      - PYPNM_AGENT_ENABLED=true
+      - PYPNM_AGENT_TOKEN=${PYPNM_AGENT_TOKEN:-dev-token-change-me}
+      # Standard PyPNM settings
+      - PYPNM_ENV=production
+      - PYPNM_LOG_LEVEL=${LOG_LEVEL:-INFO}
+    networks:
+      - pypnm-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pypnm-data:
+    driver: local
+  pypnm-logs:
+    driver: local
+
+networks:
+  pypnm-net:
+    driver: bridge

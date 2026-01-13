@@ -1,0 +1,46 @@
+{
+    "agent_id": "jump-server-01",
+    
+    "pypnm_server": {
+        "_comment": "PyPNM server WebSocket endpoint",
+        "url": "ws://localhost:8080/api/agents/ws",
+        "auth_token": "your-secure-token-here",
+        "reconnect_interval": 5
+    },
+    
+    "pypnm_ssh_tunnel": {
+        "_comment": "SSH tunnel to PyPNM server (if direct connection not possible)",
+        "enabled": true,
+        "ssh_host": "pypnm-server.example.com",
+        "ssh_port": 22,
+        "ssh_user": "pnm-agent",
+        "ssh_key_file": "~/.ssh/id_pypnm_server",
+        "local_port": 8080,
+        "remote_port": 8080
+    },
+    
+    "cmts_access": {
+        "_comment": "CMTS systems - can be reached directly via SNMP or SSH",
+        "snmp_direct": true,
+        "ssh_enabled": true,
+        "ssh_user": "pnm-agent",
+        "ssh_key_file": "~/.ssh/id_cmts"
+    },
+    
+    "cm_proxy": {
+        "_comment": "Server with connectivity to Cable Modems - SNMP commands executed here via SSH",
+        "host": "cm-connectivity-server.internal",
+        "port": 22,
+        "username": "pnm-agent",
+        "key_file": "~/.ssh/id_cm_proxy"
+    },
+    
+    "tftp_server": {
+        "_comment": "TFTP/FTP server for PNM files - accessed via SSH",
+        "host": "tftp-server.internal",
+        "port": 22,
+        "username": "pnm-agent",
+        "key_file": "~/.ssh/id_tftp",
+        "tftp_path": "/tftpboot"
+    }
+}

@@ -1,0 +1,5 @@
+# PyPNM Agent - Python Dependencies
+# Install on Jump Server
+
+websocket-client>=1.6.0
+paramiko>=3.3.0

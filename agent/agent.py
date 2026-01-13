@@ -1,0 +1,838 @@
+# PyPNM Jump Server Agent
+# SPDX-License-Identifier: Apache-2.0
+# 
+# This agent runs on the Jump Server and connects OUT to the GUI Server
+# via WebSocket. It executes SNMP/SSH commands and returns results.
+
+import json
+import logging
+import os
+import subprocess
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+try:
+    import websocket
+except ImportError:
+    print("ERROR: websocket-client not installed. Run: pip install websocket-client")
+    exit(1)
+
+try:
+    import paramiko
+except ImportError:
+    paramiko = None
+    print("WARNING: paramiko not installed. SSH proxy features disabled.")
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('PyPNM-Agent')
+
+
+@dataclass
+class AgentConfig:
+    """Agent configuration for Jump Server deployment."""
+    agent_id: str
+    pypnm_server_url: str
+    auth_token: str
+    reconnect_interval: int = 5
+    
+    # SSH Tunnel to PyPNM Server (WebSocket connection)
+    pypnm_ssh_tunnel_enabled: bool = False
+    pypnm_ssh_host: Optional[str] = None
+    pypnm_ssh_port: int = 22
+    pypnm_ssh_user: Optional[str] = None
+    pypnm_ssh_key: Optional[str] = None
+    pypnm_tunnel_local_port: int = 8080
+    pypnm_tunnel_remote_port: int = 8080
+    
+    # CMTS Access (can be direct SNMP or via SSH)
+    cmts_snmp_direct: bool = True
+    cmts_ssh_enabled: bool = False
+    cmts_ssh_user: Optional[str] = None
+    cmts_ssh_key: Optional[str] = None
+    
+    # CM Proxy - Server with connectivity to Cable Modems
+    # SNMP commands to modems are executed on this server via SSH
+    cm_proxy_host: Optional[str] = None
+    cm_proxy_port: int = 22
+    cm_proxy_user: Optional[str] = None
+    cm_proxy_key: Optional[str] = None
+    
+    # TFTP/FTP Server - accessed via SSH for PNM file retrieval
+    tftp_ssh_host: Optional[str] = None
+    tftp_ssh_port: int = 22
+    tftp_ssh_user: Optional[str] = None
+    tftp_ssh_key: Optional[str] = None
+    tftp_path: str = "/tftpboot"
+    
+    @classmethod
+    def from_file(cls, path: str) -> 'AgentConfig':
+        """Load configuration from JSON file."""
+        with open(path) as f:
+            data = json.load(f)
+        
+        # Expand ~ in paths
+        def expand_path(p):
+            return os.path.expanduser(p) if p else None
+        
+        # Support both old 'gui_server' and new 'pypnm_server' keys
+        server_config = data.get('pypnm_server') or data.get('gui_server', {})
+        tunnel_config = data.get('pypnm_ssh_tunnel') or data.get('gui_ssh_tunnel', {})
+        
+        cmts = data.get('cmts_access', {})
+        cm_proxy = data.get('cm_proxy', {})
+        tftp = data.get('tftp_server', {})
+        
+        return cls(
+            agent_id=data['agent_id'],
+            pypnm_server_url=server_config['url'],
+            auth_token=server_config['auth_token'],
+            reconnect_interval=server_config.get('reconnect_interval', 5),
+            # SSH Tunnel to PyPNM Server
+            pypnm_ssh_tunnel_enabled=tunnel_config.get('enabled', False),
+            pypnm_ssh_host=tunnel_config.get('ssh_host'),
+            pypnm_ssh_port=tunnel_config.get('ssh_port', 22),
+            pypnm_ssh_user=tunnel_config.get('ssh_user'),
+            pypnm_ssh_key=expand_path(tunnel_config.get('ssh_key_file')),
+            pypnm_tunnel_local_port=tunnel_config.get('local_port', 8080),
+            pypnm_tunnel_remote_port=tunnel_config.get('remote_port', 8080),
+            # CMTS Access
+            cmts_snmp_direct=cmts.get('snmp_direct', True),
+            cmts_ssh_enabled=cmts.get('ssh_enabled', False),
+            cmts_ssh_user=cmts.get('ssh_user'),
+            cmts_ssh_key=expand_path(cmts.get('ssh_key_file')),
+            # CM Proxy (for reaching modems)
+            cm_proxy_host=cm_proxy.get('host'),
+            cm_proxy_port=cm_proxy.get('port', 22),
+            cm_proxy_user=cm_proxy.get('username'),
+            cm_proxy_key=expand_path(cm_proxy.get('key_file')),
+            # TFTP Server (via SSH)
+            tftp_ssh_host=tftp.get('host'),
+            tftp_ssh_port=tftp.get('port', 22),
+            tftp_ssh_user=tftp.get('username'),
+            tftp_ssh_key=expand_path(tftp.get('key_file')),
+            tftp_path=tftp.get('tftp_path', '/tftpboot'),
+        )
+    
+    @classmethod
+    def from_env(cls) -> 'AgentConfig':
+        """Load configuration from environment variables."""
+        def expand_path(p):
+            return os.path.expanduser(p) if p else None
+        
+        return cls(
+            agent_id=os.environ.get('PYPNM_AGENT_ID', 'agent-01'),
+            pypnm_server_url=os.environ.get('PYPNM_SERVER_URL', 'ws://localhost:8080/api/agents/ws'),
+            auth_token=os.environ.get('PYPNM_AUTH_TOKEN', 'dev-token'),
+            reconnect_interval=int(os.environ.get('PYPNM_RECONNECT_INTERVAL', '5')),
+            # SSH Tunnel to PyPNM
+            pypnm_ssh_tunnel_enabled=os.environ.get('PYPNM_SSH_TUNNEL', 'false').lower() == 'true',
+            pypnm_ssh_host=os.environ.get('PYPNM_SSH_HOST'),
+            pypnm_ssh_port=int(os.environ.get('PYPNM_SSH_PORT', '22')),
+            pypnm_ssh_user=os.environ.get('PYPNM_SSH_USER'),
+            pypnm_ssh_key=expand_path(os.environ.get('PYPNM_SSH_KEY')),
+            pypnm_tunnel_local_port=int(os.environ.get('PYPNM_LOCAL_PORT', '8080')),
+            pypnm_tunnel_remote_port=int(os.environ.get('PYPNM_REMOTE_PORT', '8080')),
+            # CMTS
+            cmts_snmp_direct=os.environ.get('PYPNM_CMTS_SNMP_DIRECT', 'true').lower() == 'true',
+            cmts_ssh_enabled=os.environ.get('PYPNM_CMTS_SSH_ENABLED', 'false').lower() == 'true',
+            cmts_ssh_user=os.environ.get('PYPNM_CMTS_SSH_USER'),
+            cmts_ssh_key=expand_path(os.environ.get('PYPNM_CMTS_SSH_KEY')),
+            # CM Proxy
+            cm_proxy_host=os.environ.get('PYPNM_CM_PROXY_HOST'),
+            cm_proxy_port=int(os.environ.get('PYPNM_CM_PROXY_PORT', '22')),
+            cm_proxy_user=os.environ.get('PYPNM_CM_PROXY_USER'),
+            cm_proxy_key=expand_path(os.environ.get('PYPNM_CM_PROXY_KEY')),
+            # TFTP
+            tftp_ssh_host=os.environ.get('PYPNM_TFTP_SSH_HOST'),
+            tftp_ssh_port=int(os.environ.get('PYPNM_TFTP_SSH_PORT', '22')),
+            tftp_ssh_user=os.environ.get('PYPNM_TFTP_SSH_USER'),
+            tftp_ssh_key=expand_path(os.environ.get('PYPNM_TFTP_SSH_KEY')),
+            tftp_path=os.environ.get('PYPNM_TFTP_PATH', '/tftpboot'),
+        )
+
+
+class SSHProxyExecutor:
+    """Executes commands on remote server via SSH."""
+    
+    def __init__(self, host: str, port: int, username: str, key_file: Optional[str] = None):
+        self.host = host
+        self.port = port
+        self.username = username
+        self.key_file = key_file
+        self._client: Optional[paramiko.SSHClient] = None
+        self.logger = logging.getLogger(f'{__name__}.SSHProxy')
+    
+    def connect(self) -> bool:
+        """Establish SSH connection."""
+        if paramiko is None:
+            self.logger.error("paramiko not installed")
+            return False
+        
+        try:
+            self._client = paramiko.SSHClient()
+            self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            connect_kwargs = {
+                'hostname': self.host,
+                'port': self.port,
+                'username': self.username,
+            }
+            
+            if self.key_file:
+                connect_kwargs['key_filename'] = self.key_file
+            
+            self._client.connect(**connect_kwargs)
+            self.logger.info(f"Connected to SSH proxy: {self.host}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"SSH connection failed: {e}")
+            return False
+    
+    def execute(self, command: str, timeout: int = 30) -> tuple[int, str, str]:
+        """Execute command on remote server."""
+        if not self._client:
+            if not self.connect():
+                return -1, "", "SSH connection failed"
+        
+        try:
+            stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+            exit_code = stdout.channel.recv_exit_status()
+            return exit_code, stdout.read().decode(), stderr.read().decode()
+        except Exception as e:
+            self.logger.error(f"Command execution failed: {e}")
+            return -1, "", str(e)
+    
+    def close(self):
+        """Close SSH connection."""
+        if self._client:
+            self._client.close()
+            self._client = None
+
+
+class SNMPExecutor:
+    """Executes SNMP commands, optionally through SSH proxy."""
+    
+    # Allowed SNMP commands (whitelist for security)
+    ALLOWED_COMMANDS = {
+        'snmpget', 'snmpwalk', 'snmpbulkget', 'snmpbulkwalk', 'snmpset'
+    }
+    
+    def __init__(self, ssh_proxy: Optional[SSHProxyExecutor] = None):
+        self.ssh_proxy = ssh_proxy
+        self.logger = logging.getLogger(f'{__name__}.SNMP')
+    
+    def execute_snmp(self, 
+                     command: str,
+                     target_ip: str,
+                     oid: str,
+                     community: str = 'private',
+                     version: str = '2c',
+                     timeout: int = 5,
+                     retries: int = 1) -> dict:
+        """Execute SNMP command."""
+        
+        # Validate command
+        if command not in self.ALLOWED_COMMANDS:
+            return {
+                'success': False,
+                'error': f'Command not allowed: {command}'
+            }
+        
+        # Build SNMP command
+        snmp_cmd = f"{command} -v{version} -c {community} -t {timeout} -r {retries} {target_ip} {oid}"
+        
+        self.logger.info(f"Executing: {snmp_cmd}")
+        
+        if self.ssh_proxy:
+            # Execute through SSH proxy
+            exit_code, stdout, stderr = self.ssh_proxy.execute(snmp_cmd)
+        else:
+            # Execute locally
+            try:
+                result = subprocess.run(
+                    snmp_cmd.split(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout + 5
+                )
+                exit_code = result.returncode
+                stdout = result.stdout
+                stderr = result.stderr
+            except subprocess.TimeoutExpired:
+                return {'success': False, 'error': 'Command timeout'}
+            except FileNotFoundError:
+                return {'success': False, 'error': f'{command} not found'}
+        
+        if exit_code == 0:
+            return {
+                'success': True,
+                'output': stdout.strip(),
+                'command': command
+            }
+        else:
+            return {
+                'success': False,
+                'error': stderr.strip() or f'Exit code: {exit_code}',
+                'output': stdout.strip()
+            }
+
+
+class TFTPExecutor:
+    """Handles TFTP file transfers."""
+    
+    def __init__(self, tftp_host: str, tftp_port: int = 69):
+        self.tftp_host = tftp_host
+        self.tftp_port = tftp_port
+        self.logger = logging.getLogger(f'{__name__}.TFTP')
+    
+    def get_file(self, remote_path: str, local_path: Optional[str] = None) -> dict:
+        """Download file from TFTP server."""
+        if local_path is None:
+            local_path = f"/tmp/{os.path.basename(remote_path)}"
+        
+        cmd = f"tftp {self.tftp_host} {self.tftp_port} -c get {remote_path} {local_path}"
+        
+        try:
+            result = subprocess.run(
+                cmd.split(),
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0 and os.path.exists(local_path):
+                with open(local_path, 'rb') as f:
+                    content = f.read()
+                
+                return {
+                    'success': True,
+                    'path': local_path,
+                    'size': len(content),
+                    'content_base64': content.hex()  # Send as hex for binary safety
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.stderr or 'File not found'
+                }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+
+class PyPNMAgent:
+    """Main agent class that connects to GUI Server and handles requests."""
+    
+    def __init__(self, config: AgentConfig):
+        self.config = config
+        self.logger = logging.getLogger('PyPNM-Agent')
+        self.ws: Optional[websocket.WebSocketApp] = None
+        self.running = False
+        
+        # SSH Tunnel to PyPNM Server (if enabled)
+        self.pypnm_tunnel = None
+        self.pypnm_tunnel_monitor = None
+        
+        # Initialize SSH executor for CM Proxy (to reach modems)
+        self.cm_proxy: Optional[SSHProxyExecutor] = None
+        if config.cm_proxy_host:
+            self.cm_proxy = SSHProxyExecutor(
+                host=config.cm_proxy_host,
+                port=config.cm_proxy_port,
+                username=config.cm_proxy_user,
+                key_file=config.cm_proxy_key
+            )
+            self.logger.info(f"CM Proxy configured: {config.cm_proxy_host}")
+        
+        # SNMP Executor - uses CM Proxy for modem access
+        self.snmp_executor = SNMPExecutor(ssh_proxy=self.cm_proxy)
+        
+        # SSH executor for TFTP server
+        self.tftp_ssh: Optional[SSHProxyExecutor] = None
+        if config.tftp_ssh_host:
+            self.tftp_ssh = SSHProxyExecutor(
+                host=config.tftp_ssh_host,
+                port=config.tftp_ssh_port,
+                username=config.tftp_ssh_user,
+                key_file=config.tftp_ssh_key
+            )
+            self.logger.info(f"TFTP SSH configured: {config.tftp_ssh_host}")
+        
+        # SSH executor for CMTS (if SSH access enabled)
+        self.cmts_ssh: Optional[SSHProxyExecutor] = None
+        if config.cmts_ssh_enabled and config.cmts_ssh_user:
+            self.logger.info("CMTS SSH access enabled")
+        
+        # Command handlers
+        self.handlers: dict[str, Callable] = {
+            'ping': self._handle_ping,
+            'snmp_get': self._handle_snmp_get,
+            'snmp_walk': self._handle_snmp_walk,
+            'snmp_set': self._handle_snmp_set,
+            'snmp_bulk_get': self._handle_snmp_bulk_get,
+            'tftp_get': self._handle_tftp_get,
+            'cmts_command': self._handle_cmts_command,
+            'execute_pnm': self._handle_pnm_command,
+        }
+    
+    def _setup_pypnm_tunnel(self) -> bool:
+        """Set up SSH tunnel to PyPNM Server if configured."""
+        if not self.config.pypnm_ssh_tunnel_enabled:
+            return True  # No tunnel needed
+        
+        if not self.config.pypnm_ssh_host:
+            self.logger.error("PyPNM SSH tunnel enabled but no ssh_host configured")
+            return False
+        
+        try:
+            from ssh_tunnel import SSHTunnelConfig, SSHTunnelManager, TunnelMonitor
+            
+            tunnel_config = SSHTunnelConfig(
+                ssh_host=self.config.pypnm_ssh_host,
+                ssh_port=self.config.pypnm_ssh_port,
+                ssh_user=self.config.pypnm_ssh_user,
+                ssh_key_file=self.config.pypnm_ssh_key,
+                local_port=self.config.pypnm_tunnel_local_port,
+                remote_port=self.config.pypnm_tunnel_remote_port,
+            )
+            
+            self.pypnm_tunnel = SSHTunnelManager(tunnel_config, use_paramiko=False)
+            
+            if not self.pypnm_tunnel.start_tunnel():
+                self.logger.error("Failed to start PyPNM SSH tunnel")
+                return False
+            
+            # Start tunnel monitor for auto-reconnect
+            self.pypnm_tunnel_monitor = TunnelMonitor(self.pypnm_tunnel)
+            self.pypnm_tunnel_monitor.start()
+            
+            self.logger.info(f"PyPNM SSH tunnel established: localhost:{self.config.pypnm_tunnel_local_port} → {self.config.pypnm_ssh_host}:{self.config.pypnm_tunnel_remote_port}")
+            return True
+            
+        except ImportError:
+            self.logger.error("ssh_tunnel module not available")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to set up PyPNM tunnel: {e}")
+            return False
+    
+    def _get_websocket_url(self) -> str:
+        """Get the WebSocket URL (through tunnel if enabled)."""
+        if self.config.pypnm_ssh_tunnel_enabled:
+            # Connect to local tunnel endpoint
+            return f"ws://localhost:{self.config.pypnm_tunnel_local_port}/api/agents/ws"
+        else:
+            return self.config.pypnm_server_url
+    
+    def _on_open(self, ws):
+        """Called when WebSocket connection is established."""
+        ws_url = self._get_websocket_url()
+        self.logger.info(f"Connected to PyPNM Server: {ws_url}")
+        
+        # Send authentication message
+        auth_msg = {
+            'type': 'auth',
+            'agent_id': self.config.agent_id,
+            'token': self.config.auth_token,
+            'capabilities': self._get_capabilities()
+        }
+        ws.send(json.dumps(auth_msg))
+    
+    def _on_message(self, ws, message):
+        """Called when a message is received."""
+        try:
+            data = json.loads(message)
+            msg_type = data.get('type')
+            
+            if msg_type == 'auth_success':
+                self.logger.info(f"Authentication successful as {data.get('agent_id')}")
+                
+            elif msg_type == 'auth_response':
+                # Legacy support
+                if data.get('success'):
+                    self.logger.info("Authentication successful")
+                else:
+                    self.logger.error(f"Authentication failed: {data.get('error')}")
+                    ws.close()
+                    
+            elif msg_type == 'command':
+                self._handle_command(ws, data)
+                
+            elif msg_type == 'heartbeat_ack':
+                pass  # Server acknowledged heartbeat
+                
+            elif msg_type == 'ping':
+                ws.send(json.dumps({'type': 'pong', 'timestamp': time.time()}))
+                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON message: {e}")
+    
+    def _on_error(self, ws, error):
+        """Called when an error occurs."""
+        self.logger.error(f"WebSocket error: {error}")
+    
+    def _on_close(self, ws, close_status_code, close_msg):
+        """Called when connection is closed."""
+        self.logger.warning(f"Connection closed: {close_status_code} - {close_msg}")
+    
+    def _get_capabilities(self) -> list[str]:
+        """Return list of agent capabilities."""
+        caps = ['snmp_get', 'snmp_walk', 'snmp_set', 'snmp_bulk_get']
+        
+        if self.cm_proxy:
+            caps.append('cm_proxy')
+        
+        if self.tftp_ssh:
+            caps.append('tftp_get')
+        
+        if self.config.cmts_ssh_enabled:
+            caps.append('cmts_command')
+        
+        if self.config.cmts_snmp_direct:
+            caps.append('cmts_snmp_direct')
+        
+        caps.append('execute_pnm')
+        
+        return caps
+    
+    def _handle_command(self, ws, data: dict):
+        """Handle incoming command from PyPNM Server."""
+        request_id = data.get('request_id')
+        command = data.get('command')
+        params = data.get('params', {})
+        
+        self.logger.info(f"Received command: {request_id} - {command}")
+        
+        # Find handler
+        handler = self.handlers.get(command)
+        
+        if handler:
+            try:
+                result = handler(params)
+                response = {
+                    'type': 'response',
+                    'request_id': request_id,
+                    'result': result
+                }
+            except Exception as e:
+                self.logger.exception(f"Command execution error: {e}")
+                response = {
+                    'type': 'error',
+                    'request_id': request_id,
+                    'error': str(e)
+                }
+        else:
+            response = {
+                'type': 'error',
+                'request_id': request_id,
+                'error': f'Unknown command: {command}'
+            }
+        
+        ws.send(json.dumps(response))
+    
+    # ============== Command Handlers ==============
+    
+    def _handle_ping(self, params: dict) -> dict:
+        """Handle ping/connectivity check."""
+        target = params.get('target')
+        
+        result = subprocess.run(
+            ['ping', '-c', '1', '-W', '2', target],
+            capture_output=True,
+            text=True
+        )
+        
+        return {
+            'success': result.returncode == 0,
+            'reachable': result.returncode == 0,
+            'target': target,
+            'output': result.stdout
+        }
+    
+    def _handle_snmp_get(self, params: dict) -> dict:
+        """Handle SNMP GET request."""
+        return self.snmp_executor.execute_snmp(
+            command='snmpget',
+            target_ip=params['target_ip'],
+            oid=params['oid'],
+            community=params.get('community', 'private'),
+            version=params.get('version', '2c'),
+            timeout=params.get('timeout', 5),
+            retries=params.get('retries', 1)
+        )
+    
+    def _handle_snmp_walk(self, params: dict) -> dict:
+        """Handle SNMP WALK request."""
+        return self.snmp_executor.execute_snmp(
+            command='snmpwalk',
+            target_ip=params['target_ip'],
+            oid=params['oid'],
+            community=params.get('community', 'private'),
+            version=params.get('version', '2c'),
+            timeout=params.get('timeout', 5),
+            retries=params.get('retries', 1)
+        )
+    
+    def _handle_snmp_set(self, params: dict) -> dict:
+        """Handle SNMP SET request."""
+        # Build SET command with value and type
+        oid_with_value = f"{params['oid']} {params.get('type', 's')} {params['value']}"
+        
+        return self.snmp_executor.execute_snmp(
+            command='snmpset',
+            target_ip=params['target_ip'],
+            oid=oid_with_value,
+            community=params.get('community', 'private'),
+            version=params.get('version', '2c'),
+            timeout=params.get('timeout', 5),
+            retries=params.get('retries', 1)
+        )
+    
+    def _handle_snmp_bulk_get(self, params: dict) -> dict:
+        """Handle multiple SNMP GET requests."""
+        oids = params.get('oids', [])
+        target_ip = params['target_ip']
+        community = params.get('community', 'private')
+        version = params.get('version', '2c')
+        
+        results = {}
+        for oid in oids:
+            result = self.snmp_executor.execute_snmp(
+                command='snmpget',
+                target_ip=target_ip,
+                oid=oid,
+                community=community,
+                version=version,
+                timeout=params.get('timeout', 5),
+                retries=params.get('retries', 1)
+            )
+            results[oid] = result
+        
+        return {
+            'success': True,
+            'results': results
+        }
+    
+    def _handle_tftp_get(self, params: dict) -> dict:
+        """Handle TFTP/PNM file retrieval via SSH to TFTP server."""
+        if not self.tftp_ssh:
+            return {'success': False, 'error': 'TFTP SSH not configured'}
+        
+        remote_path = params.get('path', '')
+        filename = os.path.basename(remote_path)
+        
+        # Full path on TFTP server
+        tftp_full_path = os.path.join(self.config.tftp_path, remote_path)
+        
+        try:
+            # Read file via SSH
+            exit_code, stdout, stderr = self.tftp_ssh.execute(
+                f"cat '{tftp_full_path}'",
+                timeout=60
+            )
+            
+            if exit_code == 0:
+                # File content retrieved
+                content = stdout.encode() if isinstance(stdout, str) else stdout
+                return {
+                    'success': True,
+                    'filename': filename,
+                    'path': remote_path,
+                    'size': len(content),
+                    'content_base64': content.hex()
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': stderr or f'Failed to read file: exit code {exit_code}'
+                }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _handle_cmts_command(self, params: dict) -> dict:
+        """Execute command on CMTS via SSH."""
+        cmts_host = params.get('cmts_host')
+        command = params.get('command')
+        
+        if not cmts_host or not command:
+            return {'success': False, 'error': 'cmts_host and command required'}
+        
+        if not self.config.cmts_ssh_enabled:
+            return {'success': False, 'error': 'CMTS SSH not enabled'}
+        
+        # Create temporary SSH executor for this CMTS
+        cmts_ssh = SSHProxyExecutor(
+            host=cmts_host,
+            port=22,
+            username=self.config.cmts_ssh_user,
+            key_file=self.config.cmts_ssh_key
+        )
+        
+        try:
+            if not cmts_ssh.connect():
+                return {'success': False, 'error': f'Failed to connect to CMTS {cmts_host}'}
+            
+            exit_code, stdout, stderr = cmts_ssh.execute(command, timeout=30)
+            
+            return {
+                'success': exit_code == 0,
+                'cmts_host': cmts_host,
+                'command': command,
+                'output': stdout,
+                'error': stderr if exit_code != 0 else None
+            }
+        finally:
+            cmts_ssh.close()
+    
+    def _handle_pnm_command(self, params: dict) -> dict:
+        """Handle PyPNM-specific commands (trigger PNM tests via SNMP)."""
+        pnm_type = params.get('pnm_type')
+        target_ip = params.get('target_ip')
+        community = params.get('community', 'private')
+        
+        # PNM OIDs for different tests
+        pnm_oids = {
+            'rxmer': '1.3.6.1.4.1.4491.2.1.27.1.3.1',
+            'spectrum': '1.3.6.1.4.1.4491.2.1.27.1.3.2',
+            'fec': '1.3.6.1.4.1.4491.2.1.27.1.3.3',
+        }
+        
+        if pnm_type not in pnm_oids:
+            return {'success': False, 'error': f'Unknown PNM type: {pnm_type}'}
+        
+        # This would trigger the actual PNM measurement via SNMP
+        # For now, return a placeholder
+        return {
+            'success': True,
+            'pnm_type': pnm_type,
+            'message': f'PNM {pnm_type} triggered for {target_ip}'
+        }
+    
+    def connect(self):
+        """Connect to PyPNM Server."""
+        self.running = True
+        
+        # Set up SSH tunnel if enabled
+        if self.config.pypnm_ssh_tunnel_enabled:
+            if not self._setup_pypnm_tunnel():
+                self.logger.error("Failed to establish SSH tunnel, cannot continue")
+                return
+        
+        ws_url = self._get_websocket_url()
+        
+        while self.running:
+            try:
+                self.logger.info(f"Connecting to {ws_url}...")
+                
+                self.ws = websocket.WebSocketApp(
+                    ws_url,
+                    on_open=self._on_open,
+                    on_message=self._on_message,
+                    on_error=self._on_error,
+                    on_close=self._on_close
+                )
+                
+                self.ws.run_forever(ping_interval=30, ping_timeout=10)
+                
+            except Exception as e:
+                self.logger.error(f"Connection failed: {e}")
+            
+            if self.running:
+                self.logger.info(f"Reconnecting in {self.config.reconnect_interval} seconds...")
+                time.sleep(self.config.reconnect_interval)
+    
+    def stop(self):
+        """Stop the agent and cleanup connections."""
+        self.logger.info("Stopping agent...")
+        self.running = False
+        
+        # Close WebSocket
+        if self.ws:
+            self.ws.close()
+        
+        # Close CM Proxy SSH connection
+        if self.cm_proxy:
+            self.cm_proxy.close()
+        
+        # Close TFTP SSH connection
+        if self.tftp_ssh:
+            self.tftp_ssh.close()
+        
+        # Stop PyPNM tunnel monitor and tunnel
+        if self.pypnm_tunnel_monitor:
+            self.pypnm_tunnel_monitor.stop()
+        if self.pypnm_tunnel:
+            self.pypnm_tunnel.stop_tunnel()
+        
+        self.logger.info("Agent stopped")
+
+
+def main():
+    """Main entry point."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='PyPNM Remote Agent')
+    parser.add_argument('-c', '--config', help='Path to config file')
+    parser.add_argument('--url', help='PyPNM Server WebSocket URL (overrides config)')
+    parser.add_argument('--token', help='Authentication token (overrides config)')
+    parser.add_argument('--agent-id', help='Agent ID (overrides config)')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug logging')
+    args = parser.parse_args()
+    
+    # Set log level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Load configuration
+    if args.config:
+        config = AgentConfig.from_file(args.config)
+        logger.info(f"Loaded config from {args.config}")
+    else:
+        config = AgentConfig.from_env()
+        logger.info("Loaded config from environment variables")
+    
+    # Override with command line args
+    if args.url:
+        config.pypnm_server_url = args.url
+    if args.token:
+        config.auth_token = args.token
+    if args.agent_id:
+        config.agent_id = args.agent_id
+    
+    # Log configuration summary
+    logger.info(f"Agent ID: {config.agent_id}")
+    logger.info(f"PyPNM Server: {config.pypnm_server_url}")
+    logger.info(f"SSH Tunnel: {'enabled' if config.pypnm_ssh_tunnel_enabled else 'disabled'}")
+    if config.pypnm_ssh_tunnel_enabled:
+        logger.info(f"  SSH Host: {config.pypnm_ssh_host}")
+    logger.info(f"CM Proxy: {config.cm_proxy_host or 'not configured'}")
+    logger.info(f"CMTS SNMP Direct: {config.cmts_snmp_direct}")
+    logger.info(f"TFTP SSH: {config.tftp_ssh_host or 'not configured'}")
+    
+    # Start agent
+    agent = PyPNMAgent(config)
+    
+    try:
+        agent.connect()
+    except KeyboardInterrupt:
+        logger.info("Received interrupt signal")
+    finally:
+        agent.stop()
+
+
+if __name__ == '__main__':
+    main()

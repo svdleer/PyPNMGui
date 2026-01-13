@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyPNM Web GUI - Cable Modem PNM Tool</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Navigation -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">
+                    <i class="bi bi-router me-2"></i>PyPNM Web GUI
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: currentView === 'home' }" href="#" @click.prevent="currentView = 'home'">
+                                <i class="bi bi-house-door me-1"></i>Home
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: currentView === 'modems' }" href="#" @click.prevent="currentView = 'modems'">
+                                <i class="bi bi-router me-1"></i>Modems
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: currentView === 'measurements' }" href="#" @click.prevent="currentView = 'measurements'" v-show="selectedModem">
+                                <i class="bi bi-graph-up me-1"></i>Measurements
+                            </a>
+                        </li>
+                    </ul>
+                    <div class="d-flex align-items-center text-light">
+                        <span class="badge bg-success me-2" v-if="apiStatus === 'ok'">
+                            <i class="bi bi-check-circle me-1"></i>API Connected
+                        </span>
+                        <span class="badge bg-warning me-2" v-else>
+                            <i class="bi bi-exclamation-circle me-1"></i>Mock Data Mode
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="container-fluid mt-4">
+            <!-- Home View -->
+            <div v-if="currentView === 'home'">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-search me-2"></i>Cable Modem Search</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Search By</label>
+                                        <select v-model="searchType" class="form-select">
+                                            <option value="ip">IP Address</option>
+                                            <option value="mac">MAC Address</option>
+                                            <option value="name">Name</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label class="form-label">Search Value</label>
+                                        <input type="text" v-model="searchValue" class="form-control" 
+                                               :placeholder="searchPlaceholder" @keyup.enter="searchModems">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">SNMP Community</label>
+                                        <input type="text" v-model="snmpCommunity" class="form-control" placeholder="private">
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button @click="searchModems" class="btn btn-primary w-100">
+                                            <i class="bi bi-search me-1"></i>Search
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Advanced Filters -->
+                                <div class="row g-3 mt-2">
+                                    <div class="col-md-3">
+                                        <label class="form-label">CMTS Filter</label>
+                                        <select v-model="selectedCmts" class="form-select" @change="loadCmtsInterfaces">
+                                            <option value="">All CMTS</option>
+                                            <option v-for="cmts in cmtsList" :key="cmts.name" :value="cmts.name">
+                                                {{ cmts.name }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Interface Filter</label>
+                                        <select v-model="selectedInterface" class="form-select" :disabled="!selectedCmts">
+                                            <option value="">All Interfaces</option>
+                                            <option v-for="iface in cmtsInterfaces" :key="iface" :value="iface">
+                                                {{ iface }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button @click="clearFilters" class="btn btn-outline-secondary w-100">
+                                            <i class="bi bi-x-circle me-1"></i>Clear
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Results -->
+                <div class="row mt-4" v-if="modems.length > 0">
+                    <div class="col-12">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0"><i class="bi bi-list me-2"></i>Cable Modems ({{ modems.length }})</h5>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Status</th>
+                                                <th>MAC Address</th>
+                                                <th>IP Address</th>
+                                                <th>Name</th>
+                                                <th>Vendor</th>
+                                                <th>Model</th>
+                                                <th>DOCSIS</th>
+                                                <th>CMTS</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="modem in modems" :key="modem.mac_address" 
+                                                :class="{ 'table-active': selectedModem && selectedModem.mac_address === modem.mac_address }">
+                                                <td>
+                                                    <span class="badge" :class="modem.status === 'online' ? 'bg-success' : 'bg-danger'">
+                                                        {{ modem.status }}
+                                                    </span>
+                                                </td>
+                                                <td><code>{{ modem.mac_address }}</code></td>
+                                                <td>{{ modem.ip_address }}</td>
+                                                <td>{{ modem.name }}</td>
+                                                <td>{{ modem.vendor }}</td>
+                                                <td>{{ modem.model }}</td>
+                                                <td>{{ modem.docsis_version }}</td>
+                                                <td>{{ modem.cmts }}<br><small class="text-muted">{{ modem.cmts_interface }}</small></td>
+                                                <td>
+                                                    <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                    <button @click="quickPing(modem)" class="btn btn-sm btn-outline-secondary" title="Quick Ping">
+                                                        <i class="bi bi-broadcast"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- No Results -->
+                <div class="row mt-4" v-else-if="searchPerformed">
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>No modems found matching your criteria.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modems/Details View -->
+            <div v-if="currentView === 'modems' && selectedModem">
+                <div class="row">
+                    <!-- Modem Info Card -->
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm mb-4">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0"><i class="bi bi-router me-2"></i>Modem Information</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex align-items-center mb-3">
+                                    <span class="badge me-2" :class="selectedModem.status === 'online' ? 'bg-success' : 'bg-danger'" style="font-size: 1rem;">
+                                        {{ selectedModem.status.toUpperCase() }}
+                                    </span>
+                                    <span class="text-muted">{{ selectedModem.vendor }} {{ selectedModem.model }}</span>
+                                </div>
+                                <table class="table table-sm">
+                                    <tr>
+                                        <th>MAC Address</th>
+                                        <td><code>{{ selectedModem.mac_address }}</code></td>
+                                    </tr>
+                                    <tr>
+                                        <th>IP Address</th>
+                                        <td>{{ selectedModem.ip_address }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>DOCSIS Version</th>
+                                        <td>{{ selectedModem.docsis_version }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>CMTS</th>
+                                        <td>{{ selectedModem.cmts }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Interface</th>
+                                        <td>{{ selectedModem.cmts_interface }}</td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- System Info (loaded separately) -->
+                                <div v-if="systemInfo">
+                                    <hr>
+                                    <h6><i class="bi bi-info-circle me-1"></i>System Details</h6>
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <th>Software</th>
+                                            <td>{{ systemInfo.software_version }}</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Hardware</th>
+                                            <td>{{ systemInfo.hardware_version }}</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Uptime</th>
+                                            <td>{{ systemInfo.uptime_formatted }}</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                                
+                                <button @click="loadSystemInfo" class="btn btn-outline-primary btn-sm w-100 mt-2" :disabled="loadingSystemInfo">
+                                    <i class="bi bi-arrow-clockwise me-1" :class="{ 'spin': loadingSystemInfo }"></i>
+                                    {{ loadingSystemInfo ? 'Loading...' : 'Refresh Info' }}
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Quick Actions -->
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-lightning me-2"></i>Quick Actions</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-grid gap-2">
+                                    <button @click="runRxmerTest" class="btn btn-outline-primary" :disabled="runningTest">
+                                        <i class="bi bi-graph-up me-2"></i>RxMER Measurement
+                                    </button>
+                                    <button @click="runSpectrumTest" class="btn btn-outline-primary" :disabled="runningTest">
+                                        <i class="bi bi-broadcast me-2"></i>Spectrum Analysis
+                                    </button>
+                                    <button @click="loadEventLog" class="btn btn-outline-secondary" :disabled="runningTest">
+                                        <i class="bi bi-journal-text me-2"></i>View Event Log
+                                    </button>
+                                    <button @click="loadChannelStats" class="btn btn-outline-secondary" :disabled="runningTest">
+                                        <i class="bi bi-bar-chart me-2"></i>Channel Statistics
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Display Area -->
+                    <div class="col-lg-8">
+                        <!-- Downstream Channels -->
+                        <div class="card shadow-sm mb-4" v-if="dsChannels.length > 0">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-arrow-down me-2"></i>Downstream OFDM Channels</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Channel ID</th>
+                                                <th>Frequency Range</th>
+                                                <th>Subcarriers</th>
+                                                <th>Power</th>
+                                                <th>SNR</th>
+                                                <th>MER</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="ch in dsChannels" :key="ch.channel_id">
+                                                <td><strong>{{ ch.channel_id }}</strong></td>
+                                                <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
+                                                <td>{{ ch.active_subcarriers }}</td>
+                                                <td>{{ ch.power_dbmv }} dBmV</td>
+                                                <td>{{ ch.snr_db }} dB</td>
+                                                <td><span class="badge" :class="getMerBadgeClass(ch.mer_db)">{{ ch.mer_db }} dB</span></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Upstream Channels -->
+                        <div class="card shadow-sm mb-4" v-if="usChannels.length > 0">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-arrow-up me-2"></i>Upstream OFDMA Channels</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Channel ID</th>
+                                                <th>Frequency Range</th>
+                                                <th>Subcarriers</th>
+                                                <th>Power</th>
+                                                <th>Timing Offset</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="ch in usChannels" :key="ch.channel_id">
+                                                <td><strong>{{ ch.channel_id }}</strong></td>
+                                                <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
+                                                <td>{{ ch.active_subcarriers }}</td>
+                                                <td>{{ ch.power_dbmv }} dBmV</td>
+                                                <td>{{ ch.timing_offset }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- RxMER Results -->
+                        <div class="card shadow-sm mb-4" v-if="rxmerData">
+                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>RxMER Measurement Results</h5>
+                                <small class="text-muted">{{ rxmerData.timestamp }}</small>
+                            </div>
+                            <div class="card-body">
+                                <div v-for="meas in rxmerData.data.rxmer_measurements" :key="meas.channel_id">
+                                    <h6>Channel {{ meas.channel_id }}</h6>
+                                    <div class="row mb-3">
+                                        <div class="col-md-3">
+                                            <div class="stat-card bg-light p-3 rounded text-center">
+                                                <small class="text-muted">Average MER</small>
+                                                <h4 class="mb-0">{{ meas.average_mer_db }} dB</h4>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="stat-card bg-light p-3 rounded text-center">
+                                                <small class="text-muted">Min MER</small>
+                                                <h4 class="mb-0 text-warning">{{ meas.min_mer_db }} dB</h4>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="stat-card bg-light p-3 rounded text-center">
+                                                <small class="text-muted">Max MER</small>
+                                                <h4 class="mb-0 text-success">{{ meas.max_mer_db }} dB</h4>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="stat-card bg-light p-3 rounded text-center">
+                                                <small class="text-muted">Std Dev</small>
+                                                <h4 class="mb-0">{{ meas.std_dev_mer_db }} dB</h4>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Simple chart placeholder -->
+                                    <div class="chart-container" style="height: 200px;">
+                                        <canvas :id="'rxmer-chart-' + meas.channel_id"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Event Log -->
+                        <div class="card shadow-sm mb-4" v-if="eventLog.length > 0">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Event Log</h5>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                    <table class="table table-sm mb-0">
+                                        <thead class="table-light sticky-top">
+                                            <tr>
+                                                <th>Time</th>
+                                                <th>Level</th>
+                                                <th>Message</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="event in eventLog" :key="event.event_id" 
+                                                :class="getEventRowClass(event.level)">
+                                                <td style="white-space: nowrap;">{{ formatEventTime(event.timestamp) }}</td>
+                                                <td>
+                                                    <span class="badge" :class="getEventBadgeClass(event.level)">
+                                                        {{ event.level }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ event.message }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- No Data Placeholder -->
+                        <div class="card shadow-sm" v-if="!dsChannels.length && !usChannels.length && !rxmerData && !eventLog.length">
+                            <div class="card-body text-center py-5">
+                                <i class="bi bi-bar-chart-fill text-muted" style="font-size: 4rem;"></i>
+                                <h5 class="mt-3 text-muted">No Data Loaded</h5>
+                                <p class="text-muted">Use the Quick Actions panel to load modem data.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- No Modem Selected -->
+            <div v-if="currentView === 'modems' && !selectedModem">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Please select a modem from the Home page to view details.
+                    <button @click="currentView = 'home'" class="btn btn-sm btn-primary ms-3">Go to Search</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" v-if="isLoading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Vue.js 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Application JS -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+# PyPNM Agent - Docker Compose for Jump Server
+# SPDX-License-Identifier: Apache-2.0
+#
+# Deploy this on the Jump Server that has access to:
+# - GUI Server (via SSH tunnel)
+# - CM Proxy / SNMP targets
+# - CMTS systems
+# - TFTP server
+#
+# Setup:
+#   1. Copy this file to Jump Server
+#   2. Create agent-config/agent_config.json
+#   3. Add SSH keys to agent-ssh/
+#   4. Run: docker-compose -f docker-compose.agent.yml up -d
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    # Or use pre-built image:
+    # image: pypnm/agent:latest
+    container_name: pypnm-agent
+    restart: unless-stopped
+    
+    volumes:
+      # Agent configuration (required)
+      - ./agent-config:/app/config:ro
+      
+      # SSH keys for connections (required)
+      - ./agent-ssh:/home/pypnm/.ssh:ro
+      
+      # Logs (optional, for persistence)
+      - ./agent-logs:/app/logs
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      # These can override config file settings:
+      # - PYPNM_AGENT_ID=jump-server-01
+      # - PYPNM_GUI_URL=ws://localhost:5050/agent
+      # - PYPNM_AUTH_TOKEN=your-token
+      # - PYPNM_GUI_SSH_TUNNEL=true
+      # - PYPNM_GUI_SSH_HOST=gui-server.example.com
+      # - PYPNM_GUI_SSH_USER=pypnm
+    
+    # Network mode: Use host network if agent needs direct SNMP access
+    # network_mode: host
+    
+    # Or use bridge network (default)
+    networks:
+      - agent-net
+    
+    # Extra hosts (if needed for DNS resolution)
+    # extra_hosts:
+    #   - "gui-server.example.com:192.168.1.100"
+    #   - "cm-proxy.internal:10.0.0.50"
+
+networks:
+  agent-net:
+    driver: bridge

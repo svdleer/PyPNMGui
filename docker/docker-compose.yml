@@ -1,0 +1,70 @@
+# PyPNM Docker Compose
+# SPDX-License-Identifier: Apache-2.0
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up -d gui-server   # Start only GUI server
+#   docker-compose logs -f            # View logs
+#   docker-compose down               # Stop all
+
+services:
+  # ============================================
+  # GUI Server - Web interface + WebSocket API
+  # ============================================
+  gui-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: pypnm-gui
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    volumes:
+      - pypnm-data:/app/data
+      - pypnm-logs:/app/logs
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - AGENT_AUTH_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+    networks:
+      - pypnm-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Agent - Runs on Jump Server
+  # Only deploy this where you have network access
+  # to CMTS/modems/TFTP
+  # ============================================
+  # Uncomment below to run agent in Docker
+  # (Usually agent runs directly on Jump Server, not in Docker)
+  #
+  # agent:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile.agent
+  #   container_name: pypnm-agent
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./agent-config:/app/config:ro
+  #     - ./agent-ssh:/home/pypnm/.ssh:ro
+  #   environment:
+  #     - PYPNM_AGENT_ID=docker-agent-01
+  #     - PYPNM_AUTH_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+  #   networks:
+  #     - pypnm-net
+  #   depends_on:
+  #     - gui-server
+
+volumes:
+  pypnm-data:
+    driver: local
+  pypnm-logs:
+    driver: local
+
+networks:
+  pypnm-net:
+    driver: bridge

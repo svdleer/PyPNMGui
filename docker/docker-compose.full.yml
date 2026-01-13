@@ -1,0 +1,81 @@
+# PyPNM Full Stack - Server + Agent
+# SPDX-License-Identifier: Apache-2.0
+#
+# Complete deployment with PyPNM server and remote agent.
+# Use this for development/testing when both run on same machine.
+#
+# For production, typically:
+# - PyPNM server runs in cloud/datacenter
+# - Agent runs on Jump Server with network access to modems/CMTS
+#
+# Usage:
+#   docker-compose -f docker-compose.full.yml up -d
+
+services:
+  # ============================================
+  # PyPNM Server
+  # ============================================
+  pypnm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pypnm-agent
+    container_name: pypnm-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/deploy/docker/config:ro
+      - pypnm-data:/app/data
+      - pypnm-logs:/app/logs
+    environment:
+      - PYPNM_AGENT_ENABLED=true
+      - PYPNM_AGENT_TOKEN=${PYPNM_AGENT_TOKEN:-dev-token-change-me}
+      - PYPNM_ENV=development
+    networks:
+      - pypnm-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Remote Agent (for testing)
+  # In production, this runs on Jump Server
+  # ============================================
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: pypnm-agent
+    restart: unless-stopped
+    depends_on:
+      pypnm:
+        condition: service_healthy
+    volumes:
+      # Agent configuration
+      - ./agent-config:/app/config:ro
+      # SSH keys for target access
+      - ./agent-ssh:/home/pypnm/.ssh:ro
+      # Logs
+      - agent-logs:/app/logs
+    environment:
+      - PYPNM_AGENT_ID=docker-agent-01
+      - PYPNM_SERVER_URL=ws://pypnm:8080/api/agents/ws
+      - PYPNM_AUTH_TOKEN=${PYPNM_AGENT_TOKEN:-dev-token-change-me}
+    networks:
+      - pypnm-net
+    # For testing, agent may need host network to reach SNMP targets
+    # network_mode: host
+
+volumes:
+  pypnm-data:
+    driver: local
+  pypnm-logs:
+    driver: local
+  agent-logs:
+    driver: local
+
+networks:
+  pypnm-net:
+    driver: bridge

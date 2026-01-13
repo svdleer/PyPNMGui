@@ -1,0 +1,32 @@
+# PyPNM with Remote Agent Support
+# SPDX-License-Identifier: Apache-2.0
+#
+# This Dockerfile extends the official PyPNM image with remote agent support.
+# Build: docker build -f Dockerfile.pypnm-agent -t pypnm-with-agent .
+
+ARG PYPNM_VERSION=latest
+FROM ghcr.io/pypnmapps/pypnm:${PYPNM_VERSION}
+
+LABEL maintainer="PyPNM Team"
+LABEL description="PyPNM with Remote Agent WebSocket Support"
+
+# Copy agent integration files
+COPY pypnm_integration/transport/ /app/src/pypnm/transport/
+COPY pypnm_integration/api/agent_router.py /app/src/pypnm/api/routers/
+
+# Create init file for transport if needed
+RUN if [ ! -f /app/src/pypnm/transport/__init__.py ]; then \
+    echo "from .agent_manager import AgentManager, RemoteAgent" > /app/src/pypnm/transport/__init__.py && \
+    echo "from .remote_transport import RemoteAgentTransport" >> /app/src/pypnm/transport/__init__.py; \
+    fi
+
+# Environment for agent support
+ENV PYPNM_AGENT_ENABLED=true
+ENV PYPNM_AGENT_TOKEN=change-me-in-production
+
+# Expose FastAPI port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/health || exit 1
