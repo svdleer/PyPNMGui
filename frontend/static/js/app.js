@@ -41,6 +41,10 @@ createApp({
             spectrumData: null,
             eventLog: [],
             
+            // Live modem loading
+            loadingLiveModems: false,
+            liveModemSource: '',
+            
             // Charts
             charts: {}
         };
@@ -168,11 +172,52 @@ createApp({
             }
         },
         
+        async getLiveModems() {
+            if (!this.selectedCmts) {
+                this.showError('Select CMTS', 'Please select a CMTS first');
+                return;
+            }
+            
+            this.loadingLiveModems = true;
+            this.liveModemSource = '';
+            
+            try {
+                const url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=500`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Transform live modems to match mock data format
+                    this.modems = data.modems.map(m => ({
+                        mac_address: m.mac_address,
+                        ip_address: m.ip_address,
+                        status: m.status || 'unknown',
+                        name: m.mac_address,  // Use MAC as name for now
+                        vendor: 'Unknown',
+                        model: 'Unknown',
+                        docsis_version: 'Unknown',
+                        cmts: data.cmts_hostname,
+                        cmts_interface: m.cmts_index || 'N/A'
+                    }));
+                    this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems`;
+                    this.searchPerformed = true;
+                } else {
+                    this.showError('Failed to get modems', data.message || 'Unknown error');
+                }
+            } catch (error) {
+                console.error('Failed to get live modems:', error);
+                this.showError('Failed to get modems', error.message);
+            } finally {
+                this.loadingLiveModems = false;
+            }
+        },
+        
         clearFilters() {
             this.searchValue = '';
             this.selectedCmts = '';
             this.selectedInterface = '';
             this.cmtsInterfaces = [];
+            this.liveModemSource = '';
             this.searchModems();
         },
         

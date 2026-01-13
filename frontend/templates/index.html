@@ -115,6 +115,19 @@
                                                placeholder="Search by hostname..." @input="filterCmtsList">
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">
+                                        <button @click="getLiveModems" class="btn btn-success w-100" :disabled="!selectedCmts || loadingLiveModems">
+                                            <span v-if="loadingLiveModems"><i class="bi bi-arrow-repeat spin me-1"></i>Loading...</span>
+                                            <span v-else><i class="bi bi-router me-1"></i>Get Modems</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="row g-3 mt-2">
+                                    <div class="col-md-10">
+                                        <small v-if="liveModemSource" class="text-muted">
+                                            <i class="bi bi-broadcast me-1"></i>{{ liveModemSource }}
+                                        </small>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
                                         <button @click="clearFilters" class="btn btn-outline-secondary w-100">
                                             <i class="bi bi-x-circle me-1"></i>Clear
                                         </button>
