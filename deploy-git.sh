@@ -15,7 +15,9 @@ SSH_KEY="${HOME}/.ssh/id_rsa"
 CONTROL_PATH="${HOME}/.ssh/cm-%r@%h:%p"
 REMOTE_DEPLOY_DIR="/opt/pypnm-gui"
 REMOTE_USER="svdleer"
-GIT_REPO="https://github.com/PyPNMApps/PyPNMGui.git"
+
+# Git repository (public repo - no auth needed)
+GIT_REPO="https://github.com/svdleer/PyPNMGui.git"
 GIT_BRANCH="main"
 COMPOSE_FILE="docker/docker-compose.pypnm.yml"
 
@@ -68,16 +70,16 @@ ssh_remote() {
 
 case "$1" in
   init)
-    echo_info "Initializing deployment on ${TARGET_SERVER}..."
+    echo_info "Initializing deployment on appdb-sh.oss.local..."
     echo "================================"
     
-    # Create remote directory
+    # Create remote directory (may need sudo for /opt)
     echo_info "Creating remote directory..."
-    ssh_remote "mkdir -p ${REMOTE_DEPLOY_DIR}"
+    ssh_remote "sudo mkdir -p ${REMOTE_DEPLOY_DIR} && sudo chown ${REMOTE_USER}:${REMOTE_USER} ${REMOTE_DEPLOY_DIR}"
     
     # Clone repository (with proxy)
     echo_info "Cloning git repository..."
-    ssh_remote "cd ${REMOTE_DEPLOY_DIR}/.. && rm -rf $(basename ${REMOTE_DEPLOY_DIR}) && git config --global http.proxy ${PROXY_URL} && git config --global https.proxy ${PROXY_URL} && git clone ${GIT_REPO} $(basename ${REMOTE_DEPLOY_DIR})" || {
+    ssh_remote "cd ${REMOTE_DEPLOY_DIR}/.. && rm -rf ${REMOTE_DEPLOY_DIR} && git config --global http.proxy ${PROXY_URL} && git config --global https.proxy ${PROXY_URL} && git clone ${GIT_REPO} ${REMOTE_DEPLOY_DIR}" || {
         echo_error "Failed to clone repository!"
         exit 1
     }
@@ -134,8 +136,9 @@ case "$1" in
     echo_info "Container status:"
     ssh_remote "cd ${REMOTE_DEPLOY_DIR} && docker-compose -f ${COMPOSE_FILE} ps"
     echo ""
-    echo_info "Access PyPNM: http://localhost:8080 (via tunnel)"
-    echo_info "Swagger UI: http://localhost:8080/docs"
+    echo_info "Access PyPNM: http://localhost:8000 (via tunnel)"
+    echo_info "Swagger UI: http://localhost:8000/docs"
+    echo_info "Agent endpoint: ws://localhost:8000/api/agents/ws"
     echo_info "View logs: ./deploy-git.sh logs"
     ;;
     

@@ -1,32 +1,70 @@
 # PyPNM with Remote Agent Support
 # SPDX-License-Identifier: Apache-2.0
 #
-# This Dockerfile extends the official PyPNM image with remote agent support.
+# This Dockerfile builds PyPNM from source and adds remote agent support.
 # Build: docker build -f Dockerfile.pypnm-agent -t pypnm-with-agent .
 
-ARG PYPNM_VERSION=latest
-FROM ghcr.io/pypnmapps/pypnm:${PYPNM_VERSION}
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim
 
 LABEL maintainer="PyPNM Team"
 LABEL description="PyPNM with Remote Agent WebSocket Support"
 
-# Copy agent integration files
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+# Build args for proxy support
+ARG http_proxy
+ARG https_proxy
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    gosu \
+    iputils-ping \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone PyPNM from source
+ARG PYPNM_VERSION=main
+RUN git clone --depth 1 --branch ${PYPNM_VERSION} \
+    https://github.com/PyPNMApps/PyPNM.git /tmp/pypnm && \
+    cp -r /tmp/pypnm/* /app/ && \
+    rm -rf /tmp/pypnm
+
+# Install PyPNM
+RUN python -m pip install --upgrade pip && \
+    python -m pip install .
+
+# Copy agent integration files (from PyPNMGui context)
 COPY pypnm_integration/transport/ /app/src/pypnm/transport/
 COPY pypnm_integration/api/agent_router.py /app/src/pypnm/api/routers/
 
-# Create init file for transport if needed
-RUN if [ ! -f /app/src/pypnm/transport/__init__.py ]; then \
-    echo "from .agent_manager import AgentManager, RemoteAgent" > /app/src/pypnm/transport/__init__.py && \
-    echo "from .remote_transport import RemoteAgentTransport" >> /app/src/pypnm/transport/__init__.py; \
-    fi
+# Install additional dependencies for agent support
+RUN pip install --no-cache-dir websockets
+
+# Create user and set permissions
+RUN useradd -m -u 10001 -s /usr/sbin/nologin pypnm && \
+    chmod +x /app/entrypoint.sh 2>/dev/null || true
 
 # Environment for agent support
 ENV PYPNM_AGENT_ENABLED=true
 ENV PYPNM_AGENT_TOKEN=change-me-in-production
 
-# Expose FastAPI port
-EXPOSE 8080
+# Expose FastAPI port (PyPNM uses 8000)
+EXPOSE 8000
 
 # Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/docs || exit 1
+
+# Use PyPNM's entrypoint if available, otherwise run directly
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python", "-m", "uvicorn", "pypnm.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8080/api/health || exit 1
