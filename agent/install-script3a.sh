@@ -73,13 +73,6 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
         "ssh_enabled": false
     },
     
-    "equalizer": {
-        "_comment": "Equalizer server for CMTS SNMP queries via SSH",
-        "host": "equalizer.oss.local",
-        "port": 22,
-        "username": "svdleer"
-    },
-    
     "cm_proxy": {
         "_comment": "Jump host to reach cable modems for SNMP",
         "host": "hop-access1.ext.oss.local",
