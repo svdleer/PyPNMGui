@@ -22,7 +22,8 @@ createApp({
             // Search parameters
             searchType: 'ip',
             searchValue: '',
-            snmpCommunity: 'private',
+            snmpCommunity: 'Z1gg0@LL',
+            snmpCommunityRW: 'Z1gg0Sp3c1@l',
             selectedCmts: '',
             selectedInterface: '',
             searchPerformed: false,

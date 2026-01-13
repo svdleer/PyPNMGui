@@ -735,8 +735,9 @@ class PyPNMAgent:
         - docsIf3CmtsCmRegStatusMdIfIndex (interface): 1.3.6.1.4.1.4491.2.1.20.1.3.1.5
         """
         cmts_ip = params.get('cmts_ip')
-        community = params.get('community', 'private')
-        limit = params.get('limit', 100)  # Limit results
+        community = params.get('community', 'Z1gg0@LL')
+        limit = params.get('limit', 500)  # Limit results
+        use_bulk = params.get('use_bulk', True)  # Use bulk get for better performance
         
         if not cmts_ip:
             return {'success': False, 'error': 'cmts_ip required'}
@@ -750,14 +751,18 @@ class PyPNMAgent:
         
         modems = []
         
+        # Use bulk walk for better performance
+        snmp_command = 'snmpbulkwalk' if use_bulk else 'snmpwalk'
+        self.logger.info(f"Using {snmp_command} with community '{community}'")
+        
         try:
             # Get MAC addresses via SNMP walk
             mac_result = self.snmp_executor.execute_snmp(
-                command='snmpwalk',
+                command=snmp_command,
                 target_ip=cmts_ip,
                 oid=OID_CM_MAC,
                 community=community,
-                timeout=30,
+                timeout=60,
                 retries=2
             )
             
@@ -797,11 +802,11 @@ class PyPNMAgent:
             
             # Get IP addresses
             ip_result = self.snmp_executor.execute_snmp(
-                command='snmpwalk',
+                command=snmp_command,
                 target_ip=cmts_ip,
                 oid=OID_CM_IP,
                 community=community,
-                timeout=30,
+                timeout=60,
                 retries=2
             )
             
@@ -820,11 +825,11 @@ class PyPNMAgent:
             
             # Get status values
             status_result = self.snmp_executor.execute_snmp(
-                command='snmpwalk',
+                command=snmp_command,
                 target_ip=cmts_ip,
                 oid=OID_CM_STATUS,
                 community=community,
-                timeout=30,
+                timeout=60,
                 retries=2
             )
             
@@ -904,7 +909,8 @@ class PyPNMAgent:
         modems_result = self._handle_cmts_get_modems({
             'cmts_ip': cmts_ip,
             'community': community,
-            'limit': 5000  # Get more for search
+            'limit': 5000,  # Get more for search
+            'use_bulk': True
         })
         
         if not modems_result.get('success'):

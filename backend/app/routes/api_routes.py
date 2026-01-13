@@ -258,8 +258,8 @@ def get_cmts_modems(hostname):
     """
     from app.core.simple_ws import get_simple_agent_manager
     
-    community = request.args.get('community', 'private')
-    limit = int(request.args.get('limit', 100))
+    community = request.args.get('community', 'Z1gg0@LL')
+    limit = int(request.args.get('limit', 500))
     
     # Get CMTS IP from our CMTS provider
     cmts = CMTSProvider.get_cmts_by_hostname(hostname)

@@ -73,14 +73,19 @@
                                             <option value="name">Name</option>
                                         </select>
                                     </div>
-                                    <div class="col-md-5">
+                                    <div class="col-md-4">
                                         <label class="form-label">Search Value</label>
                                         <input type="text" v-model="searchValue" class="form-control" 
                                                :placeholder="searchPlaceholder" @keyup.enter="searchModems">
                                     </div>
-                                    <div class="col-md-2">
-                                        <label class="form-label">SNMP Community</label>
-                                        <input type="text" v-model="snmpCommunity" class="form-control" placeholder="private">
+                                    <div class="col-md-3">
+                                        <label class="form-label">SNMP Community (Read)</label>
+                                        <select v-model="snmpCommunity" class="form-select">
+                                            <option value="Z1gg0@LL">Z1gg0@LL (Read)</option>
+                                            <option value="Z1gg0Sp3c1@l">Z1gg0Sp3c1@l (R/W)</option>
+                                            <option value="public">public</option>
+                                            <option value="private">private</option>
+                                        </select>
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">
                                         <button @click="searchModems" class="btn btn-primary w-100">
