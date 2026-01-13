@@ -53,15 +53,15 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
     
     "pypnm_server": {
         "_comment": "Connect via SSH tunnel to appdb.oss.local",
-        "url": "ws://localhost:5050/ws/agent",
+        "url": "ws://127.0.0.1:5050/ws/agent",
         "auth_token": "dev-token-change-me",
         "reconnect_interval": 5
     },
     
     "pypnm_ssh_tunnel": {
-        "_comment": "SSH tunnel to appdb.oss.local for WebSocket connection",
+        "_comment": "SSH tunnel to appdb-sh.oss.local for WebSocket connection",
         "enabled": true,
-        "ssh_host": "appdb.oss.local",
+        "ssh_host": "appdb-sh.oss.local",
         "ssh_port": 22,
         "ssh_user": "svdleer",
         "local_port": 5050,

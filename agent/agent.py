@@ -129,7 +129,7 @@ class AgentConfig:
         
         return cls(
             agent_id=os.environ.get('PYPNM_AGENT_ID', 'agent-01'),
-            pypnm_server_url=os.environ.get('PYPNM_SERVER_URL', 'ws://localhost:8080/api/agents/ws'),
+            pypnm_server_url=os.environ.get('PYPNM_SERVER_URL', 'ws://127.0.0.1:5050/ws/agent'),
             auth_token=os.environ.get('PYPNM_AUTH_TOKEN', 'dev-token'),
             reconnect_interval=int(os.environ.get('PYPNM_RECONNECT_INTERVAL', '5')),
             # SSH Tunnel to PyPNM
@@ -433,7 +433,7 @@ class PyPNMAgent:
         """Get the WebSocket URL (through tunnel if enabled)."""
         if self.config.pypnm_ssh_tunnel_enabled:
             # Connect to local tunnel endpoint
-            return f"ws://localhost:{self.config.pypnm_tunnel_local_port}/api/agents/ws"
+            return f"ws://127.0.0.1:{self.config.pypnm_tunnel_local_port}/ws/agent"
         else:
             return self.config.pypnm_server_url
     
