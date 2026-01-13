@@ -19,7 +19,10 @@ REMOTE_USER="svdleer"
 # Git repository (public repo - no auth needed)
 GIT_REPO="https://github.com/svdleer/PyPNMGui.git"
 GIT_BRANCH="main"
-COMPOSE_FILE="docker/docker-compose.pypnm.yml"
+
+# Docker compose file - PyPNMGui server (Flask GUI)
+COMPOSE_FILE="docker/docker-compose.yml"
+GUI_PORT="5050"
 
 # Proxy settings for remote server (behind corporate proxy)
 PROXY_URL="http://proxy.ext.oss.local:8080"
@@ -136,9 +139,9 @@ case "$1" in
     echo_info "Container status:"
     ssh_remote "cd ${REMOTE_DEPLOY_DIR} && docker-compose -f ${COMPOSE_FILE} ps"
     echo ""
-    echo_info "Access PyPNM: http://localhost:8000 (via tunnel)"
-    echo_info "Swagger UI: http://localhost:8000/docs"
-    echo_info "Agent endpoint: ws://localhost:8000/api/agents/ws"
+    echo_info "Access PyPNM GUI: http://localhost:5050 (via tunnel)"
+    echo_info "API Swagger: http://localhost:5050/api/docs"
+    echo_info "Agent WebSocket: ws://localhost:5050/ws"
     echo_info "View logs: ./deploy-git.sh logs"
     ;;
     

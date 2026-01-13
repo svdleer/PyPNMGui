@@ -24,14 +24,14 @@ TFTP_SERVER="tftp-server.oss.local"         # TODO: Update with actual hostname 
 
 # Remote ports
 SSH_PORT="22"
-WEBAPP_PORT="8000"                          # PyPNM runs on port 8000
+WEBAPP_PORT="5050"                          # PyPNM GUI runs on port 5050
 MODEM_SSH_PORT="22"                         # SSH port on modem server
 TFTP_SSH_PORT="22"                          # SSH port on TFTP server (for SCP/SFTP)
 TFTP_PORT="69"                              # TFTP UDP port (if needed)
 
 # Local ports
 LOCAL_SSH_PORT="2222"
-LOCAL_WEBAPP_PORT="8000"                    # PyPNM runs on port 8000
+LOCAL_WEBAPP_PORT="5050"                    # PyPNM GUI on port 5050
 LOCAL_MODEM_SSH_PORT="2223"                 # Local port for modem server SSH
 LOCAL_TFTP_SSH_PORT="2224"                  # Local port for TFTP server SSH
 
