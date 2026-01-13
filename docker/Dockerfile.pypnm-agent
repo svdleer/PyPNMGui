@@ -35,6 +35,7 @@ ARG PYPNM_VERSION=main
 RUN git clone --depth 1 --branch ${PYPNM_VERSION} \
     https://github.com/PyPNMApps/PyPNM.git /tmp/pypnm && \
     cp -r /tmp/pypnm/* /app/ && \
+    cp /tmp/pypnm/docker/entrypoint.sh /app/entrypoint.sh && \
     rm -rf /tmp/pypnm
 
 # Install PyPNM
@@ -60,11 +61,9 @@ ENV PYPNM_AGENT_TOKEN=change-me-in-production
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/docs || exit 1
 
-# Use PyPNM's entrypoint if available, otherwise run directly
+# Use PyPNM's entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "-m", "uvicorn", "pypnm.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
