@@ -59,7 +59,7 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
     },
     
     "pypnm_ssh_tunnel": {
-        "_comment": "SSH tunnel to appdb-sh.oss.local for WebSocket connection",
+        "_comment": "SSH tunnel to appdb-sh.oss.local for WebSocket + Redis",
         "enabled": true,
         "ssh_host": "appdb-sh.oss.local",
         "ssh_port": 22,
@@ -80,15 +80,18 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
         "username": "svdleer"
     },
     
-    "redis": {
-        "_comment": "Redis cache for modem data (docker on appdb)",
-        "host": "172.22.139.10",
-        "port": 6379,
-        "ttl": 300
+    "cm_proxy": {
+        "_comment": "Jump host to reach cable modems for SNMP",
+        "host": "hop-access1.ext.oss.local",
+        "port": 22,
+        "username": "svdleer"
     },
     
-    "cm_proxy": {
-        "host": null
+    "redis": {
+        "_comment": "Redis on appdb - accessible via SSH tunnel (localhost:6379)",
+        "host": "127.0.0.1",
+        "port": 6379,
+        "ttl": 300
     },
     
     "tftp_server": {
@@ -101,7 +104,7 @@ EOF
     echo "Created config: $INSTALL_DIR/agent_config.json"
 fi
 
-# Create start script (agent handles its own SSH tunnel)
+# Create start script (agent handles its own SSH tunnel, we add Redis tunnel)
 cat > "$INSTALL_DIR/start.sh" << EOF
 #!/bin/bash
 cd "\$(dirname "\$0")"
@@ -113,7 +116,19 @@ if [ -f agent.pid ] && kill -0 \$(cat agent.pid) 2>/dev/null; then
     exit 0
 fi
 
-# Start agent (it will create its own SSH tunnel based on config)
+# Start Redis SSH tunnel (port 6379) if not already running
+if ! pgrep -f "ssh.*6379:localhost:6379.*appdb-sh" > /dev/null 2>&1; then
+    echo "Starting Redis SSH tunnel to appdb-sh.oss.local..."
+    ssh -f -N -L 6379:localhost:6379 svdleer@appdb-sh.oss.local -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes 2>/dev/null
+    sleep 1
+    if pgrep -f "ssh.*6379:localhost:6379.*appdb-sh" > /dev/null 2>&1; then
+        echo "Redis tunnel established (localhost:6379)"
+    else
+        echo "WARNING: Redis tunnel failed (caching disabled)"
+    fi
+fi
+
+# Start agent (it will create its own WebSocket SSH tunnel based on config)
 nohup "\$VENV/bin/python" agent.py -c agent_config.json > logs/agent.log 2>&1 &
 echo \$! > agent.pid
 echo "Agent started (PID: \$!)"
@@ -130,6 +145,8 @@ if [ -f agent.pid ]; then
 else
     echo "No PID file"
 fi
+# Also stop Redis tunnel
+pkill -f "ssh.*6379:localhost:6379.*appdb-sh" 2>/dev/null && echo "Redis tunnel stopped"
 EOF
 chmod +x "$INSTALL_DIR/stop.sh"
 
@@ -139,6 +156,7 @@ cat > "$INSTALL_DIR/status.sh" << 'EOF'
 cd "$(dirname "$0")"
 if [ -f agent.pid ] && kill -0 $(cat agent.pid) 2>/dev/null; then
     echo "Agent RUNNING (PID: $(cat agent.pid))"
+    pgrep -f "ssh.*6379:localhost:6379.*appdb-sh" > /dev/null && echo "Redis tunnel: ACTIVE" || echo "Redis tunnel: DOWN"
     echo "---"
     tail -10 logs/agent.log 2>/dev/null
 else
