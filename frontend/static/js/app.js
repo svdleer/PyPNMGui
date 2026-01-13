@@ -194,9 +194,9 @@ createApp({
                         ip_address: m.ip_address,
                         status: m.status || 'unknown',
                         name: m.mac_address,  // Use MAC as name for now
-                        vendor: 'Unknown',
-                        model: 'Unknown',
-                        docsis_version: 'Unknown',
+                        vendor: m.vendor || 'Unknown',
+                        model: 'N/A',
+                        docsis_version: m.docsis_version || 'Unknown',
                         cmts: data.cmts_hostname,
                         cmts_interface: m.cmts_index || 'N/A'
                     }));

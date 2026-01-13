@@ -10,6 +10,7 @@ import os
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -25,6 +26,12 @@ try:
 except ImportError:
     paramiko = None
     print("WARNING: paramiko not installed. SSH proxy features disabled.")
+
+try:
+    import redis
+except ImportError:
+    redis = None
+    print("INFO: redis not installed. Caching disabled. Run: pip install redis")
 
 
 # Configure logging
@@ -65,6 +72,17 @@ class AgentConfig:
     cm_proxy_user: Optional[str] = None
     cm_proxy_key: Optional[str] = None
     
+    # Equalizer Server - for SNMP queries via SSH (has best CMTS connectivity)
+    equalizer_host: Optional[str] = None
+    equalizer_port: int = 22
+    equalizer_user: Optional[str] = None
+    equalizer_key: Optional[str] = None
+    
+    # Redis caching for modem data
+    redis_host: Optional[str] = None
+    redis_port: int = 6379
+    redis_ttl: int = 300  # Cache TTL in seconds
+    
     # TFTP/FTP Server - accessed via SSH for PNM file retrieval
     tftp_ssh_host: Optional[str] = None
     tftp_ssh_port: int = 22
@@ -88,6 +106,8 @@ class AgentConfig:
         
         cmts = data.get('cmts_access', {})
         cm_proxy = data.get('cm_proxy', {})
+        equalizer = data.get('equalizer', {})
+        redis_config = data.get('redis', {})
         tftp = data.get('tftp_server', {})
         
         return cls(
@@ -113,6 +133,15 @@ class AgentConfig:
             cm_proxy_port=cm_proxy.get('port', 22),
             cm_proxy_user=cm_proxy.get('username'),
             cm_proxy_key=expand_path(cm_proxy.get('key_file')),
+            # Equalizer (for CMTS SNMP via SSH)
+            equalizer_host=equalizer.get('host'),
+            equalizer_port=equalizer.get('port', 22),
+            equalizer_user=equalizer.get('username') or equalizer.get('user'),
+            equalizer_key=expand_path(equalizer.get('key_file')),
+            # Redis caching
+            redis_host=redis_config.get('host'),
+            redis_port=redis_config.get('port', 6379),
+            redis_ttl=redis_config.get('ttl', 300),
             # TFTP Server (via SSH)
             tftp_ssh_host=tftp.get('host'),
             tftp_ssh_port=tftp.get('port', 22),
@@ -355,6 +384,17 @@ class PyPNMAgent:
             )
             self.logger.info(f"CM Proxy configured: {config.cm_proxy_host}")
         
+        # Equalizer executor for CMTS SNMP
+        self.equalizer: Optional[SSHProxyExecutor] = None
+        if config.equalizer_host:
+            self.equalizer = SSHProxyExecutor(
+                host=config.equalizer_host,
+                port=config.equalizer_port,
+                username=config.equalizer_user,
+                key_file=config.equalizer_key
+            )
+            self.logger.info(f"Equalizer configured: {config.equalizer_host}")
+        
         # SNMP Executor - uses CM Proxy for modem access
         self.snmp_executor = SNMPExecutor(ssh_proxy=self.cm_proxy)
         
@@ -387,6 +427,42 @@ class PyPNMAgent:
             'cmts_get_modems': self._handle_cmts_get_modems,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
         }
+    
+    def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
+                       community: str, command: str = 'snmpbulkwalk') -> dict:
+        """Execute SNMP command via SSH to remote server (e.g., Equalizer)."""
+        if not paramiko:
+            return {'success': False, 'error': 'paramiko not installed'}
+        
+        try:
+            # Build SNMP command
+            snmp_cmd = f"{command} -v2c -c {community} {target_ip} {oid}"
+            
+            # Connect via SSH
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(ssh_host, username=ssh_user, timeout=30)
+            
+            self.logger.info(f"Executing via SSH to {ssh_host}: {command} {target_ip} {oid}")
+            
+            # Execute command
+            stdin, stdout, stderr = ssh.exec_command(snmp_cmd, timeout=120)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
+            
+            ssh.close()
+            
+            if error and 'Timeout' in error:
+                return {'success': False, 'error': f'SNMP timeout: {error}'}
+            
+            return {
+                'success': True,
+                'output': output,
+                'error': error if error else None
+            }
+        except Exception as e:
+            self.logger.error(f"SSH SNMP failed: {e}")
+            return {'success': False, 'error': str(e)}
     
     def _setup_pypnm_tunnel(self) -> bool:
         """Set up SSH tunnel to PyPNM Server if configured."""
@@ -727,6 +803,7 @@ class PyPNMAgent:
     def _handle_cmts_get_modems(self, params: dict) -> dict:
         """
         Get list of cable modems from a CMTS via SNMP.
+        Uses parallel queries for MAC, IP, Status. Supports Redis caching.
         
         DOCSIS CMTS MIBs used:
         - docsIfCmtsCmStatusMacAddress: 1.3.6.1.2.1.10.127.1.3.3.1.2
@@ -736,11 +813,25 @@ class PyPNMAgent:
         """
         cmts_ip = params.get('cmts_ip')
         community = params.get('community', 'Z1gg0@LL')
-        limit = params.get('limit', 500)  # Limit results
-        use_bulk = params.get('use_bulk', True)  # Use bulk get for better performance
+        limit = params.get('limit', 10000)  # Increased limit
+        use_bulk = params.get('use_bulk', True)
+        use_cache = params.get('use_cache', True)
+        use_equalizer = params.get('use_equalizer', False) or self.config.equalizer_host
         
         if not cmts_ip:
             return {'success': False, 'error': 'cmts_ip required'}
+        
+        # Check Redis cache first
+        cache_key = f"cmts_modems:{cmts_ip}"
+        if use_cache and redis and self.config.redis_host:
+            try:
+                r = redis.Redis(host=self.config.redis_host, port=self.config.redis_port, decode_responses=True)
+                cached = r.get(cache_key)
+                if cached:
+                    self.logger.info(f"Returning cached modems for {cmts_ip}")
+                    return json.loads(cached)
+            except Exception as e:
+                self.logger.warning(f"Redis cache error: {e}")
         
         self.logger.info(f"Getting cable modems from CMTS {cmts_ip}")
         
@@ -748,28 +839,55 @@ class PyPNMAgent:
         OID_CM_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'  # docsIfCmtsCmStatusMacAddress
         OID_CM_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'   # docsIfCmtsCmStatusIpAddress
         OID_CM_STATUS = '1.3.6.1.2.1.10.127.1.3.3.1.9'  # docsIfCmtsCmStatusValue
+        OID_DOCSIS_VER = '1.3.6.1.2.1.10.127.1.3.3.1.17' # docsIfCmtsCmStatusDocsisRegMode (D3.0+)
         
-        modems = []
-        
-        # Use bulk walk for better performance
         snmp_command = 'snmpbulkwalk' if use_bulk else 'snmpwalk'
-        self.logger.info(f"Using {snmp_command} with community '{community}'")
+        self.logger.info(f"Using {snmp_command} with community '{community}' (parallel queries)")
+        
+        # Function to execute SNMP query (used for parallel execution)
+        def query_oid(oid_name, oid):
+            if use_equalizer and self.config.equalizer_host:
+                return self._snmp_via_ssh(
+                    ssh_host=self.config.equalizer_host,
+                    ssh_user=self.config.equalizer_user or 'svdleer',
+                    target_ip=cmts_ip,
+                    oid=oid,
+                    community=community,
+                    command=snmp_command
+                )
+            else:
+                return self.snmp_executor.execute_snmp(
+                    command=snmp_command,
+                    target_ip=cmts_ip,
+                    oid=oid,
+                    community=community,
+                    timeout=120,
+                    retries=2
+                )
         
         try:
-            # Get MAC addresses via SNMP walk
-            mac_result = self.snmp_executor.execute_snmp(
-                command=snmp_command,
-                target_ip=cmts_ip,
-                oid=OID_CM_MAC,
-                community=community,
-                timeout=60,
-                retries=2
-            )
+            # Parallel SNMP queries for MAC, IP, Status, DOCSIS version
+            results = {}
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(query_oid, 'mac', OID_CM_MAC): 'mac',
+                    executor.submit(query_oid, 'ip', OID_CM_IP): 'ip',
+                    executor.submit(query_oid, 'status', OID_CM_STATUS): 'status',
+                    executor.submit(query_oid, 'docsis', OID_DOCSIS_VER): 'docsis',
+                }
+                for future in as_completed(futures):
+                    name = futures[future]
+                    try:
+                        results[name] = future.result()
+                    except Exception as e:
+                        self.logger.error(f"Query {name} failed: {e}")
+                        results[name] = {'success': False, 'error': str(e)}
             
+            mac_result = results.get('mac', {})
             if not mac_result.get('success'):
                 return {
                     'success': False,
-                    'error': f"SNMP walk failed: {mac_result.get('error')}",
+                    'error': f"SNMP MAC walk failed: {mac_result.get('error')}",
                     'cmts_ip': cmts_ip
                 }
             
@@ -800,16 +918,8 @@ class PyPNMAgent:
                     except Exception as e:
                         self.logger.debug(f"Failed to parse MAC line: {line} - {e}")
             
-            # Get IP addresses
-            ip_result = self.snmp_executor.execute_snmp(
-                command=snmp_command,
-                target_ip=cmts_ip,
-                oid=OID_CM_IP,
-                community=community,
-                timeout=60,
-                retries=2
-            )
-            
+            # Parse IP addresses (from parallel result)
+            ip_result = results.get('ip', {})
             ip_map = {}  # index -> ip
             if ip_result.get('success'):
                 for line in ip_result.get('output', '').split('\n'):
@@ -823,16 +933,8 @@ class PyPNMAgent:
                         except:
                             pass
             
-            # Get status values
-            status_result = self.snmp_executor.execute_snmp(
-                command=snmp_command,
-                target_ip=cmts_ip,
-                oid=OID_CM_STATUS,
-                community=community,
-                timeout=60,
-                retries=2
-            )
-            
+            # Parse status values (from parallel result)
+            status_result = results.get('status', {})
             status_map = {}  # index -> status
             if status_result.get('success'):
                 for line in status_result.get('output', '').split('\n'):
@@ -846,23 +948,53 @@ class PyPNMAgent:
                         except:
                             pass
             
+            # Parse DOCSIS version (from parallel result)
+            docsis_result = results.get('docsis', {})
+            docsis_map = {}  # index -> version
+            if docsis_result.get('success'):
+                for line in docsis_result.get('output', '').split('\n'):
+                    if '=' in line and 'INTEGER' in line:
+                        try:
+                            parts = line.split('=', 1)
+                            index = parts[0].strip().split('.')[-1]
+                            val = parts[1].strip().split(':')[-1].strip()
+                            # 1=other, 2=docsis10, 3=docsis11, 4=docsis20, 5=docsis30, 6=docsis31
+                            docsis_map[index] = int(val) if val.isdigit() else 0
+                        except:
+                            pass
+            
             # Build modem list
+            modems = []
             for index, mac in mac_map.items():
+                docsis_code = docsis_map.get(index, 0)
                 modem = {
                     'mac_address': mac,
                     'ip_address': ip_map.get(index, 'N/A'),
                     'status_code': status_map.get(index, 0),
                     'status': self._decode_cm_status(status_map.get(index, 0)),
-                    'cmts_index': index
+                    'cmts_index': index,
+                    'vendor': self._get_vendor_from_mac(mac),
+                    'docsis_version': self._decode_docsis_version(docsis_code),
                 }
                 modems.append(modem)
             
-            return {
+            result = {
                 'success': True,
                 'cmts_ip': cmts_ip,
                 'count': len(modems),
                 'modems': modems
             }
+            
+            # Cache result in Redis
+            if use_cache and redis and self.config.redis_host:
+                try:
+                    r = redis.Redis(host=self.config.redis_host, port=self.config.redis_port, decode_responses=True)
+                    r.setex(cache_key, self.config.redis_ttl, json.dumps(result))
+                    self.logger.info(f"Cached {len(modems)} modems for {cmts_ip} (TTL: {self.config.redis_ttl}s)")
+                except Exception as e:
+                    self.logger.warning(f"Redis cache set error: {e}")
+            
+            return result
             
         except Exception as e:
             self.logger.exception(f"Failed to get modems from CMTS: {e}")
@@ -887,6 +1019,127 @@ class PyPNMAgent:
             9: 'registeredBPIInitializing',
         }
         return status_map.get(status_code, f'unknown({status_code})')
+    
+    def _decode_docsis_version(self, docsis_code: int) -> str:
+        """Decode DOCSIS registration mode to version string."""
+        version_map = {
+            1: 'Other',
+            2: 'DOCSIS 1.0',
+            3: 'DOCSIS 1.1',
+            4: 'DOCSIS 2.0',
+            5: 'DOCSIS 3.0',
+            6: 'DOCSIS 3.1',
+        }
+        return version_map.get(docsis_code, 'Unknown')
+    
+    def _get_vendor_from_mac(self, mac: str) -> str:
+        """Get vendor name from MAC address OUI (first 3 bytes)."""
+        # Common cable modem OUIs
+        oui_vendors = {
+            '00:00:ca': 'ARRIS',
+            '00:01:5c': 'ARRIS',
+            '00:15:96': 'ARRIS',
+            '00:15:a2': 'ARRIS',
+            '00:15:a3': 'ARRIS',
+            '00:15:a4': 'ARRIS',
+            '00:15:a5': 'ARRIS',
+            '00:1d:ce': 'ARRIS',
+            '00:1d:cf': 'ARRIS',
+            '00:1d:d0': 'ARRIS',
+            '00:1d:d1': 'ARRIS',
+            '00:1d:d2': 'ARRIS',
+            '00:1d:d3': 'ARRIS',
+            '00:1d:d4': 'ARRIS',
+            '00:1d:d5': 'ARRIS',
+            '00:23:74': 'ARRIS',
+            'e8:ed:05': 'ARRIS',
+            'f8:0b:be': 'ARRIS',
+            '20:3d:66': 'ARRIS',
+            '84:a0:6e': 'ARRIS',
+            'f0:af:85': 'ARRIS',
+            'fc:51:a4': 'ARRIS',
+            '00:1e:5a': 'CISCO',
+            '00:1e:bd': 'CISCO',
+            '00:22:6b': 'CISCO',
+            '00:26:0a': 'CISCO',
+            '00:30:f1': 'CISCO',
+            '5c:50:15': 'CISCO',
+            'c0:c5:20': 'CISCO',
+            '00:11:1a': 'Motorola',
+            '00:12:25': 'Motorola',
+            '00:14:f8': 'Motorola',
+            '00:15:9a': 'Motorola',
+            '00:15:d1': 'Motorola',
+            '00:17:e2': 'Motorola',
+            '00:18:a4': 'Motorola',
+            '00:19:47': 'Motorola',
+            '00:1a:66': 'Motorola',
+            '00:1a:77': 'Motorola',
+            '00:1c:c1': 'Motorola',
+            '00:1c:fb': 'Motorola',
+            '00:1d:6b': 'Motorola',
+            '00:1e:46': 'Motorola',
+            '00:1e:5d': 'Motorola',
+            '00:1f:6b': 'Motorola',
+            '00:23:be': 'Motorola',
+            '00:24:95': 'Motorola',
+            '00:26:41': 'Motorola',
+            '00:26:42': 'Motorola',
+            '10:86:8c': 'Technicolor',
+            '18:35:d1': 'Technicolor',
+            '2c:39:96': 'Technicolor',
+            '30:d3:2d': 'Technicolor',
+            '58:23:8c': 'Technicolor',
+            '70:b1:4e': 'Technicolor',
+            '7c:03:4c': 'Technicolor',
+            '88:f7:c7': 'Technicolor',
+            '90:01:3b': 'Technicolor',
+            'a0:ce:c8': 'Technicolor',
+            'c8:d1:5e': 'Technicolor',
+            'd4:35:1d': 'Technicolor',
+            'f4:ca:e5': 'Technicolor',
+            '00:1d:b5': 'Juniper',
+            '00:1f:12': 'Juniper',
+            '00:21:59': 'Juniper',
+            '00:23:9c': 'Juniper',
+            '00:26:88': 'Juniper',
+            '00:14:d1': 'Ubee',
+            '00:15:2c': 'Ubee',
+            '28:c6:8e': 'Ubee',
+            '58:6d:8f': 'Ubee',
+            '5c:b0:66': 'Ubee',
+            '64:0d:ce': 'Ubee',
+            '68:b6:fc': 'Ubee',
+            '78:96:84': 'Ubee',
+            '08:95:2a': 'Sagemcom',
+            '10:b3:6f': 'Sagemcom',
+            '28:52:e8': 'Sagemcom',
+            '30:7c:b2': 'Sagemcom',
+            '44:e1:37': 'Sagemcom',
+            '70:fc:8f': 'Sagemcom',
+            '7c:8b:ca': 'Sagemcom',
+            'a0:1b:29': 'Sagemcom',
+            'a8:4e:3f': 'Sagemcom',
+            'a8:70:5d': 'Sagemcom',
+            'cc:33:bb': 'Sagemcom',
+            'f8:08:4f': 'Sagemcom',
+            '00:04:bd': 'Hitron',
+            '00:26:5b': 'Hitron',
+            '00:26:d8': 'Hitron',
+            '68:02:b8': 'Hitron',
+            'bc:14:85': 'Hitron',
+            'c4:27:95': 'Hitron',
+            'cc:03:fa': 'Hitron',
+        }
+        
+        if not mac or len(mac) < 8:
+            return 'Unknown'
+        
+        # Normalize MAC format
+        mac_normalized = mac.lower().replace('-', ':')
+        oui = mac_normalized[:8]
+        
+        return oui_vendors.get(oui, 'Unknown')
     
     def _handle_cmts_get_modem_info(self, params: dict) -> dict:
         """

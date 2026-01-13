@@ -73,6 +73,20 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
         "ssh_enabled": false
     },
     
+    "equalizer": {
+        "_comment": "Equalizer server for CMTS SNMP queries via SSH",
+        "host": "equalizer.oss.local",
+        "port": 22,
+        "username": "svdleer"
+    },
+    
+    "redis": {
+        "_comment": "Redis cache for modem data (docker on appdb)",
+        "host": "172.22.139.10",
+        "port": 6379,
+        "ttl": 300
+    },
+    
     "cm_proxy": {
         "host": null
     },
