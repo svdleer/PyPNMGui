@@ -18,13 +18,22 @@ class CustomFlask(Flask):
 socketio = None
 
 
+import os
+
 def create_app():
     """Create and configure the Flask application."""
     global socketio
     
+    # Paths work for both local dev and Docker
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    frontend_dir = os.path.join(base_dir, '..', 'frontend')
+    if not os.path.exists(frontend_dir):
+        # Docker layout: /app/frontend
+        frontend_dir = os.path.join(base_dir, 'frontend')
+    
     app = CustomFlask(__name__, 
-                static_folder='../../frontend/static',
-                template_folder='../../frontend/templates')
+                static_folder=os.path.join(frontend_dir, 'static'),
+                template_folder=os.path.join(frontend_dir, 'templates'))
     
     # Enable CORS for API calls
     CORS(app)
