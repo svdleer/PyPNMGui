@@ -395,7 +395,10 @@ class PyPNMAgent:
             )
             self.logger.info(f"Equalizer configured: {config.equalizer_host}")
         
-        # SNMP Executor - uses CM Proxy for modem access
+        # SNMP Executor - direct SNMP for CMTS queries
+        self.snmp_executor_direct = SNMPExecutor(ssh_proxy=None)
+        
+        # SNMP Executor via CM Proxy - for modem access through hop-access
         self.snmp_executor = SNMPExecutor(ssh_proxy=self.cm_proxy)
         
         # SSH executor for TFTP server
@@ -845,6 +848,7 @@ class PyPNMAgent:
         self.logger.info(f"Using {snmp_command} with community '{community}' (parallel queries)")
         
         # Function to execute SNMP query (used for parallel execution)
+        # For CMTS queries, use direct SNMP (not via cm_proxy which is for modems)
         def query_oid(oid_name, oid):
             if use_equalizer and self.config.equalizer_host:
                 return self._snmp_via_ssh(
@@ -856,7 +860,8 @@ class PyPNMAgent:
                     command=snmp_command
                 )
             else:
-                return self.snmp_executor.execute_snmp(
+                # Use direct SNMP executor for CMTS (not via cm_proxy)
+                return self.snmp_executor_direct.execute_snmp(
                     command=snmp_command,
                     target_ip=cmts_ip,
                     oid=oid,
