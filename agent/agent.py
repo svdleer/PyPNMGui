@@ -838,11 +838,14 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting cable modems from CMTS {cmts_ip}")
         
-        # DOCSIS MIB OIDs
+        # DOCSIS MIB OIDs (old table for MAC, IP, Status)
         OID_CM_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'  # docsIfCmtsCmStatusMacAddress
         OID_CM_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'   # docsIfCmtsCmStatusIpAddress
         OID_CM_STATUS = '1.3.6.1.2.1.10.127.1.3.3.1.9'  # docsIfCmtsCmStatusValue
-        OID_DOCSIS_VER = '1.3.6.1.4.1.4491.2.1.20.1.3.1.6'  # docsIf3CmtsCmRegStatusDocsisVersion
+        
+        # DOCSIS 3.0 MIB OIDs (new table for DOCSIS version - different index!)
+        OID_D3_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
+        OID_D3_DOCSIS = '1.3.6.1.4.1.4491.2.1.20.1.3.1.6'  # docsIf3CmtsCmRegStatusDocsisVersion
         
         snmp_command = 'snmpbulkwalk' if use_bulk else 'snmpwalk'
         self.logger.info(f"Using {snmp_command} with community '{community}' (parallel queries)")
@@ -871,14 +874,15 @@ class PyPNMAgent:
                 )
         
         try:
-            # Parallel SNMP queries for MAC, IP, Status, DOCSIS version
+            # Parallel SNMP queries for MAC, IP, Status + DOCSIS3 table for version
             results = {}
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {
                     executor.submit(query_oid, 'mac', OID_CM_MAC): 'mac',
                     executor.submit(query_oid, 'ip', OID_CM_IP): 'ip',
                     executor.submit(query_oid, 'status', OID_CM_STATUS): 'status',
-                    executor.submit(query_oid, 'docsis', OID_DOCSIS_VER): 'docsis',
+                    executor.submit(query_oid, 'd3_mac', OID_D3_MAC): 'd3_mac',
+                    executor.submit(query_oid, 'd3_docsis', OID_D3_DOCSIS): 'd3_docsis',
                 }
                 for future in as_completed(futures):
                     name = futures[future]
@@ -953,25 +957,53 @@ class PyPNMAgent:
                         except:
                             pass
             
-            # Parse DOCSIS version (from parallel result)
-            docsis_result = results.get('docsis', {})
-            docsis_map = {}  # index -> version
-            if docsis_result.get('success'):
-                for line in docsis_result.get('output', '').split('\n'):
+            # Parse DOCSIS version from DOCSIS 3.0 MIB (different index, correlate by MAC)
+            # First parse MAC from docsIf3 table to get d3_index -> mac mapping
+            d3_mac_result = results.get('d3_mac', {})
+            d3_mac_map = {}  # d3_index -> mac
+            if d3_mac_result.get('success'):
+                for line in d3_mac_result.get('output', '').split('\n'):
+                    if '=' in line and ('Hex-STRING' in line or 'STRING' in line):
+                        try:
+                            parts = line.split('=', 1)
+                            d3_index = parts[0].strip().split('.')[-1]
+                            mac_part = parts[1].strip()
+                            if 'Hex-STRING' in mac_part:
+                                hex_mac = mac_part.split('Hex-STRING:')[-1].strip()
+                                mac_bytes = hex_mac.replace(' ', '').replace(':', '')
+                                if len(mac_bytes) >= 12:
+                                    mac = ':'.join([mac_bytes[i:i+2] for i in range(0, 12, 2)]).upper()
+                                    d3_mac_map[d3_index] = mac
+                        except:
+                            pass
+            
+            # Parse DOCSIS version from docsIf3 table
+            d3_docsis_result = results.get('d3_docsis', {})
+            d3_docsis_map = {}  # d3_index -> version
+            if d3_docsis_result.get('success'):
+                for line in d3_docsis_result.get('output', '').split('\n'):
                     if '=' in line and 'INTEGER' in line:
                         try:
                             parts = line.split('=', 1)
-                            index = parts[0].strip().split('.')[-1]
+                            d3_index = parts[0].strip().split('.')[-1]
                             val = parts[1].strip().split(':')[-1].strip()
-                            # 1=other, 2=docsis10, 3=docsis11, 4=docsis20, 5=docsis30, 6=docsis31
-                            docsis_map[index] = int(val) if val.isdigit() else 0
+                            d3_docsis_map[d3_index] = int(val) if val.isdigit() else 0
                         except:
                             pass
+            
+            # Create MAC -> DOCSIS version mapping by correlating d3 tables
+            mac_to_docsis = {}  # mac -> docsis_version
+            for d3_index, mac in d3_mac_map.items():
+                if d3_index in d3_docsis_map:
+                    mac_to_docsis[mac] = d3_docsis_map[d3_index]
+            
+            self.logger.info(f"DOCSIS version correlation: {len(mac_to_docsis)} MACs matched from docsIf3 table")
             
             # Build modem list
             modems = []
             for index, mac in mac_map.items():
-                docsis_code = docsis_map.get(index, 0)
+                # Look up DOCSIS version by MAC address (from docsIf3 table)
+                docsis_code = mac_to_docsis.get(mac, 0)
                 modem = {
                     'mac_address': mac,
                     'ip_address': ip_map.get(index, 'N/A'),
