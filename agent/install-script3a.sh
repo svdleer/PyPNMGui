@@ -12,12 +12,19 @@ VENV_DIR="${HOME}/python/venv"
 INSTALL_DIR="${HOME}/.pypnm-agent"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Proxy configuration for pip
+export http_proxy="http://proxy.ext.oss.local:8080"
+export https_proxy="http://proxy.ext.oss.local:8080"
+export HTTP_PROXY="http://proxy.ext.oss.local:8080"
+export HTTPS_PROXY="http://proxy.ext.oss.local:8080"
+
 echo "=========================================="
 echo "  PyPNM Agent Install for script3a"
 echo "=========================================="
 echo ""
 echo "Using venv: $VENV_DIR"
 echo "Install to: $INSTALL_DIR"
+echo "Proxy: $http_proxy"
 echo ""
 
 # Check venv exists
@@ -45,14 +52,20 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
     "agent_id": "jump-server-script3a",
     
     "pypnm_server": {
-        "_comment": "Connect to PyPNM GUI on appdb.oss.local",
-        "url": "ws://appdb.oss.local:5050/ws/agent",
+        "_comment": "Connect via SSH tunnel to appdb.oss.local",
+        "url": "ws://localhost:5050/ws/agent",
         "auth_token": "dev-token-change-me",
         "reconnect_interval": 5
     },
     
     "pypnm_ssh_tunnel": {
-        "enabled": false
+        "_comment": "SSH tunnel to appdb.oss.local for WebSocket connection",
+        "enabled": true,
+        "ssh_host": "appdb.oss.local",
+        "ssh_port": 22,
+        "ssh_user": "svdleer",
+        "local_port": 5050,
+        "remote_port": 5050
     },
     
     "cmts_access": {
@@ -74,15 +87,19 @@ EOF
     echo "Created config: $INSTALL_DIR/agent_config.json"
 fi
 
-# Create start script
+# Create start script (agent handles its own SSH tunnel)
 cat > "$INSTALL_DIR/start.sh" << EOF
 #!/bin/bash
 cd "\$(dirname "\$0")"
 VENV="$VENV_DIR"
+
+# Check if already running
 if [ -f agent.pid ] && kill -0 \$(cat agent.pid) 2>/dev/null; then
     echo "Agent already running (PID: \$(cat agent.pid))"
     exit 0
 fi
+
+# Start agent (it will create its own SSH tunnel based on config)
 nohup "\$VENV/bin/python" agent.py -c agent_config.json > logs/agent.log 2>&1 &
 echo \$! > agent.pid
 echo "Agent started (PID: \$!)"
