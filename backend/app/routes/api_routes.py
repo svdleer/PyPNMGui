@@ -295,19 +295,24 @@ def get_cmts_modems(hostname):
     
     try:
         # Send task to agent
+        enrich = request.args.get('enrich', 'false').lower() == 'true'
+        modem_community = request.args.get('modem_community', 'm0d3m1nf0')
+        
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='cmts_get_modems',
             params={
                 'cmts_ip': cmts_ip,
                 'community': community,
-                'limit': limit
+                'limit': limit,
+                'enrich_modems': enrich,
+                'modem_community': modem_community
             },
-            timeout=60
+            timeout=120
         )
         
-        # Wait for result
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        # Wait for result (longer timeout if enriching)
+        result = agent_manager.wait_for_task(task_id, timeout=120 if enrich else 60)
         
         if result is None:
             return jsonify({

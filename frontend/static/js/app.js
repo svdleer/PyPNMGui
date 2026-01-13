@@ -46,6 +46,7 @@ createApp({
             // Live modem loading
             loadingLiveModems: false,
             liveModemSource: '',
+            enrichModems: false,
             
             // Charts
             charts: {}
@@ -184,7 +185,10 @@ createApp({
             this.liveModemSource = '';
             
             try {
-                const url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=500`;
+                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000`;
+                if (this.enrichModems) {
+                    url += `&enrich=true&modem_community=${this.snmpCommunityModem}`;
+                }
                 const response = await fetch(url);
                 const data = await response.json();
                 
@@ -196,10 +200,11 @@ createApp({
                         status: m.status || 'unknown',
                         name: m.mac_address,  // Use MAC as name for now
                         vendor: m.vendor || 'Unknown',
-                        model: 'N/A',
+                        model: m.model || 'N/A',
                         docsis_version: m.docsis_version || 'Unknown',
                         cmts: data.cmts_hostname,
-                        cmts_interface: m.cmts_index || 'N/A'
+                        cmts_interface: m.cmts_index || 'N/A',
+                        software_version: m.software_version || ''
                     }));
                     this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems`;
                     this.searchPerformed = true;

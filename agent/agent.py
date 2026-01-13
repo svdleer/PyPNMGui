@@ -983,6 +983,12 @@ class PyPNMAgent:
                 }
                 modems.append(modem)
             
+            # Optionally query modems via hop-access for sysDescr (model info)
+            enrich_modems = params.get('enrich_modems', False)
+            if enrich_modems and self.cm_proxy:
+                self.logger.info(f"Enriching {len(modems)} modems via cm_proxy...")
+                modems = self._enrich_modems_parallel(modems, params.get('modem_community', 'm0d3m1nf0'))
+            
             result = {
                 'success': True,
                 'cmts_ip': cmts_ip,
@@ -1008,6 +1014,98 @@ class PyPNMAgent:
                 'error': str(e),
                 'cmts_ip': cmts_ip
             }
+    
+    def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
+        """
+        Query each modem via cm_proxy (hop-access) to get sysDescr for model info.
+        Uses parallel threads for speed.
+        """
+        OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'  # sysDescr
+        
+        def query_modem(modem):
+            modem_ip = modem.get('ip_address')
+            if not modem_ip or modem_ip == 'N/A':
+                return modem
+            
+            try:
+                result = self.snmp_executor.execute_snmp(
+                    command='snmpget',
+                    target_ip=modem_ip,
+                    oid=OID_SYS_DESCR,
+                    community=modem_community,
+                    timeout=5,
+                    retries=1
+                )
+                
+                if result.get('success'):
+                    sys_descr = result.get('output', '')
+                    # Parse sysDescr for model info
+                    model_info = self._parse_sys_descr(sys_descr)
+                    modem['model'] = model_info.get('model', 'Unknown')
+                    modem['software_version'] = model_info.get('software', '')
+                    if model_info.get('vendor'):
+                        modem['vendor'] = model_info.get('vendor')
+            except Exception as e:
+                self.logger.debug(f"Failed to query modem {modem_ip}: {e}")
+            
+            return modem
+        
+        # Only query online modems with valid IPs (limit to avoid overload)
+        online_modems = [m for m in modems if m.get('status') == 'operational' and m.get('ip_address') != 'N/A'][:100]
+        
+        self.logger.info(f"Querying {len(online_modems)} online modems via cm_proxy (max_workers={max_workers})")
+        
+        enriched = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(query_modem, m): m for m in online_modems}
+            for future in as_completed(futures):
+                try:
+                    enriched.append(future.result())
+                except Exception as e:
+                    enriched.append(futures[future])
+        
+        # Merge enriched modems back
+        enriched_map = {m['mac_address']: m for m in enriched}
+        for modem in modems:
+            if modem['mac_address'] in enriched_map:
+                modem.update(enriched_map[modem['mac_address']])
+        
+        return modems
+    
+    def _parse_sys_descr(self, sys_descr: str) -> dict:
+        """Parse sysDescr to extract vendor, model, and software version."""
+        result = {}
+        descr = sys_descr.lower()
+        
+        # Common patterns
+        if 'arris' in descr or 'touchstone' in descr:
+            result['vendor'] = 'ARRIS'
+        elif 'technicolor' in descr or 'tc' in descr:
+            result['vendor'] = 'Technicolor'
+        elif 'sagemcom' in descr:
+            result['vendor'] = 'Sagemcom'
+        elif 'hitron' in descr:
+            result['vendor'] = 'Hitron'
+        elif 'motorola' in descr:
+            result['vendor'] = 'Motorola'
+        elif 'cisco' in descr:
+            result['vendor'] = 'Cisco'
+        elif 'ubee' in descr:
+            result['vendor'] = 'Ubee'
+        
+        # Try to extract model from sysDescr
+        # Format varies: "ARRIS DOCSIS 3.1 Touchstone TG3442 ..." etc.
+        import re
+        model_match = re.search(r'(TG\d+|TC\d+|SB\d+|DPC\d+|EPC\d+|CM\d+|SBG\d+|CGM\d+)', sys_descr, re.I)
+        if model_match:
+            result['model'] = model_match.group(1).upper()
+        
+        # Software version
+        version_match = re.search(r'(\d+\.\d+\.\d+[\.\d]*)', sys_descr)
+        if version_match:
+            result['software'] = version_match.group(1)
+        
+        return result
     
     def _decode_cm_status(self, status_code: int) -> str:
         """Decode DOCSIS CM status code to human-readable string."""
