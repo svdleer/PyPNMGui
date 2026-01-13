@@ -243,3 +243,120 @@ def health_check():
         "service": "PyPNM Web GUI",
         "use_mock_data": current_app.config.get('USE_MOCK_DATA', True)
     })
+
+
+# ============== Agent-Based CMTS Modem Lookup ==============
+
+@api_bp.route('/cmts/<hostname>/modems', methods=['GET'])
+def get_cmts_modems(hostname):
+    """
+    Get list of cable modems from a CMTS via SNMP (through WebSocket agent).
+    
+    Query params:
+        - community: SNMP community string (default: private)
+        - limit: Max number of modems to return (default: 100)
+    """
+    from app.core.agent_manager import get_agent_manager
+    
+    community = request.args.get('community', 'private')
+    limit = int(request.args.get('limit', 100))
+    
+    # Get CMTS IP from our CMTS provider
+    cmts = CMTSProvider.get_cmts_by_hostname(hostname)
+    if not cmts:
+        return jsonify({
+            "status": "error",
+            "message": f"CMTS '{hostname}' not found in inventory"
+        }), 404
+    
+    cmts_ip = cmts.get('IPAddress')
+    if not cmts_ip:
+        return jsonify({
+            "status": "error", 
+            "message": f"No IP address for CMTS '{hostname}'"
+        }), 400
+    
+    # Get agent manager
+    agent_manager = get_agent_manager()
+    if not agent_manager:
+        return jsonify({
+            "status": "error",
+            "message": "Agent manager not available"
+        }), 503
+    
+    # Find an agent with SNMP capability
+    agent = agent_manager.get_agent_for_capability('snmp_walk')
+    if not agent:
+        return jsonify({
+            "status": "error",
+            "message": "No connected agent with SNMP capability. Deploy an agent first.",
+            "hint": "Run: cd agent && ./deploy-agent.sh"
+        }), 503
+    
+    # Send task to agent
+    task_id = agent_manager.send_task_sync(
+        agent_id=agent.agent_id,
+        command='cmts_get_modems',
+        params={
+            'cmts_ip': cmts_ip,
+            'community': community,
+            'limit': limit
+        },
+        timeout=60
+    )
+    
+    if not task_id:
+        return jsonify({
+            "status": "error",
+            "message": "Failed to send task to agent"
+        }), 500
+    
+    # Wait for result
+    result = agent_manager.wait_for_task(task_id, timeout=60)
+    
+    if result is None:
+        return jsonify({
+            "status": "error",
+            "message": "Task timed out"
+        }), 504
+    
+    if result.get('error'):
+        return jsonify({
+            "status": "error",
+            "message": result.get('error')
+        }), 500
+    
+    task_result = result.get('result', {})
+    
+    return jsonify({
+        "status": "success",
+        "cmts_hostname": hostname,
+        "cmts_ip": cmts_ip,
+        "cmts_vendor": cmts.get('Vendor'),
+        "cmts_type": cmts.get('Type'),
+        "count": task_result.get('count', 0),
+        "modems": task_result.get('modems', []),
+        "agent_id": agent.agent_id
+    })
+
+
+@api_bp.route('/agents', methods=['GET'])
+def get_connected_agents():
+    """Get list of connected WebSocket agents."""
+    from app.core.agent_manager import get_agent_manager
+    
+    agent_manager = get_agent_manager()
+    if not agent_manager:
+        return jsonify({
+            "status": "success",
+            "agents": [],
+            "message": "Agent manager not initialized"
+        })
+    
+    agents = agent_manager.get_available_agents()
+    
+    return jsonify({
+        "status": "success",
+        "count": len(agents),
+        "agents": agents
+    })

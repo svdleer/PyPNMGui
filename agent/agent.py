@@ -384,6 +384,8 @@ class PyPNMAgent:
             'tftp_get': self._handle_tftp_get,
             'cmts_command': self._handle_cmts_command,
             'execute_pnm': self._handle_pnm_command,
+            'cmts_get_modems': self._handle_cmts_get_modems,
+            'cmts_get_modem_info': self._handle_cmts_get_modem_info,
         }
     
     def _setup_pypnm_tunnel(self) -> bool:
@@ -720,6 +722,206 @@ class PyPNMAgent:
             'success': True,
             'pnm_type': pnm_type,
             'message': f'PNM {pnm_type} triggered for {target_ip}'
+        }
+    
+    def _handle_cmts_get_modems(self, params: dict) -> dict:
+        """
+        Get list of cable modems from a CMTS via SNMP.
+        
+        DOCSIS CMTS MIBs used:
+        - docsIfCmtsCmStatusMacAddress: 1.3.6.1.2.1.10.127.1.3.3.1.2
+        - docsIfCmtsCmStatusIpAddress: 1.3.6.1.2.1.10.127.1.3.3.1.3
+        - docsIfCmtsCmStatusValue (status): 1.3.6.1.2.1.10.127.1.3.3.1.9
+        - docsIf3CmtsCmRegStatusMdIfIndex (interface): 1.3.6.1.4.1.4491.2.1.20.1.3.1.5
+        """
+        cmts_ip = params.get('cmts_ip')
+        community = params.get('community', 'private')
+        limit = params.get('limit', 100)  # Limit results
+        
+        if not cmts_ip:
+            return {'success': False, 'error': 'cmts_ip required'}
+        
+        self.logger.info(f"Getting cable modems from CMTS {cmts_ip}")
+        
+        # DOCSIS MIB OIDs
+        OID_CM_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'  # docsIfCmtsCmStatusMacAddress
+        OID_CM_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'   # docsIfCmtsCmStatusIpAddress
+        OID_CM_STATUS = '1.3.6.1.2.1.10.127.1.3.3.1.9'  # docsIfCmtsCmStatusValue
+        
+        modems = []
+        
+        try:
+            # Get MAC addresses via SNMP walk
+            mac_result = self.snmp_executor.execute_snmp(
+                command='snmpwalk',
+                target_ip=cmts_ip,
+                oid=OID_CM_MAC,
+                community=community,
+                timeout=30,
+                retries=2
+            )
+            
+            if not mac_result.get('success'):
+                return {
+                    'success': False,
+                    'error': f"SNMP walk failed: {mac_result.get('error')}",
+                    'cmts_ip': cmts_ip
+                }
+            
+            # Parse MAC addresses from SNMP output
+            mac_lines = mac_result.get('output', '').strip().split('\n')
+            mac_map = {}  # index -> mac
+            
+            for line in mac_lines[:limit]:
+                # Parse: SNMPv2-SMI::mib-2.10.127.1.3.3.1.2.12345 = Hex-STRING: AA BB CC DD EE FF
+                if '=' in line and ('Hex-STRING' in line or 'STRING' in line):
+                    try:
+                        parts = line.split('=', 1)
+                        oid_part = parts[0].strip()
+                        value_part = parts[1].strip()
+                        
+                        # Extract index from OID
+                        index = oid_part.split('.')[-1]
+                        
+                        # Extract MAC from value (handles both formats)
+                        if 'Hex-STRING' in value_part:
+                            mac_hex = value_part.split(':', 1)[1].strip()
+                            mac = mac_hex.replace(' ', ':').lower()
+                        else:
+                            # Raw string format
+                            mac = value_part.replace('"', '').strip()
+                        
+                        mac_map[index] = mac
+                    except Exception as e:
+                        self.logger.debug(f"Failed to parse MAC line: {line} - {e}")
+            
+            # Get IP addresses
+            ip_result = self.snmp_executor.execute_snmp(
+                command='snmpwalk',
+                target_ip=cmts_ip,
+                oid=OID_CM_IP,
+                community=community,
+                timeout=30,
+                retries=2
+            )
+            
+            ip_map = {}  # index -> ip
+            if ip_result.get('success'):
+                for line in ip_result.get('output', '').split('\n'):
+                    if '=' in line and ('IpAddress' in line or 'Network Address' in line):
+                        try:
+                            parts = line.split('=', 1)
+                            index = parts[0].strip().split('.')[-1]
+                            # Extract IP: IpAddress: 10.1.2.3 or Network Address: 10.1.2.3
+                            ip = parts[1].strip().split(':')[-1].strip()
+                            ip_map[index] = ip
+                        except:
+                            pass
+            
+            # Get status values
+            status_result = self.snmp_executor.execute_snmp(
+                command='snmpwalk',
+                target_ip=cmts_ip,
+                oid=OID_CM_STATUS,
+                community=community,
+                timeout=30,
+                retries=2
+            )
+            
+            status_map = {}  # index -> status
+            if status_result.get('success'):
+                for line in status_result.get('output', '').split('\n'):
+                    if '=' in line and 'INTEGER' in line:
+                        try:
+                            parts = line.split('=', 1)
+                            index = parts[0].strip().split('.')[-1]
+                            # Status is an integer
+                            status_val = parts[1].strip().split(':')[-1].strip()
+                            status_map[index] = int(status_val) if status_val.isdigit() else status_val
+                        except:
+                            pass
+            
+            # Build modem list
+            for index, mac in mac_map.items():
+                modem = {
+                    'mac_address': mac,
+                    'ip_address': ip_map.get(index, 'N/A'),
+                    'status_code': status_map.get(index, 0),
+                    'status': self._decode_cm_status(status_map.get(index, 0)),
+                    'cmts_index': index
+                }
+                modems.append(modem)
+            
+            return {
+                'success': True,
+                'cmts_ip': cmts_ip,
+                'count': len(modems),
+                'modems': modems
+            }
+            
+        except Exception as e:
+            self.logger.exception(f"Failed to get modems from CMTS: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cmts_ip': cmts_ip
+            }
+    
+    def _decode_cm_status(self, status_code: int) -> str:
+        """Decode DOCSIS CM status code to human-readable string."""
+        # docsIfCmtsCmStatusValue values
+        status_map = {
+            1: 'other',
+            2: 'ranging',
+            3: 'rangingAborted',
+            4: 'rangingComplete',
+            5: 'ipComplete',
+            6: 'registrationComplete',
+            7: 'accessDenied',
+            8: 'operational',  # This is the "online" state
+            9: 'registeredBPIInitializing',
+        }
+        return status_map.get(status_code, f'unknown({status_code})')
+    
+    def _handle_cmts_get_modem_info(self, params: dict) -> dict:
+        """
+        Get detailed info for a specific modem from CMTS.
+        
+        Can search by MAC or IP address.
+        """
+        cmts_ip = params.get('cmts_ip')
+        mac_address = params.get('mac_address')
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'private')
+        
+        if not cmts_ip:
+            return {'success': False, 'error': 'cmts_ip required'}
+        
+        if not mac_address and not modem_ip:
+            return {'success': False, 'error': 'mac_address or modem_ip required'}
+        
+        # First get all modems and find the matching one
+        modems_result = self._handle_cmts_get_modems({
+            'cmts_ip': cmts_ip,
+            'community': community,
+            'limit': 5000  # Get more for search
+        })
+        
+        if not modems_result.get('success'):
+            return modems_result
+        
+        # Find matching modem
+        for modem in modems_result.get('modems', []):
+            if mac_address and modem['mac_address'].lower() == mac_address.lower():
+                return {'success': True, 'modem': modem, 'cmts_ip': cmts_ip}
+            if modem_ip and modem['ip_address'] == modem_ip:
+                return {'success': True, 'modem': modem, 'cmts_ip': cmts_ip}
+        
+        return {
+            'success': False,
+            'error': f"Modem not found on CMTS {cmts_ip}",
+            'search_mac': mac_address,
+            'search_ip': modem_ip
         }
     
     def connect(self):

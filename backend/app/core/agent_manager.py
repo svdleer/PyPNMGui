@@ -222,22 +222,29 @@ class AgentManager:
                        agent_id: str,
                        command: str,
                        params: dict,
-                       timeout: float = 30.0) -> dict:
-        """Send a task and wait for response synchronously."""
+                       timeout: float = 30.0) -> str:
+        """Send a task and return task_id. Use wait_for_task to get result."""
         task_id = self.send_task(agent_id, command, params, timeout=timeout)
         
         # Create queue for this task
         self._task_queues[task_id] = Queue()
         
+        return task_id
+    
+    def wait_for_task(self, task_id: str, timeout: float = 30.0) -> Optional[dict]:
+        """Wait for a task to complete and return result."""
+        if task_id not in self._task_queues:
+            return None
+        
         try:
-            # Wait for response
             result = self._task_queues[task_id].get(timeout=timeout)
             return result
         except Empty:
-            return {'success': False, 'error': 'Task timeout'}
+            return None
         finally:
             # Cleanup
-            del self._task_queues[task_id]
+            if task_id in self._task_queues:
+                del self._task_queues[task_id]
             if task_id in self.pending_tasks:
                 del self.pending_tasks[task_id]
     
@@ -302,20 +309,28 @@ class AgentManager:
 
 
 # Global agent manager instance
-agent_manager = AgentManager()
+_agent_manager: Optional[AgentManager] = None
+
+
+def get_agent_manager() -> Optional[AgentManager]:
+    """Get the global agent manager instance."""
+    return _agent_manager
 
 
 def init_agent_websocket(app, auth_token: str = None):
     """Initialize agent WebSocket support."""
+    global _agent_manager
+    
     if not SOCKETIO_AVAILABLE:
         logger.warning("flask-socketio not available, agent support disabled")
         return None
     
     socketio = SocketIO(app, cors_allowed_origins="*")
     
+    _agent_manager = AgentManager()
     if auth_token:
-        agent_manager.auth_token = auth_token
+        _agent_manager.auth_token = auth_token
     
-    agent_manager.init_app(app, socketio)
+    _agent_manager.init_app(app, socketio)
     
     return socketio
