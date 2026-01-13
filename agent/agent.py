@@ -842,7 +842,7 @@ class PyPNMAgent:
         OID_CM_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'  # docsIfCmtsCmStatusMacAddress
         OID_CM_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'   # docsIfCmtsCmStatusIpAddress
         OID_CM_STATUS = '1.3.6.1.2.1.10.127.1.3.3.1.9'  # docsIfCmtsCmStatusValue
-        OID_DOCSIS_VER = '1.3.6.1.2.1.10.127.1.3.3.1.17' # docsIfCmtsCmStatusDocsisRegMode (D3.0+)
+        OID_DOCSIS_VER = '1.3.6.1.4.1.4491.2.1.20.1.3.1.6'  # docsIf3CmtsCmRegStatusDocsisVersion
         
         snmp_command = 'snmpbulkwalk' if use_bulk else 'snmpwalk'
         self.logger.info(f"Using {snmp_command} with community '{community}' (parallel queries)")
@@ -1124,16 +1124,19 @@ class PyPNMAgent:
         return status_map.get(status_code, f'unknown({status_code})')
     
     def _decode_docsis_version(self, docsis_code: int) -> str:
-        """Decode DOCSIS registration mode to version string."""
+        """Decode DOCSIS version from docsIf3CmtsCmRegStatusDocsisVersion."""
+        # docsIf3CmtsCmRegStatusDocsisVersion values from DOCSIS-IF3-MIB
         version_map = {
-            1: 'Other',
-            2: 'DOCSIS 1.0',
-            3: 'DOCSIS 1.1',
-            4: 'DOCSIS 2.0',
-            5: 'DOCSIS 3.0',
-            6: 'DOCSIS 3.1',
+            1: 'ATDMA',
+            2: 'SCDMA', 
+            3: 'DOCSIS 1.0',
+            4: 'DOCSIS 1.1',
+            5: 'DOCSIS 2.0',
+            6: 'DOCSIS 3.0',
+            7: 'DOCSIS 3.1',
+            8: 'DOCSIS 4.0',
         }
-        return version_map.get(docsis_code, 'Unknown')
+        return version_map.get(docsis_code, f'Unknown({docsis_code})')
     
     def _get_vendor_from_mac(self, mac: str) -> str:
         """Get vendor name from MAC address OUI (first 3 bytes)."""
