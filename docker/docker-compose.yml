@@ -28,6 +28,9 @@ services:
       - FLASK_ENV=production
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - AGENT_AUTH_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+      # Enable WebSocket agent support
+      - ENABLE_AGENT_WEBSOCKET=true
+      - DATA_MODE=agent
       # AppDB API for CMTS data
       - APPDB_API_URL=https://appdb.oss.local/isw/api
       - APPDB_API_USER=isw

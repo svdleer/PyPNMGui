@@ -1,0 +1,140 @@
+#!/bin/bash
+# PyPNM Agent - Install Script for script3a.oss.local
+# Uses existing venv at ~/python/venv
+#
+# Usage:
+#   1. Copy agent files to script3a
+#   2. Run: ./install-script3a.sh
+
+set -e
+
+VENV_DIR="${HOME}/python/venv"
+INSTALL_DIR="${HOME}/.pypnm-agent"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "=========================================="
+echo "  PyPNM Agent Install for script3a"
+echo "=========================================="
+echo ""
+echo "Using venv: $VENV_DIR"
+echo "Install to: $INSTALL_DIR"
+echo ""
+
+# Check venv exists
+if [ ! -f "$VENV_DIR/bin/python" ]; then
+    echo "ERROR: venv not found at $VENV_DIR"
+    exit 1
+fi
+
+# Create install directory
+mkdir -p "$INSTALL_DIR/logs"
+
+# Copy agent files
+cp "$SCRIPT_DIR/agent.py" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
+[ -f "$SCRIPT_DIR/ssh_tunnel.py" ] && cp "$SCRIPT_DIR/ssh_tunnel.py" "$INSTALL_DIR/"
+
+# Install dependencies in venv
+echo "Installing Python dependencies..."
+"$VENV_DIR/bin/pip" install -q websocket-client
+
+# Create config if not exists
+if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
+    cat > "$INSTALL_DIR/agent_config.json" << 'EOF'
+{
+    "agent_id": "jump-server-script3a",
+    
+    "pypnm_server": {
+        "_comment": "Connect to PyPNM GUI on appdb.oss.local",
+        "url": "ws://appdb.oss.local:5050/ws/agent",
+        "auth_token": "dev-token-change-me",
+        "reconnect_interval": 5
+    },
+    
+    "pypnm_ssh_tunnel": {
+        "enabled": false
+    },
+    
+    "cmts_access": {
+        "snmp_direct": true,
+        "ssh_enabled": false
+    },
+    
+    "cm_proxy": {
+        "host": null
+    },
+    
+    "tftp_server": {
+        "host": null,
+        "tftp_path": "/tftpboot"
+    }
+}
+EOF
+    chmod 600 "$INSTALL_DIR/agent_config.json"
+    echo "Created config: $INSTALL_DIR/agent_config.json"
+fi
+
+# Create start script
+cat > "$INSTALL_DIR/start.sh" << EOF
+#!/bin/bash
+cd "\$(dirname "\$0")"
+VENV="$VENV_DIR"
+if [ -f agent.pid ] && kill -0 \$(cat agent.pid) 2>/dev/null; then
+    echo "Agent already running (PID: \$(cat agent.pid))"
+    exit 0
+fi
+nohup "\$VENV/bin/python" agent.py -c agent_config.json > logs/agent.log 2>&1 &
+echo \$! > agent.pid
+echo "Agent started (PID: \$!)"
+echo "Logs: \$(pwd)/logs/agent.log"
+EOF
+chmod +x "$INSTALL_DIR/start.sh"
+
+# Create stop script
+cat > "$INSTALL_DIR/stop.sh" << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+if [ -f agent.pid ]; then
+    kill $(cat agent.pid) 2>/dev/null && rm agent.pid && echo "Agent stopped" || echo "Agent not running"
+else
+    echo "No PID file"
+fi
+EOF
+chmod +x "$INSTALL_DIR/stop.sh"
+
+# Create status script
+cat > "$INSTALL_DIR/status.sh" << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+if [ -f agent.pid ] && kill -0 $(cat agent.pid) 2>/dev/null; then
+    echo "Agent RUNNING (PID: $(cat agent.pid))"
+    echo "---"
+    tail -10 logs/agent.log 2>/dev/null
+else
+    echo "Agent STOPPED"
+fi
+EOF
+chmod +x "$INSTALL_DIR/status.sh"
+
+# Create run script (foreground for debug)
+cat > "$INSTALL_DIR/run.sh" << EOF
+#!/bin/bash
+cd "\$(dirname "\$0")"
+"$VENV_DIR/bin/python" agent.py -c agent_config.json -v
+EOF
+chmod +x "$INSTALL_DIR/run.sh"
+
+echo ""
+echo "=========================================="
+echo "  Installation Complete!"
+echo "=========================================="
+echo ""
+echo "Commands:"
+echo "  cd $INSTALL_DIR"
+echo "  ./start.sh    - Start agent"
+echo "  ./stop.sh     - Stop agent"
+echo "  ./status.sh   - Check status"
+echo "  ./run.sh      - Run in foreground (debug)"
+echo ""
+echo "Config: $INSTALL_DIR/agent_config.json"
+echo ""

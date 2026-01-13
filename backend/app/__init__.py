@@ -14,15 +14,15 @@ class CustomFlask(Flask):
     ))
 
 
-# Global socketio instance (may be None if not using agents)
-socketio = None
+# Global websocket instance
+sock = None
 
 
 import os
 
 def create_app():
     """Create and configure the Flask application."""
-    global socketio
+    global sock
     
     # Paths work for both local dev and Docker
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,16 +41,14 @@ def create_app():
     # Load configuration
     app.config.from_object('app.core.config.Config')
     
-    # Initialize agent WebSocket if enabled
-    if app.config.get('ENABLE_AGENT_WEBSOCKET', False):
+    # Initialize WebSocket support for agents
+    if app.config.get('ENABLE_AGENT_WEBSOCKET', True):
         try:
-            from app.core.agent_manager import init_agent_websocket
-            socketio = init_agent_websocket(
-                app, 
-                auth_token=app.config.get('AGENT_AUTH_TOKEN')
-            )
-            app.logger.info("Agent WebSocket support enabled")
-        except ImportError as e:
+            from app.routes.ws_routes import init_websocket
+            sock = init_websocket(app)
+            if sock:
+                app.logger.info("Agent WebSocket support enabled at /ws/agent")
+        except Exception as e:
             app.logger.warning(f"Agent WebSocket not available: {e}")
     
     # Register blueprints
