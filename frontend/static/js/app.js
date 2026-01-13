@@ -24,6 +24,7 @@ createApp({
             searchValue: '',
             snmpCommunity: 'Z1gg0@LL',
             snmpCommunityRW: 'Z1gg0Sp3c1@l',
+            snmpCommunityModem: 'm0d3m1nf0',
             selectedCmts: '',
             selectedInterface: '',
             searchPerformed: false,
