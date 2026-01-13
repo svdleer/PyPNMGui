@@ -91,12 +91,12 @@
                                 
                                 <!-- Advanced Filters -->
                                 <div class="row g-3 mt-2">
-                                    <div class="col-md-3">
+                                    <div class="col-md-4">
                                         <label class="form-label">CMTS Filter</label>
                                         <select v-model="selectedCmts" class="form-select" @change="loadCmtsInterfaces">
-                                            <option value="">All CMTS</option>
+                                            <option value="">All CMTS ({{ cmtsList.length }})</option>
                                             <option v-for="cmts in cmtsList" :key="cmts.name" :value="cmts.name">
-                                                {{ cmts.name }}
+                                                {{ cmts.name }} - {{ cmts.vendor }} {{ cmts.type }}
                                             </option>
                                         </select>
                                     </div>
@@ -109,12 +109,61 @@
                                             </option>
                                         </select>
                                     </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">CMTS Search</label>
+                                        <input type="text" v-model="cmtsSearch" class="form-control" 
+                                               placeholder="Search by hostname..." @input="filterCmtsList">
+                                    </div>
                                     <div class="col-md-2 d-flex align-items-end">
                                         <button @click="clearFilters" class="btn btn-outline-secondary w-100">
                                             <i class="bi bi-x-circle me-1"></i>Clear
                                         </button>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CMTS Summary Cards -->
+                <div class="row mt-4" v-if="cmtsListFull.length > 0">
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-primary text-white">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-hdd-network me-2"></i>Total CMTS
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-success text-white">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-building me-2"></i>Arris E6000
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.filter(c => c.vendor === 'Arris').length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-info text-white">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-house me-2"></i>Casa C100G
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.filter(c => c.vendor === 'Casa').length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-warning text-dark">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-diagram-3 me-2"></i>Cisco cBR-8
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.filter(c => c.vendor === 'Cisco').length }}</h2>
                             </div>
                         </div>
                     </div>

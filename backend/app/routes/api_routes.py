@@ -4,6 +4,7 @@
 from flask import jsonify, request, current_app
 from . import api_bp
 from app.models import MockDataProvider
+from app.core.cmts_provider import CMTSProvider
 
 
 # ============== Cable Modem Endpoints ==============
@@ -51,28 +52,84 @@ def get_modem(mac_address):
 
 @api_bp.route('/cmts', methods=['GET'])
 def get_cmts_list():
-    """Get list of CMTS devices."""
-    cmts_list = MockDataProvider.get_cmts_list()
+    """
+    Get list of CMTS devices from appdb.
+    
+    Query params:
+        - vendor: Filter by vendor (Arris, Casa, Cisco)
+        - type: Filter by type (E6000, C100G, cBR-8)
+        - search: Search by hostname, alias, or IP
+        - refresh: Force cache refresh (true/false)
+    """
+    vendor = request.args.get('vendor')
+    cmts_type = request.args.get('type')
+    search = request.args.get('search')
+    refresh = request.args.get('refresh', '').lower() == 'true'
+    
+    # Get CMTS data (from cache or API)
+    if vendor:
+        cmts_list = CMTSProvider.get_cmts_by_vendor(vendor)
+    elif cmts_type:
+        cmts_list = CMTSProvider.get_cmts_by_type(cmts_type)
+    elif search:
+        cmts_list = CMTSProvider.search_cmts(search)
+    else:
+        cmts_list = CMTSProvider.get_all_cmts(force_refresh=refresh)
+    
     return jsonify({
         "status": "success",
-        "cmts_list": cmts_list
+        "count": len(cmts_list),
+        "cmts_list": cmts_list,
+        "cache_info": CMTSProvider.get_cache_info()
     })
+
+
+@api_bp.route('/cmts/summary', methods=['GET'])
+def get_cmts_summary():
+    """Get summary of CMTS systems by vendor and type."""
+    return jsonify({
+        "status": "success",
+        "total": CMTSProvider.get_cmts_count(),
+        "by_vendor": CMTSProvider.get_vendors_summary(),
+        "by_type": CMTSProvider.get_types_summary(),
+        "cache_info": CMTSProvider.get_cache_info()
+    })
+
+
+@api_bp.route('/cmts/<hostname>', methods=['GET'])
+def get_cmts_by_hostname(hostname):
+    """Get a specific CMTS by hostname."""
+    cmts = CMTSProvider.get_cmts_by_hostname(hostname)
+    
+    if cmts:
+        return jsonify({
+            "status": "success",
+            "cmts": cmts
+        })
+    else:
+        return jsonify({
+            "status": "error",
+            "message": f"CMTS '{hostname}' not found"
+        }), 404
 
 
 @api_bp.route('/cmts/<cmts_name>/interfaces', methods=['GET'])
 def get_cmts_interfaces(cmts_name):
-    """Get interfaces for a specific CMTS."""
-    cmts_list = MockDataProvider.get_cmts_list()
-    for cmts in cmts_list:
-        if cmts['name'] == cmts_name:
-            return jsonify({
-                "status": "success",
-                "interfaces": cmts['interfaces']
-            })
+    """Get interfaces for a specific CMTS (placeholder - needs PyPNM integration)."""
+    cmts = CMTSProvider.get_cmts_by_hostname(cmts_name)
+    
+    if cmts:
+        # TODO: Integrate with PyPNM to get real interface data
+        return jsonify({
+            "status": "success",
+            "cmts": cmts_name,
+            "interfaces": [],
+            "message": "Interface discovery requires PyPNM agent connection"
+        })
     
     return jsonify({
         "status": "error",
-        "message": "CMTS not found"
+        "message": f"CMTS '{cmts_name}' not found"
     }), 404
 
 

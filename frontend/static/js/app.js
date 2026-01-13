@@ -26,10 +26,12 @@ createApp({
             selectedCmts: '',
             selectedInterface: '',
             searchPerformed: false,
+            cmtsSearch: '',
             
             // Data
             modems: [],
             cmtsList: [],
+            cmtsListFull: [],  // Full CMTS list for filtering
             cmtsInterfaces: [],
             selectedModem: null,
             systemInfo: null,
@@ -85,10 +87,34 @@ createApp({
                 const response = await fetch(`${API_BASE}/cmts`);
                 const data = await response.json();
                 if (data.status === 'success') {
-                    this.cmtsList = data.cmts_list;
+                    // Transform the appdb format to our format
+                    const cmtsList = data.cmts_list.map(cmts => ({
+                        name: cmts.HostName,
+                        ip: cmts.IPAddress,
+                        vendor: cmts.Vendor,
+                        type: cmts.Type,
+                        alias: cmts.Alias || ''
+                    }));
+                    this.cmtsListFull = cmtsList;
+                    this.cmtsList = cmtsList;
+                    console.log(`Loaded ${this.cmtsList.length} CMTS systems from appdb`);
                 }
             } catch (error) {
                 console.error('Failed to load CMTS list:', error);
+            }
+        },
+        
+        filterCmtsList() {
+            if (!this.cmtsSearch) {
+                this.cmtsList = this.cmtsListFull;
+            } else {
+                const search = this.cmtsSearch.toLowerCase();
+                this.cmtsList = this.cmtsListFull.filter(cmts => 
+                    cmts.name.toLowerCase().includes(search) ||
+                    cmts.alias.toLowerCase().includes(search) ||
+                    cmts.ip.toLowerCase().includes(search) ||
+                    cmts.vendor.toLowerCase().includes(search)
+                );
             }
         },
         
