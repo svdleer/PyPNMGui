@@ -9,4 +9,4 @@ main_bp = Blueprint('main', __name__)
 # API blueprint for data endpoints
 api_bp = Blueprint('api', __name__)
 
-from . import main_routes, api_routes, agent_routes
+from . import main_routes, api_routes

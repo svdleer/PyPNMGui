@@ -18,6 +18,7 @@ try:
     SOCKETIO_AVAILABLE = True
 except ImportError:
     SOCKETIO_AVAILABLE = False
+    SocketIO = None  # Define as None to avoid NameError
     print("WARNING: flask-socketio not installed. Agent support disabled.")
 
 
