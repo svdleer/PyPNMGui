@@ -1212,13 +1212,36 @@ class PyPNMAgent:
     def _parse_sys_descr(self, sys_descr: str) -> dict:
         """Parse sysDescr to extract vendor, model, and software version."""
         result = {}
-        descr = sys_descr.lower()
-        original = sys_descr  # Keep original for model extraction
+        import re
         
-        # Common patterns
+        # Check for structured format: <<KEY: value; KEY: value>>
+        structured_match = re.search(r'<<(.+?)>>', sys_descr)
+        if structured_match:
+            fields = structured_match.group(1)
+            # Parse key: value pairs
+            for pair in fields.split(';'):
+                if ':' in pair:
+                    key, value = pair.split(':', 1)
+                    key = key.strip().upper()
+                    value = value.strip()
+                    if key == 'MODEL':
+                        result['model'] = value
+                    elif key == 'VENDOR':
+                        result['vendor'] = value
+                    elif key == 'SW_REV':
+                        result['software'] = value
+            # If we found model from structured format, return
+            if result.get('model'):
+                return result
+        
+        # Fallback to pattern matching
+        descr = sys_descr.lower()
+        original = sys_descr
+        
+        # Vendor detection
         if 'arris' in descr or 'touchstone' in descr:
             result['vendor'] = 'ARRIS'
-        elif 'technicolor' in descr or 'tc' in descr:
+        elif 'technicolor' in descr:
             result['vendor'] = 'Technicolor'
         elif 'sagemcom' in descr:
             result['vendor'] = 'Sagemcom'
@@ -1237,52 +1260,40 @@ class PyPNMAgent:
         elif 'humax' in descr:
             result['vendor'] = 'Humax'
         
-        # Try to extract model from sysDescr
-        import re
-        # Extended patterns for various modem models
+        # Model patterns
         model_patterns = [
-            r'(TG\d+[A-Z]*)',           # ARRIS Touchstone TG3442, TG2492
-            r'(TC\d+[A-Z]*)',           # Technicolor TC4400
-            r'(SB\d+[A-Z]*)',           # Motorola SB6121
-            r'(DPC\d+[A-Z]*)',          # Cisco DPC3010
-            r'(EPC\d+[A-Z]*)',          # Cisco EPC3010  
-            r'(CM\d+[A-Z]*)',           # Generic CM models
-            r'(SBG\d+[A-Z]*)',          # Motorola SBG6580
-            r'(CGM\d+[A-Z]*)',          # Sagemcom CGM4140
-            r'(CG\d+[A-Z]*)',           # Cable Gateway models
-            r'(CH\d+[A-Z]*)',           # Compal CH models
-            r'(HG\d+[A-Z]*)',           # Home Gateway models
-            r'(F@ST\s*\d+)',            # Sagemcom F@ST models
-            r'(CODA-\d+[A-Z]*)',        # CODA models
-            r'(DCM\d+)',                # DCM models
-            r'([A-Z]{2,4}\d{3,5}[A-Z]*)',  # Generic: 2-4 letters + 3-5 digits
+            r'(FAST\d+[A-Z]*)',         # Sagemcom FAST3896
+            r'(F\d{4}[A-Z]*)',          # F3896LG
+            r'(TG\d+[A-Z]*)',           # ARRIS Touchstone
+            r'(TC\d+[A-Z]*)',           # Technicolor
+            r'(SB\d+[A-Z]*)',           # Motorola
+            r'(DPC\d+[A-Z]*)',          # Cisco
+            r'(EPC\d+[A-Z]*)',          # Cisco
+            r'(CM\d+[A-Z]*)',           # Generic
+            r'(SBG\d+[A-Z]*)',          # Motorola
+            r'(CGM\d+[A-Z]*)',          # Sagemcom
+            r'(CG\d+[A-Z]*)',           # Cable Gateway
+            r'(CH\d+[A-Z]*)',           # Compal
+            r'(CODA-?\d+[A-Z]*)',       # CODA
+            r'(DCM\d+)',                # DCM
         ]
         
         for pattern in model_patterns:
             match = re.search(pattern, original, re.I)
             if match:
-                result['model'] = match.group(1).upper().replace(' ', '')
+                result['model'] = match.group(1).upper()
                 break
         
-        # If no model found, use first word-like token after vendor
-        if 'model' not in result and result.get('vendor'):
-            words = original.split()
-            for i, word in enumerate(words):
-                if result['vendor'].lower() in word.lower() and i + 1 < len(words):
-                    next_word = words[i + 1]
-                    if re.match(r'^[A-Z0-9\-]+$', next_word, re.I) and len(next_word) >= 3:
-                        result['model'] = next_word.upper()
-                        break
+        # Software version (if not from structured)
+        if 'software' not in result:
+            version_match = re.search(r'(\d+\.\d+\.\d+[\.\d\-a-zA-Z]*)', sys_descr)
+            if version_match:
+                result['software'] = version_match.group(1)
         
-        # If still no model, use sysDescr truncated as model
+        # If still no model, use first part of sysDescr
         if 'model' not in result and sys_descr:
-            # Take first meaningful part
-            result['model'] = sys_descr[:30].strip()
-        
-        # Software version
-        version_match = re.search(r'(\d+\.\d+\.\d+[\.\d\-a-zA-Z]*)', sys_descr)
-        if version_match:
-            result['software'] = version_match.group(1)
+            first_word = sys_descr.split()[0] if sys_descr.split() else sys_descr[:20]
+            result['model'] = first_word
         
         return result
     
