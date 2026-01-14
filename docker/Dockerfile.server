@@ -50,4 +50,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5050/api/health || exit 1
 
 # Run with gunicorn + eventlet for WebSocket support
-CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5050", "run:app"]
+# --timeout 300: allow long-running SNMP walks (up to 5 min)
+# --keep-alive 120: keep connections alive longer
+CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5050", "--timeout", "300", "--keep-alive", "120", "run:app"]
