@@ -14,7 +14,7 @@ try:
     import redis
     REDIS_HOST = os.environ.get('REDIS_HOST', 'eve-li-redis')
     REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
-    REDIS_TTL = int(os.environ.get('REDIS_TTL', '300'))  # 5 min cache
+    REDIS_TTL = int(os.environ.get('REDIS_TTL', '3600'))  # 60 min cache
     redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     # Test connection
     redis_client.ping()
