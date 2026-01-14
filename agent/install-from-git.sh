@@ -117,7 +117,28 @@ chmod +x "$INSTALL_DIR/start.sh"
 cat > "$INSTALL_DIR/stop.sh" << 'EOF'
 #!/bin/bash
 echo "Stopping PyPNM Agent..."
-pkill -f "agent.py" 2>/dev/null || echo "Agent not running"
+
+# Find and kill agent.py gracefully (SIGTERM allows cleanup)
+AGENT_PID=$(pgrep -f "python.*agent.py" 2>/dev/null)
+if [ -n "$AGENT_PID" ]; then
+    echo "Sending SIGTERM to agent (PID: $AGENT_PID)..."
+    kill -TERM $AGENT_PID 2>/dev/null
+    sleep 2
+    # Force kill if still running
+    if ps -p $AGENT_PID > /dev/null 2>&1; then
+        echo "Force killing agent..."
+        kill -9 $AGENT_PID 2>/dev/null
+    fi
+else
+    echo "Agent not running"
+fi
+
+# Also kill any SSH tunnels started by the agent
+pkill -f "ssh.*pypnm.*tunnel" 2>/dev/null
+pkill -f "ssh.*-L.*5050" 2>/dev/null
+pkill -f "ssh.*appdb" 2>/dev/null
+
+echo "Agent stopped"
 EOF
 chmod +x "$INSTALL_DIR/stop.sh"
 

@@ -133,13 +133,40 @@ chmod +x "$INSTALL_DIR/start.sh"
 cat > "$INSTALL_DIR/stop.sh" << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
+echo "Stopping PyPNM Agent..."
+
+# Stop by PID file if exists
 if [ -f agent.pid ]; then
-    kill $(cat agent.pid) 2>/dev/null && rm agent.pid && echo "Agent stopped" || echo "Agent not running"
+    PID=$(cat agent.pid)
+    if ps -p $PID > /dev/null 2>&1; then
+        echo "Sending SIGTERM to agent (PID: $PID)..."
+        kill -TERM $PID 2>/dev/null
+        sleep 2
+        if ps -p $PID > /dev/null 2>&1; then
+            echo "Force killing agent..."
+            kill -9 $PID 2>/dev/null
+        fi
+    fi
+    rm -f agent.pid
 else
-    echo "No PID file"
+    # Fallback: find by process name
+    AGENT_PID=$(pgrep -f "python.*agent.py" 2>/dev/null)
+    if [ -n "$AGENT_PID" ]; then
+        echo "Sending SIGTERM to agent (PID: $AGENT_PID)..."
+        kill -TERM $AGENT_PID 2>/dev/null
+        sleep 2
+        if ps -p $AGENT_PID > /dev/null 2>&1; then
+            kill -9 $AGENT_PID 2>/dev/null
+        fi
+    fi
 fi
-# Also stop Redis tunnel
-pkill -f "ssh.*6379:localhost:6379.*appdb-sh" 2>/dev/null && echo "Redis tunnel stopped"
+
+# Kill SSH tunnels started by agent
+pkill -f "ssh.*-L.*5050" 2>/dev/null
+pkill -f "ssh.*6379:localhost:6379.*appdb-sh" 2>/dev/null
+pkill -f "ssh.*appdb" 2>/dev/null
+
+echo "Agent stopped"
 EOF
 chmod +x "$INSTALL_DIR/stop.sh"
 
