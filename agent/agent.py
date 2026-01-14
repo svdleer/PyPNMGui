@@ -4,9 +4,11 @@
 # This agent runs on the Jump Server and connects OUT to the GUI Server
 # via WebSocket. It executes SNMP/SSH commands and returns results.
 
+import asyncio
 import json
 import logging
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -33,6 +35,23 @@ try:
 except ImportError:
     redis = None
     print("INFO: redis not installed. Caching disabled. Run: pip install redis")
+
+# Try to import pypnm-docsis for proper PNM operations
+try:
+    import socks  # PySocks for SOCKS proxy support
+    PYSOCKS_AVAILABLE = True
+except ImportError:
+    PYSOCKS_AVAILABLE = False
+    print("INFO: PySocks not installed. Run: pip install pysocks")
+
+try:
+    from pypnm.docsis.cm_snmp_operation import CmSnmpOperation
+    from pypnm.docsis.cable_modem import CableModem
+    from pypnm.snmp.snmp_v2c import Snmp_v2c
+    PYPNM_AVAILABLE = True
+except ImportError:
+    PYPNM_AVAILABLE = False
+    print("INFO: pypnm-docsis not installed. Using fallback SNMP parsing.")
 
 
 # Configure logging
@@ -361,7 +380,99 @@ class TFTPExecutor:
             }
 
 
+class SocksTunnelManager:
+    """Manages a SOCKS5 proxy tunnel via SSH for routing SNMP through hop-access."""
+    
+    def __init__(self, ssh_host: str, ssh_user: str, ssh_port: int = 22, 
+                 local_port: int = 1080, ssh_key: Optional[str] = None):
+        self.ssh_host = ssh_host
+        self.ssh_user = ssh_user
+        self.ssh_port = ssh_port
+        self.local_port = local_port
+        self.ssh_key = ssh_key
+        self.process: Optional[subprocess.Popen] = None
+        self.logger = logging.getLogger(f'{__name__}.SocksTunnel')
+        self._lock = threading.Lock()
+    
+    def start(self) -> bool:
+        """Start the SOCKS5 tunnel via SSH -D."""
+        with self._lock:
+            if self.is_running():
+                self.logger.info(f"SOCKS tunnel already running on port {self.local_port}")
+                return True
+            
+            try:
+                # Build SSH command for dynamic port forwarding (SOCKS5)
+                cmd = [
+                    'ssh', '-N', '-D', f'127.0.0.1:{self.local_port}',
+                    '-o', 'StrictHostKeyChecking=no',
+                    '-o', 'ServerAliveInterval=30',
+                    '-o', 'ServerAliveCountMax=3',
+                    '-o', 'ExitOnForwardFailure=yes',
+                    '-p', str(self.ssh_port),
+                ]
+                
+                if self.ssh_key:
+                    cmd.extend(['-i', self.ssh_key])
+                
+                cmd.append(f'{self.ssh_user}@{self.ssh_host}')
+                
+                self.logger.info(f"Starting SOCKS tunnel: {' '.join(cmd)}")
+                
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL
+                )
+                
+                # Wait a moment for tunnel to establish
+                time.sleep(2)
+                
+                if self.process.poll() is None:
+                    self.logger.info(f"SOCKS5 tunnel established on 127.0.0.1:{self.local_port}")
+                    return True
+                else:
+                    stderr = self.process.stderr.read().decode() if self.process.stderr else ''
+                    self.logger.error(f"SOCKS tunnel failed to start: {stderr}")
+                    return False
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to start SOCKS tunnel: {e}")
+                return False
+    
+    def stop(self):
+        """Stop the SOCKS tunnel."""
+        with self._lock:
+            if self.process:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                self.process = None
+                self.logger.info("SOCKS tunnel stopped")
+    
+    def is_running(self) -> bool:
+        """Check if tunnel is still running."""
+        if self.process is None:
+            return False
+        return self.process.poll() is None
+    
+    def ensure_running(self) -> bool:
+        """Ensure tunnel is running, restart if needed."""
+        if not self.is_running():
+            self.logger.warning("SOCKS tunnel not running, restarting...")
+            return self.start()
+        return True
+    
+    def get_proxy_address(self) -> tuple:
+        """Get the SOCKS proxy address (host, port)."""
+        return ('127.0.0.1', self.local_port)
+
+
 class PyPNMAgent:
+
     """Main agent class that connects to GUI Server and handles requests."""
     
     def __init__(self, config: AgentConfig):
@@ -374,7 +485,26 @@ class PyPNMAgent:
         self.pypnm_tunnel = None
         self.pypnm_tunnel_monitor = None
         
-        # Initialize SSH executor for CM Proxy (to reach modems)
+        # SOCKS tunnel for routing SNMP through cm_proxy (hop-access)
+        self.socks_tunnel: Optional[SocksTunnelManager] = None
+        if config.cm_proxy_host and config.cm_proxy_user:
+            self.socks_tunnel = SocksTunnelManager(
+                ssh_host=config.cm_proxy_host,
+                ssh_user=config.cm_proxy_user,
+                ssh_port=config.cm_proxy_port,
+                local_port=1080,  # Default SOCKS port
+                ssh_key=config.cm_proxy_key
+            )
+            self.logger.info(f"SOCKS tunnel configured via {config.cm_proxy_host}")
+        
+        # pypnm availability flag
+        self.pypnm_enabled = PYPNM_AVAILABLE and self.socks_tunnel is not None
+        if self.pypnm_enabled:
+            self.logger.info("PyPNM-DOCSIS integration ENABLED - using native SNMP")
+        else:
+            self.logger.info("PyPNM-DOCSIS integration disabled - using fallback SSH commands")
+        
+        # Initialize SSH executor for CM Proxy (to reach modems) - fallback
         self.cm_proxy: Optional[SSHProxyExecutor] = None
         if config.cm_proxy_host:
             self.cm_proxy = SSHProxyExecutor(
@@ -418,6 +548,10 @@ class PyPNMAgent:
         if config.cmts_ssh_enabled and config.cmts_ssh_user:
             self.logger.info("CMTS SSH access enabled")
         
+        # Async event loop for pypnm operations
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread: Optional[threading.Thread] = None
+        
         # Command handlers
         self.handlers: dict[str, Callable] = {
             'ping': self._handle_ping,
@@ -431,7 +565,7 @@ class PyPNMAgent:
             'cmts_get_modems': self._handle_cmts_get_modems,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
             'enrich_modems': self._handle_enrich_modems,
-            # PNM measurement commands
+            # PNM measurement commands - use pypnm when available
             'pnm_rxmer': self._handle_pnm_rxmer,
             'pnm_spectrum': self._handle_pnm_spectrum,
             'pnm_fec': self._handle_pnm_fec,
@@ -440,8 +574,199 @@ class PyPNMAgent:
             'pnm_event_log': self._handle_pnm_event_log,
         }
     
+    def _start_async_loop(self):
+        """Start the async event loop in a background thread for pypnm operations."""
+        if self._loop is not None:
+            return
+        
+        def run_loop():
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+        
+        self._loop_thread = threading.Thread(target=run_loop, daemon=True)
+        self._loop_thread.start()
+        time.sleep(0.1)  # Give loop time to start
+        self.logger.info("Async event loop started for pypnm operations")
+    
+    def _run_async(self, coro):
+        """Run an async coroutine from sync context."""
+        if self._loop is None:
+            self._start_async_loop()
+        
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=120)  # 2 min timeout for SNMP operations
+    
+    def _get_pypnm_snmp(self, modem_ip: str, community: str = 'public') -> Optional['Snmp_v2c']:
+        """Create a pypnm Snmp_v2c instance with SOCKS proxy routing."""
+        if not PYPNM_AVAILABLE:
+            return None
+        
+        if not self.socks_tunnel or not self.socks_tunnel.ensure_running():
+            self.logger.error("SOCKS tunnel not available")
+            return None
+        
+        # Configure socket to use SOCKS proxy
+        if PYSOCKS_AVAILABLE:
+            socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", self.socks_tunnel.local_port)
+            socket.socket = socks.socksocket
+        
+        try:
+            snmp = Snmp_v2c(
+                host=modem_ip,
+                community=community,
+                timeout=10,
+                retries=2
+            )
+            return snmp
+        except Exception as e:
+            self.logger.error(f"Failed to create pypnm SNMP client: {e}")
+            return None
+    
+    async def _pypnm_get_channel_info(self, modem_ip: str, community: str) -> dict:
+        """Get comprehensive channel info using pypnm CmSnmpOperation."""
+        try:
+            snmp = Snmp_v2c(host=modem_ip, community=community, timeout=10, retries=2)
+            cm_ops = CmSnmpOperation(snmp)
+            
+            # Get all channel data in parallel using pypnm's methods
+            ds_scqam_task = cm_ops.getDocsIfDownstreamChannel()
+            ds_ofdm_task = cm_ops.getDocsIf31CmDsOfdmChanEntry() if hasattr(cm_ops, 'getDocsIf31CmDsOfdmChanEntry') else asyncio.sleep(0)
+            us_scqam_task = cm_ops.getDocsIfUpstreamChannelEntry()
+            us_ofdma_task = cm_ops.getDocsIf31CmUsOfdmaChanEntry()
+            
+            ds_scqam, ds_ofdm, us_scqam, us_ofdma = await asyncio.gather(
+                ds_scqam_task, ds_ofdm_task, us_scqam_task, us_ofdma_task,
+                return_exceptions=True
+            )
+            
+            result = {
+                'success': True,
+                'modem_ip': modem_ip,
+                'timestamp': datetime.now().isoformat(),
+                'downstream': {
+                    'scqam': [],
+                    'ofdm': []
+                },
+                'upstream': {
+                    'scqam': [],
+                    'ofdma': []
+                }
+            }
+            
+            # Process downstream SC-QAM
+            if not isinstance(ds_scqam, Exception) and ds_scqam:
+                for ch in ds_scqam:
+                    result['downstream']['scqam'].append(ch.model_dump() if hasattr(ch, 'model_dump') else vars(ch))
+            
+            # Process downstream OFDM
+            if not isinstance(ds_ofdm, Exception) and ds_ofdm:
+                for ch in ds_ofdm:
+                    result['downstream']['ofdm'].append(ch.model_dump() if hasattr(ch, 'model_dump') else vars(ch))
+            
+            # Process upstream SC-QAM
+            if not isinstance(us_scqam, Exception) and us_scqam:
+                for ch in us_scqam:
+                    result['upstream']['scqam'].append(ch.model_dump() if hasattr(ch, 'model_dump') else vars(ch))
+            
+            # Process upstream OFDMA
+            if not isinstance(us_ofdma, Exception) and us_ofdma:
+                for ch in us_ofdma:
+                    result['upstream']['ofdma'].append(ch.model_dump() if hasattr(ch, 'model_dump') else vars(ch))
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"pypnm channel info failed: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _pypnm_get_rxmer(self, modem_ip: str, community: str) -> dict:
+        """Get RxMER data using pypnm CmSnmpOperation."""
+        try:
+            snmp = Snmp_v2c(host=modem_ip, community=community, timeout=10, retries=2)
+            cm_ops = CmSnmpOperation(snmp)
+            
+            # Get RxMER entries
+            rxmer_entries = await cm_ops.getDocsPnmCmDsOfdmRxMerEntry()
+            
+            result = {
+                'success': True,
+                'modem_ip': modem_ip,
+                'timestamp': datetime.now().isoformat(),
+                'rxmer_entries': []
+            }
+            
+            if rxmer_entries:
+                for entry in rxmer_entries:
+                    result['rxmer_entries'].append(
+                        entry.model_dump() if hasattr(entry, 'model_dump') else vars(entry)
+                    )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"pypnm RxMER failed: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _pypnm_get_fec(self, modem_ip: str, community: str) -> dict:
+        """Get FEC data using pypnm CmSnmpOperation."""
+        try:
+            snmp = Snmp_v2c(host=modem_ip, community=community, timeout=10, retries=2)
+            cm_ops = CmSnmpOperation(snmp)
+            
+            # Get FEC entries
+            fec_entries = await cm_ops.getDocsPnmCmDsOfdmFecEntry()
+            
+            result = {
+                'success': True,
+                'modem_ip': modem_ip,
+                'timestamp': datetime.now().isoformat(),
+                'fec_entries': []
+            }
+            
+            if fec_entries:
+                for entry in fec_entries:
+                    result['fec_entries'].append(
+                        entry.model_dump() if hasattr(entry, 'model_dump') else vars(entry)
+                    )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"pypnm FEC failed: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _pypnm_get_spectrum(self, modem_ip: str, community: str) -> dict:
+        """Get spectrum analyzer data using pypnm CmSnmpOperation."""
+        try:
+            snmp = Snmp_v2c(host=modem_ip, community=community, timeout=10, retries=2)
+            cm_ops = CmSnmpOperation(snmp)
+            
+            # Get spectrum analysis entries
+            spectrum_entries = await cm_ops.getDocsIf3CmSpectrumAnalysisEntry()
+            
+            result = {
+                'success': True,
+                'modem_ip': modem_ip,
+                'timestamp': datetime.now().isoformat(),
+                'spectrum_entries': []
+            }
+            
+            if spectrum_entries:
+                for entry in spectrum_entries:
+                    result['spectrum_entries'].append(
+                        entry.model_dump() if hasattr(entry, 'model_dump') else vars(entry)
+                    )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"pypnm spectrum failed: {e}")
+            return {'success': False, 'error': str(e)}
+    
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
                        community: str, command: str = 'snmpbulkwalk') -> dict:
+
         """Execute SNMP command via SSH to remote server (e.g., Equalizer)."""
         if not paramiko:
             return {'success': False, 'error': 'paramiko not installed'}
@@ -926,6 +1251,20 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting RxMER for modem {modem_ip}")
         
+        # Try pypnm native SNMP if available
+        if self.pypnm_enabled and PYPNM_AVAILABLE:
+            try:
+                self.logger.info(f"Using pypnm-docsis for RxMER query")
+                result = self._run_async(self._pypnm_get_rxmer(modem_ip, community))
+                if result.get('success'):
+                    result['mac_address'] = mac_address
+                    return result
+                else:
+                    self.logger.warning(f"pypnm RxMER failed, falling back to SSH: {result.get('error')}")
+            except Exception as e:
+                self.logger.warning(f"pypnm RxMER exception, falling back to SSH: {e}")
+        
+        # Fallback to SSH-based SNMP
         # DOCSIS 3.1 RxMER OIDs (docsIf31CmDsOfdmChannelPowerTable)
         OID_OFDM_POWER = '1.3.6.1.4.1.4491.2.1.28.1.5'  # docsIf31CmDsOfdmChannelPowerTable
         OID_DS_MER = '1.3.6.1.4.1.4491.2.1.20.1.24.1.1'  # docsIf3CmStatusUsTxPower (for reference)
@@ -977,6 +1316,20 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting spectrum for modem {modem_ip}")
         
+        # Try pypnm native SNMP if available
+        if self.pypnm_enabled and PYPNM_AVAILABLE:
+            try:
+                self.logger.info(f"Using pypnm-docsis for spectrum query")
+                result = self._run_async(self._pypnm_get_spectrum(modem_ip, community))
+                if result.get('success'):
+                    result['mac_address'] = mac_address
+                    return result
+                else:
+                    self.logger.warning(f"pypnm spectrum failed, falling back to SSH: {result.get('error')}")
+            except Exception as e:
+                self.logger.warning(f"pypnm spectrum exception, falling back to SSH: {e}")
+        
+        # Fallback to SSH-based SNMP
         # DOCSIS CM spectrum OIDs
         OID_DS_FREQ = '1.3.6.1.2.1.10.127.1.1.1.1.2'  # docsIfDownChannelFrequency
         OID_DS_POWER = '1.3.6.1.2.1.10.127.1.1.1.1.6'  # docsIfDownChannelPower
@@ -1050,6 +1403,20 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting FEC stats for modem {modem_ip}")
         
+        # Try pypnm native SNMP if available
+        if self.pypnm_enabled and PYPNM_AVAILABLE:
+            try:
+                self.logger.info(f"Using pypnm-docsis for FEC query")
+                result = self._run_async(self._pypnm_get_fec(modem_ip, community))
+                if result.get('success'):
+                    result['mac_address'] = mac_address
+                    return result
+                else:
+                    self.logger.warning(f"pypnm FEC failed, falling back to SSH: {result.get('error')}")
+            except Exception as e:
+                self.logger.warning(f"pypnm FEC exception, falling back to SSH: {e}")
+        
+        # Fallback to SSH-based SNMP
         # DOCSIS FEC OIDs
         OID_UNERRORED = '1.3.6.1.2.1.10.127.1.1.4.1.2'  # docsIfSigQUnerroreds
         OID_CORRECTED = '1.3.6.1.2.1.10.127.1.1.4.1.3'  # docsIfSigQCorrecteds
@@ -1153,6 +1520,20 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting channel info for modem {modem_ip}")
         
+        # Try pypnm native SNMP if available
+        if self.pypnm_enabled and PYPNM_AVAILABLE:
+            try:
+                self.logger.info(f"Using pypnm-docsis for channel info query")
+                result = self._run_async(self._pypnm_get_channel_info(modem_ip, community))
+                if result.get('success'):
+                    result['mac_address'] = mac_address
+                    return result
+                else:
+                    self.logger.warning(f"pypnm channel info failed, falling back to SSH: {result.get('error')}")
+            except Exception as e:
+                self.logger.warning(f"pypnm channel info exception, falling back to SSH: {e}")
+        
+        # Fallback to SSH-based SNMP
         # Define all OIDs to query
         oids = {
             'ds_freq': '1.3.6.1.2.1.10.127.1.1.1.1.2',   # docsIfDownChannelFrequency
@@ -1914,7 +2295,16 @@ class PyPNMAgent:
         """Connect to PyPNM Server."""
         self.running = True
         
-        # Set up SSH tunnel if enabled
+        # Start SOCKS tunnel for pypnm modem access
+        if self.socks_tunnel and self.pypnm_enabled:
+            self.logger.info("Starting SOCKS tunnel for pypnm-docsis...")
+            if self.socks_tunnel.start():
+                self.logger.info("SOCKS tunnel established - pypnm will route SNMP through it")
+            else:
+                self.logger.warning("SOCKS tunnel failed to start - pypnm disabled, using SSH fallback")
+                self.pypnm_enabled = False
+        
+        # Set up SSH tunnel to server if enabled
         if self.config.pypnm_ssh_tunnel_enabled:
             if not self._setup_pypnm_tunnel():
                 self.logger.error("Failed to establish SSH tunnel, cannot continue")
@@ -1959,6 +2349,14 @@ class PyPNMAgent:
         # Close TFTP SSH connection
         if self.tftp_ssh:
             self.tftp_ssh.close()
+        
+        # Stop SOCKS tunnel
+        if self.socks_tunnel:
+            self.socks_tunnel.stop()
+        
+        # Stop async event loop
+        if self._loop:
+            self._loop.call_soon_threadsafe(self._loop.stop)
         
         # Stop PyPNM tunnel monitor and tunnel
         if self.pypnm_tunnel_monitor:

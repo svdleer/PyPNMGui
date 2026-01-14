@@ -4,3 +4,8 @@
 websocket-client>=1.6.0
 paramiko>=3.3.0
 redis>=5.0.0
+# SOCKS proxy support for pypnm SNMP routing through SSH tunnel
+PySocks>=1.7.1
+
+# PyPNM DOCSIS library for native PNM operations (optional but recommended)
+pypnm-docsis>=1.0.20.0
