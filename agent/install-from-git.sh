@@ -77,14 +77,14 @@ if [ ! -f "$INSTALL_DIR/agent_config.json" ]; then
     },
     
     "cm_proxy": {
-        "host": "hop-access.oss.local",
+        "host": "hop-access1.ext.oss.local",
         "port": 22,
         "username": "svdleer",
         "key_file": "~/.ssh/id_rsa"
     },
     
     "equalizer": {
-        "host": "hop-access.oss.local",
+        "host": "hop-access1.ext.oss.local",
         "port": 22,
         "username": "svdleer",
         "key_file": "~/.ssh/id_rsa"
