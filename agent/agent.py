@@ -838,13 +838,13 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting cable modems from CMTS {cmts_ip}")
         
-        # DOCSIS 3.0 MIB OIDs - use docsIf3 table for MAC, status, DOCSIS version
+        # DOCSIS 3.0 MIB OIDs - use docsIf3 table for MAC and DOCSIS version
         OID_D3_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
-        OID_D3_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.3.1.4'  # docsIf3CmtsCmRegStatusValue
         
-        # Old DOCSIS table for IP (has different index, correlate by MAC)
+        # Old DOCSIS table for IP and Status (has different index, correlate by MAC)
         OID_OLD_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'   # docsIfCmtsCmStatusMacAddress
         OID_OLD_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'    # docsIfCmtsCmStatusIpAddress
+        OID_OLD_STATUS = '1.3.6.1.2.1.10.127.1.3.3.1.9'  # docsIfCmtsCmStatusValue
         
         # DOCSIS 3.1 MIB - MaxUsableDsFreq: if > 0, modem is DOCSIS 3.1
         OID_D31_MAX_DS_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.3.1.7'  # docsIf31CmtsCmRegStatusMaxUsableDsFreq
@@ -881,10 +881,10 @@ class PyPNMAgent:
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {
                     executor.submit(query_oid, 'mac', OID_D3_MAC): 'mac',
-                    executor.submit(query_oid, 'status', OID_D3_STATUS): 'status',
                     executor.submit(query_oid, 'd31_freq', OID_D31_MAX_DS_FREQ): 'd31_freq',
-                    executor.submit(query_oid, 'old_mac', OID_OLD_MAC): 'old_mac',  # For IP correlation
+                    executor.submit(query_oid, 'old_mac', OID_OLD_MAC): 'old_mac',
                     executor.submit(query_oid, 'old_ip', OID_OLD_IP): 'old_ip',
+                    executor.submit(query_oid, 'old_status', OID_OLD_STATUS): 'old_status',
                 }
                 for future in as_completed(futures):
                     name = futures[future]
@@ -971,18 +971,27 @@ class PyPNMAgent:
             
             self.logger.info(f"Correlated {len(mac_to_ip)} IP addresses from old table")
             
-            # Parse status values (from parallel result)
-            status_result = results.get('status', {})
-            status_map = {}  # index -> status
-            if status_result.get('success'):
-                for line in status_result.get('output', '').split('\n'):
+            # Parse old status values and create MAC -> status lookup
+            old_status_result = results.get('old_status', {})
+            old_status_map = {}  # old_index -> status
+            if old_status_result.get('success'):
+                for line in old_status_result.get('output', '').split('\n'):
                     if '=' in line and 'INTEGER' in line:
                         try:
                             parts = line.split('=', 1)
-                            index = parts[0].strip().split('.')[-1]
+                            old_index = parts[0].strip().split('.')[-1]
                             status_val = parts[1].strip().split(':')[-1].strip()
-                            status_map[index] = int(status_val) if status_val.isdigit() else status_val
+                            old_status_map[old_index] = int(status_val) if status_val.isdigit() else 0
                         except:
+                            pass
+            
+            # Create MAC -> status lookup
+            mac_to_status = {}  # mac -> status_code
+            for old_index, mac in old_mac_map.items():
+                if old_index in old_status_map:
+                    mac_to_status[mac] = old_status_map[old_index]
+            
+            self.logger.info(f"Correlated {len(mac_to_status)} status values from old table")
                             pass
             
             # Parse DOCSIS 3.1 detection from MaxUsableDsFreq
@@ -1019,12 +1028,13 @@ class PyPNMAgent:
             for index, mac in mac_map.items():
                 is_d31 = d31_map.get(index, False)
                 docsis_version = 'DOCSIS 3.1' if is_d31 else 'DOCSIS 3.0'
+                status_code = mac_to_status.get(mac, 0)
                 
                 modem = {
                     'mac_address': mac,
-                    'ip_address': mac_to_ip.get(mac, 'N/A'),  # Lookup IP by MAC
-                    'status_code': status_map.get(index, 0),
-                    'status': self._decode_d3_status(status_map.get(index, 0)),
+                    'ip_address': mac_to_ip.get(mac, 'N/A'),
+                    'status_code': status_code,
+                    'status': self._decode_cm_status(status_code),  # Use old decoder
                     'cmts_index': index,
                     'vendor': self._get_vendor_from_mac(mac),
                     'docsis_version': docsis_version,
