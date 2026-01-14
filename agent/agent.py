@@ -992,7 +992,6 @@ class PyPNMAgent:
                     mac_to_status[mac] = old_status_map[old_index]
             
             self.logger.info(f"Correlated {len(mac_to_status)} status values from old table")
-                            pass
             
             # Parse DOCSIS 3.1 detection from MaxUsableDsFreq
             # If freq > 0, modem is DOCSIS 3.1, else DOCSIS 3.0
