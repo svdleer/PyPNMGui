@@ -401,31 +401,50 @@ def get_cmts_modems(hostname):
             except Exception as e:
                 logging.getLogger(__name__).warning(f"Redis cache write error: {e}")
         
-        # Start background enrichment if requested
+        # Start background enrichment if requested - enrich ALL modems in batches
         if enrich and agent_manager.get_agent_for_capability('cm_proxy'):
             import threading
+            all_modems = task_result.get('modems', [])
+            
             def enrich_background():
                 try:
-                    enrich_task_id = agent_manager.send_task_sync(
-                        agent_id=agent.agent_id,
-                        command='enrich_modems',
-                        params={
-                            'modems': task_result.get('modems', [])[:200],  # Limit to 200 modems
-                            'modem_community': modem_community,
-                            'cmts_hostname': hostname,
-                            'cmts_ip': cmts_ip
-                        },
-                        timeout=300
-                    )
-                    enrich_result = agent_manager.wait_for_task(enrich_task_id, timeout=300)
-                    if enrich_result and enrich_result.get('result', {}).get('success'):
-                        enriched_modems = enrich_result.get('result', {}).get('modems', [])
+                    batch_size = 200
+                    enriched_modems = []
+                    
+                    # Process all modems in batches
+                    for i in range(0, len(all_modems), batch_size):
+                        batch = all_modems[i:i+batch_size]
+                        batch_num = (i // batch_size) + 1
+                        total_batches = (len(all_modems) + batch_size - 1) // batch_size
+                        
+                        logging.getLogger(__name__).info(f"Enrichment batch {batch_num}/{total_batches}: {len(batch)} modems")
+                        
+                        enrich_task_id = agent_manager.send_task_sync(
+                            agent_id=agent.agent_id,
+                            command='enrich_modems',
+                            params={
+                                'modems': batch,
+                                'modem_community': modem_community,
+                            },
+                            timeout=300
+                        )
+                        enrich_result = agent_manager.wait_for_task(enrich_task_id, timeout=300)
+                        
+                        if enrich_result and enrich_result.get('result', {}).get('success'):
+                            enriched_modems.extend(enrich_result.get('result', {}).get('modems', []))
+                        else:
+                            # Keep original batch if enrichment failed
+                            enriched_modems.extend(batch)
+                    
+                    # Update cache with enriched data (same key - replaces original)
+                    if enriched_modems and REDIS_AVAILABLE and redis_client:
                         enriched_data = response_data.copy()
                         enriched_data['modems'] = enriched_modems
                         enriched_data['enriched'] = True
-                        if REDIS_AVAILABLE and redis_client:
-                            redis_client.setex(enriched_cache_key, REDIS_TTL, json.dumps(enriched_data))
-                            logging.getLogger(__name__).info(f"Background enrichment complete: {len(enriched_modems)} modems")
+                        enriched_data['count'] = len(enriched_modems)
+                        redis_client.setex(cache_key, REDIS_TTL, json.dumps(enriched_data))
+                        logging.getLogger(__name__).info(f"Enrichment complete: {len(enriched_modems)} modems updated in cache")
+                        
                 except Exception as e:
                     logging.getLogger(__name__).error(f"Background enrichment failed: {e}")
             
