@@ -297,17 +297,28 @@ def get_cmts_modems(hostname):
         # Send task to agent
         enrich = request.args.get('enrich', 'false').lower() == 'true'
         modem_community = request.args.get('modem_community', 'm0d3m1nf0')
+        method = request.args.get('method', 'snmp')  # 'snmp' or 'ssh'
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='cmts_get_modems',
-            params={
+        # Choose command based on method
+        if method == 'ssh':
+            command = 'cmts_get_modems_ssh'
+            params = {
+                'cmts_host': cmts_ip,
+            }
+        else:
+            command = 'cmts_get_modems'
+            params = {
                 'cmts_ip': cmts_ip,
                 'community': community,
                 'limit': limit,
                 'enrich_modems': enrich,
                 'modem_community': modem_community
-            },
+            }
+        
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command=command,
+            params=params,
             timeout=120
         )
         

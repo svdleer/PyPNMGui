@@ -33,6 +33,12 @@ except ImportError:
     redis = None
     print("INFO: redis not installed. Caching disabled. Run: pip install redis")
 
+try:
+    from netmiko import ConnectHandler
+except ImportError:
+    ConnectHandler = None
+    print("INFO: netmiko not installed. SSH CMTS features disabled. Run: pip install netmiko")
+
 
 # Configure logging
 logging.basicConfig(
@@ -63,6 +69,7 @@ class AgentConfig:
     cmts_snmp_direct: bool = True
     cmts_ssh_enabled: bool = False
     cmts_ssh_user: Optional[str] = None
+    cmts_ssh_password: Optional[str] = None
     cmts_ssh_key: Optional[str] = None
     
     # CM Proxy - Server with connectivity to Cable Modems
@@ -127,6 +134,7 @@ class AgentConfig:
             cmts_snmp_direct=cmts.get('snmp_direct', True),
             cmts_ssh_enabled=cmts.get('ssh_enabled', False),
             cmts_ssh_user=cmts.get('ssh_user'),
+            cmts_ssh_password=cmts.get('ssh_password'),
             cmts_ssh_key=expand_path(cmts.get('ssh_key_file')),
             # CM Proxy (for reaching modems)
             cm_proxy_host=cm_proxy.get('host'),
@@ -173,6 +181,7 @@ class AgentConfig:
             cmts_snmp_direct=os.environ.get('PYPNM_CMTS_SNMP_DIRECT', 'true').lower() == 'true',
             cmts_ssh_enabled=os.environ.get('PYPNM_CMTS_SSH_ENABLED', 'false').lower() == 'true',
             cmts_ssh_user=os.environ.get('PYPNM_CMTS_SSH_USER'),
+            cmts_ssh_password=os.environ.get('PYPNM_CMTS_SSH_PASSWORD'),
             cmts_ssh_key=expand_path(os.environ.get('PYPNM_CMTS_SSH_KEY')),
             # CM Proxy
             cm_proxy_host=os.environ.get('PYPNM_CM_PROXY_HOST'),
@@ -428,6 +437,7 @@ class PyPNMAgent:
             'cmts_command': self._handle_cmts_command,
             'execute_pnm': self._handle_pnm_command,
             'cmts_get_modems': self._handle_cmts_get_modems,
+            'cmts_get_modems_ssh': self._handle_cmts_get_modems_ssh,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
         }
     
@@ -1046,6 +1056,156 @@ class PyPNMAgent:
                 'error': str(e),
                 'cmts_ip': cmts_ip
             }
+    
+    def _handle_cmts_get_modems_ssh(self, params: dict) -> dict:
+        """
+        Get list of cable modems from a CMTS via SSH (show cable modem).
+        Much faster than SNMP - uses netmiko for SSH connection.
+        
+        Returns MAC, IP, Status, DOCSIS version from parsed CLI output.
+        """
+        if not ConnectHandler:
+            return {'success': False, 'error': 'netmiko not installed. Run: pip install netmiko'}
+        
+        cmts_host = params.get('cmts_host') or params.get('cmts_ip')
+        username = params.get('username') or self.config.cmts_ssh_user or 'svdleer'
+        password = params.get('password') or self.config.cmts_ssh_password or ''
+        
+        if not cmts_host:
+            return {'success': False, 'error': 'cmts_host required'}
+        
+        self.logger.info(f"Getting cable modems from CMTS {cmts_host} via SSH")
+        
+        try:
+            # Connect to CMTS via SSH
+            cmts_device = {
+                'device_type': 'cisco_ios',
+                'host': cmts_host,
+                'username': username,
+                'password': password,
+                'global_delay_factor': 1,
+            }
+            
+            cmts_connect = ConnectHandler(**cmts_device, fast_cli=True, use_keys=False)
+            self.logger.info(f"Connected to CMTS {cmts_host}")
+            
+            # Run show cable modem command
+            output = cmts_connect.send_command('show cable modem', read_timeout=120)
+            cmts_connect.disconnect()
+            
+            # Parse the output
+            modems = self._parse_show_cable_modem(output)
+            
+            self.logger.info(f"Parsed {len(modems)} modems from CMTS {cmts_host}")
+            
+            return {
+                'success': True,
+                'cmts_host': cmts_host,
+                'count': len(modems),
+                'modems': modems
+            }
+            
+        except Exception as e:
+            self.logger.exception(f"Failed to get modems via SSH: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cmts_host': cmts_host
+            }
+    
+    def _parse_show_cable_modem(self, output: str) -> list:
+        """
+        Parse 'show cable modem' output from Commscope E6000 / Cisco CMTS.
+        
+        Example E6000 output:
+        MAC Address    IP Address      I/F           MAC           D   Prim  RxPwr  Timing Num  BPI
+                                       State         Version       S   Sid   (dB)   Offset CPEs Enb
+        0025.2e0a.1234 10.1.2.3        C1/0/U0       online(pt)    3.1 1     0.0    1234   1    Y
+        """
+        import re
+        
+        modems = []
+        lines = output.strip().split('\n')
+        
+        # Skip header lines
+        data_started = False
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Detect data start (line starting with MAC address pattern)
+            mac_match = re.match(r'^([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})', line)
+            if mac_match:
+                data_started = True
+                
+                # Parse the modem line
+                parts = line.split()
+                if len(parts) >= 5:
+                    mac_raw = parts[0]
+                    ip_addr = parts[1] if len(parts) > 1 else 'N/A'
+                    interface = parts[2] if len(parts) > 2 else 'N/A'
+                    state = parts[3] if len(parts) > 3 else 'unknown'
+                    docsis_ver = parts[4] if len(parts) > 4 else 'Unknown'
+                    
+                    # Convert MAC format from 0025.2e0a.1234 to 00:25:2E:0A:12:34
+                    mac_formatted = self._format_mac(mac_raw)
+                    
+                    # Normalize status
+                    status = self._normalize_status(state)
+                    
+                    modem = {
+                        'mac_address': mac_formatted,
+                        'ip_address': ip_addr if ip_addr != '---' else 'N/A',
+                        'interface': interface,
+                        'status': status,
+                        'docsis_version': self._normalize_docsis_version(docsis_ver),
+                        'vendor': self._get_vendor_from_mac(mac_formatted),
+                    }
+                    modems.append(modem)
+        
+        return modems
+    
+    def _format_mac(self, mac_raw: str) -> str:
+        """Convert MAC from 0025.2e0a.1234 to 00:25:2E:0A:12:34"""
+        # Remove dots
+        mac_clean = mac_raw.replace('.', '')
+        if len(mac_clean) == 12:
+            return ':'.join([mac_clean[i:i+2].upper() for i in range(0, 12, 2)])
+        return mac_raw.upper()
+    
+    def _normalize_status(self, state: str) -> str:
+        """Normalize CMTS status string to standard format."""
+        state_lower = state.lower()
+        if 'online' in state_lower:
+            return 'operational'
+        elif 'offline' in state_lower:
+            return 'offline'
+        elif 'ranging' in state_lower:
+            return 'ranging'
+        elif 'reject' in state_lower or 'denied' in state_lower:
+            return 'accessDenied'
+        elif 'init' in state_lower:
+            return 'initializing'
+        return state
+    
+    def _normalize_docsis_version(self, docsis_str: str) -> str:
+        """Normalize DOCSIS version string."""
+        docsis_str = docsis_str.strip()
+        if docsis_str in ('3.0', 'd30', 'D3.0'):
+            return 'DOCSIS 3.0'
+        elif docsis_str in ('3.1', 'd31', 'D3.1'):
+            return 'DOCSIS 3.1'
+        elif docsis_str in ('4.0', 'd40', 'D4.0'):
+            return 'DOCSIS 4.0'
+        elif docsis_str in ('2.0', 'd20', 'D2.0'):
+            return 'DOCSIS 2.0'
+        elif docsis_str in ('1.1', 'd11', 'D1.1'):
+            return 'DOCSIS 1.1'
+        elif docsis_str in ('1.0', 'd10', 'D1.0'):
+            return 'DOCSIS 1.0'
+        return f'DOCSIS {docsis_str}' if docsis_str else 'Unknown'
     
     def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
         """
