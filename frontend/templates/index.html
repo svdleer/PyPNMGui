@@ -514,9 +514,19 @@
         </div>
 
         <!-- Loading Overlay -->
-        <div class="loading-overlay" v-if="isLoading">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+        <div class="loading-overlay" v-if="isLoading || loadingLiveModems">
+            <div class="text-center">
+                <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div v-if="loadingLiveModems" class="text-white">
+                    <h5><i class="bi bi-router me-2"></i>Loading Modems from CMTS</h5>
+                    <p class="mb-1">Performing SNMP walks on {{ selectedCmts }}...</p>
+                    <p class="small text-light">This may take 1-3 minutes for large CMTS systems</p>
+                    <div class="progress mt-3" style="width: 300px; margin: 0 auto;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

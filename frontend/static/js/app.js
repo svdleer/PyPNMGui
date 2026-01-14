@@ -208,7 +208,8 @@ createApp({
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || ''
                     }));
-                    this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems`;
+                    const cacheInfo = data.cached ? ' (cached)' : '';
+                    this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems${cacheInfo}`;
                     this.searchPerformed = true;
                 } else {
                     this.showError('Failed to get modems', data.message || 'Unknown error');
