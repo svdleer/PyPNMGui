@@ -39,6 +39,31 @@ except ImportError:
     ConnectHandler = None
     print("INFO: netmiko not installed. SSH CMTS features disabled. Run: pip install netmiko")
 
+try:
+    from cryptography.fernet import Fernet
+except ImportError:
+    Fernet = None
+    print("INFO: cryptography not installed. Encrypted passwords disabled. Run: pip install cryptography")
+
+
+# CMTS credentials (encrypted)
+CMTS_USERNAME = 'verB0uwen'
+CMTS_ENC_PASSWORD = 'gAAAAABpMq5rKzVjsefcVVN4TvBUnlzXAHs28B_C2mWt3TbEQN-Ua2QPoKEbcXQYa_ruCFQe_POpWp_UzTndbx3FPfJGPg7czQ=='
+CMTS_FERNET_KEY = 'Z4gJ36cWp4tVJXKROVzNpn_MC8OVwMJpTR_O-NIDCrw='
+
+
+def decrypt_password(enc_password: str, key: str = CMTS_FERNET_KEY) -> str:
+    """Decrypt Fernet-encrypted password."""
+    if not Fernet:
+        return ''
+    try:
+        key_bytes = bytes(key, 'utf-8')
+        enc_bytes = bytes(enc_password, 'utf-8')
+        f = Fernet(key_bytes)
+        return f.decrypt(enc_bytes).decode('utf-8').strip()
+    except Exception:
+        return ''
+
 
 # Configure logging
 logging.basicConfig(
@@ -1068,13 +1093,21 @@ class PyPNMAgent:
             return {'success': False, 'error': 'netmiko not installed. Run: pip install netmiko'}
         
         cmts_host = params.get('cmts_host') or params.get('cmts_ip')
-        username = params.get('username') or self.config.cmts_ssh_user or 'svdleer'
-        password = params.get('password') or self.config.cmts_ssh_password or ''
+        
+        # Use encrypted password from fixofdm.py or config
+        username = params.get('username') or self.config.cmts_ssh_user or CMTS_USERNAME
+        password = params.get('password') or self.config.cmts_ssh_password
+        if not password:
+            # Decrypt the default password
+            password = decrypt_password(CMTS_ENC_PASSWORD)
         
         if not cmts_host:
             return {'success': False, 'error': 'cmts_host required'}
         
-        self.logger.info(f"Getting cable modems from CMTS {cmts_host} via SSH")
+        if not password:
+            return {'success': False, 'error': 'CMTS SSH password not configured and decryption failed'}
+        
+        self.logger.info(f"Getting cable modems from CMTS {cmts_host} via SSH (user: {username})")
         
         try:
             # Connect to CMTS via SSH
