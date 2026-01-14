@@ -1120,38 +1120,9 @@ class PyPNMAgent:
     def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
         """
         Query each modem via cm_proxy (hop-access) to get sysDescr for model info.
-        Uses parallel threads for speed.
+        Uses a single SSH connection with multiple SNMP queries for efficiency.
         """
         OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'  # sysDescr
-        
-        def query_modem(modem):
-            modem_ip = modem.get('ip_address')
-            if not modem_ip or modem_ip == 'N/A':
-                return modem
-            
-            try:
-                # Query modem via cm_proxy (hop-access SSH)
-                result = self._snmp_via_ssh(
-                    ssh_host=self.config.cm_proxy_host,
-                    ssh_user=self.config.cm_proxy_user or 'svdleer',
-                    target_ip=modem_ip,
-                    oid=OID_SYS_DESCR,
-                    community=modem_community,
-                    command='snmpget'
-                )
-                
-                if result.get('success'):
-                    sys_descr = result.get('output', '')
-                    # Parse sysDescr for model info
-                    model_info = self._parse_sys_descr(sys_descr)
-                    modem['model'] = model_info.get('model', 'Unknown')
-                    modem['software_version'] = model_info.get('software', '')
-                    if model_info.get('vendor'):
-                        modem['vendor'] = model_info.get('vendor')
-            except Exception as e:
-                self.logger.debug(f"Failed to query modem {modem_ip}: {e}")
-            
-            return modem
         
         # Query modems with valid IPs (any status that indicates online)
         online_statuses = {'operational', 'registrationComplete', 'ipComplete', 'online'}
@@ -1161,17 +1132,57 @@ class PyPNMAgent:
         
         self.logger.info(f"Enrichment: {len(online_modems)} modems with valid IP (from {len(modems)} total)")
         
-        enriched = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(query_modem, m): m for m in online_modems}
-            for future in as_completed(futures):
+        if not online_modems:
+            self.logger.warning("No online modems to enrich")
+            return modems
+        
+        # Use single SSH connection for all queries
+        if not paramiko:
+            self.logger.error("paramiko not installed")
+            return modems
+        
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(
+                self.config.cm_proxy_host, 
+                username=self.config.cm_proxy_user or 'svdleer',
+                timeout=30
+            )
+            self.logger.info(f"SSH connected to {self.config.cm_proxy_host} for modem enrichment")
+            
+            enriched_count = 0
+            for i, modem in enumerate(online_modems):
+                modem_ip = modem.get('ip_address')
                 try:
-                    enriched.append(future.result())
+                    # Quick SNMP query with short timeout
+                    snmp_cmd = f"snmpget -v2c -c {modem_community} -t 2 -r 1 {modem_ip} {OID_SYS_DESCR}"
+                    stdin, stdout, stderr = ssh.exec_command(snmp_cmd, timeout=5)
+                    output = stdout.read().decode('utf-8', errors='replace')
+                    
+                    if output and 'STRING:' in output:
+                        sys_descr = output.split('STRING:')[-1].strip().strip('"')
+                        model_info = self._parse_sys_descr(sys_descr)
+                        modem['model'] = model_info.get('model', 'Unknown')
+                        modem['software_version'] = model_info.get('software', '')
+                        if model_info.get('vendor'):
+                            modem['vendor'] = model_info.get('vendor')
+                        enriched_count += 1
+                        
+                    if (i + 1) % 50 == 0:
+                        self.logger.info(f"Enriched {i+1}/{len(online_modems)} modems...")
+                        
                 except Exception as e:
-                    enriched.append(futures[future])
+                    self.logger.debug(f"Failed to query modem {modem_ip}: {e}")
+            
+            ssh.close()
+            self.logger.info(f"Enrichment done: {enriched_count}/{len(online_modems)} succeeded")
+            
+        except Exception as e:
+            self.logger.exception(f"SSH connection failed: {e}")
         
         # Merge enriched modems back
-        enriched_map = {m['mac_address']: m for m in enriched}
+        enriched_map = {m['mac_address']: m for m in online_modems}
         for modem in modems:
             if modem['mac_address'] in enriched_map:
                 modem.update(enriched_map[modem['mac_address']])
