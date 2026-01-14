@@ -852,12 +852,10 @@ class PyPNMAgent:
         snmp_command = 'snmpbulkwalk' if use_bulk else 'snmpwalk'
         self.logger.info(f"Using {snmp_command} with community '{community}' (parallel queries)")
         
-        # Function to execute SNMP query for CMTS
-        # CMTS queries go DIRECT from agent (script3a can reach CMTS)
-        # Only use equalizer if explicitly requested AND direct is disabled
+        # Function to execute SNMP query (used for parallel execution)
+        # For CMTS queries, use direct SNMP (not via cm_proxy which is for modems)
         def query_oid(oid_name, oid):
-            if use_equalizer and self.config.equalizer_host and not self.config.cmts_snmp_direct:
-                # Use equalizer/hop-access only if direct CMTS access is disabled
+            if use_equalizer and self.config.equalizer_host:
                 return self._snmp_via_ssh(
                     ssh_host=self.config.equalizer_host,
                     ssh_user=self.config.equalizer_user or 'svdleer',
@@ -867,7 +865,7 @@ class PyPNMAgent:
                     command=snmp_command
                 )
             else:
-                # Use direct SNMP for CMTS queries (default for script3a)
+                # Use direct SNMP executor for CMTS (not via cm_proxy)
                 return self.snmp_executor_direct.execute_snmp(
                     command=snmp_command,
                     target_ip=cmts_ip,
