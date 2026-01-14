@@ -33,37 +33,6 @@ except ImportError:
     redis = None
     print("INFO: redis not installed. Caching disabled. Run: pip install redis")
 
-try:
-    from netmiko import ConnectHandler
-except ImportError:
-    ConnectHandler = None
-    print("INFO: netmiko not installed. SSH CMTS features disabled. Run: pip install netmiko")
-
-try:
-    from cryptography.fernet import Fernet
-except ImportError:
-    Fernet = None
-    print("INFO: cryptography not installed. Encrypted passwords disabled. Run: pip install cryptography")
-
-
-# CMTS credentials (encrypted)
-CMTS_USERNAME = 'n3user'
-CMTS_ENC_PASSWORD = 'gAAAAABpZu0V-v9QNpgb4CdoJi2MHxrswbZOrgoj4T1ZcioEiBM5a2m5sjFU_JwzN3tQ8-GoazBaZot4U1RTSA62IVWyagwI4w=='
-CMTS_FERNET_KEY = 'Z4gJ36cWp4tVJXKROVzNpn_MC8OVwMJpTR_O-NIDCrw='
-
-
-def decrypt_password(enc_password: str, key: str = CMTS_FERNET_KEY) -> str:
-    """Decrypt Fernet-encrypted password."""
-    if not Fernet:
-        return ''
-    try:
-        key_bytes = bytes(key, 'utf-8')
-        enc_bytes = bytes(enc_password, 'utf-8')
-        f = Fernet(key_bytes)
-        return f.decrypt(enc_bytes).decode('utf-8').strip()
-    except Exception:
-        return ''
-
 
 # Configure logging
 logging.basicConfig(
@@ -94,7 +63,6 @@ class AgentConfig:
     cmts_snmp_direct: bool = True
     cmts_ssh_enabled: bool = False
     cmts_ssh_user: Optional[str] = None
-    cmts_ssh_password: Optional[str] = None
     cmts_ssh_key: Optional[str] = None
     
     # CM Proxy - Server with connectivity to Cable Modems
@@ -159,7 +127,6 @@ class AgentConfig:
             cmts_snmp_direct=cmts.get('snmp_direct', True),
             cmts_ssh_enabled=cmts.get('ssh_enabled', False),
             cmts_ssh_user=cmts.get('ssh_user'),
-            cmts_ssh_password=cmts.get('ssh_password'),
             cmts_ssh_key=expand_path(cmts.get('ssh_key_file')),
             # CM Proxy (for reaching modems)
             cm_proxy_host=cm_proxy.get('host'),
@@ -206,7 +173,6 @@ class AgentConfig:
             cmts_snmp_direct=os.environ.get('PYPNM_CMTS_SNMP_DIRECT', 'true').lower() == 'true',
             cmts_ssh_enabled=os.environ.get('PYPNM_CMTS_SSH_ENABLED', 'false').lower() == 'true',
             cmts_ssh_user=os.environ.get('PYPNM_CMTS_SSH_USER'),
-            cmts_ssh_password=os.environ.get('PYPNM_CMTS_SSH_PASSWORD'),
             cmts_ssh_key=expand_path(os.environ.get('PYPNM_CMTS_SSH_KEY')),
             # CM Proxy
             cm_proxy_host=os.environ.get('PYPNM_CM_PROXY_HOST'),
@@ -462,7 +428,6 @@ class PyPNMAgent:
             'cmts_command': self._handle_cmts_command,
             'execute_pnm': self._handle_pnm_command,
             'cmts_get_modems': self._handle_cmts_get_modems,
-            'cmts_get_modems_ssh': self._handle_cmts_get_modems_ssh,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
         }
     
@@ -873,14 +838,13 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting cable modems from CMTS {cmts_ip}")
         
-        # DOCSIS MIB OIDs (old table for MAC, IP, Status)
-        OID_CM_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'  # docsIfCmtsCmStatusMacAddress
-        OID_CM_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'   # docsIfCmtsCmStatusIpAddress
-        OID_CM_STATUS = '1.3.6.1.2.1.10.127.1.3.3.1.9'  # docsIfCmtsCmStatusValue
-        
-        # DOCSIS 3.0 MIB OIDs (new table for DOCSIS version - different index!)
+        # DOCSIS 3.0 MIB OIDs - use docsIf3 table for all data (consistent indexes)
         OID_D3_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
-        OID_D3_DOCSIS = '1.3.6.1.4.1.4491.2.1.20.1.3.1.6'  # docsIf3CmtsCmRegStatusDocsisVersion
+        OID_D3_IP = '1.3.6.1.4.1.4491.2.1.20.1.3.1.3'   # docsIf3CmtsCmRegStatusIpAddr
+        OID_D3_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.3.1.4'  # docsIf3CmtsCmRegStatusValue
+        
+        # DOCSIS 3.1 MIB - MaxUsableDsFreq: if > 0, modem is DOCSIS 3.1
+        OID_D31_MAX_DS_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.3.1.7'  # docsIf31CmtsCmRegStatusMaxUsableDsFreq
         
         snmp_command = 'snmpbulkwalk' if use_bulk else 'snmpwalk'
         self.logger.info(f"Using {snmp_command} with community '{community}' (parallel queries)")
@@ -909,15 +873,14 @@ class PyPNMAgent:
                 )
         
         try:
-            # Parallel SNMP queries for MAC, IP, Status + DOCSIS3 table for version
+            # Parallel SNMP queries using docsIf3 table (consistent indexes)
             results = {}
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
-                    executor.submit(query_oid, 'mac', OID_CM_MAC): 'mac',
-                    executor.submit(query_oid, 'ip', OID_CM_IP): 'ip',
-                    executor.submit(query_oid, 'status', OID_CM_STATUS): 'status',
-                    executor.submit(query_oid, 'd3_mac', OID_D3_MAC): 'd3_mac',
-                    executor.submit(query_oid, 'd3_docsis', OID_D3_DOCSIS): 'd3_docsis',
+                    executor.submit(query_oid, 'mac', OID_D3_MAC): 'mac',
+                    executor.submit(query_oid, 'ip', OID_D3_IP): 'ip',
+                    executor.submit(query_oid, 'status', OID_D3_STATUS): 'status',
+                    executor.submit(query_oid, 'd31_freq', OID_D31_MAX_DS_FREQ): 'd31_freq',
                 }
                 for future in as_completed(futures):
                     name = futures[future]
@@ -935,12 +898,11 @@ class PyPNMAgent:
                     'cmts_ip': cmts_ip
                 }
             
-            # Parse MAC addresses from SNMP output
+            # Parse MAC addresses from docsIf3 table
             mac_lines = mac_result.get('output', '').strip().split('\n')
             mac_map = {}  # index -> mac
             
             for line in mac_lines[:limit]:
-                # Parse: SNMPv2-SMI::mib-2.10.127.1.3.3.1.2.12345 = Hex-STRING: AA BB CC DD EE FF
                 if '=' in line and ('Hex-STRING' in line or 'STRING' in line):
                     try:
                         parts = line.split('=', 1)
@@ -950,29 +912,41 @@ class PyPNMAgent:
                         # Extract index from OID
                         index = oid_part.split('.')[-1]
                         
-                        # Extract MAC from value (handles both formats)
+                        # Extract MAC from Hex-STRING
                         if 'Hex-STRING' in value_part:
-                            mac_hex = value_part.split(':', 1)[1].strip()
-                            mac = mac_hex.replace(' ', ':').lower()
-                        else:
-                            # Raw string format
-                            mac = value_part.replace('"', '').strip()
-                        
-                        mac_map[index] = mac
+                            hex_mac = value_part.split('Hex-STRING:')[-1].strip()
+                            mac_bytes = hex_mac.replace(' ', '').replace(':', '')
+                            if len(mac_bytes) >= 12:
+                                mac = ':'.join([mac_bytes[i:i+2] for i in range(0, 12, 2)]).lower()
+                                mac_map[index] = mac
                     except Exception as e:
                         self.logger.debug(f"Failed to parse MAC line: {line} - {e}")
+            
+            self.logger.info(f"Parsed {len(mac_map)} MAC addresses from docsIf3 table")
             
             # Parse IP addresses (from parallel result)
             ip_result = results.get('ip', {})
             ip_map = {}  # index -> ip
             if ip_result.get('success'):
                 for line in ip_result.get('output', '').split('\n'):
-                    if '=' in line and ('IpAddress' in line or 'Network Address' in line):
+                    if '=' in line and ('IpAddress' in line or 'Hex-STRING' in line):
                         try:
                             parts = line.split('=', 1)
                             index = parts[0].strip().split('.')[-1]
-                            # Extract IP: IpAddress: 10.1.2.3 or Network Address: 10.1.2.3
-                            ip = parts[1].strip().split(':')[-1].strip()
+                            value = parts[1].strip()
+                            # Handle both IpAddress and Hex-STRING formats
+                            if 'IpAddress' in value:
+                                ip = value.split(':')[-1].strip()
+                            elif 'Hex-STRING' in value:
+                                # Convert hex bytes to IP: Hex-STRING: 0A 01 02 03 -> 10.1.2.3
+                                hex_ip = value.split('Hex-STRING:')[-1].strip()
+                                bytes_list = hex_ip.split()
+                                if len(bytes_list) >= 4:
+                                    ip = '.'.join([str(int(b, 16)) for b in bytes_list[:4]])
+                                else:
+                                    continue
+                            else:
+                                continue
                             ip_map[index] = ip
                         except:
                             pass
@@ -986,67 +960,54 @@ class PyPNMAgent:
                         try:
                             parts = line.split('=', 1)
                             index = parts[0].strip().split('.')[-1]
-                            # Status is an integer
                             status_val = parts[1].strip().split(':')[-1].strip()
                             status_map[index] = int(status_val) if status_val.isdigit() else status_val
                         except:
                             pass
             
-            # Parse DOCSIS version from DOCSIS 3.0 MIB (different index, correlate by MAC)
-            # First parse MAC from docsIf3 table to get d3_index -> mac mapping
-            d3_mac_result = results.get('d3_mac', {})
-            d3_mac_map = {}  # d3_index -> mac
-            if d3_mac_result.get('success'):
-                for line in d3_mac_result.get('output', '').split('\n'):
-                    if '=' in line and ('Hex-STRING' in line or 'STRING' in line):
+            # Parse DOCSIS 3.1 detection from MaxUsableDsFreq
+            # If freq > 0, modem is DOCSIS 3.1, else DOCSIS 3.0
+            d31_freq_result = results.get('d31_freq', {})
+            d31_map = {}  # index -> is_docsis31 (bool)
+            if d31_freq_result.get('success'):
+                for line in d31_freq_result.get('output', '').split('\n'):
+                    if '=' in line:
                         try:
                             parts = line.split('=', 1)
-                            d3_index = parts[0].strip().split('.')[-1]
-                            mac_part = parts[1].strip()
-                            if 'Hex-STRING' in mac_part:
-                                hex_mac = mac_part.split('Hex-STRING:')[-1].strip()
-                                mac_bytes = hex_mac.replace(' ', '').replace(':', '')
-                                if len(mac_bytes) >= 12:
-                                    mac = ':'.join([mac_bytes[i:i+2] for i in range(0, 12, 2)]).upper()
-                                    d3_mac_map[d3_index] = mac
+                            index = parts[0].strip().split('.')[-1]
+                            value = parts[1].strip()
+                            # Parse integer value (Unsigned32, Gauge32, INTEGER, or plain number)
+                            freq = 0
+                            tokens = value.replace(':', ' ').split()
+                            for tok in reversed(tokens):
+                                try:
+                                    freq = int(tok)
+                                    break
+                                except ValueError:
+                                    continue
+                            # freq > 0 means DOCSIS 3.1
+                            d31_map[index] = freq > 0
                         except:
                             pass
             
-            # Parse DOCSIS version from docsIf3 table
-            d3_docsis_result = results.get('d3_docsis', {})
-            d3_docsis_map = {}  # d3_index -> version
-            if d3_docsis_result.get('success'):
-                for line in d3_docsis_result.get('output', '').split('\n'):
-                    if '=' in line and 'INTEGER' in line:
-                        try:
-                            parts = line.split('=', 1)
-                            d3_index = parts[0].strip().split('.')[-1]
-                            val = parts[1].strip().split(':')[-1].strip()
-                            d3_docsis_map[d3_index] = int(val) if val.isdigit() else 0
-                        except:
-                            pass
-            
-            # Create MAC -> DOCSIS version mapping by correlating d3 tables
-            mac_to_docsis = {}  # mac -> docsis_version
-            for d3_index, mac in d3_mac_map.items():
-                if d3_index in d3_docsis_map:
-                    mac_to_docsis[mac] = d3_docsis_map[d3_index]
-            
-            self.logger.info(f"DOCSIS version correlation: {len(mac_to_docsis)} MACs matched from docsIf3 table")
+            d31_count = sum(1 for v in d31_map.values() if v)
+            d30_count = sum(1 for v in d31_map.values() if not v)
+            self.logger.info(f"DOCSIS version detection: {d31_count} x 3.1, {d30_count} x 3.0")
             
             # Build modem list
             modems = []
             for index, mac in mac_map.items():
-                # Look up DOCSIS version by MAC address (from docsIf3 table)
-                docsis_code = mac_to_docsis.get(mac, 0)
+                is_d31 = d31_map.get(index, False)
+                docsis_version = 'DOCSIS 3.1' if is_d31 else 'DOCSIS 3.0'
+                
                 modem = {
                     'mac_address': mac,
                     'ip_address': ip_map.get(index, 'N/A'),
                     'status_code': status_map.get(index, 0),
-                    'status': self._decode_cm_status(status_map.get(index, 0)),
+                    'status': self._decode_d3_status(status_map.get(index, 0)),
                     'cmts_index': index,
                     'vendor': self._get_vendor_from_mac(mac),
-                    'docsis_version': self._decode_docsis_version(docsis_code),
+                    'docsis_version': docsis_version,
                 }
                 modems.append(modem)
             
@@ -1081,164 +1042,6 @@ class PyPNMAgent:
                 'error': str(e),
                 'cmts_ip': cmts_ip
             }
-    
-    def _handle_cmts_get_modems_ssh(self, params: dict) -> dict:
-        """
-        Get list of cable modems from a CMTS via SSH (show cable modem).
-        Much faster than SNMP - uses netmiko for SSH connection.
-        
-        Returns MAC, IP, Status, DOCSIS version from parsed CLI output.
-        """
-        if not ConnectHandler:
-            return {'success': False, 'error': 'netmiko not installed. Run: pip install netmiko'}
-        
-        cmts_host = params.get('cmts_host') or params.get('cmts_ip')
-        
-        # Use encrypted password from fixofdm.py or config
-        username = params.get('username') or self.config.cmts_ssh_user or CMTS_USERNAME
-        password = params.get('password') or self.config.cmts_ssh_password
-        if not password:
-            # Decrypt the default password
-            password = decrypt_password(CMTS_ENC_PASSWORD)
-        
-        if not cmts_host:
-            return {'success': False, 'error': 'cmts_host required'}
-        
-        if not password:
-            return {'success': False, 'error': 'CMTS SSH password not configured and decryption failed'}
-        
-        self.logger.info(f"Getting cable modems from CMTS {cmts_host} via SSH (user: {username})")
-        
-        try:
-            # Connect to CMTS via SSH
-            cmts_device = {
-                'device_type': 'cisco_ios',
-                'host': cmts_host,
-                'username': username,
-                'password': password,
-                'global_delay_factor': 1,
-            }
-            
-            cmts_connect = ConnectHandler(**cmts_device, fast_cli=True, use_keys=False)
-            self.logger.info(f"Connected to CMTS {cmts_host}")
-            
-            # Run show cable modem command
-            output = cmts_connect.send_command('show cable modem', read_timeout=120)
-            cmts_connect.disconnect()
-            
-            # Parse the output
-            modems = self._parse_show_cable_modem(output)
-            
-            self.logger.info(f"Parsed {len(modems)} modems from CMTS {cmts_host}")
-            
-            return {
-                'success': True,
-                'cmts_host': cmts_host,
-                'count': len(modems),
-                'modems': modems
-            }
-            
-        except Exception as e:
-            self.logger.exception(f"Failed to get modems via SSH: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'cmts_host': cmts_host
-            }
-    
-    def _parse_show_cable_modem(self, output: str) -> list:
-        """
-        Parse 'show cable modem' output from Commscope E6000 / Cisco CMTS.
-        
-        Example E6000 output:
-        MAC Address    IP Address      I/F           MAC           D   Prim  RxPwr  Timing Num  BPI
-                                       State         Version       S   Sid   (dB)   Offset CPEs Enb
-        0025.2e0a.1234 10.1.2.3        C1/0/U0       online(pt)    3.1 1     0.0    1234   1    Y
-        """
-        import re
-        
-        modems = []
-        lines = output.strip().split('\n')
-        
-        # Skip header lines
-        data_started = False
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Detect data start (line starting with MAC address pattern)
-            mac_match = re.match(r'^([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})', line)
-            if mac_match:
-                data_started = True
-                
-                # Parse the modem line
-                parts = line.split()
-                if len(parts) >= 5:
-                    mac_raw = parts[0]
-                    ip_addr = parts[1] if len(parts) > 1 else 'N/A'
-                    interface = parts[2] if len(parts) > 2 else 'N/A'
-                    state = parts[3] if len(parts) > 3 else 'unknown'
-                    docsis_ver = parts[4] if len(parts) > 4 else 'Unknown'
-                    
-                    # Convert MAC format from 0025.2e0a.1234 to 00:25:2E:0A:12:34
-                    mac_formatted = self._format_mac(mac_raw)
-                    
-                    # Normalize status
-                    status = self._normalize_status(state)
-                    
-                    modem = {
-                        'mac_address': mac_formatted,
-                        'ip_address': ip_addr if ip_addr != '---' else 'N/A',
-                        'interface': interface,
-                        'status': status,
-                        'docsis_version': self._normalize_docsis_version(docsis_ver),
-                        'vendor': self._get_vendor_from_mac(mac_formatted),
-                    }
-                    modems.append(modem)
-        
-        return modems
-    
-    def _format_mac(self, mac_raw: str) -> str:
-        """Convert MAC from 0025.2e0a.1234 to 00:25:2E:0A:12:34"""
-        # Remove dots
-        mac_clean = mac_raw.replace('.', '')
-        if len(mac_clean) == 12:
-            return ':'.join([mac_clean[i:i+2].upper() for i in range(0, 12, 2)])
-        return mac_raw.upper()
-    
-    def _normalize_status(self, state: str) -> str:
-        """Normalize CMTS status string to standard format."""
-        state_lower = state.lower()
-        if 'online' in state_lower:
-            return 'operational'
-        elif 'offline' in state_lower:
-            return 'offline'
-        elif 'ranging' in state_lower:
-            return 'ranging'
-        elif 'reject' in state_lower or 'denied' in state_lower:
-            return 'accessDenied'
-        elif 'init' in state_lower:
-            return 'initializing'
-        return state
-    
-    def _normalize_docsis_version(self, docsis_str: str) -> str:
-        """Normalize DOCSIS version string."""
-        docsis_str = docsis_str.strip()
-        if docsis_str in ('3.0', 'd30', 'D3.0'):
-            return 'DOCSIS 3.0'
-        elif docsis_str in ('3.1', 'd31', 'D3.1'):
-            return 'DOCSIS 3.1'
-        elif docsis_str in ('4.0', 'd40', 'D4.0'):
-            return 'DOCSIS 4.0'
-        elif docsis_str in ('2.0', 'd20', 'D2.0'):
-            return 'DOCSIS 2.0'
-        elif docsis_str in ('1.1', 'd11', 'D1.1'):
-            return 'DOCSIS 1.1'
-        elif docsis_str in ('1.0', 'd10', 'D1.0'):
-            return 'DOCSIS 1.0'
-        return f'DOCSIS {docsis_str}' if docsis_str else 'Unknown'
     
     def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
         """
@@ -1345,6 +1148,29 @@ class PyPNMAgent:
             7: 'accessDenied',
             8: 'operational',  # This is the "online" state
             9: 'registeredBPIInitializing',
+        }
+        return status_map.get(status_code, f'unknown({status_code})')
+    
+    def _decode_d3_status(self, status_code: int) -> str:
+        """Decode docsIf3CmtsCmRegStatusValue to human-readable string."""
+        # docsIf3CmtsCmRegStatusValue values from DOCS-IF3-MIB
+        status_map = {
+            1: 'other',
+            2: 'initialRanging',
+            3: 'rangingAutoAdjComplete',
+            4: 'startEae',
+            5: 'startDhcpv4',
+            6: 'startDhcpv6',
+            7: 'dhcpv4Complete',
+            8: 'dhcpv6Complete',
+            9: 'startCfgFileDownload',
+            10: 'cfgFileDownloadComplete',
+            11: 'startRegistration',
+            12: 'registrationComplete',
+            13: 'operational',  # This is the "online" state
+            14: 'bpiInit',
+            15: 'forwardingDisabled',
+            16: 'rfMuteAll',
         }
         return status_map.get(status_code, f'unknown({status_code})')
     

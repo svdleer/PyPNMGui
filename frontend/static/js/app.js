@@ -47,7 +47,6 @@ createApp({
             loadingLiveModems: false,
             liveModemSource: '',
             enrichModems: false,
-            useSSH: true,  // Use SSH by default (faster)
             
             // Charts
             charts: {}
@@ -188,14 +187,8 @@ createApp({
             try {
                 let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000`;
                 
-                // Add method parameter (ssh or snmp)
-                if (this.useSSH) {
-                    url += '&method=ssh';
-                } else {
-                    url += '&method=snmp';
-                    if (this.enrichModems) {
-                        url += `&enrich=true&modem_community=${this.snmpCommunityModem}`;
-                    }
+                if (this.enrichModems) {
+                    url += `&enrich=true&modem_community=${this.snmpCommunityModem}`;
                 }
                 
                 const response = await fetch(url);
@@ -215,8 +208,7 @@ createApp({
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || ''
                     }));
-                    const methodUsed = this.useSSH ? 'SSH' : 'SNMP';
-                    this.liveModemSource = `Live data via ${methodUsed} from ${data.cmts_hostname} (${data.cmts_ip || data.cmts_host}) via agent ${data.agent_id} - ${data.count} modems`;
+                    this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems`;
                     this.searchPerformed = true;
                 } else {
                     this.showError('Failed to get modems', data.message || 'Unknown error');

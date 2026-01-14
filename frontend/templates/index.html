@@ -127,19 +127,11 @@
                                     </div>
                                 </div>
                                 <div class="row g-3 mt-2">
-                                    <div class="col-md-2">
+                                    <div class="col-md-4">
                                         <div class="form-check mt-2">
-                                            <input class="form-check-input" type="checkbox" v-model="useSSH" id="useSSH">
-                                            <label class="form-check-label" for="useSSH">
-                                                <small>Use SSH (faster)</small>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-2">
-                                        <div class="form-check mt-2">
-                                            <input class="form-check-input" type="checkbox" v-model="enrichModems" id="enrichModems" :disabled="useSSH">
+                                            <input class="form-check-input" type="checkbox" v-model="enrichModems" id="enrichModems">
                                             <label class="form-check-label" for="enrichModems">
-                                                <small>Enrich modems</small>
+                                                <small>Enrich modems (query each via hop-access, slower)</small>
                                             </label>
                                         </div>
                                     </div>
