@@ -1124,16 +1124,21 @@ class PyPNMAgent:
         """
         OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'  # sysDescr
         
-        # Query modems with valid IPs (any status that indicates online)
-        online_statuses = {'operational', 'registrationComplete', 'ipComplete', 'online'}
+        # Log status breakdown
+        status_counts = {}
+        for m in modems:
+            s = m.get('status', 'unknown')
+            status_counts[s] = status_counts.get(s, 0) + 1
+        self.logger.info(f"Modem status breakdown: {status_counts}")
+        
+        # Query any modem with a valid IP (not N/A)
         online_modems = [m for m in modems 
-                         if m.get('ip_address') and m.get('ip_address') != 'N/A' 
-                         and m.get('status') in online_statuses][:200]
+                         if m.get('ip_address') and m.get('ip_address') != 'N/A'][:200]
         
         self.logger.info(f"Enrichment: {len(online_modems)} modems with valid IP (from {len(modems)} total)")
         
         if not online_modems:
-            self.logger.warning("No online modems to enrich")
+            self.logger.warning("No modems with valid IP to enrich")
             return modems
         
         if not paramiko:
