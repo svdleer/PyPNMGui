@@ -1083,19 +1083,25 @@ class PyPNMAgent:
         modems = params.get('modems', [])
         modem_community = params.get('modem_community', 'm0d3m1nf0')
         
-        if not self.cm_proxy:
+        if not self.config.cm_proxy_host:
+            self.logger.error("cm_proxy_host not configured!")
             return {
                 'success': False,
                 'error': 'cm_proxy not configured for modem enrichment'
             }
         
-        self.logger.info(f"Starting background enrichment of {len(modems)} modems via cm_proxy")
+        # Log some stats about incoming modems
+        status_counts = {}
+        for m in modems:
+            s = m.get('status', 'unknown')
+            status_counts[s] = status_counts.get(s, 0) + 1
+        self.logger.info(f"Enrichment request: {len(modems)} modems, status breakdown: {status_counts}")
         
         try:
             enriched = self._enrich_modems_parallel(modems, modem_community, max_workers=50)
             
             # Count how many were enriched
-            enriched_count = sum(1 for m in enriched if m.get('model') and m.get('model') != 'N/A')
+            enriched_count = sum(1 for m in enriched if m.get('model') and m.get('model') not in ['N/A', 'Unknown'])
             self.logger.info(f"Enrichment complete: {enriched_count}/{len(enriched)} modems have model info")
             
             return {
@@ -1147,10 +1153,13 @@ class PyPNMAgent:
             
             return modem
         
-        # Only query online modems with valid IPs
-        online_modems = [m for m in modems if m.get('status') == 'operational' and m.get('ip_address') != 'N/A'][:200]
+        # Query modems with valid IPs (any status that indicates online)
+        online_statuses = {'operational', 'registrationComplete', 'ipComplete', 'online'}
+        online_modems = [m for m in modems 
+                         if m.get('ip_address') and m.get('ip_address') != 'N/A' 
+                         and m.get('status') in online_statuses][:200]
         
-        self.logger.info(f"Querying {len(online_modems)} online modems via cm_proxy {self.config.cm_proxy_host} (max_workers={max_workers})")
+        self.logger.info(f"Enrichment: {len(online_modems)} modems with valid IP (from {len(modems)} total)")
         
         enriched = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
