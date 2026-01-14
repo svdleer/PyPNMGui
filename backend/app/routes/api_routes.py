@@ -299,9 +299,12 @@ def get_cmts_modems(hostname):
     use_cache = request.args.get('refresh', 'false').lower() != 'true'
     cache_key = f"modems:{hostname}:{cmts_ip}"
     
+    logging.getLogger(__name__).info(f"Cache check: use_cache={use_cache}, REDIS_AVAILABLE={REDIS_AVAILABLE}, key={cache_key}")
+    
     if use_cache and REDIS_AVAILABLE and redis_client:
         try:
             cached = redis_client.get(cache_key)
+            logging.getLogger(__name__).info(f"Redis get result: {type(cached)}, len={len(cached) if cached else 0}")
             if cached:
                 logging.getLogger(__name__).info(f"Returning cached modems for {hostname}")
                 cached_data = json.loads(cached)
