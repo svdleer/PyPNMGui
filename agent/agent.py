@@ -838,10 +838,13 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting cable modems from CMTS {cmts_ip}")
         
-        # DOCSIS 3.0 MIB OIDs - use docsIf3 table for all data (consistent indexes)
+        # DOCSIS 3.0 MIB OIDs - use docsIf3 table for MAC, status, DOCSIS version
         OID_D3_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
-        OID_D3_IP = '1.3.6.1.4.1.4491.2.1.20.1.3.1.3'   # docsIf3CmtsCmRegStatusIpAddr
         OID_D3_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.3.1.4'  # docsIf3CmtsCmRegStatusValue
+        
+        # Old DOCSIS table for IP (has different index, correlate by MAC)
+        OID_OLD_MAC = '1.3.6.1.2.1.10.127.1.3.3.1.2'   # docsIfCmtsCmStatusMacAddress
+        OID_OLD_IP = '1.3.6.1.2.1.10.127.1.3.3.1.3'    # docsIfCmtsCmStatusIpAddress
         
         # DOCSIS 3.1 MIB - MaxUsableDsFreq: if > 0, modem is DOCSIS 3.1
         OID_D31_MAX_DS_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.3.1.7'  # docsIf31CmtsCmRegStatusMaxUsableDsFreq
@@ -873,14 +876,15 @@ class PyPNMAgent:
                 )
         
         try:
-            # Parallel SNMP queries using docsIf3 table (consistent indexes)
+            # Parallel SNMP queries
             results = {}
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {
                     executor.submit(query_oid, 'mac', OID_D3_MAC): 'mac',
-                    executor.submit(query_oid, 'ip', OID_D3_IP): 'ip',
                     executor.submit(query_oid, 'status', OID_D3_STATUS): 'status',
                     executor.submit(query_oid, 'd31_freq', OID_D31_MAX_DS_FREQ): 'd31_freq',
+                    executor.submit(query_oid, 'old_mac', OID_OLD_MAC): 'old_mac',  # For IP correlation
+                    executor.submit(query_oid, 'old_ip', OID_OLD_IP): 'old_ip',
                 }
                 for future in as_completed(futures):
                     name = futures[future]
@@ -924,32 +928,48 @@ class PyPNMAgent:
             
             self.logger.info(f"Parsed {len(mac_map)} MAC addresses from docsIf3 table")
             
-            # Parse IP addresses (from parallel result)
-            ip_result = results.get('ip', {})
-            ip_map = {}  # index -> ip
-            if ip_result.get('success'):
-                for line in ip_result.get('output', '').split('\n'):
-                    if '=' in line and ('IpAddress' in line or 'Hex-STRING' in line):
+            # Parse old table MAC -> IP mapping (for correlation)
+            old_mac_result = results.get('old_mac', {})
+            old_ip_result = results.get('old_ip', {})
+            old_mac_map = {}  # old_index -> mac
+            old_ip_map = {}   # old_index -> ip
+            
+            # Parse old MAC addresses
+            if old_mac_result.get('success'):
+                for line in old_mac_result.get('output', '').split('\n'):
+                    if '=' in line and ('Hex-STRING' in line or 'STRING' in line):
                         try:
                             parts = line.split('=', 1)
-                            index = parts[0].strip().split('.')[-1]
+                            old_index = parts[0].strip().split('.')[-1]
                             value = parts[1].strip()
-                            # Handle both IpAddress and Hex-STRING formats
-                            if 'IpAddress' in value:
-                                ip = value.split(':')[-1].strip()
-                            elif 'Hex-STRING' in value:
-                                # Convert hex bytes to IP: Hex-STRING: 0A 01 02 03 -> 10.1.2.3
-                                hex_ip = value.split('Hex-STRING:')[-1].strip()
-                                bytes_list = hex_ip.split()
-                                if len(bytes_list) >= 4:
-                                    ip = '.'.join([str(int(b, 16)) for b in bytes_list[:4]])
-                                else:
-                                    continue
-                            else:
-                                continue
-                            ip_map[index] = ip
+                            if 'Hex-STRING' in value:
+                                hex_mac = value.split('Hex-STRING:')[-1].strip()
+                                mac_bytes = hex_mac.replace(' ', '').replace(':', '')
+                                if len(mac_bytes) >= 12:
+                                    mac = ':'.join([mac_bytes[i:i+2] for i in range(0, 12, 2)]).lower()
+                                    old_mac_map[old_index] = mac
                         except:
                             pass
+            
+            # Parse old IP addresses
+            if old_ip_result.get('success'):
+                for line in old_ip_result.get('output', '').split('\n'):
+                    if '=' in line and ('IpAddress' in line or 'Network Address' in line):
+                        try:
+                            parts = line.split('=', 1)
+                            old_index = parts[0].strip().split('.')[-1]
+                            ip = parts[1].strip().split(':')[-1].strip()
+                            old_ip_map[old_index] = ip
+                        except:
+                            pass
+            
+            # Create MAC -> IP lookup from old table
+            mac_to_ip = {}  # mac -> ip
+            for old_index, mac in old_mac_map.items():
+                if old_index in old_ip_map:
+                    mac_to_ip[mac] = old_ip_map[old_index]
+            
+            self.logger.info(f"Correlated {len(mac_to_ip)} IP addresses from old table")
             
             # Parse status values (from parallel result)
             status_result = results.get('status', {})
@@ -1002,7 +1022,7 @@ class PyPNMAgent:
                 
                 modem = {
                     'mac_address': mac,
-                    'ip_address': ip_map.get(index, 'N/A'),
+                    'ip_address': mac_to_ip.get(mac, 'N/A'),  # Lookup IP by MAC
                     'status_code': status_map.get(index, 0),
                     'status': self._decode_d3_status(status_map.get(index, 0)),
                     'cmts_index': index,
