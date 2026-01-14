@@ -52,7 +52,31 @@ def get_modems():
 
 @api_bp.route('/modems/<mac_address>', methods=['GET'])
 def get_modem(mac_address):
-    """Get a specific modem by MAC address."""
+    """Get a specific modem by MAC address from cache or mock data."""
+    # Normalize MAC address
+    mac_normalized = mac_address.lower().replace('-', ':')
+    
+    # Try to find in Redis cache first
+    if REDIS_AVAILABLE and redis_client:
+        try:
+            # Search all modem caches
+            keys = redis_client.keys('modems:*')
+            for key in keys:
+                cached = redis_client.get(key)
+                if cached:
+                    data = json.loads(cached)
+                    modems = data.get('modems', [])
+                    for modem in modems:
+                        cached_mac = modem.get('mac_address', '').lower().replace('-', ':')
+                        if cached_mac == mac_normalized:
+                            return jsonify({
+                                "status": "success",
+                                "modem": modem
+                            })
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Redis search error: {e}")
+    
+    # Fallback to mock data
     modem = MockDataProvider.get_modem_by_mac(mac_address)
     
     if modem:
