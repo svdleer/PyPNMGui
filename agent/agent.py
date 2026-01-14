@@ -1120,7 +1120,7 @@ class PyPNMAgent:
     def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
         """
         Query each modem via cm_proxy (hop-access) to get sysDescr for model info.
-        Uses a single SSH connection with multiple SNMP queries for efficiency.
+        Uses batch SSH with parallel xargs for efficiency.
         """
         OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'  # sysDescr
         
@@ -1136,7 +1136,6 @@ class PyPNMAgent:
             self.logger.warning("No online modems to enrich")
             return modems
         
-        # Use single SSH connection for all queries
         if not paramiko:
             self.logger.error("paramiko not installed")
             return modems
@@ -1149,37 +1148,52 @@ class PyPNMAgent:
                 username=self.config.cm_proxy_user or 'svdleer',
                 timeout=30
             )
-            self.logger.info(f"SSH connected to {self.config.cm_proxy_host} for modem enrichment")
+            self.logger.info(f"SSH connected to {self.config.cm_proxy_host} for batch modem enrichment")
             
-            enriched_count = 0
-            for i, modem in enumerate(online_modems):
-                modem_ip = modem.get('ip_address')
-                try:
-                    # Quick SNMP query with short timeout
-                    snmp_cmd = f"snmpget -v2c -c {modem_community} -t 2 -r 1 {modem_ip} {OID_SYS_DESCR}"
-                    stdin, stdout, stderr = ssh.exec_command(snmp_cmd, timeout=5)
-                    output = stdout.read().decode('utf-8', errors='replace')
-                    
-                    if output and 'STRING:' in output:
-                        sys_descr = output.split('STRING:')[-1].strip().strip('"')
-                        model_info = self._parse_sys_descr(sys_descr)
-                        modem['model'] = model_info.get('model', 'Unknown')
-                        modem['software_version'] = model_info.get('software', '')
-                        if model_info.get('vendor'):
-                            modem['vendor'] = model_info.get('vendor')
-                        enriched_count += 1
-                        
-                    if (i + 1) % 50 == 0:
-                        self.logger.info(f"Enriched {i+1}/{len(online_modems)} modems...")
-                        
-                except Exception as e:
-                    self.logger.debug(f"Failed to query modem {modem_ip}: {e}")
+            # Build list of IPs
+            ip_list = [m.get('ip_address') for m in online_modems]
+            ip_string = '\\n'.join(ip_list)
+            
+            # Batch query using xargs with parallel execution
+            # Output format: IP|sysDescr
+            batch_cmd = f'''echo -e "{ip_string}" | xargs -I{{}} -P{max_workers} sh -c 'result=$(snmpget -v2c -c {modem_community} -t 2 -r 0 {{}} {OID_SYS_DESCR} 2>/dev/null | grep STRING); [ -n "$result" ] && echo "{{}}|$result"' '''
+            
+            self.logger.info(f"Running batch SNMP query for {len(ip_list)} modems with {max_workers} parallel workers")
+            
+            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=120)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
             
             ssh.close()
-            self.logger.info(f"Enrichment done: {enriched_count}/{len(online_modems)} succeeded")
+            
+            # Parse results
+            results = {}
+            for line in output.strip().split('\n'):
+                if '|' in line and 'STRING:' in line:
+                    parts = line.split('|', 1)
+                    if len(parts) == 2:
+                        ip = parts[0].strip()
+                        sys_descr = parts[1].split('STRING:')[-1].strip().strip('"')
+                        results[ip] = sys_descr
+            
+            self.logger.info(f"Batch query returned {len(results)} results")
+            
+            # Apply results to modems
+            enriched_count = 0
+            for modem in online_modems:
+                ip = modem.get('ip_address')
+                if ip in results:
+                    model_info = self._parse_sys_descr(results[ip])
+                    modem['model'] = model_info.get('model', 'Unknown')
+                    modem['software_version'] = model_info.get('software', '')
+                    if model_info.get('vendor'):
+                        modem['vendor'] = model_info.get('vendor')
+                    enriched_count += 1
+            
+            self.logger.info(f"Enrichment done: {enriched_count}/{len(online_modems)} modems enriched")
             
         except Exception as e:
-            self.logger.exception(f"SSH connection failed: {e}")
+            self.logger.exception(f"Batch enrichment failed: {e}")
         
         # Merge enriched modems back
         enriched_map = {m['mac_address']: m for m in online_modems}
