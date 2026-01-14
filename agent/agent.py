@@ -47,8 +47,8 @@ except ImportError:
 
 
 # CMTS credentials (encrypted)
-CMTS_USERNAME = 'verB0uwen'
-CMTS_ENC_PASSWORD = 'gAAAAABpMq5rKzVjsefcVVN4TvBUnlzXAHs28B_C2mWt3TbEQN-Ua2QPoKEbcXQYa_ruCFQe_POpWp_UzTndbx3FPfJGPg7czQ=='
+CMTS_USERNAME = 'n3user'
+CMTS_ENC_PASSWORD = 'gAAAAABpZu0V-v9QNpgb4CdoJi2MHxrswbZOrgoj4T1ZcioEiBM5a2m5sjFU_JwzN3tQ8-GoazBaZot4U1RTSA62IVWyagwI4w=='
 CMTS_FERNET_KEY = 'Z4gJ36cWp4tVJXKROVzNpn_MC8OVwMJpTR_O-NIDCrw='
 
 
