@@ -819,7 +819,9 @@ class PyPNMAgent:
         limit = params.get('limit', 10000)  # Increased limit
         use_bulk = params.get('use_bulk', True)
         use_cache = params.get('use_cache', True)
-        use_equalizer = params.get('use_equalizer', False) or self.config.equalizer_host
+        # CMTS queries go DIRECT - don't auto-enable equalizer just because it's configured
+        # Equalizer/cm_proxy is for modem enrichment, not CMTS queries
+        use_equalizer = params.get('use_equalizer', False)
         
         if not cmts_ip:
             return {'success': False, 'error': 'cmts_ip required'}
