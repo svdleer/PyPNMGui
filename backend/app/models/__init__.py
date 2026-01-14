@@ -1,4 +1,4 @@
 # Models module
-from .mock_data import MockDataProvider
+# Mock data removed - using real agent calls
 
-__all__ = ['MockDataProvider']
+__all__ = []

@@ -6,7 +6,6 @@ import json
 import logging
 from flask import jsonify, request, current_app
 from . import api_bp
-from app.models import MockDataProvider
 from app.core.cmts_provider import CMTSProvider
 
 # Redis for caching modem data
@@ -14,7 +13,7 @@ try:
     import redis
     REDIS_HOST = os.environ.get('REDIS_HOST', 'eve-li-redis')
     REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
-    REDIS_TTL = int(os.environ.get('REDIS_TTL', '3600'))  # 60 min cache
+    REDIS_TTL = int(os.environ.get('REDIS_TTL', '21600'))  # 6 hour cache
     redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     # Test connection
     redis_client.ping()
@@ -30,24 +29,11 @@ except Exception as e:
 
 @api_bp.route('/modems', methods=['GET'])
 def get_modems():
-    """Get list of cable modems with optional filtering."""
-    search_type = request.args.get('search_type')
-    search_value = request.args.get('search_value')
-    cmts = request.args.get('cmts')
-    interface = request.args.get('interface')
-    
-    modems = MockDataProvider.get_cable_modems(
-        search_type=search_type,
-        search_value=search_value,
-        cmts=cmts,
-        interface=interface
-    )
-    
+    """Get list of cable modems - redirects to CMTS modem endpoint."""
     return jsonify({
-        "status": "success",
-        "count": len(modems),
-        "modems": modems
-    })
+        "status": "error",
+        "message": "Use /api/cmts/<hostname>/modems to get modems from a specific CMTS"
+    }), 400
 
 
 @api_bp.route('/modems/<mac_address>', methods=['GET'])
@@ -76,19 +62,10 @@ def get_modem(mac_address):
         except Exception as e:
             logging.getLogger(__name__).warning(f"Redis search error: {e}")
     
-    # Fallback to mock data
-    modem = MockDataProvider.get_modem_by_mac(mac_address)
-    
-    if modem:
-        return jsonify({
-            "status": "success",
-            "modem": modem
-        })
-    else:
-        return jsonify({
-            "status": "error",
-            "message": "Modem not found"
-        }), 404
+    return jsonify({
+        "status": "error",
+        "message": "Modem not found in cache. Load modems from CMTS first."
+    }), 404
 
 
 # ============== CMTS Endpoints ==============
@@ -180,39 +157,189 @@ def get_cmts_interfaces(cmts_name):
 
 @api_bp.route('/modem/<mac_address>/system-info', methods=['POST'])
 def get_system_info(mac_address):
-    """Get system information for a modem (simulates /system/sysDescr)."""
-    data = MockDataProvider.get_system_info(mac_address)
-    return jsonify(data)
+    """Get system information for a modem via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_channel_info',
+            params={'mac_address': mac_address, 'modem_ip': modem_ip, 'community': community},
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Query failed')}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/modem/<mac_address>/uptime', methods=['POST'])
 def get_uptime(mac_address):
-    """Get uptime for a modem (simulates /system/upTime)."""
-    data = MockDataProvider.get_uptime(mac_address)
-    return jsonify(data)
+    """Get uptime for a modem via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        # Query sysUpTime OID
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_get',
+            params={'target_ip': modem_ip, 'oid': '1.3.6.1.2.1.1.3.0', 'community': community},
+            timeout=30
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=30)
+        if result and result.get('result', {}).get('success'):
+            output = result.get('result', {}).get('output', '')
+            # Parse uptime from SNMP output
+            uptime_ticks = 0
+            if 'Timeticks:' in output:
+                import re
+                match = re.search(r'\((\d+)\)', output)
+                if match:
+                    uptime_ticks = int(match.group(1))
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "uptime_ticks": uptime_ticks,
+                "uptime_seconds": uptime_ticks // 100,
+                "uptime_days": uptime_ticks // 100 // 86400
+            })
+        return jsonify({"status": "error", "message": "Query failed"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ============== Channel Statistics Endpoints ==============
 
 @api_bp.route('/modem/<mac_address>/ds-channels', methods=['POST'])
 def get_ds_channels(mac_address):
-    """Get downstream OFDM channel statistics."""
-    data = MockDataProvider.get_ds_channel_stats(mac_address)
-    return jsonify(data)
+    """Get downstream channel statistics via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_channel_info',
+            params={'mac_address': mac_address, 'modem_ip': modem_ip, 'community': community},
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            data = result.get('result')
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "channels": data.get('downstream', [])
+            })
+        return jsonify({"status": "error", "message": "Query failed"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/modem/<mac_address>/us-channels', methods=['POST'])
 def get_us_channels(mac_address):
-    """Get upstream OFDMA channel statistics."""
-    data = MockDataProvider.get_us_channel_stats(mac_address)
-    return jsonify(data)
+    """Get upstream channel statistics via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_channel_info',
+            params={'mac_address': mac_address, 'modem_ip': modem_ip, 'community': community},
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            data = result.get('result')
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "channels": data.get('upstream', [])
+            })
+        return jsonify({"status": "error", "message": "Query failed"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/modem/<mac_address>/interface-stats', methods=['POST'])
 def get_interface_stats(mac_address):
-    """Get interface statistics."""
-    data = MockDataProvider.get_interface_stats(mac_address)
-    return jsonify(data)
+    """Get interface statistics via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        # Query ifInOctets, ifOutOctets for cable interface
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_walk',
+            params={'target_ip': modem_ip, 'oid': '1.3.6.1.2.1.2.2.1', 'community': community},
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "raw_output": result.get('result', {}).get('output', '')
+            })
+        return jsonify({"status": "error", "message": "Query failed"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ============== PNM Measurement Endpoints ==============
@@ -233,10 +360,7 @@ def get_rxmer(mac_address):
     
     agent = agent_manager.get_agent_for_capability('cm_proxy')
     if not agent:
-        # Fallback to mock data if no agent
-        data = MockDataProvider.get_rxmer_measurement(mac_address, request_data.get('channel_ids', [159]))
-        data['mock'] = True
-        return jsonify(data)
+        return jsonify({"status": "error", "message": "No agent available"}), 503
     
     try:
         task_id = agent_manager.send_task_sync(
@@ -273,9 +397,7 @@ def get_spectrum(mac_address):
     agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
     
     if not agent:
-        data = MockDataProvider.get_spectrum_analysis(mac_address)
-        data['mock'] = True
-        return jsonify(data)
+        return jsonify({"status": "error", "message": "No agent available"}), 503
     
     try:
         task_id = agent_manager.send_task_sync(
@@ -311,9 +433,7 @@ def get_fec_summary(mac_address):
     agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
     
     if not agent:
-        data = MockDataProvider.get_fec_summary(mac_address)
-        data['mock'] = True
-        return jsonify(data)
+        return jsonify({"status": "error", "message": "No agent available"}), 503
     
     try:
         task_id = agent_manager.send_task_sync(
@@ -417,17 +537,13 @@ def get_event_log(mac_address):
     community = request_data.get('community', 'm0d3m1nf0')
     
     if not modem_ip:
-        data = MockDataProvider.get_event_log(mac_address)
-        data['mock'] = True
-        return jsonify(data)
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
     agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
     
     if not agent:
-        data = MockDataProvider.get_event_log(mac_address)
-        data['mock'] = True
-        return jsonify(data)
+        return jsonify({"status": "error", "message": "No agent available"}), 503
     
     try:
         task_id = agent_manager.send_task_sync(
@@ -444,39 +560,13 @@ def get_event_log(mac_address):
         if result and result.get('result', {}).get('success'):
             return jsonify(result.get('result'))
         else:
-            data = MockDataProvider.get_event_log(mac_address)
-            data['mock'] = True
-            return jsonify(data)
+            return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Query failed')}), 500
     except Exception as e:
-        data = MockDataProvider.get_event_log(mac_address)
-        data['mock'] = True
-        return jsonify(data)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ============== Multi-RxMER Endpoints ==============
-
-@api_bp.route('/multi-rxmer/start', methods=['POST'])
-def start_multi_rxmer():
-    """Start a multi-RxMER capture."""
-    request_data = request.get_json() or {}
-    mac_address = request_data.get('mac_address')
-    config = request_data.get('config', {})
-    
-    if not mac_address:
-        return jsonify({
-            "status": "error",
-            "message": "mac_address is required"
-        }), 400
-    
-    data = MockDataProvider.start_multi_rxmer(mac_address, config)
-    return jsonify(data)
-
-
-@api_bp.route('/multi-rxmer/status/<operation_id>', methods=['GET'])
-def get_multi_rxmer_status(operation_id):
-    """Get status of a multi-RxMER capture."""
-    data = MockDataProvider.get_multi_rxmer_status(operation_id)
-    return jsonify(data)
+# TODO: Implement multi-RxMER via agent when needed
 
 
 # ============== Health Check ==============
@@ -559,7 +649,8 @@ def get_cmts_modems(hostname):
     
     try:
         # Check if enriched data exists in cache
-        enrich = request.args.get('enrich', 'false').lower() == 'true'
+        # Enrich is enabled by default
+        enrich = request.args.get('enrich', 'true').lower() != 'false'
         modem_community = request.args.get('modem_community', 'm0d3m1nf0')
         enriched_cache_key = f"modems_enriched:{hostname}:{cmts_ip}"
         
