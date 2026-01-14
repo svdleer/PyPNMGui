@@ -12,6 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -430,6 +431,13 @@ class PyPNMAgent:
             'cmts_get_modems': self._handle_cmts_get_modems,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
             'enrich_modems': self._handle_enrich_modems,
+            # PNM measurement commands
+            'pnm_rxmer': self._handle_pnm_rxmer,
+            'pnm_spectrum': self._handle_pnm_spectrum,
+            'pnm_fec': self._handle_pnm_fec,
+            'pnm_pre_eq': self._handle_pnm_pre_eq,
+            'pnm_channel_info': self._handle_pnm_channel_info,
+            'pnm_event_log': self._handle_pnm_event_log,
         }
     
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
@@ -804,6 +812,375 @@ class PyPNMAgent:
             'message': f'PNM {pnm_type} triggered for {target_ip}'
         }
     
+    def _query_modem_via_cm_proxy(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+        """Query a modem via cm_proxy (hop-access) SSH."""
+        if not self.config.cm_proxy_host:
+            return {'success': False, 'error': 'cm_proxy not configured'}
+        
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(
+                self.config.cm_proxy_host,
+                username=self.config.cm_proxy_user or 'svdleer',
+                timeout=30
+            )
+            
+            cmd = 'snmpwalk' if walk else 'snmpget'
+            snmp_cmd = f"{cmd} -v2c -c {community} -t 5 -r 1 {modem_ip} {oid}"
+            
+            stdin, stdout, stderr = ssh.exec_command(snmp_cmd, timeout=30)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
+            ssh.close()
+            
+            return {
+                'success': 'Timeout' not in error and 'No Response' not in error,
+                'output': output,
+                'error': error if error else None
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_rxmer(self, params: dict) -> dict:
+        """Get RxMER (Receive Modulation Error Ratio) data from modem."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting RxMER for modem {modem_ip}")
+        
+        # DOCSIS 3.1 RxMER OIDs (docsIf31CmDsOfdmChannelPowerTable)
+        OID_OFDM_POWER = '1.3.6.1.4.1.4491.2.1.28.1.5'  # docsIf31CmDsOfdmChannelPowerTable
+        OID_DS_MER = '1.3.6.1.4.1.4491.2.1.20.1.24.1.1'  # docsIf3CmStatusUsTxPower (for reference)
+        
+        result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_POWER, community, walk=True)
+        
+        if not result.get('success'):
+            return {'success': False, 'error': result.get('error', 'SNMP query failed')}
+        
+        # Parse RxMER values
+        measurements = []
+        for line in result.get('output', '').split('\n'):
+            if '=' in line and ('INTEGER' in line or 'Gauge' in line):
+                try:
+                    parts = line.split('=')
+                    oid_part = parts[0].strip()
+                    value_part = parts[1].strip()
+                    
+                    # Extract channel index from OID
+                    idx = oid_part.split('.')[-1]
+                    
+                    # Extract value
+                    val = ''.join(c for c in value_part.split(':')[-1] if c.isdigit() or c == '-')
+                    if val:
+                        measurements.append({
+                            'channel_id': int(idx),
+                            'mer_db': float(val) / 10 if abs(int(val)) > 100 else float(val)
+                        })
+                except:
+                    pass
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'measurements': measurements,
+            'average_mer_db': sum(m['mer_db'] for m in measurements) / len(measurements) if measurements else 0
+        }
+    
+    def _handle_pnm_spectrum(self, params: dict) -> dict:
+        """Get spectrum analysis data from modem."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting spectrum for modem {modem_ip}")
+        
+        # DOCSIS CM spectrum OIDs
+        OID_DS_FREQ = '1.3.6.1.2.1.10.127.1.1.1.1.2'  # docsIfDownChannelFrequency
+        OID_DS_POWER = '1.3.6.1.2.1.10.127.1.1.1.1.6'  # docsIfDownChannelPower
+        OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'  # docsIfUpChannelFrequency
+        OID_US_POWER = '1.3.6.1.4.1.4491.2.1.20.1.2.1.1'  # docsIf3CmStatusUsTxPower
+        
+        ds_freq_result = self._query_modem_via_cm_proxy(modem_ip, OID_DS_FREQ, community, walk=True)
+        ds_power_result = self._query_modem_via_cm_proxy(modem_ip, OID_DS_POWER, community, walk=True)
+        us_power_result = self._query_modem_via_cm_proxy(modem_ip, OID_US_POWER, community, walk=True)
+        
+        ds_channels = []
+        us_channels = []
+        
+        # Parse downstream
+        freq_map = {}
+        for line in ds_freq_result.get('output', '').split('\n'):
+            if '=' in line:
+                try:
+                    idx = line.split('=')[0].strip().split('.')[-1]
+                    val = ''.join(c for c in line.split('=')[1] if c.isdigit())
+                    if val:
+                        freq_map[idx] = int(val)
+                except:
+                    pass
+        
+        for line in ds_power_result.get('output', '').split('\n'):
+            if '=' in line:
+                try:
+                    idx = line.split('=')[0].strip().split('.')[-1]
+                    val = ''.join(c for c in line.split('=')[1] if c.isdigit() or c == '-')
+                    if val and idx in freq_map:
+                        ds_channels.append({
+                            'channel_id': int(idx),
+                            'frequency_hz': freq_map[idx],
+                            'power_dbmv': float(val) / 10
+                        })
+                except:
+                    pass
+        
+        # Parse upstream power
+        for line in us_power_result.get('output', '').split('\n'):
+            if '=' in line:
+                try:
+                    idx = line.split('=')[0].strip().split('.')[-1]
+                    val = ''.join(c for c in line.split('=')[1] if c.isdigit() or c == '-')
+                    if val:
+                        us_channels.append({
+                            'channel_id': int(idx),
+                            'power_dbmv': float(val) / 10
+                        })
+                except:
+                    pass
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'downstream_channels': ds_channels,
+            'upstream_channels': us_channels
+        }
+    
+    def _handle_pnm_fec(self, params: dict) -> dict:
+        """Get FEC (Forward Error Correction) statistics from modem."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting FEC stats for modem {modem_ip}")
+        
+        # DOCSIS FEC OIDs
+        OID_UNERRORED = '1.3.6.1.2.1.10.127.1.1.4.1.2'  # docsIfSigQUnerroreds
+        OID_CORRECTED = '1.3.6.1.2.1.10.127.1.1.4.1.3'  # docsIfSigQCorrecteds
+        OID_UNCORRECTABLE = '1.3.6.1.2.1.10.127.1.1.4.1.4'  # docsIfSigQUncorrectables
+        OID_SNR = '1.3.6.1.2.1.10.127.1.1.4.1.5'  # docsIfSigQSignalNoise
+        
+        unerrored = self._query_modem_via_cm_proxy(modem_ip, OID_UNERRORED, community, walk=True)
+        corrected = self._query_modem_via_cm_proxy(modem_ip, OID_CORRECTED, community, walk=True)
+        uncorrectable = self._query_modem_via_cm_proxy(modem_ip, OID_UNCORRECTABLE, community, walk=True)
+        snr = self._query_modem_via_cm_proxy(modem_ip, OID_SNR, community, walk=True)
+        
+        def parse_values(result):
+            values = {}
+            for line in result.get('output', '').split('\n'):
+                if '=' in line:
+                    try:
+                        idx = line.split('=')[0].strip().split('.')[-1]
+                        val = ''.join(c for c in line.split('=')[1] if c.isdigit())
+                        if val:
+                            values[idx] = int(val)
+                    except:
+                        pass
+            return values
+        
+        unerrored_map = parse_values(unerrored)
+        corrected_map = parse_values(corrected)
+        uncorrectable_map = parse_values(uncorrectable)
+        snr_map = parse_values(snr)
+        
+        channels = []
+        for idx in unerrored_map:
+            total = unerrored_map.get(idx, 0) + corrected_map.get(idx, 0) + uncorrectable_map.get(idx, 0)
+            channels.append({
+                'channel_id': int(idx),
+                'unerrored': unerrored_map.get(idx, 0),
+                'corrected': corrected_map.get(idx, 0),
+                'uncorrectable': uncorrectable_map.get(idx, 0),
+                'total_codewords': total,
+                'snr_db': snr_map.get(idx, 0) / 10 if idx in snr_map else 0
+            })
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'channels': channels,
+            'total_uncorrectable': sum(c['uncorrectable'] for c in channels),
+            'total_corrected': sum(c['corrected'] for c in channels)
+        }
+    
+    def _handle_pnm_pre_eq(self, params: dict) -> dict:
+        """Get pre-equalization coefficients from modem."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting pre-eq coefficients for modem {modem_ip}")
+        
+        # DOCSIS Pre-equalization OID
+        OID_PRE_EQ = '1.3.6.1.4.1.4491.2.1.20.1.2.1.5'  # docsIf3CmStatusUsEqData
+        
+        result = self._query_modem_via_cm_proxy(modem_ip, OID_PRE_EQ, community, walk=True)
+        
+        if not result.get('success'):
+            return {'success': False, 'error': result.get('error', 'SNMP query failed')}
+        
+        coefficients = []
+        for line in result.get('output', '').split('\n'):
+            if '=' in line and 'Hex-STRING' in line:
+                try:
+                    idx = line.split('=')[0].strip().split('.')[-1]
+                    hex_data = line.split('Hex-STRING:')[-1].strip()
+                    coefficients.append({
+                        'channel_id': int(idx),
+                        'hex_data': hex_data,
+                        'length': len(hex_data.replace(' ', '')) // 2
+                    })
+                except:
+                    pass
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'coefficients': coefficients
+        }
+    
+    def _handle_pnm_channel_info(self, params: dict) -> dict:
+        """Get comprehensive channel info (DS/US power, frequency, modulation)."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting channel info for modem {modem_ip}")
+        
+        # Downstream OIDs
+        OID_DS_FREQ = '1.3.6.1.2.1.10.127.1.1.1.1.2'
+        OID_DS_POWER = '1.3.6.1.2.1.10.127.1.1.1.1.6'
+        OID_DS_MOD = '1.3.6.1.2.1.10.127.1.1.1.1.4'  # Modulation type
+        OID_DS_SNR = '1.3.6.1.2.1.10.127.1.1.4.1.5'
+        
+        # Upstream OIDs
+        OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'
+        OID_US_POWER = '1.3.6.1.4.1.4491.2.1.20.1.2.1.1'
+        OID_US_T3_TIMEOUTS = '1.3.6.1.2.1.10.127.1.2.2.1.12'
+        OID_US_T4_TIMEOUTS = '1.3.6.1.2.1.10.127.1.2.2.1.13'
+        
+        # Query all
+        ds_freq = self._query_modem_via_cm_proxy(modem_ip, OID_DS_FREQ, community, walk=True)
+        ds_power = self._query_modem_via_cm_proxy(modem_ip, OID_DS_POWER, community, walk=True)
+        ds_snr = self._query_modem_via_cm_proxy(modem_ip, OID_DS_SNR, community, walk=True)
+        us_power = self._query_modem_via_cm_proxy(modem_ip, OID_US_POWER, community, walk=True)
+        
+        def parse_int_values(result, divisor=1):
+            values = {}
+            for line in result.get('output', '').split('\n'):
+                if '=' in line:
+                    try:
+                        idx = line.split('=')[0].strip().split('.')[-1]
+                        val = ''.join(c for c in line.split('=')[1] if c.isdigit() or c == '-')
+                        if val:
+                            values[idx] = int(val) / divisor
+                    except:
+                        pass
+            return values
+        
+        ds_freq_map = parse_int_values(ds_freq)
+        ds_power_map = parse_int_values(ds_power, 10)
+        ds_snr_map = parse_int_values(ds_snr, 10)
+        us_power_map = parse_int_values(us_power, 10)
+        
+        downstream = []
+        for idx in ds_freq_map:
+            downstream.append({
+                'channel_id': int(idx),
+                'frequency_mhz': ds_freq_map[idx] / 1000000,
+                'power_dbmv': ds_power_map.get(idx, 0),
+                'snr_db': ds_snr_map.get(idx, 0)
+            })
+        
+        upstream = []
+        for idx in us_power_map:
+            upstream.append({
+                'channel_id': int(idx),
+                'power_dbmv': us_power_map[idx]
+            })
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'downstream': sorted(downstream, key=lambda x: x['channel_id']),
+            'upstream': sorted(upstream, key=lambda x: x['channel_id'])
+        }
+    
+    def _handle_pnm_event_log(self, params: dict) -> dict:
+        """Get event log from modem."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting event log for modem {modem_ip}")
+        
+        # DOCSIS Event Log OIDs
+        OID_EVENT_TEXT = '1.3.6.1.2.1.69.1.5.8.1.7'  # docsDevEvText
+        OID_EVENT_TIME = '1.3.6.1.2.1.69.1.5.8.1.6'  # docsDevEvLastTime
+        OID_EVENT_LEVEL = '1.3.6.1.2.1.69.1.5.8.1.4'  # docsDevEvLevel
+        
+        text_result = self._query_modem_via_cm_proxy(modem_ip, OID_EVENT_TEXT, community, walk=True)
+        
+        events = []
+        for line in text_result.get('output', '').split('\n'):
+            if '=' in line and 'STRING' in line:
+                try:
+                    idx = line.split('=')[0].strip().split('.')[-1]
+                    text = line.split('STRING:')[-1].strip().strip('"')
+                    events.append({
+                        'id': int(idx),
+                        'text': text
+                    })
+                except:
+                    pass
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'events': events[-50:],  # Last 50 events
+            'total_events': len(events)
+        }
+
     def _handle_cmts_get_modems(self, params: dict) -> dict:
         """
         Get list of cable modems from a CMTS via SNMP.

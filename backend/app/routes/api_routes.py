@@ -195,35 +195,238 @@ def get_interface_stats(mac_address):
 
 @api_bp.route('/modem/<mac_address>/rxmer', methods=['POST'])
 def get_rxmer(mac_address):
-    """Get RxMER measurement."""
+    """Get RxMER measurement for a modem via agent."""
     request_data = request.get_json() or {}
-    channel_ids = request_data.get('channel_ids', [159])
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
     
-    data = MockDataProvider.get_rxmer_measurement(mac_address, channel_ids)
-    return jsonify(data)
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    if not agent_manager:
+        return jsonify({"status": "error", "message": "Agent manager not initialized"}), 503
+    
+    agent = agent_manager.get_agent_for_capability('cm_proxy')
+    if not agent:
+        # Fallback to mock data if no agent
+        data = MockDataProvider.get_rxmer_measurement(mac_address, request_data.get('channel_ids', [159]))
+        data['mock'] = True
+        return jsonify(data)
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_rxmer',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        else:
+            return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Unknown error')}), 500
+    except Exception as e:
+        logging.getLogger(__name__).error(f"RxMER request failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/modem/<mac_address>/spectrum', methods=['POST'])
 def get_spectrum(mac_address):
-    """Get spectrum analysis data."""
-    data = MockDataProvider.get_spectrum_analysis(mac_address)
-    return jsonify(data)
+    """Get spectrum analysis data via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        data = MockDataProvider.get_spectrum_analysis(mac_address)
+        data['mock'] = True
+        return jsonify(data)
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_spectrum',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community
+            },
+            timeout=120
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=120)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        else:
+            return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Unknown error')}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/modem/<mac_address>/fec-summary', methods=['POST'])
 def get_fec_summary(mac_address):
-    """Get FEC summary statistics."""
-    data = MockDataProvider.get_fec_summary(mac_address)
-    return jsonify(data)
+    """Get FEC summary statistics via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        data = MockDataProvider.get_fec_summary(mac_address)
+        data['mock'] = True
+        return jsonify(data)
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_fec',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        else:
+            return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Unknown error')}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/modem/<mac_address>/pre-eq', methods=['POST'])
+def get_pre_eq(mac_address):
+    """Get pre-equalization coefficients via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_pre_eq',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        else:
+            return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Unknown error')}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/modem/<mac_address>/channel-info', methods=['POST'])
+def get_channel_info(mac_address):
+    """Get downstream/upstream channel info via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_channel_info',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        else:
+            return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Unknown error')}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ============== Event Log Endpoint ==============
 
 @api_bp.route('/modem/<mac_address>/event-log', methods=['POST'])
 def get_event_log(mac_address):
-    """Get modem event log."""
-    data = MockDataProvider.get_event_log(mac_address)
-    return jsonify(data)
+    """Get modem event log via agent."""
+    request_data = request.get_json() or {}
+    modem_ip = request_data.get('modem_ip')
+    community = request_data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        data = MockDataProvider.get_event_log(mac_address)
+        data['mock'] = True
+        return jsonify(data)
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    
+    if not agent:
+        data = MockDataProvider.get_event_log(mac_address)
+        data['mock'] = True
+        return jsonify(data)
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_event_log',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if result and result.get('result', {}).get('success'):
+            return jsonify(result.get('result'))
+        else:
+            data = MockDataProvider.get_event_log(mac_address)
+            data['mock'] = True
+            return jsonify(data)
+    except Exception as e:
+        data = MockDataProvider.get_event_log(mac_address)
+        data['mock'] = True
+        return jsonify(data)
 
 
 # ============== Multi-RxMER Endpoints ==============
