@@ -1178,6 +1178,11 @@ class PyPNMAgent:
             
             self.logger.info(f"Batch query returned {len(results)} results")
             
+            # Log a sample sysDescr for debugging
+            if results:
+                sample_ip = list(results.keys())[0]
+                self.logger.info(f"Sample sysDescr from {sample_ip}: {results[sample_ip][:100]}")
+            
             # Apply results to modems
             enriched_count = 0
             for modem in online_modems:
@@ -1188,7 +1193,8 @@ class PyPNMAgent:
                     modem['software_version'] = model_info.get('software', '')
                     if model_info.get('vendor'):
                         modem['vendor'] = model_info.get('vendor')
-                    enriched_count += 1
+                    if model_info.get('model') and model_info['model'] not in ['Unknown', 'N/A']:
+                        enriched_count += 1
             
             self.logger.info(f"Enrichment done: {enriched_count}/{len(online_modems)} modems enriched")
             
@@ -1207,6 +1213,7 @@ class PyPNMAgent:
         """Parse sysDescr to extract vendor, model, and software version."""
         result = {}
         descr = sys_descr.lower()
+        original = sys_descr  # Keep original for model extraction
         
         # Common patterns
         if 'arris' in descr or 'touchstone' in descr:
@@ -1223,16 +1230,57 @@ class PyPNMAgent:
             result['vendor'] = 'Cisco'
         elif 'ubee' in descr:
             result['vendor'] = 'Ubee'
+        elif 'netgear' in descr:
+            result['vendor'] = 'Netgear'
+        elif 'compal' in descr:
+            result['vendor'] = 'Compal'
+        elif 'humax' in descr:
+            result['vendor'] = 'Humax'
         
         # Try to extract model from sysDescr
-        # Format varies: "ARRIS DOCSIS 3.1 Touchstone TG3442 ..." etc.
         import re
-        model_match = re.search(r'(TG\d+|TC\d+|SB\d+|DPC\d+|EPC\d+|CM\d+|SBG\d+|CGM\d+)', sys_descr, re.I)
-        if model_match:
-            result['model'] = model_match.group(1).upper()
+        # Extended patterns for various modem models
+        model_patterns = [
+            r'(TG\d+[A-Z]*)',           # ARRIS Touchstone TG3442, TG2492
+            r'(TC\d+[A-Z]*)',           # Technicolor TC4400
+            r'(SB\d+[A-Z]*)',           # Motorola SB6121
+            r'(DPC\d+[A-Z]*)',          # Cisco DPC3010
+            r'(EPC\d+[A-Z]*)',          # Cisco EPC3010  
+            r'(CM\d+[A-Z]*)',           # Generic CM models
+            r'(SBG\d+[A-Z]*)',          # Motorola SBG6580
+            r'(CGM\d+[A-Z]*)',          # Sagemcom CGM4140
+            r'(CG\d+[A-Z]*)',           # Cable Gateway models
+            r'(CH\d+[A-Z]*)',           # Compal CH models
+            r'(HG\d+[A-Z]*)',           # Home Gateway models
+            r'(F@ST\s*\d+)',            # Sagemcom F@ST models
+            r'(CODA-\d+[A-Z]*)',        # CODA models
+            r'(DCM\d+)',                # DCM models
+            r'([A-Z]{2,4}\d{3,5}[A-Z]*)',  # Generic: 2-4 letters + 3-5 digits
+        ]
+        
+        for pattern in model_patterns:
+            match = re.search(pattern, original, re.I)
+            if match:
+                result['model'] = match.group(1).upper().replace(' ', '')
+                break
+        
+        # If no model found, use first word-like token after vendor
+        if 'model' not in result and result.get('vendor'):
+            words = original.split()
+            for i, word in enumerate(words):
+                if result['vendor'].lower() in word.lower() and i + 1 < len(words):
+                    next_word = words[i + 1]
+                    if re.match(r'^[A-Z0-9\-]+$', next_word, re.I) and len(next_word) >= 3:
+                        result['model'] = next_word.upper()
+                        break
+        
+        # If still no model, use sysDescr truncated as model
+        if 'model' not in result and sys_descr:
+            # Take first meaningful part
+            result['model'] = sys_descr[:30].strip()
         
         # Software version
-        version_match = re.search(r'(\d+\.\d+\.\d+[\.\d]*)', sys_descr)
+        version_match = re.search(r'(\d+\.\d+\.\d+[\.\d\-a-zA-Z]*)', sys_descr)
         if version_match:
             result['software'] = version_match.group(1)
         
