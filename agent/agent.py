@@ -1364,7 +1364,7 @@ class PyPNMAgent:
                     on_close=self._on_close
                 )
                 
-                self.ws.run_forever(ping_interval=60, ping_timeout=120)
+                self.ws.run_forever(ping_interval=120, ping_timeout=60)
                 
             except Exception as e:
                 self.logger.error(f"Connection failed: {e}")
