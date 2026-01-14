@@ -308,11 +308,11 @@ def get_cmts_modems(hostname):
                 'enrich_modems': enrich,
                 'modem_community': modem_community
             },
-            timeout=120
+            timeout=300  # 5 min for large CMTS walks
         )
         
-        # Wait for result (longer timeout if enriching)
-        result = agent_manager.wait_for_task(task_id, timeout=120 if enrich else 60)
+        # Wait for result (longer timeout for SNMP walks - 3 min default, 5 min if enriching)
+        result = agent_manager.wait_for_task(task_id, timeout=300 if enrich else 180)
         
         if result is None:
             return jsonify({
