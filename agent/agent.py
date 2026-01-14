@@ -1124,21 +1124,16 @@ class PyPNMAgent:
         """
         OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'  # sysDescr
         
-        # Log status breakdown
-        status_counts = {}
-        for m in modems:
-            s = m.get('status', 'unknown')
-            status_counts[s] = status_counts.get(s, 0) + 1
-        self.logger.info(f"Modem status breakdown: {status_counts}")
-        
-        # Query any modem with a valid IP (not N/A)
+        # Query modems with valid IPs (any status that indicates online)
+        online_statuses = {'operational', 'registrationComplete', 'ipComplete', 'online'}
         online_modems = [m for m in modems 
-                         if m.get('ip_address') and m.get('ip_address') != 'N/A'][:200]
+                         if m.get('ip_address') and m.get('ip_address') != 'N/A' 
+                         and m.get('status') in online_statuses][:200]
         
         self.logger.info(f"Enrichment: {len(online_modems)} modems with valid IP (from {len(modems)} total)")
         
         if not online_modems:
-            self.logger.warning("No modems with valid IP to enrich")
+            self.logger.warning("No online modems to enrich")
             return modems
         
         if not paramiko:
@@ -1183,11 +1178,6 @@ class PyPNMAgent:
             
             self.logger.info(f"Batch query returned {len(results)} results")
             
-            # Log a sample sysDescr for debugging
-            if results:
-                sample_ip = list(results.keys())[0]
-                self.logger.info(f"Sample sysDescr from {sample_ip}: {results[sample_ip][:100]}")
-            
             # Apply results to modems
             enriched_count = 0
             for modem in online_modems:
@@ -1198,8 +1188,7 @@ class PyPNMAgent:
                     modem['software_version'] = model_info.get('software', '')
                     if model_info.get('vendor'):
                         modem['vendor'] = model_info.get('vendor')
-                    if model_info.get('model') and model_info['model'] not in ['Unknown', 'N/A']:
-                        enriched_count += 1
+                    enriched_count += 1
             
             self.logger.info(f"Enrichment done: {enriched_count}/{len(online_modems)} modems enriched")
             
@@ -1220,10 +1209,10 @@ class PyPNMAgent:
         import re
         
         # Check for structured format: <<KEY: value; KEY: value>>
+        # Example: "FAST3896 Wireless Voice Gateway <<HW_REV: 1.2; VENDOR: SAGEMCOM; SW_REV: LG-RDK_11.10.26; MODEL: F3896LG>>"
         structured_match = re.search(r'<<(.+?)>>', sys_descr)
         if structured_match:
             fields = structured_match.group(1)
-            # Parse key: value pairs
             for pair in fields.split(';'):
                 if ':' in pair:
                     key, value = pair.split(':', 1)
@@ -1235,15 +1224,12 @@ class PyPNMAgent:
                         result['vendor'] = value
                     elif key == 'SW_REV':
                         result['software'] = value
-            # If we found model from structured format, return
             if result.get('model'):
                 return result
         
-        # Fallback to pattern matching
+        # Fallback: pattern matching for non-structured sysDescr
         descr = sys_descr.lower()
-        original = sys_descr
         
-        # Vendor detection
         if 'arris' in descr or 'touchstone' in descr:
             result['vendor'] = 'ARRIS'
         elif 'technicolor' in descr:
@@ -1258,47 +1244,16 @@ class PyPNMAgent:
             result['vendor'] = 'Cisco'
         elif 'ubee' in descr:
             result['vendor'] = 'Ubee'
-        elif 'netgear' in descr:
-            result['vendor'] = 'Netgear'
-        elif 'compal' in descr:
-            result['vendor'] = 'Compal'
-        elif 'humax' in descr:
-            result['vendor'] = 'Humax'
         
         # Model patterns
-        model_patterns = [
-            r'(FAST\d+[A-Z]*)',         # Sagemcom FAST3896
-            r'(F\d{4}[A-Z]*)',          # F3896LG
-            r'(TG\d+[A-Z]*)',           # ARRIS Touchstone
-            r'(TC\d+[A-Z]*)',           # Technicolor
-            r'(SB\d+[A-Z]*)',           # Motorola
-            r'(DPC\d+[A-Z]*)',          # Cisco
-            r'(EPC\d+[A-Z]*)',          # Cisco
-            r'(CM\d+[A-Z]*)',           # Generic
-            r'(SBG\d+[A-Z]*)',          # Motorola
-            r'(CGM\d+[A-Z]*)',          # Sagemcom
-            r'(CG\d+[A-Z]*)',           # Cable Gateway
-            r'(CH\d+[A-Z]*)',           # Compal
-            r'(CODA-?\d+[A-Z]*)',       # CODA
-            r'(DCM\d+)',                # DCM
-        ]
+        model_match = re.search(r'(FAST\d+|F\d{4}[A-Z]*|TG\d+|TC\d+|SB\d+|DPC\d+|EPC\d+|CM\d+|SBG\d+|CGM\d+)', sys_descr, re.I)
+        if model_match:
+            result['model'] = model_match.group(1).upper()
         
-        for pattern in model_patterns:
-            match = re.search(pattern, original, re.I)
-            if match:
-                result['model'] = match.group(1).upper()
-                break
-        
-        # Software version (if not from structured)
-        if 'software' not in result:
-            version_match = re.search(r'(\d+\.\d+\.\d+[\.\d\-a-zA-Z]*)', sys_descr)
-            if version_match:
-                result['software'] = version_match.group(1)
-        
-        # If still no model, use first part of sysDescr
-        if 'model' not in result and sys_descr:
-            first_word = sys_descr.split()[0] if sys_descr.split() else sys_descr[:20]
-            result['model'] = first_word
+        # Software version
+        version_match = re.search(r'(\d+\.\d+\.\d+[\.\d\-a-zA-Z]*)', sys_descr)
+        if version_match:
+            result['software'] = version_match.group(1)
         
         return result
     
