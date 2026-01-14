@@ -429,6 +429,7 @@ class PyPNMAgent:
             'execute_pnm': self._handle_pnm_command,
             'cmts_get_modems': self._handle_cmts_get_modems,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
+            'enrich_modems': self._handle_enrich_modems,
         }
     
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
@@ -1074,6 +1075,42 @@ class PyPNMAgent:
                 'cmts_ip': cmts_ip
             }
     
+    def _handle_enrich_modems(self, params: dict) -> dict:
+        """
+        Enrich modems with vendor/model/firmware info via cm_proxy (hop-access).
+        This runs in background after initial modem list is returned.
+        """
+        modems = params.get('modems', [])
+        modem_community = params.get('modem_community', 'm0d3m1nf0')
+        
+        if not self.cm_proxy:
+            return {
+                'success': False,
+                'error': 'cm_proxy not configured for modem enrichment'
+            }
+        
+        self.logger.info(f"Starting background enrichment of {len(modems)} modems via cm_proxy")
+        
+        try:
+            enriched = self._enrich_modems_parallel(modems, modem_community, max_workers=50)
+            
+            # Count how many were enriched
+            enriched_count = sum(1 for m in enriched if m.get('model') and m.get('model') != 'N/A')
+            self.logger.info(f"Enrichment complete: {enriched_count}/{len(enriched)} modems have model info")
+            
+            return {
+                'success': True,
+                'modems': enriched,
+                'enriched_count': enriched_count,
+                'total_count': len(enriched)
+            }
+        except Exception as e:
+            self.logger.exception(f"Failed to enrich modems: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
     def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
         """
         Query each modem via cm_proxy (hop-access) to get sysDescr for model info.
@@ -1087,13 +1124,14 @@ class PyPNMAgent:
                 return modem
             
             try:
-                result = self.snmp_executor.execute_snmp(
-                    command='snmpget',
+                # Query modem via cm_proxy (hop-access SSH)
+                result = self._snmp_via_ssh(
+                    ssh_host=self.config.cm_proxy_host,
+                    ssh_user=self.config.cm_proxy_user or 'svdleer',
                     target_ip=modem_ip,
                     oid=OID_SYS_DESCR,
                     community=modem_community,
-                    timeout=5,
-                    retries=1
+                    command='snmpget'
                 )
                 
                 if result.get('success'):
@@ -1109,10 +1147,10 @@ class PyPNMAgent:
             
             return modem
         
-        # Only query online modems with valid IPs (limit to avoid overload)
-        online_modems = [m for m in modems if m.get('status') == 'operational' and m.get('ip_address') != 'N/A'][:100]
+        # Only query online modems with valid IPs
+        online_modems = [m for m in modems if m.get('status') == 'operational' and m.get('ip_address') != 'N/A'][:200]
         
-        self.logger.info(f"Querying {len(online_modems)} online modems via cm_proxy (max_workers={max_workers})")
+        self.logger.info(f"Querying {len(online_modems)} online modems via cm_proxy {self.config.cm_proxy_host} (max_workers={max_workers})")
         
         enriched = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:

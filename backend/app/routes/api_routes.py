@@ -328,10 +328,25 @@ def get_cmts_modems(hostname):
         }), 503
     
     try:
-        # Send task to agent
+        # Check if enriched data exists in cache
         enrich = request.args.get('enrich', 'false').lower() == 'true'
         modem_community = request.args.get('modem_community', 'm0d3m1nf0')
+        enriched_cache_key = f"modems_enriched:{hostname}:{cmts_ip}"
         
+        # Try enriched cache first if enrich requested
+        if enrich and use_cache and REDIS_AVAILABLE and redis_client:
+            try:
+                enriched_cached = redis_client.get(enriched_cache_key)
+                if enriched_cached:
+                    logging.getLogger(__name__).info(f"Returning enriched cached modems for {hostname}")
+                    cached_data = json.loads(enriched_cached)
+                    cached_data['cached'] = True
+                    cached_data['enriched'] = True
+                    return jsonify(cached_data)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Redis enriched cache read error: {e}")
+        
+        # Send task to agent - never block on enrichment, do it in background
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='cmts_get_modems',
@@ -339,14 +354,14 @@ def get_cmts_modems(hostname):
                 'cmts_ip': cmts_ip,
                 'community': community,
                 'limit': limit,
-                'enrich_modems': enrich,
+                'enrich_modems': False,  # Never enrich inline - too slow
                 'modem_community': modem_community
             },
             timeout=300  # 5 min for large CMTS walks
         )
         
-        # Wait for result (longer timeout for SNMP walks - 3 min default, 5 min if enriching)
-        result = agent_manager.wait_for_task(task_id, timeout=300 if enrich else 180)
+        # Wait for result
+        result = agent_manager.wait_for_task(task_id, timeout=180)
         
         if result is None:
             return jsonify({
@@ -371,7 +386,8 @@ def get_cmts_modems(hostname):
             "count": task_result.get('count', 0),
             "modems": task_result.get('modems', []),
             "agent_id": agent.agent_id,
-            "cached": False
+            "cached": False,
+            "enriched": False
         }
         
         # Cache result in Redis
@@ -381,6 +397,38 @@ def get_cmts_modems(hostname):
                 logging.getLogger(__name__).info(f"Cached {task_result.get('count')} modems for {hostname} (TTL={REDIS_TTL}s)")
             except Exception as e:
                 logging.getLogger(__name__).warning(f"Redis cache write error: {e}")
+        
+        # Start background enrichment if requested
+        if enrich and agent_manager.get_agent_for_capability('cm_proxy'):
+            import threading
+            def enrich_background():
+                try:
+                    enrich_task_id = agent_manager.send_task_sync(
+                        agent_id=agent.agent_id,
+                        command='enrich_modems',
+                        params={
+                            'modems': task_result.get('modems', [])[:200],  # Limit to 200 modems
+                            'modem_community': modem_community,
+                            'cmts_hostname': hostname,
+                            'cmts_ip': cmts_ip
+                        },
+                        timeout=300
+                    )
+                    enrich_result = agent_manager.wait_for_task(enrich_task_id, timeout=300)
+                    if enrich_result and enrich_result.get('result', {}).get('success'):
+                        enriched_modems = enrich_result.get('result', {}).get('modems', [])
+                        enriched_data = response_data.copy()
+                        enriched_data['modems'] = enriched_modems
+                        enriched_data['enriched'] = True
+                        if REDIS_AVAILABLE and redis_client:
+                            redis_client.setex(enriched_cache_key, REDIS_TTL, json.dumps(enriched_data))
+                            logging.getLogger(__name__).info(f"Background enrichment complete: {len(enriched_modems)} modems")
+                except Exception as e:
+                    logging.getLogger(__name__).error(f"Background enrichment failed: {e}")
+            
+            thread = threading.Thread(target=enrich_background, daemon=True)
+            thread.start()
+            response_data['enriching'] = True
         
         return jsonify(response_data)
     
