@@ -812,27 +812,52 @@ class PyPNMAgent:
             'message': f'PNM {pnm_type} triggered for {target_ip}'
         }
     
+    def _get_cm_proxy_ssh(self):
+        """Get or create a persistent SSH connection to cm_proxy."""
+        if not hasattr(self, '_cm_proxy_ssh') or self._cm_proxy_ssh is None:
+            if not self.config.cm_proxy_host:
+                return None
+            try:
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(
+                    self.config.cm_proxy_host,
+                    username=self.config.cm_proxy_user or 'svdleer',
+                    timeout=30
+                )
+                self._cm_proxy_ssh = ssh
+                self.logger.info(f"Persistent SSH connection to {self.config.cm_proxy_host} established")
+            except Exception as e:
+                self.logger.error(f"Failed to connect to cm_proxy: {e}")
+                self._cm_proxy_ssh = None
+        
+        # Check if connection is still alive
+        if self._cm_proxy_ssh:
+            try:
+                transport = self._cm_proxy_ssh.get_transport()
+                if transport is None or not transport.is_active():
+                    self.logger.warning("SSH connection lost, reconnecting...")
+                    self._cm_proxy_ssh = None
+                    return self._get_cm_proxy_ssh()  # Reconnect
+            except:
+                self._cm_proxy_ssh = None
+                return self._get_cm_proxy_ssh()  # Reconnect
+        
+        return self._cm_proxy_ssh
+    
     def _query_modem_via_cm_proxy(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
-        """Query a modem via cm_proxy (hop-access) SSH."""
-        if not self.config.cm_proxy_host:
-            return {'success': False, 'error': 'cm_proxy not configured'}
+        """Query a modem via cm_proxy using persistent SSH connection."""
+        ssh = self._get_cm_proxy_ssh()
+        if not ssh:
+            return {'success': False, 'error': 'cm_proxy not configured or connection failed'}
         
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(
-                self.config.cm_proxy_host,
-                username=self.config.cm_proxy_user or 'svdleer',
-                timeout=30
-            )
-            
             cmd = 'snmpwalk' if walk else 'snmpget'
             snmp_cmd = f"{cmd} -v2c -c {community} -t 5 -r 1 {modem_ip} {oid}"
             
             stdin, stdout, stderr = ssh.exec_command(snmp_cmd, timeout=30)
             output = stdout.read().decode('utf-8', errors='replace')
             error = stderr.read().decode('utf-8', errors='replace')
-            ssh.close()
             
             return {
                 'success': 'Timeout' not in error and 'No Response' not in error,
@@ -840,6 +865,54 @@ class PyPNMAgent:
                 'error': error if error else None
             }
         except Exception as e:
+            # Connection might have died, clear it so next call reconnects
+            self._cm_proxy_ssh = None
+            return {'success': False, 'error': str(e)}
+    
+    def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
+        """Query multiple OIDs in a single SSH session using batch command."""
+        ssh = self._get_cm_proxy_ssh()
+        if not ssh:
+            return {'success': False, 'error': 'cm_proxy not configured or connection failed'}
+        
+        try:
+            # Build batch command: run all snmpwalks in parallel
+            # Format: (snmpwalk ... & snmpwalk ... & wait)
+            cmds = []
+            for name, oid in oids.items():
+                cmds.append(f"echo '=={name}==' && snmpwalk -v2c -c {community} -t 5 -r 1 {modem_ip} {oid}")
+            
+            # Join with ; to run sequentially (safer with SSH)
+            batch_cmd = ' ; '.join(cmds)
+            
+            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=60)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
+            
+            # Parse output by section markers
+            results = {}
+            current_section = None
+            current_lines = []
+            
+            for line in output.split('\n'):
+                if line.startswith('==') and line.endswith('=='):
+                    if current_section:
+                        results[current_section] = '\n'.join(current_lines)
+                    current_section = line.strip('=')
+                    current_lines = []
+                else:
+                    current_lines.append(line)
+            
+            if current_section:
+                results[current_section] = '\n'.join(current_lines)
+            
+            return {
+                'success': True,
+                'results': results,
+                'error': error if error else None
+            }
+        except Exception as e:
+            self._cm_proxy_ssh = None
             return {'success': False, 'error': str(e)}
     
     def _handle_pnm_rxmer(self, params: dict) -> dict:
@@ -1080,27 +1153,25 @@ class PyPNMAgent:
         
         self.logger.info(f"Getting channel info for modem {modem_ip}")
         
-        # Downstream OIDs
-        OID_DS_FREQ = '1.3.6.1.2.1.10.127.1.1.1.1.2'
-        OID_DS_POWER = '1.3.6.1.2.1.10.127.1.1.1.1.6'
-        OID_DS_MOD = '1.3.6.1.2.1.10.127.1.1.1.1.4'  # Modulation type
-        OID_DS_SNR = '1.3.6.1.2.1.10.127.1.1.4.1.5'
+        # Define all OIDs to query
+        oids = {
+            'ds_freq': '1.3.6.1.2.1.10.127.1.1.1.1.2',   # docsIfDownChannelFrequency
+            'ds_power': '1.3.6.1.2.1.10.127.1.1.1.1.6',  # docsIfDownChannelPower
+            'ds_snr': '1.3.6.1.2.1.10.127.1.1.4.1.5',    # docsIfSigQSignalNoise
+            'us_power': '1.3.6.1.4.1.4491.2.1.20.1.2.1.1', # docsIf3CmStatusUsTxPower
+        }
         
-        # Upstream OIDs
-        OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'
-        OID_US_POWER = '1.3.6.1.4.1.4491.2.1.20.1.2.1.1'
-        OID_US_T3_TIMEOUTS = '1.3.6.1.2.1.10.127.1.2.2.1.12'
-        OID_US_T4_TIMEOUTS = '1.3.6.1.2.1.10.127.1.2.2.1.13'
+        # Batch query all OIDs in single SSH command
+        batch_result = self._batch_query_modem(modem_ip, oids, community)
         
-        # Query all
-        ds_freq = self._query_modem_via_cm_proxy(modem_ip, OID_DS_FREQ, community, walk=True)
-        ds_power = self._query_modem_via_cm_proxy(modem_ip, OID_DS_POWER, community, walk=True)
-        ds_snr = self._query_modem_via_cm_proxy(modem_ip, OID_DS_SNR, community, walk=True)
-        us_power = self._query_modem_via_cm_proxy(modem_ip, OID_US_POWER, community, walk=True)
+        if not batch_result.get('success'):
+            return {'success': False, 'error': batch_result.get('error', 'Batch query failed')}
         
-        def parse_int_values(result, divisor=1):
+        results = batch_result.get('results', {})
+        
+        def parse_int_values(output_str, divisor=1):
             values = {}
-            for line in result.get('output', '').split('\n'):
+            for line in output_str.split('\n'):
                 if '=' in line:
                     try:
                         idx = line.split('=')[0].strip().split('.')[-1]
@@ -1111,10 +1182,10 @@ class PyPNMAgent:
                         pass
             return values
         
-        ds_freq_map = parse_int_values(ds_freq)
-        ds_power_map = parse_int_values(ds_power, 10)
-        ds_snr_map = parse_int_values(ds_snr, 10)
-        us_power_map = parse_int_values(us_power, 10)
+        ds_freq_map = parse_int_values(results.get('ds_freq', ''))
+        ds_power_map = parse_int_values(results.get('ds_power', ''), 10)
+        ds_snr_map = parse_int_values(results.get('ds_snr', ''), 10)
+        us_power_map = parse_int_values(results.get('us_power', ''), 10)
         
         downstream = []
         for idx in ds_freq_map:
