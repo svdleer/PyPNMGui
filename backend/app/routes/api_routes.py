@@ -1,10 +1,29 @@
 # PyPNM Web GUI - API Routes
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import json
+import logging
 from flask import jsonify, request, current_app
 from . import api_bp
 from app.models import MockDataProvider
 from app.core.cmts_provider import CMTSProvider
+
+# Redis for caching modem data
+try:
+    import redis
+    REDIS_HOST = os.environ.get('REDIS_HOST', 'eve-li-redis')
+    REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
+    REDIS_TTL = int(os.environ.get('REDIS_TTL', '300'))  # 5 min cache
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    # Test connection
+    redis_client.ping()
+    REDIS_AVAILABLE = True
+    logging.getLogger(__name__).info(f"Redis cache connected: {REDIS_HOST}:{REDIS_PORT}")
+except Exception as e:
+    REDIS_AVAILABLE = False
+    redis_client = None
+    logging.getLogger(__name__).warning(f"Redis not available: {e}")
 
 
 # ============== Cable Modem Endpoints ==============
@@ -276,6 +295,21 @@ def get_cmts_modems(hostname):
             "message": f"No IP address for CMTS '{hostname}'"
         }), 400
     
+    # Check Redis cache first (unless refresh requested)
+    use_cache = request.args.get('refresh', 'false').lower() != 'true'
+    cache_key = f"modems:{hostname}:{cmts_ip}"
+    
+    if use_cache and REDIS_AVAILABLE and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                logging.getLogger(__name__).info(f"Returning cached modems for {hostname}")
+                cached_data = json.loads(cached)
+                cached_data['cached'] = True
+                return jsonify(cached_data)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Redis cache read error: {e}")
+    
     # Get agent manager
     agent_manager = get_simple_agent_manager()
     if not agent_manager:
@@ -328,7 +362,7 @@ def get_cmts_modems(hostname):
         
         task_result = result.get('result', {})
         
-        return jsonify({
+        response_data = {
             "status": "success",
             "cmts_hostname": hostname,
             "cmts_ip": cmts_ip,
@@ -336,8 +370,19 @@ def get_cmts_modems(hostname):
             "cmts_type": cmts.get('Type'),
             "count": task_result.get('count', 0),
             "modems": task_result.get('modems', []),
-            "agent_id": agent.agent_id
-        })
+            "agent_id": agent.agent_id,
+            "cached": False
+        }
+        
+        # Cache result in Redis
+        if REDIS_AVAILABLE and redis_client and task_result.get('count', 0) > 0:
+            try:
+                redis_client.setex(cache_key, REDIS_TTL, json.dumps(response_data))
+                logging.getLogger(__name__).info(f"Cached {task_result.get('count')} modems for {hostname} (TTL={REDIS_TTL}s)")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Redis cache write error: {e}")
+        
+        return jsonify(response_data)
     
     except ValueError as e:
         return jsonify({
