@@ -7,6 +7,7 @@ import logging
 from flask import jsonify, request, current_app
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
+from app.core.simple_ws import get_simple_agent_manager
 
 # Redis for caching modem data
 try:
