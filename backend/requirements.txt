@@ -6,6 +6,9 @@ python-dotenv>=1.0.0
 gunicorn>=21.0.0
 redis>=5.0.0
 
+# PyPNM DOCSIS library for PNM analysis
+pypnm-docsis>=1.0.20.0
+
 # Simple WebSocket support for agents
 simple-websocket>=1.0.0
 flask-sock>=0.7.0
