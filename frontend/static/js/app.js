@@ -255,7 +255,10 @@ createApp({
                 const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/system-info`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ community: this.snmpCommunity })
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
                 });
                 
                 const data = await response.json();
@@ -283,7 +286,10 @@ createApp({
                 const dsResponse = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/ds-channels`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ community: this.snmpCommunity })
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
                 });
                 const dsData = await dsResponse.json();
                 
@@ -295,7 +301,10 @@ createApp({
                 const usResponse = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/us-channels`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ community: this.snmpCommunity })
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
                 });
                 const usData = await usResponse.json();
                 
@@ -323,6 +332,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
                         community: this.snmpCommunity,
                         channel_ids: [159]
                     })
@@ -358,7 +368,10 @@ createApp({
                 const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/spectrum`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ community: this.snmpCommunity })
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
                 });
                 
                 const data = await response.json();
@@ -386,7 +399,10 @@ createApp({
                 const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/event-log`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ community: this.snmpCommunity })
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
                 });
                 
                 const data = await response.json();
