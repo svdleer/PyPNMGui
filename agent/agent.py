@@ -900,6 +900,15 @@ class PyPNMAgent:
             
             self.logger.info(f"Executing SNMP batch query via subprocess SSH to {self.config.cm_proxy_host}")
             
+            # Test basic SSH connectivity first
+            test_result = subprocess.run(
+                ['ssh', ssh_target, 'echo "SSH_OK"'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            self.logger.info(f"SSH test: {test_result.stdout.strip()}, stderr: {test_result.stderr[:100] if test_result.stderr else 'none'}")
+            
             result = subprocess.run(
                 ['ssh', ssh_target, batch_cmd],
                 capture_output=True,
