@@ -257,7 +257,7 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
+                        community: 'm0d3m1nf0'  // Modem community, not CMTS community
                     })
                 });
                 
