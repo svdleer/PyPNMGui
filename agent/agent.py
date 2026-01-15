@@ -887,17 +887,19 @@ class PyPNMAgent:
         
         try:
             # Build batch command: run all snmpwalks sequentially
-            # Use timeout command if available to prevent hanging (10s per query for slower modems)
+            # Reduced timeout to 5s per OID for faster failure
             cmds = []
             for name, oid in oids.items():
                 # Try timeout command, fall back to plain snmpwalk if timeout not available
-                cmds.append(f"echo '=={name}==' && (timeout 10 snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1 || snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1)")
+                cmds.append(f"echo '=={name}==' && (timeout 5 snmpwalk -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1 || snmpwalk -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1)")
             
             # Join with ; to run sequentially 
             batch_cmd = ' ; '.join(cmds)
             
-            # Execute with overall timeout (10s per OID * number of OIDs + 10s buffer)
-            overall_timeout = len(oids) * 10 + 10
+            self.logger.debug(f"Executing batch SNMP query via cm_proxy")
+            
+            # Execute with overall timeout (5s per OID * number of OIDs + 5s buffer)
+            overall_timeout = len(oids) * 5 + 5
             stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
             
             # Read with timeout to prevent blocking
@@ -905,8 +907,11 @@ class PyPNMAgent:
             channel = stdout.channel
             channel.settimeout(overall_timeout)
             
+            self.logger.debug(f"Reading SNMP results from cm_proxy")
             output = stdout.read().decode('utf-8', errors='replace')
             error = stderr.read().decode('utf-8', errors='replace')
+            
+            self.logger.debug(f"Got {len(output)} bytes of output from SNMP query")
             
             # Check for common SNMP errors
             if 'No Such Object available on this agent at this OID' in output:
@@ -1192,7 +1197,13 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        self.logger.info(f"Getting channel info for modem {modem_ip}")
+        self.logger.info(f"Getting channel info for modem {modem_ip} via cm_proxy")
+        
+        # Check if cm_proxy is configured
+        if not self.config.get('cm_proxy'):
+            return {'success': False, 'error': 'cm_proxy not configured in agent_config.json'}
+        
+        self.logger.debug(f"cm_proxy config: {self.config.get('cm_proxy')}")
         
         # Define all OIDs to query
         oids = {
