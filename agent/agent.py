@@ -1200,10 +1200,10 @@ class PyPNMAgent:
         self.logger.info(f"Getting channel info for modem {modem_ip} via cm_proxy")
         
         # Check if cm_proxy is configured
-        if not self.config.get('cm_proxy'):
+        if not self.config.cm_proxy_host:
             return {'success': False, 'error': 'cm_proxy not configured in agent_config.json'}
         
-        self.logger.debug(f"cm_proxy config: {self.config.get('cm_proxy')}")
+        self.logger.debug(f"cm_proxy config: host={self.config.cm_proxy_host}, user={self.config.cm_proxy_user}")
         
         # Define all OIDs to query
         oids = {
