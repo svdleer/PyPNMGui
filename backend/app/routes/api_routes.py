@@ -904,3 +904,41 @@ def snmp_get():
         return handle_agent_result(result)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/snmp/walk', methods=['POST'])
+def snmp_walk():
+    """Execute SNMP WALK via agent."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    oid = data.get('oid')
+    
+    if not all([modem_ip, oid]):
+        return jsonify({
+            "status": "error",
+            "message": "modem_ip and oid required"
+        }), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('snmp_walk') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent with snmp_walk capability"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_walk',
+            params={
+                'target_ip': modem_ip,
+                'oid': oid,
+                'community': data.get('community', 'm0d3m1nf0')
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        return handle_agent_result(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
