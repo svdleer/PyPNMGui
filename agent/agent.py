@@ -895,10 +895,10 @@ class PyPNMAgent:
             import subprocess
             import os
             
-            # Build OID queries using snmpget (faster than snmpwalk for single values)
+            # Build OID queries using snmpwalk for DOCSIS tables
             oid_queries = []
             for name, oid in oids.items():
-                oid_queries.append(f"result=$(snmpget -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1); echo '{name}|'$result")
+                oid_queries.append(f"echo '=={name}==' ; snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1")
             
             # Join with ; to run sequentially
             batch_cmd = ' ; '.join(oid_queries)
@@ -929,17 +929,27 @@ class PyPNMAgent:
             error = result.stderr
             
             self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
-            self.logger.info(f"Raw output: {output}")
+            self.logger.info(f"Raw output preview: {output[:200]}...")
             
-            # Parse results by line (format: name|snmp_output)
+            # Parse results by section markers
             results = {}
-            for line in output.strip().split('\n'):
-                if '|' in line:
-                    parts = line.split('|', 1)
-                    if len(parts) == 2:
-                        name = parts[0].strip()
-                        data = parts[1].strip()
-                        results[name] = data
+            current_section = None
+            current_lines = []
+            
+            for line in output.split('\n'):
+                if line.startswith('==') and line.endswith('=='):
+                    # Save previous section
+                    if current_section:
+                        results[current_section] = '\n'.join(current_lines)
+                    # Start new section
+                    current_section = line.strip('=')
+                    current_lines = []
+                elif current_section:
+                    current_lines.append(line)
+            
+            # Save last section
+            if current_section:
+                results[current_section] = '\n'.join(current_lines)
             
             return {
                 'success': True,
