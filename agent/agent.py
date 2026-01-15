@@ -886,18 +886,18 @@ class PyPNMAgent:
             }
         
         try:
-            # Build batch command: run all snmpwalks sequentially with timeout
-            # Use timeout command to ensure each snmpwalk doesn't hang
+            # Build batch command: run all snmpwalks sequentially
+            # Use timeout command if available to prevent hanging (10s per query for slower modems)
             cmds = []
             for name, oid in oids.items():
-                # Wrap in timeout to prevent hanging (5s snmpwalk + 2s buffer = 7s per query)
-                cmds.append(f"echo '=={name}==' && timeout 7 snmpwalk -v2c -c {community} -t 5 -r 1 {modem_ip} {oid} 2>&1 || echo 'TIMEOUT'")
+                # Try timeout command, fall back to plain snmpwalk if timeout not available
+                cmds.append(f"echo '=={name}==' && (timeout 10 snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1 || snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1)")
             
             # Join with ; to run sequentially 
             batch_cmd = ' ; '.join(cmds)
             
-            # Execute with overall timeout (7s per OID * number of OIDs + 5s buffer)
-            overall_timeout = len(oids) * 7 + 5
+            # Execute with overall timeout (10s per OID * number of OIDs + 10s buffer)
+            overall_timeout = len(oids) * 10 + 10
             stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
             
             # Read with timeout to prevent blocking
@@ -909,15 +909,21 @@ class PyPNMAgent:
             error = stderr.read().decode('utf-8', errors='replace')
             
             # Check for common SNMP errors
-            if 'TIMEOUT' in output or 'Timeout' in error or 'Timeout' in output:
+            if 'No Such Object available on this agent at this OID' in output:
+                self.logger.warning(f"Some OIDs not available on modem {modem_ip}")
+                # Continue anyway - partial data is ok
+            
+            if 'Timeout: No Response' in output or 'Timeout: No Response' in error:
                 return {
                     'success': False,
-                    'error': f'SNMP timeout querying modem {modem_ip}. Modem may be offline or unreachable from cm_proxy'
+                    'error': f'SNMP timeout - no response from modem {modem_ip}. Modem may be offline or SNMP disabled'
                 }
-            if 'No Response' in error or 'No Response' in output:
+            
+            # Check if we got any useful data at all
+            if not output or len(output.strip()) < 10:
                 return {
                     'success': False,
-                    'error': f'No SNMP response from modem {modem_ip}. Verify modem is online and SNMP is enabled'
+                    'error': f'No SNMP data received from modem {modem_ip}. Error: {error[:200] if error else "Unknown"}'
                 }
             
             # Parse output by section markers
