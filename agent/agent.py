@@ -898,7 +898,7 @@ class PyPNMAgent:
             # Build OID queries using snmpwalk for DOCSIS tables
             oid_queries = []
             for name, oid in oids.items():
-                oid_queries.append(f"echo '=={name}==' ; snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1")
+                oid_queries.append(f"echo '=={name}==' ; snmpwalk -v2c -c {community} -t 10 -r 0 {modem_ip} {oid} 2>&1 || echo 'TIMEOUT'")
             
             # Join with ; to run sequentially
             batch_cmd = ' ; '.join(oid_queries)
