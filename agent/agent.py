@@ -881,24 +881,12 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
-        """Query multiple OIDs using the same method as _enrich_modems_parallel."""
+        """Query multiple OIDs using subprocess SSH (proven to work)."""
         if not self.config.cm_proxy_host:
-            return {
-                'success': False, 
-                'error': 'cm_proxy not configured'
-            }
+            return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
-            import paramiko
-            
-            # Use same SSH method as _enrich_modems_parallel
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(
-                self.config.cm_proxy_host, 
-                username=self.config.cm_proxy_user or 'svdleer',
-                timeout=30
-            )
+            import subprocess
             
             # Build batch command with section markers
             cmds = []
@@ -907,14 +895,19 @@ class PyPNMAgent:
             
             batch_cmd = ' ; '.join(cmds)
             
-            self.logger.info(f"Executing SNMP batch query via paramiko to {self.config.cm_proxy_host}")
+            # Simple subprocess SSH - no special options, use system SSH config
+            ssh_target = f"{self.config.cm_proxy_user or 'svdleer'}@{self.config.cm_proxy_host}"
             
-            # Execute command - same as _enrich_modems_parallel
-            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=120)
-            output = stdout.read().decode('utf-8', errors='replace')
-            error = stderr.read().decode('utf-8', errors='replace')
+            self.logger.info(f"Executing SNMP batch query via subprocess SSH to {self.config.cm_proxy_host}")
             
-            ssh.close()
+            result = subprocess.run(
+                ['ssh', ssh_target, batch_cmd],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            output = result.stdout
             
             self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
             
