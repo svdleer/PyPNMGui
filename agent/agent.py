@@ -900,16 +900,88 @@ class PyPNMAgent:
             
             # Execute with overall timeout (5s per OID * number of OIDs + 5s buffer)
             overall_timeout = len(oids) * 5 + 5
-            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
             
-            # Read with timeout to prevent blocking
-            import select
-            channel = stdout.channel
-            channel.settimeout(overall_timeout)
+            # Use threading to enforce timeout on SSH command
+            import threading
+            import queue
             
-            self.logger.debug(f"Reading SNMP results from cm_proxy")
-            output = stdout.read().decode('utf-8', errors='replace')
-            error = stderr.read().decode('utf-8', errors='replace')
+            result_queue = queue.Queue()
+            def _exec_ssh_command():
+                try:
+                    stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
+                    # Set non-blocking mode and read with select
+                    channel = stdout.channel
+                    channel.setblocking(0)
+                    
+                    import time
+                    start_time = time.time()
+                    output_chunks = []
+                    error_chunks = []
+                    
+                    while True:
+                        if time.time() - start_time > overall_timeout:
+                            result_queue.put(('timeout', None, None))
+                            return
+                        
+                        # Check if data is available
+                        if channel.recv_ready():
+                            chunk = channel.recv(4096)
+                            if chunk:
+                                output_chunks.append(chunk)
+                        
+                        if channel.recv_stderr_ready():
+                            chunk = channel.recv_stderr(4096)
+                            if chunk:
+                                error_chunks.append(chunk)
+                        
+                        # Check if command finished
+                        if channel.exit_status_ready():
+                            # Read remaining data
+                            while channel.recv_ready():
+                                output_chunks.append(channel.recv(4096))
+                            while channel.recv_stderr_ready():
+                                error_chunks.append(channel.recv_stderr(4096))
+                            break
+                        
+                        time.sleep(0.1)
+                    
+                    output = b''.join(output_chunks).decode('utf-8', errors='replace')
+                    error = b''.join(error_chunks).decode('utf-8', errors='replace')
+                    result_queue.put(('success', output, error))
+                except Exception as e:
+                    result_queue.put(('error', None, str(e)))
+            
+            # Start thread
+            thread = threading.Thread(target=_exec_ssh_command, daemon=True)
+            thread.start()
+            thread.join(timeout=overall_timeout + 2)
+            
+            if thread.is_alive():
+                self.logger.error(f"SSH command timed out after {overall_timeout + 2}s")
+                return {
+                    'success': False,
+                    'error': f'SSH command timeout - modem {modem_ip} query took too long'
+                }
+            
+            # Get result from queue
+            try:
+                status, output, error = result_queue.get_nowait()
+            except:
+                return {
+                    'success': False,
+                    'error': 'SSH command failed - no response from thread'
+                }
+            
+            if status == 'timeout':
+                return {
+                    'success': False,
+                    'error': f'SNMP query timeout - modem {modem_ip} not responding within {overall_timeout}s'
+                }
+            elif status == 'error':
+                return {
+                    'success': False,
+                    'error': f'SSH command error: {error}'
+                }
             
             self.logger.debug(f"Got {len(output)} bytes of output from SNMP query")
             
