@@ -1241,7 +1241,7 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        self.logger.info(f"Getting channel info for modem {modem_ip} via cm_proxy")
+        self.logger.info(f"Getting channel info for modem {modem_ip} via cm_proxy, community={community}")
         
         # Check if cm_proxy is configured
         if not self.config.cm_proxy_host:
