@@ -52,8 +52,8 @@ echo ""
 echo "=========================================="
 echo "Test 1: SSH Connection to CM Proxy"
 echo "=========================================="
-SSH_OPTS="-i $CM_PROXY_KEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes -o PasswordAuthentication=no"
-if ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "echo 'SSH OK'" 2>/dev/null | grep -q "SSH OK"; then
+SSH_OPTS="-i $CM_PROXY_KEY -o ConnectTimeout=10 -o StrictHostKeyChecking=no"
+if ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "echo 'SSH OK'" 2>&1 | grep -q "SSH OK"; then
     echo -e "${GREEN}✓ PASS${NC} - SSH connection to $CM_PROXY_HOST successful"
 else
     echo -e "${RED}✗ FAIL${NC} - Cannot SSH to $CM_PROXY_HOST"
