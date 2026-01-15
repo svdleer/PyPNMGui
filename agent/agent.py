@@ -881,56 +881,42 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
-        """Query multiple OIDs in a single SSH session using batch command.
-        
-        Uses subprocess SSH with efficient batch querying similar to _enrich_modems_parallel.
-        """
+        """Query multiple OIDs using the same method as _enrich_modems_parallel."""
         if not self.config.cm_proxy_host:
             return {
                 'success': False, 
-                'error': 'cm_proxy not configured. Set up cm_proxy in agent_config.json'
+                'error': 'cm_proxy not configured'
             }
         
         try:
-            import subprocess
-            import os
+            import paramiko
             
-            # Build OID queries using snmpwalk for DOCSIS tables
-            oid_queries = []
-            for name, oid in oids.items():
-                oid_queries.append(f"echo '=={name}==' ; snmpwalk -v2c -c {community} -t 10 -r 0 {modem_ip} {oid} 2>&1 || echo 'TIMEOUT'")
-            
-            # Join with ; to run sequentially
-            batch_cmd = ' ; '.join(oid_queries)
-            
-            # Build SSH command with key file
-            ssh_user = self.config.cm_proxy_user or 'svdleer'
-            ssh_host = self.config.cm_proxy_host
-            key_file = os.path.expanduser(self.config.cm_proxy_key) if self.config.cm_proxy_key else None
-            
-            ssh_args = ['ssh']
-            if key_file:
-                ssh_args.extend(['-i', key_file])
-            ssh_args.extend(['-o', 'StrictHostKeyChecking=accept-new'])
-            ssh_args.append(f'{ssh_user}@{ssh_host}')
-            ssh_args.append(batch_cmd)
-            
-            self.logger.info(f"Executing SNMP batch query via subprocess SSH to {ssh_host}")
-            
-            # Execute with timeout
-            overall_timeout = len(oids) * 5 + 10
-            result = subprocess.run(
-                ssh_args,
-                capture_output=True,
-                text=True,
-                timeout=overall_timeout
+            # Use same SSH method as _enrich_modems_parallel
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(
+                self.config.cm_proxy_host, 
+                username=self.config.cm_proxy_user or 'svdleer',
+                timeout=30
             )
             
-            output = result.stdout
-            error = result.stderr
+            # Build batch command with section markers
+            cmds = []
+            for name, oid in oids.items():
+                cmds.append(f"echo '=={name}==' ; snmpwalk -v2c -c {community} -t 10 -r 0 {modem_ip} {oid} 2>&1")
+            
+            batch_cmd = ' ; '.join(cmds)
+            
+            self.logger.info(f"Executing SNMP batch query via paramiko to {self.config.cm_proxy_host}")
+            
+            # Execute command - same as _enrich_modems_parallel
+            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=120)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
+            
+            ssh.close()
             
             self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
-            self.logger.info(f"Raw output preview: {output[:200]}...")
             
             # Parse results by section markers
             results = {}
@@ -939,16 +925,13 @@ class PyPNMAgent:
             
             for line in output.split('\n'):
                 if line.startswith('==') and line.endswith('=='):
-                    # Save previous section
                     if current_section:
                         results[current_section] = '\n'.join(current_lines)
-                    # Start new section
                     current_section = line.strip('=')
                     current_lines = []
                 elif current_section:
                     current_lines.append(line)
             
-            # Save last section
             if current_section:
                 results[current_section] = '\n'.join(current_lines)
             
