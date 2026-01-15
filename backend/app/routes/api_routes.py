@@ -825,3 +825,82 @@ def get_connected_agents():
         "count": len(agents),
         "agents": agents
     })
+
+
+@api_bp.route('/snmp/set', methods=['POST'])
+def snmp_set():
+    """Execute SNMP SET via agent."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    oid = data.get('oid')
+    value = data.get('value')
+    
+    if not all([modem_ip, oid, value]):
+        return jsonify({
+            "status": "error",
+            "message": "modem_ip, oid, and value required"
+        }), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('snmp_set') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent with snmp_set capability"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_set',
+            params={
+                'target_ip': modem_ip,
+                'oid': oid,
+                'value': value,
+                'type': data.get('type', 'i'),
+                'community': data.get('community', 'm0d3m1nf0')
+            },
+            timeout=30
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=30)
+        return handle_agent_result(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/snmp/get', methods=['POST'])
+def snmp_get():
+    """Execute SNMP GET via agent."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    oid = data.get('oid')
+    
+    if not all([modem_ip, oid]):
+        return jsonify({
+            "status": "error",
+            "message": "modem_ip and oid required"
+        }), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('snmp_get') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent with snmp_get capability"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_get',
+            params={
+                'target_ip': modem_ip,
+                'oid': oid,
+                'community': data.get('community', 'm0d3m1nf0')
+            },
+            timeout=30
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=30)
+        return handle_agent_result(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
