@@ -883,129 +883,93 @@ class PyPNMAgent:
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
         """Query multiple OIDs in a single SSH session using batch command.
         
-        Requires cm_proxy SSH configuration. The proxy must have network access to modem IPs,
-        typically via SSH tunnel, socat, or direct routing.
+        Uses subprocess SSH instead of paramiko for reliable execution.
         """
-        ssh = self._get_cm_proxy_ssh()
-        if not ssh:
+        if not self.config.cm_proxy_host:
             return {
                 'success': False, 
-                'error': 'cm_proxy not configured. Set up cm_proxy in agent_config.json with SSH tunnel/socat to reach modem network'
+                'error': 'cm_proxy not configured. Set up cm_proxy in agent_config.json'
             }
         
         try:
+            import subprocess
+            import os
+            
             # Build batch command: run all snmpwalks sequentially
-            # Reduced timeout to 5s per OID for faster failure
             cmds = []
             for name, oid in oids.items():
-                # Try timeout command, fall back to plain snmpwalk if timeout not available
-                cmds.append(f"echo '=={name}==' && (timeout 5 snmpwalk -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1 || snmpwalk -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1)")
+                cmds.append(f"echo '=={name}==' && timeout 5 snmpwalk -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1")
             
-            # Join with ; to run sequentially 
             batch_cmd = ' ; '.join(cmds)
             
-            self.logger.info(f"[DEBUG] Starting SNMP batch query for {modem_ip} with {len(oids)} OIDs")
-            self.logger.debug(f"Executing batch SNMP query via cm_proxy")
+            # Build SSH command
+            ssh_user = self.config.cm_proxy_user or 'svdleer'
+            ssh_host = self.config.cm_proxy_host
+            key_file = os.path.expanduser(self.config.cm_proxy_key) if self.config.cm_proxy_key else None
             
-            # Execute with overall timeout (5s per OID * number of OIDs + 5s buffer)
-            overall_timeout = len(oids) * 5 + 5
+            ssh_args = ['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new']
+            if key_file:
+                ssh_args.extend(['-i', key_file])
+            ssh_args.append(f'{ssh_user}@{ssh_host}')
+            ssh_args.append(batch_cmd)
             
-            self.logger.info(f"[DEBUG] Creating thread for SSH command execution")
-            # Use threading to enforce timeout on SSH command
-            import threading
-            import queue
+            self.logger.info(f"Executing SNMP query via subprocess SSH to {ssh_host}")
             
-            result_queue = queue.Queue()
-            def _exec_ssh_command():
-                self.logger.info(f"[DEBUG] Thread started, executing SSH command")
-                try:
-                    stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
-                    # Set non-blocking mode and read with select
-                    channel = stdout.channel
-                    channel.setblocking(0)
-                    
-                    import time
-                    start_time = time.time()
-                    output_chunks = []
-                    error_chunks = []
-                    
-                    while True:
-                        if time.time() - start_time > overall_timeout:
-                            result_queue.put(('timeout', None, None))
-                            return
-                        
-                        # Check if data is available
-                        if channel.recv_ready():
-                            chunk = channel.recv(4096)
-                            if chunk:
-                                output_chunks.append(chunk)
-                        
-                        if channel.recv_stderr_ready():
-                            chunk = channel.recv_stderr(4096)
-                            if chunk:
-                                error_chunks.append(chunk)
-                        
-                        # Check if command finished
-                        if channel.exit_status_ready():
-                            # Read remaining data
-                            while channel.recv_ready():
-                                output_chunks.append(channel.recv(4096))
-                            while channel.recv_stderr_ready():
-                                error_chunks.append(channel.recv_stderr(4096))
-                            break
-                        
-                        time.sleep(0.1)
-                    
-                    output = b''.join(output_chunks).decode('utf-8', errors='replace')
-                    error = b''.join(error_chunks).decode('utf-8', errors='replace')
-                    result_queue.put(('success', output, error))
-                except Exception as e:
-                    result_queue.put(('error', None, str(e)))
+            # Execute with timeout
+            overall_timeout = len(oids) * 6 + 10
+            result = subprocess.run(
+                ssh_args,
+                capture_output=True,
+                text=True,
+                timeout=overall_timeout
+            )
             
-            # Start thread
-            thread = threading.Thread(target=_exec_ssh_command, daemon=True)
-            thread.start()
-            thread.join(timeout=overall_timeout + 2)
+            output = result.stdout
+            error = result.stderr
             
-            if thread.is_alive():
-                self.logger.error(f"SSH command timed out after {overall_timeout + 2}s")
-                return {
-                    'success': False,
-                    'error': f'SSH command timeout - modem {modem_ip} query took too long'
-                }
-            
-            # Get result from queue
-            try:
-                status, output, error = result_queue.get_nowait()
-            except:
-                return {
-                    'success': False,
-                    'error': 'SSH command failed - no response from thread'
-                }
-            
-            if status == 'timeout':
-                return {
-                    'success': False,
-                    'error': f'SNMP query timeout - modem {modem_ip} not responding within {overall_timeout}s'
-                }
-            elif status == 'error':
-                return {
-                    'success': False,
-                    'error': f'SSH command error: {error}'
-                }
-            
-            self.logger.debug(f"Got {len(output)} bytes of output from SNMP query")
-            
-            # Check for common SNMP errors
-            if 'No Such Object available on this agent at this OID' in output:
-                self.logger.warning(f"Some OIDs not available on modem {modem_ip}")
-                # Continue anyway - partial data is ok
+            self.logger.info(f"SSH command completed, got {len(output)} bytes")
             
             if 'Timeout: No Response' in output or 'Timeout: No Response' in error:
                 return {
                     'success': False,
-                    'error': f'SNMP timeout - no response from modem {modem_ip}. Modem may be offline or SNMP disabled'
+                    'error': f'SNMP timeout - no response from modem {modem_ip}'
                 }
+            
+            # Parse results by section
+            results = {}
+            current_section = None
+            current_lines = []
+            
+            for line in output.split('\n'):
+                if line.startswith('==') and line.endswith('=='):
+                    if current_section:
+                        results[current_section] = '\n'.join(current_lines)
+                    current_section = line.strip('=')
+                    current_lines = []
+                elif current_section:
+                    current_lines.append(line)
+            
+            if current_section:
+                results[current_section] = '\n'.join(current_lines)
+            
+            return {
+                'success': True,
+                'results': results,
+                'raw_output': output
+            }
+            
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"SSH command timeout after {overall_timeout}s")
+            return {
+                'success': False,
+                'error': f'SSH command timeout - modem {modem_ip} query took too long'
+            }
+        except Exception as e:
+            self.logger.error(f"SSH command failed: {e}")
+            return {
+                'success': False,
+                'error': f'SSH command failed: {str(e)}'
+            }
             
             # Check if we got any useful data at all
             if not output or len(output.strip()) < 10:
@@ -1286,7 +1250,7 @@ class PyPNMAgent:
         if not self.config.cm_proxy_host:
             return {'success': False, 'error': 'cm_proxy not configured in agent_config.json'}
         
-        self.logger.debug(f"cm_proxy config: host={self.config.cm_proxy_host}, user={self.config.cm_proxy_user}")
+        self.logger.info(f"cm_proxy config: host={self.config.cm_proxy_host}, user={self.config.cm_proxy_user}")
         
         # Define all OIDs to query
         oids = {
@@ -1296,8 +1260,12 @@ class PyPNMAgent:
             'us_power': '1.3.6.1.4.1.4491.2.1.20.1.2.1.1', # docsIf3CmStatusUsTxPower
         }
         
+        self.logger.info(f"Calling _batch_query_modem for {modem_ip}")
+        
         # Batch query all OIDs in single SSH command
         batch_result = self._batch_query_modem(modem_ip, oids, community)
+        
+        self.logger.info(f"_batch_query_modem returned: success={batch_result.get('success')}")
         
         if not batch_result.get('success'):
             return {'success': False, 'error': batch_result.get('error', 'Batch query failed')}
