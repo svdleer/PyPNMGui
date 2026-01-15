@@ -929,6 +929,7 @@ class PyPNMAgent:
             error = result.stderr
             
             self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
+            self.logger.info(f"Raw output: {output}")
             
             # Parse results by line (format: name|snmp_output)
             results = {}
