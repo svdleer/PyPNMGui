@@ -24,19 +24,44 @@ echo ""
 echo "Configuration:"
 echo "  CM Proxy:      $CM_PROXY_HOST"
 echo "  CM Proxy User: $CM_PROXY_USER"
+echo "  SSH Key:       $CM_PROXY_KEY"
 echo "  Test Modem IP: $TEST_MODEM_IP"
 echo "  SNMP Community: $SNMP_COMMUNITY"
+echo ""
+
+# Test 0: SSH Key Check
+echo "=========================================="
+echo "Test 0: SSH Key Verification"
+echo "=========================================="
+if [ ! -f "$CM_PROXY_KEY" ]; then
+    echo -e "${RED}✗ FAIL${NC} - SSH key not found: $CM_PROXY_KEY"
+    echo "  Set CM_PROXY_KEY environment variable to correct path"
+    exit 1
+fi
+
+KEY_PERMS=$(stat -c %a "$CM_PROXY_KEY" 2>/dev/null || stat -f %A "$CM_PROXY_KEY" 2>/dev/null)
+if [ "$KEY_PERMS" != "600" ] && [ "$KEY_PERMS" != "400" ]; then
+    echo -e "${YELLOW}⚠ WARNING${NC} - SSH key permissions are $KEY_PERMS (should be 600 or 400)"
+    echo "  Run: chmod 600 $CM_PROXY_KEY"
+fi
+
+echo -e "${GREEN}✓ PASS${NC} - SSH key exists: $CM_PROXY_KEY"
 echo ""
 
 # Test 1: SSH connection to proxy
 echo "=========================================="
 echo "Test 1: SSH Connection to CM Proxy"
 echo "=========================================="
-if ssh -i "$CM_PROXY_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no "$CM_PROXY_USER@$CM_PROXY_HOST" "echo 'SSH OK'" 2>/dev/null | grep -q "SSH OK"; then
+SSH_OPTS="-i $CM_PROXY_KEY -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes -o PasswordAuthentication=no"
+if ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "echo 'SSH OK'" 2>/dev/null | grep -q "SSH OK"; then
     echo -e "${GREEN}✓ PASS${NC} - SSH connection to $CM_PROXY_HOST successful"
 else
     echo -e "${RED}✗ FAIL${NC} - Cannot SSH to $CM_PROXY_HOST"
-    echo "  Check: SSH key, hostname, firewall"
+    echo "  Possible issues:"
+    echo "    - SSH key not in authorized_keys on $CM_PROXY_HOST"
+    echo "    - Wrong SSH key file"
+    echo "    - Firewall blocking SSH"
+    echo "  Try manually: ssh -i $CM_PROXY_KEY $CM_PROXY_USER@$CM_PROXY_HOST"
     exit 1
 fi
 echo ""
@@ -45,7 +70,7 @@ echo ""
 echo "=========================================="
 echo "Test 2: SNMP Tools on CM Proxy"
 echo "=========================================="
-if ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "which snmpwalk" >/dev/null 2>&1; then
+if ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "which snmpwalk" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ PASS${NC} - snmpwalk is installed on $CM_PROXY_HOST"
 else
     echo -e "${RED}✗ FAIL${NC} - snmpwalk not found on $CM_PROXY_HOST"
@@ -59,7 +84,7 @@ echo "=========================================="
 echo "Test 3: Direct SNMP Query (SSH + snmpwalk)"
 echo "=========================================="
 echo "Running: ssh $CM_PROXY_HOST 'snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.2.1.1.1.0'"
-SNMP_RESULT=$(ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "timeout 10 snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.2.1.1.1.0 2>&1" || echo "FAILED")
+SNMP_RESULT=$(ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "timeout 10 snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.2.1.1.1.0 2>&1" || echo "FAILED")
 
 if echo "$SNMP_RESULT" | grep -q "STRING:"; then
     echo -e "${GREEN}✓ PASS${NC} - SNMP query successful"
@@ -88,7 +113,7 @@ BATCH_CMD+="echo '==ds_power==' && timeout 7 snmpwalk -v2c -c $SNMP_COMMUNITY -t
 BATCH_CMD+="echo '==ds_snr==' && timeout 7 snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.2.1.10.127.1.1.4.1.5 2>&1 | head -5 ; "
 BATCH_CMD+="echo '==us_power==' && timeout 7 snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.4.1.4491.2.1.20.1.2.1.1 2>&1 | head -5"
 
-BATCH_RESULT=$(ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "$BATCH_CMD" 2>&1)
+BATCH_RESULT=$(ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "$BATCH_CMD" 2>&1)
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 
@@ -111,7 +136,7 @@ echo ""
 echo "=========================================="
 echo "Test 5: Timeout Command Availability"
 echo "=========================================="
-if ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "which timeout" >/dev/null 2>&1; then
+if ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "which timeout" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ PASS${NC} - 'timeout' command available"
 else
     echo -e "${YELLOW}⚠ WARNING${NC} - 'timeout' command not found"
@@ -124,7 +149,7 @@ echo ""
 echo "=========================================="
 echo "Test 6: Network Latency to Modem"
 echo "=========================================="
-PING_RESULT=$(ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "ping -c 3 -W 2 $TEST_MODEM_IP 2>&1" || echo "FAILED")
+PING_RESULT=$(ssh $SSH_OPTS "$CM_PROXY_USER@$CM_PROXY_HOST" "ping -c 3 -W 2 $TEST_MODEM_IP 2>&1" || echo "FAILED")
 
 if echo "$PING_RESULT" | grep -q "3 received"; then
     AVG_TIME=$(echo "$PING_RESULT" | grep "avg" | sed 's/.*= [^/]*\/\([^/]*\)\/.*/\1/')
