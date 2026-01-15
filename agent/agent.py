@@ -823,9 +823,17 @@ class PyPNMAgent:
             try:
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                # Get key file path, expanding ~ to home directory
+                key_file = None
+                if self.config.cm_proxy_key:
+                    key_file = os.path.expanduser(self.config.cm_proxy_key)
+                    self.logger.debug(f"Using SSH key: {key_file}")
+                
                 ssh.connect(
                     self.config.cm_proxy_host,
                     username=self.config.cm_proxy_user or 'svdleer',
+                    key_filename=key_file,
                     timeout=30
                 )
                 self._cm_proxy_ssh = ssh
