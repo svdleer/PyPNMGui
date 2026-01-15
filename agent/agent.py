@@ -873,10 +873,17 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
-        """Query multiple OIDs in a single SSH session using batch command."""
+        """Query multiple OIDs in a single SSH session using batch command.
+        
+        Requires cm_proxy SSH configuration. The proxy must have network access to modem IPs,
+        typically via SSH tunnel, socat, or direct routing.
+        """
         ssh = self._get_cm_proxy_ssh()
         if not ssh:
-            return {'success': False, 'error': 'cm_proxy not configured or connection failed'}
+            return {
+                'success': False, 
+                'error': 'cm_proxy not configured. Set up cm_proxy in agent_config.json with SSH tunnel/socat to reach modem network'
+            }
         
         try:
             # Build batch command: run all snmpwalks in parallel
@@ -891,6 +898,18 @@ class PyPNMAgent:
             stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=60)
             output = stdout.read().decode('utf-8', errors='replace')
             error = stderr.read().decode('utf-8', errors='replace')
+            
+            # Check for common SNMP errors
+            if 'Timeout' in error or 'Timeout' in output:
+                return {
+                    'success': False,
+                    'error': f'SNMP timeout - modem {modem_ip} not reachable. Check cm_proxy network access/routing/tunnel to modem network'
+                }
+            if 'No Response' in error or 'No Response' in output:
+                return {
+                    'success': False,
+                    'error': f'No SNMP response from modem {modem_ip}. Verify modem is online and cm_proxy can route to modem network'
+                }
             
             # Parse output by section markers
             results = {}
@@ -1146,24 +1165,19 @@ class PyPNMAgent:
         }
     
     def _handle_pnm_channel_info(self, params: dict) -> dict:
-        """Get comprehensive channel info (DS/US power, frequency, modulation)."""
-        # DISABLED: Direct modem SNMP queries via IP do not work in most networks
-        # Modem IPs are typically in isolated management networks or behind NAT
-        # Use CMTS-based queries instead (cmts_get_modem_info with MAC address)
-        return {
-            'success': False, 
-            'error': 'Direct modem SNMP not supported. Use CMTS queries instead: /api/cmts/<hostname>/modems/<mac>'
-        }
+        """Get comprehensive channel info (DS/US power, frequency, modulation).
         
-        # Original implementation kept for reference:
-        # modem_ip = params.get('modem_ip')
-        # community = params.get('community', 'm0d3m1nf0')
-        # mac_address = params.get('mac_address')
-        # 
-        # if not modem_ip:
-        #     return {'success': False, 'error': 'modem_ip required'}
-        # 
-        # self.logger.info(f"Getting channel info for modem {modem_ip}")
+        Requires cm_proxy configuration with SSH tunnel or socat to reach modem IPs.
+        Modems must be reachable via SNMP through the configured proxy.
+        """
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        self.logger.info(f"Getting channel info for modem {modem_ip}")
         
         # Define all OIDs to query
         oids = {
