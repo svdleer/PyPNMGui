@@ -32,7 +32,7 @@
         "host": "hop-access1-sh.ext.oss.local",
         "port": 22,
         "username": "pnm-agent",
-        "key_file": "~/.ssh/id_rsa"
+        "key_file": "~/.ssh/id_ed25519"
     },
     
     "tftp_server": {
