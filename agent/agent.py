@@ -883,7 +883,7 @@ class PyPNMAgent:
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
         """Query multiple OIDs in a single SSH session using batch command.
         
-        Uses subprocess SSH instead of paramiko for reliable execution.
+        Uses subprocess SSH with efficient batch querying similar to _enrich_modems_parallel.
         """
         if not self.config.cm_proxy_host:
             return {
@@ -895,12 +895,13 @@ class PyPNMAgent:
             import subprocess
             import os
             
-            # Build batch command: run all snmpwalks sequentially
-            cmds = []
+            # Build OID queries using snmpget (faster than snmpwalk for single values)
+            oid_queries = []
             for name, oid in oids.items():
-                cmds.append(f"echo '=={name}==' && snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1")
+                oid_queries.append(f"result=$(snmpget -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>/dev/null); echo '{name}|'$result")
             
-            batch_cmd = ' ; '.join(cmds)
+            # Join with ; to run sequentially
+            batch_cmd = ' ; '.join(oid_queries)
             
             # Build SSH command
             ssh_user = self.config.cm_proxy_user or 'svdleer'
@@ -913,11 +914,10 @@ class PyPNMAgent:
             ssh_args.append(f'{ssh_user}@{ssh_host}')
             ssh_args.append(batch_cmd)
             
-            self.logger.info(f"Executing SNMP query via subprocess SSH to {ssh_host}")
-            self.logger.info(f"SSH command: {' '.join(ssh_args[:6])}... '{batch_cmd[:100]}...'")
+            self.logger.info(f"Executing SNMP batch query via subprocess SSH to {ssh_host}")
             
             # Execute with timeout
-            overall_timeout = len(oids) * 6 + 10
+            overall_timeout = len(oids) * 5 + 10
             result = subprocess.run(
                 ssh_args,
                 capture_output=True,
@@ -928,32 +928,17 @@ class PyPNMAgent:
             output = result.stdout
             error = result.stderr
             
-            self.logger.info(f"SSH command completed, got {len(output)} bytes stdout, {len(error)} bytes stderr")
-            self.logger.info(f"SSH stdout: {output[:500] if output else 'empty'}")
-            self.logger.info(f"SSH stderr first 200: {error[:200] if error else 'empty'}")
+            self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
             
-            if 'Timeout: No Response' in output or 'Timeout: No Response' in error:
-                return {
-                    'success': False,
-                    'error': f'SNMP timeout - no response from modem {modem_ip}'
-                }
-            
-            # Parse results by section
+            # Parse results by line (format: name|snmp_output)
             results = {}
-            current_section = None
-            current_lines = []
-            
-            for line in output.split('\n'):
-                if line.startswith('==') and line.endswith('=='):
-                    if current_section:
-                        results[current_section] = '\n'.join(current_lines)
-                    current_section = line.strip('=')
-                    current_lines = []
-                elif current_section:
-                    current_lines.append(line)
-            
-            if current_section:
-                results[current_section] = '\n'.join(current_lines)
+            for line in output.strip().split('\n'):
+                if '|' in line:
+                    parts = line.split('|', 1)
+                    if len(parts) == 2:
+                        name = parts[0].strip()
+                        data = parts[1].strip()
+                        results[name] = data
             
             return {
                 'success': True,
