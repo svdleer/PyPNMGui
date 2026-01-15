@@ -19,11 +19,11 @@ try:
     # Test connection
     redis_client.ping()
     REDIS_AVAILABLE = True
-    logging.getLogger(__name__).info(f"Redis cache connected: {REDIS_HOST}:{REDIS_PORT}")
+    print(f"[INFO] Redis cache connected: {REDIS_HOST}:{REDIS_PORT}", flush=True)
 except Exception as e:
     REDIS_AVAILABLE = False
     redis_client = None
-    logging.getLogger(__name__).warning(f"Redis not available: {e}")
+    print(f"[WARNING] Redis not available: {e}", flush=True)
 
 
 # Helper function to handle agent task results

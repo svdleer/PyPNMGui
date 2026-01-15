@@ -49,6 +49,7 @@ services:
       - https_proxy=
     networks:
       - pypnm-net
+      - eve-li-web_default
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
       interval: 30s
@@ -89,3 +90,5 @@ volumes:
 networks:
   pypnm-net:
     driver: bridge
+  eve-li-web_default:
+    external: true
