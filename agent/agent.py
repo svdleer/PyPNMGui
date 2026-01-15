@@ -903,12 +903,15 @@ class PyPNMAgent:
             # Join with ; to run sequentially
             batch_cmd = ' ; '.join(oid_queries)
             
-            # Build SSH command - use SSH config and ControlMaster if available
+            # Build SSH command with key file
             ssh_user = self.config.cm_proxy_user or 'svdleer'
             ssh_host = self.config.cm_proxy_host
+            key_file = os.path.expanduser(self.config.cm_proxy_key) if self.config.cm_proxy_key else None
             
             ssh_args = ['ssh']
-            # Don't force BatchMode or StrictHostKeyChecking - respect SSH config
+            if key_file:
+                ssh_args.extend(['-i', key_file])
+            ssh_args.extend(['-o', 'StrictHostKeyChecking=accept-new'])
             ssh_args.append(f'{ssh_user}@{ssh_host}')
             ssh_args.append(batch_cmd)
             
