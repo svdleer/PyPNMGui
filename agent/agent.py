@@ -886,29 +886,38 @@ class PyPNMAgent:
             }
         
         try:
-            # Build batch command: run all snmpwalks in parallel
-            # Format: (snmpwalk ... & snmpwalk ... & wait)
+            # Build batch command: run all snmpwalks sequentially with timeout
+            # Use timeout command to ensure each snmpwalk doesn't hang
             cmds = []
             for name, oid in oids.items():
-                cmds.append(f"echo '=={name}==' && snmpwalk -v2c -c {community} -t 5 -r 1 {modem_ip} {oid}")
+                # Wrap in timeout to prevent hanging (5s snmpwalk + 2s buffer = 7s per query)
+                cmds.append(f"echo '=={name}==' && timeout 7 snmpwalk -v2c -c {community} -t 5 -r 1 {modem_ip} {oid} 2>&1 || echo 'TIMEOUT'")
             
-            # Join with ; to run sequentially (safer with SSH)
+            # Join with ; to run sequentially 
             batch_cmd = ' ; '.join(cmds)
             
-            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=60)
+            # Execute with overall timeout (7s per OID * number of OIDs + 5s buffer)
+            overall_timeout = len(oids) * 7 + 5
+            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
+            
+            # Read with timeout to prevent blocking
+            import select
+            channel = stdout.channel
+            channel.settimeout(overall_timeout)
+            
             output = stdout.read().decode('utf-8', errors='replace')
             error = stderr.read().decode('utf-8', errors='replace')
             
             # Check for common SNMP errors
-            if 'Timeout' in error or 'Timeout' in output:
+            if 'TIMEOUT' in output or 'Timeout' in error or 'Timeout' in output:
                 return {
                     'success': False,
-                    'error': f'SNMP timeout - modem {modem_ip} not reachable. Check cm_proxy network access/routing/tunnel to modem network'
+                    'error': f'SNMP timeout querying modem {modem_ip}. Modem may be offline or unreachable from cm_proxy'
                 }
             if 'No Response' in error or 'No Response' in output:
                 return {
                     'success': False,
-                    'error': f'No SNMP response from modem {modem_ip}. Verify modem is online and cm_proxy can route to modem network'
+                    'error': f'No SNMP response from modem {modem_ip}. Verify modem is online and SNMP is enabled'
                 }
             
             # Parse output by section markers
