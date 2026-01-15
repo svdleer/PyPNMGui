@@ -898,7 +898,7 @@ class PyPNMAgent:
             # Build OID queries using snmpget (faster than snmpwalk for single values)
             oid_queries = []
             for name, oid in oids.items():
-                oid_queries.append(f"result=$(snmpget -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>/dev/null); echo '{name}|'$result")
+                oid_queries.append(f"result=$(snmpget -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1); echo '{name}|'$result")
             
             # Join with ; to run sequentially
             batch_cmd = ' ; '.join(oid_queries)
