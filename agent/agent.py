@@ -1147,14 +1147,23 @@ class PyPNMAgent:
     
     def _handle_pnm_channel_info(self, params: dict) -> dict:
         """Get comprehensive channel info (DS/US power, frequency, modulation)."""
-        modem_ip = params.get('modem_ip')
-        community = params.get('community', 'm0d3m1nf0')
-        mac_address = params.get('mac_address')
+        # DISABLED: Direct modem SNMP queries via IP do not work in most networks
+        # Modem IPs are typically in isolated management networks or behind NAT
+        # Use CMTS-based queries instead (cmts_get_modem_info with MAC address)
+        return {
+            'success': False, 
+            'error': 'Direct modem SNMP not supported. Use CMTS queries instead: /api/cmts/<hostname>/modems/<mac>'
+        }
         
-        if not modem_ip:
-            return {'success': False, 'error': 'modem_ip required'}
-        
-        self.logger.info(f"Getting channel info for modem {modem_ip}")
+        # Original implementation kept for reference:
+        # modem_ip = params.get('modem_ip')
+        # community = params.get('community', 'm0d3m1nf0')
+        # mac_address = params.get('mac_address')
+        # 
+        # if not modem_ip:
+        #     return {'success': False, 'error': 'modem_ip required'}
+        # 
+        # self.logger.info(f"Getting channel info for modem {modem_ip}")
         
         # Define all OIDs to query
         oids = {
