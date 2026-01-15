@@ -17,13 +17,12 @@ LABEL description="PyPNM Remote Agent for Jump Server deployment"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client \
     snmp \
-    snmp-mibs-downloader \
     iputils-ping \
     curl \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Enable MIBs
+# Enable MIBs (snmp-mibs-downloader not available in Debian Trixie)
 RUN sed -i 's/^mibs :$/# mibs :/' /etc/snmp/snmp.conf 2>/dev/null || true
 
 # Create app user (non-root)

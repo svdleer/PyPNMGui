@@ -6,12 +6,6 @@ FROM python:3.11-slim
 LABEL maintainer="PyPNM Team"
 LABEL description="PyPNM Web GUI Server with WebSocket agent support"
 
-# Build argument for proxy (use --build-arg HTTP_PROXY=... when building)
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ENV http_proxy=${HTTP_PROXY}
-ENV https_proxy=${HTTPS_PROXY}
-
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -27,9 +21,9 @@ WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Clear proxy after install (not needed at runtime)
-ENV http_proxy=
-ENV https_proxy=
+# Bust cache for code copy
+ARG CACHEBUST=1
+RUN echo "Cache bust: $CACHEBUST"
 
 # Copy application code
 COPY backend/ ./
