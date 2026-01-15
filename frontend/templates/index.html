@@ -297,29 +297,69 @@
                                     </tr>
                                 </table>
                                 
-                                <!-- System Info (loaded separately) -->
-                                <div v-if="systemInfo">
+                                <!-- Channel Info (loaded separately) -->
+                                <div v-if="systemInfo && systemInfo.downstream">
                                     <hr>
-                                    <h6><i class="bi bi-info-circle me-1"></i>System Details</h6>
-                                    <table class="table table-sm">
-                                        <tr>
-                                            <th>Software</th>
-                                            <td>{{ systemInfo.software_version }}</td>
-                                        </tr>
-                                        <tr>
-                                            <th>Hardware</th>
-                                            <td>{{ systemInfo.hardware_version }}</td>
-                                        </tr>
-                                        <tr>
-                                            <th>Uptime</th>
-                                            <td>{{ systemInfo.uptime_formatted }}</td>
-                                        </tr>
-                                    </table>
+                                    <h6><i class="bi bi-broadcast me-1"></i>Channel Information</h6>
+                                    
+                                    <div class="mb-3">
+                                        <strong>Downstream ({{ systemInfo.downstream.length }} channels)</strong>
+                                        <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                                            <table class="table table-sm table-striped">
+                                                <thead style="position: sticky; top: 0; background: white;">
+                                                    <tr>
+                                                        <th>Ch</th>
+                                                        <th>Freq (MHz)</th>
+                                                        <th>Power (dBmV)</th>
+                                                        <th>SNR (dB)</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.downstream.filter(c => c.frequency_mhz > 0)" :key="ch.channel_id">
+                                                        <td>{{ ch.channel_id }}</td>
+                                                        <td>{{ ch.frequency_mhz.toFixed(0) }}</td>
+                                                        <td :class="{'text-danger': ch.power_dbmv < -10 || ch.power_dbmv > 15}">
+                                                            {{ ch.power_dbmv.toFixed(1) }}
+                                                        </td>
+                                                        <td :class="{'text-danger': ch.snr_db < 35}">
+                                                            {{ ch.snr_db.toFixed(1) }}
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    
+                                    <div v-if="systemInfo.upstream && systemInfo.upstream.length">
+                                        <strong>Upstream ({{ systemInfo.upstream.length }} channels)</strong>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Power (dBmV)</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.upstream" :key="ch.channel_id">
+                                                        <td>{{ ch.channel_id }}</td>
+                                                        <td :class="{'text-danger': ch.power_dbmv < 35 || ch.power_dbmv > 52}">
+                                                            {{ ch.power_dbmv.toFixed(1) }}
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    
+                                    <small class="text-muted">
+                                        <i class="bi bi-clock me-1"></i>{{ new Date(systemInfo.timestamp).toLocaleString() }}
+                                    </small>
                                 </div>
                                 
                                 <button @click="loadSystemInfo" class="btn btn-outline-primary btn-sm w-100 mt-2" :disabled="loadingSystemInfo">
                                     <i class="bi bi-arrow-clockwise me-1" :class="{ 'spin': loadingSystemInfo }"></i>
-                                    {{ loadingSystemInfo ? 'Loading...' : 'Refresh Info' }}
+                                    {{ loadingSystemInfo ? 'Loading...' : 'Load Channel Info' }}
                                 </button>
                             </div>
                         </div>
