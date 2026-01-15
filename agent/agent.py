@@ -881,12 +881,21 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
-        """Query multiple OIDs using subprocess SSH (proven to work)."""
+        """Query multiple OIDs using EXACT same paramiko method as _enrich_modems_parallel."""
         if not self.config.cm_proxy_host:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
-            import subprocess
+            # Use EXACT same SSH connection as enrichment
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(
+                self.config.cm_proxy_host, 
+                username=self.config.cm_proxy_user or 'svdleer',
+                timeout=30
+            )
+            
+            self.logger.info(f"SSH connected to {self.config.cm_proxy_host} for modem query")
             
             # Build batch command with section markers
             cmds = []
@@ -895,42 +904,16 @@ class PyPNMAgent:
             
             batch_cmd = ' ; '.join(cmds)
             
-            # Simple subprocess SSH - no special options, use system SSH config
-            ssh_target = f"{self.config.cm_proxy_user or 'svdleer'}@{self.config.cm_proxy_host}"
+            self.logger.info(f"Executing batch SNMP query with community={community}")
             
-            self.logger.info(f"Executing SNMP batch query via subprocess SSH to {self.config.cm_proxy_host}")
+            # Execute command - EXACT same as enrichment
+            stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=120)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
             
-            # Test basic SSH connectivity first
-            test_result = subprocess.run(
-                ['ssh', ssh_target, 'echo "SSH_OK"'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            self.logger.info(f"SSH test: {test_result.stdout.strip()}")
-            
-            # Test if snmpwalk is available on remote
-            test_snmp = subprocess.run(
-                ['ssh', ssh_target, 'which snmpwalk'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            self.logger.info(f"snmpwalk path: {test_snmp.stdout.strip()}, stderr: {test_snmp.stderr[:100] if test_snmp.stderr else 'none'}")
-            
-            self.logger.info(f"Running command: ssh {ssh_target} '{batch_cmd[:200]}...'")
-            
-            result = subprocess.run(
-                ['ssh', ssh_target, batch_cmd],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            
-            output = result.stdout
+            ssh.close()
             
             self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
-            self.logger.info(f"Output content: {output}")
             
             # Parse results by section markers
             results = {}
