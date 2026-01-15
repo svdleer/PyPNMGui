@@ -26,6 +26,23 @@ except Exception as e:
     logging.getLogger(__name__).warning(f"Redis not available: {e}")
 
 
+# Helper function to handle agent task results
+def handle_agent_result(result, success_field='success'):
+    """Handle agent task result with proper None checking."""
+    if not result:
+        return jsonify({"status": "error", "message": "Agent task timeout or no response"}), 504
+    
+    result_data = result.get('result')
+    if not result_data:
+        return jsonify({"status": "error", "message": "No result from agent"}), 500
+    
+    if result_data.get(success_field):
+        return jsonify(result_data)
+    
+    error_msg = result_data.get('error', 'Unknown error')
+    return jsonify({"status": "error", "message": error_msg}), 500
+
+
 # ============== Cable Modem Endpoints ==============
 
 @api_bp.route('/modems', methods=['GET'])
@@ -180,9 +197,7 @@ def get_system_info(mac_address):
             timeout=60
         )
         result = agent_manager.wait_for_task(task_id, timeout=60)
-        if result and result.get('result', {}).get('success'):
-            return jsonify(result.get('result'))
-        return jsonify({"status": "error", "message": result.get('result', {}).get('error', 'Query failed')}), 500
+        return handle_agent_result(result)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
