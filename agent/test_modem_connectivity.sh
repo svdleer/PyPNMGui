@@ -58,8 +58,8 @@ echo ""
 echo "=========================================="
 echo "Test 3: Direct SNMP Query (SSH + snmpwalk)"
 echo "=========================================="
-echo "Running: ssh $CM_PROXY_HOST 'snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP sysDescr'"
-SNMP_RESULT=$(ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "timeout 10 snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP sysDescr 2>&1" || echo "FAILED")
+echo "Running: ssh $CM_PROXY_HOST 'snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.2.1.1.1.0'"
+SNMP_RESULT=$(ssh -i "$CM_PROXY_KEY" "$CM_PROXY_USER@$CM_PROXY_HOST" "timeout 10 snmpwalk -v2c -c $SNMP_COMMUNITY -t 5 -r 1 $TEST_MODEM_IP 1.3.6.1.2.1.1.1.0 2>&1" || echo "FAILED")
 
 if echo "$SNMP_RESULT" | grep -q "STRING:"; then
     echo -e "${GREEN}✓ PASS${NC} - SNMP query successful"
