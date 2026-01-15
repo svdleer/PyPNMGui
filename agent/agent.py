@@ -910,6 +910,7 @@ class PyPNMAgent:
             output = result.stdout
             
             self.logger.info(f"SSH command completed, got {len(output)} bytes stdout")
+            self.logger.info(f"Output content: {output}")
             
             # Parse results by section markers
             results = {}
