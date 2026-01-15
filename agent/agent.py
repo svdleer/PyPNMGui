@@ -938,51 +938,12 @@ class PyPNMAgent:
                 'raw_output': output
             }
             
-        except subprocess.TimeoutExpired:
-            self.logger.error(f"SSH command timeout after {overall_timeout}s")
+        except Exception as e:
+            self.logger.exception(f"Batch query failed: {e}")
             return {
                 'success': False,
-                'error': f'SSH command timeout - modem {modem_ip} query took too long'
+                'error': f'SNMP query failed: {str(e)}'
             }
-        except Exception as e:
-            self.logger.error(f"SSH command failed: {e}")
-            return {
-                'success': False,
-                'error': f'SSH command failed: {str(e)}'
-            }
-            
-            # Check if we got any useful data at all
-            if not output or len(output.strip()) < 10:
-                return {
-                    'success': False,
-                    'error': f'No SNMP data received from modem {modem_ip}. Error: {error[:200] if error else "Unknown"}'
-                }
-            
-            # Parse output by section markers
-            results = {}
-            current_section = None
-            current_lines = []
-            
-            for line in output.split('\n'):
-                if line.startswith('==') and line.endswith('=='):
-                    if current_section:
-                        results[current_section] = '\n'.join(current_lines)
-                    current_section = line.strip('=')
-                    current_lines = []
-                else:
-                    current_lines.append(line)
-            
-            if current_section:
-                results[current_section] = '\n'.join(current_lines)
-            
-            return {
-                'success': True,
-                'results': results,
-                'error': error if error else None
-            }
-        except Exception as e:
-            self._cm_proxy_ssh = None
-            return {'success': False, 'error': str(e)}
     
     def _handle_pnm_rxmer(self, params: dict) -> dict:
         """Get RxMER (Receive Modulation Error Ratio) data from modem."""
