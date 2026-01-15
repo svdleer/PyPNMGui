@@ -29,17 +29,22 @@ except Exception as e:
 # Helper function to handle agent task results
 def handle_agent_result(result, success_field='success'):
     """Handle agent task result with proper None checking."""
+    logger = logging.getLogger(__name__)
+    
     if not result:
+        logger.warning("Agent task returned None (timeout or no response)")
         return jsonify({"status": "error", "message": "Agent task timeout or no response"}), 504
     
     result_data = result.get('result')
     if not result_data:
+        logger.warning(f"Agent task returned empty result: {result}")
         return jsonify({"status": "error", "message": "No result from agent"}), 500
     
     if result_data.get(success_field):
         return jsonify(result_data)
     
     error_msg = result_data.get('error', 'Unknown error')
+    logger.warning(f"Agent task failed: {error_msg}")
     return jsonify({"status": "error", "message": error_msg}), 500
 
 
