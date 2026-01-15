@@ -263,10 +263,10 @@ createApp({
                 
                 const data = await response.json();
                 
-                if (data.status === 'success') {
-                    this.systemInfo = data.data;
+                if (data.success) {
+                    this.systemInfo = data;
                 } else {
-                    this.showError('Failed to load system info', data.message);
+                    this.showError('Failed to load system info', data.error || data.message);
                 }
             } catch (error) {
                 console.error('Failed to load system info:', error);
