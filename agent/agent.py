@@ -898,7 +898,7 @@ class PyPNMAgent:
             # Build batch command: run all snmpwalks sequentially
             cmds = []
             for name, oid in oids.items():
-                cmds.append(f"echo '=={name}==' && timeout 5 snmpwalk -v2c -c {community} -t 3 -r 1 {modem_ip} {oid} 2>&1")
+                cmds.append(f"echo '=={name}==' && snmpwalk -v2c -c {community} -t 5 -r 2 {modem_ip} {oid} 2>&1")
             
             batch_cmd = ' ; '.join(cmds)
             
