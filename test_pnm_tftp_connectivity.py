@@ -18,8 +18,8 @@ TFTP_SERVER_HOST = "vps.serial.nl"
 TFTP_SERVER_IP = None  # Will be resolved
 TFTP_PATH = "/tmp/pnm-test"
 
-# PyPNM GUI API
-API_BASE = "http://appdb-sh.ext.oss.local:5050/api"
+# PyPNM GUI API (use localhost via SSH tunnel)
+API_BASE = "http://localhost:5050/api"
 
 # DOCSIS PNM OIDs for triggering spectrum analysis
 DOCSIS_PNM_BULK_DEST_IP_TYPE = "1.3.6.1.4.1.4491.2.1.27.1.2.4.1.2.1"  # IPv4

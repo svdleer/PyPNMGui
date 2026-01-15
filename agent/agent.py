@@ -654,39 +654,66 @@ class PyPNMAgent:
         }
     
     def _handle_snmp_get(self, params: dict) -> dict:
-        """Handle SNMP GET request."""
+        """Handle SNMP GET request via cm_proxy."""
+        target_ip = params['target_ip']
+        oid = params['oid']
+        community = params.get('community', 'private')
+        
+        # Use cm_proxy if configured
+        if self.config.cm_proxy_host:
+            return self._query_modem_via_cm_proxy(target_ip, oid, community, walk=False)
+        
+        # Fallback to direct SNMP
         return self.snmp_executor.execute_snmp(
             command='snmpget',
-            target_ip=params['target_ip'],
-            oid=params['oid'],
-            community=params.get('community', 'private'),
+            target_ip=target_ip,
+            oid=oid,
+            community=community,
             version=params.get('version', '2c'),
             timeout=params.get('timeout', 5),
             retries=params.get('retries', 1)
         )
     
     def _handle_snmp_walk(self, params: dict) -> dict:
-        """Handle SNMP WALK request."""
+        """Handle SNMP WALK request via cm_proxy."""
+        target_ip = params['target_ip']
+        oid = params['oid']
+        community = params.get('community', 'private')
+        
+        # Use cm_proxy if configured
+        if self.config.cm_proxy_host:
+            return self._query_modem_via_cm_proxy(target_ip, oid, community, walk=True)
+        
+        # Fallback to direct SNMP
         return self.snmp_executor.execute_snmp(
             command='snmpwalk',
-            target_ip=params['target_ip'],
-            oid=params['oid'],
-            community=params.get('community', 'private'),
+            target_ip=target_ip,
+            oid=oid,
+            community=community,
             version=params.get('version', '2c'),
             timeout=params.get('timeout', 5),
             retries=params.get('retries', 1)
         )
     
     def _handle_snmp_set(self, params: dict) -> dict:
-        """Handle SNMP SET request."""
-        # Build SET command with value and type
-        oid_with_value = f"{params['oid']} {params.get('type', 's')} {params['value']}"
+        """Handle SNMP SET request via cm_proxy."""
+        target_ip = params['target_ip']
+        oid = params['oid']
+        value = params['value']
+        value_type = params.get('type', 'i')
+        community = params.get('community', 'private')
         
+        # Use cm_proxy if configured
+        if self.config.cm_proxy_host:
+            return self._set_modem_via_cm_proxy(target_ip, oid, value, value_type, community)
+        
+        # Fallback to direct SNMP (not typical for modems)
+        oid_with_value = f"{oid} {value_type} {value}"
         return self.snmp_executor.execute_snmp(
             command='snmpset',
-            target_ip=params['target_ip'],
+            target_ip=target_ip,
             oid=oid_with_value,
-            community=params.get('community', 'private'),
+            community=community,
             version=params.get('version', '2c'),
             timeout=params.get('timeout', 5),
             retries=params.get('retries', 1)
@@ -872,6 +899,29 @@ class PyPNMAgent:
             
             return {
                 'success': 'Timeout' not in error and 'No Response' not in error,
+                'output': output,
+                'error': error if error else None
+            }
+        except Exception as e:
+            # Connection might have died, clear it so next call reconnects
+            self._cm_proxy_ssh = None
+            return {'success': False, 'error': str(e)}
+    
+    def _set_modem_via_cm_proxy(self, modem_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
+        """Set an SNMP value on a modem via cm_proxy using persistent SSH connection."""
+        ssh = self._get_cm_proxy_ssh()
+        if not ssh:
+            return {'success': False, 'error': 'cm_proxy not configured or connection failed'}
+        
+        try:
+            snmp_cmd = f"snmpset -v2c -c {community} -t 5 -r 1 {modem_ip} {oid} {value_type} {value}"
+            
+            stdin, stdout, stderr = ssh.exec_command(snmp_cmd, timeout=30)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
+            
+            return {
+                'success': 'Timeout' not in error and 'No Response' not in error and error == '',
                 'output': output,
                 'error': error if error else None
             }
