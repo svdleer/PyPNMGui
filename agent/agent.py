@@ -914,6 +914,7 @@ class PyPNMAgent:
             ssh_args.append(batch_cmd)
             
             self.logger.info(f"Executing SNMP query via subprocess SSH to {ssh_host}")
+            self.logger.info(f"SSH command: {' '.join(ssh_args[:6])}... '{batch_cmd[:100]}...'")
             
             # Execute with timeout
             overall_timeout = len(oids) * 6 + 10
