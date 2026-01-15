@@ -1,8 +1,5 @@
-# PyPNM Web GUI - API Routes (Proxy to PyPNM Server)
+# PyPNM Web GUI - API Routes
 # SPDX-License-Identifier: Apache-2.0
-#
-# This Flask backend acts as a proxy/aggregator for PyPNM's FastAPI server.
-# PyPNM must be installed and running separately: https://github.com/PyPNMApps/PyPNM
 
 import os
 import json
@@ -10,9 +7,7 @@ import logging
 from flask import jsonify, request, current_app
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
-from app.core.pypnm_client import get_pypnm_client, PyPNMClient
-
-logger = logging.getLogger(__name__)
+from app.core.simple_ws import get_simple_agent_manager
 
 # Redis for caching modem data
 try:
@@ -24,38 +19,27 @@ try:
     # Test connection
     redis_client.ping()
     REDIS_AVAILABLE = True
-    logger.info(f"Redis cache connected: {REDIS_HOST}:{REDIS_PORT}")
+    logging.getLogger(__name__).info(f"Redis cache connected: {REDIS_HOST}:{REDIS_PORT}")
 except Exception as e:
     REDIS_AVAILABLE = False
     redis_client = None
-    logger.warning(f"Redis not available: {e}")
+    logging.getLogger(__name__).warning(f"Redis not available: {e}")
 
 
-# ============== Health Check ==============
+# ============== Cable Modem Endpoints ==============
 
-@api_bp.route('/health', methods=['GET'])
-def health_check():
-    """Check if PyPNM server is accessible."""
-    pypnm = get_pypnm_client()
-    pypnm_ok = pypnm.health_check()
-    
+@api_bp.route('/modems', methods=['GET'])
+def get_modems():
+    """Get list of cable modems - redirects to CMTS modem endpoint."""
     return jsonify({
-        "status": "ok" if pypnm_ok else "degraded",
-        "pypnm_connected": pypnm_ok,
-        "pypnm_url": pypnm.config.base_url,
-        "redis_available": REDIS_AVAILABLE
-    }), 200 if pypnm_ok else 503
+        "status": "error",
+        "message": "Use /api/cmts/<hostname>/modems to get modems from a specific CMTS"
+    }), 400
 
-
-# ============== Cable Modem Endpoints (Proxy to PyPNM) ==============
 
 @api_bp.route('/modems/<mac_address>', methods=['GET'])
 def get_modem(mac_address):
-    """
-    Get modem information from cache.
-    
-    Note: This endpoint uses cached data. For real-time data, use PyPNM endpoints directly.
-    """
+    """Get a specific modem by MAC address from cache or mock data."""
     # Normalize MAC address
     mac_normalized = mac_address.lower().replace('-', ':')
     
@@ -77,291 +61,12 @@ def get_modem(mac_address):
                                 "modem": modem
                             })
         except Exception as e:
-            logger.warning(f"Redis search error: {e}")
+            logging.getLogger(__name__).warning(f"Redis search error: {e}")
     
     return jsonify({
         "status": "error",
         "message": "Modem not found in cache. Load modems from CMTS first."
     }), 404
-
-
-# ============== System Information Endpoints (Proxy to PyPNM) ==============
-
-@api_bp.route('/modem/<mac_address>/system-info', methods=['POST'])
-def get_system_info(mac_address):
-    """
-    Get system information for a modem via PyPNM.
-    
-    PyPNM Endpoint: POST /system/sysDescr
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_sys_descr(mac_address, modem_ip, community)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"System info request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/modem/<mac_address>/uptime', methods=['POST'])
-def get_uptime(mac_address):
-    """
-    Get uptime for a modem via PyPNM.
-    
-    PyPNM Endpoint: POST /system/upTime
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_uptime(mac_address, modem_ip, community)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Uptime request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/modem/<mac_address>/event-log', methods=['POST'])
-def get_event_log(mac_address):
-    """
-    Get event log for a modem via PyPNM.
-    
-    PyPNM Endpoint: POST /docs/dev/eventLog
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_event_log(mac_address, modem_ip, community)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Event log request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-# ============== Channel Statistics Endpoints (Proxy to PyPNM) ==============
-
-@api_bp.route('/modem/<mac_address>/ds-channels', methods=['POST'])
-def get_ds_channels(mac_address):
-    """
-    Get downstream channel statistics via PyPNM.
-    
-    Returns both DOCSIS 3.0 (SC-QAM) and 3.1 (OFDM) channel stats.
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        
-        # Get both 3.0 and 3.1 stats
-        scqam_stats = pypnm.get_ds_scqam_stats(mac_address, modem_ip, community)
-        ofdm_stats = pypnm.get_ds_ofdm_stats(mac_address, modem_ip, community)
-        
-        return jsonify({
-            "status": "success",
-            "mac_address": mac_address,
-            "scqam": scqam_stats,
-            "ofdm": ofdm_stats
-        })
-    except Exception as e:
-        logger.error(f"Downstream channel stats request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/modem/<mac_address>/us-channels', methods=['POST'])
-def get_us_channels(mac_address):
-    """
-    Get upstream channel statistics via PyPNM.
-    
-    Returns both DOCSIS 3.0 (ATDMA) and 3.1 (OFDMA) channel stats.
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        
-        # Get both 3.0 and 3.1 stats
-        atdma_stats = pypnm.get_us_atdma_stats(mac_address, modem_ip, community)
-        ofdma_stats = pypnm.get_us_ofdma_stats(mac_address, modem_ip, community)
-        
-        return jsonify({
-            "status": "success",
-            "mac_address": mac_address,
-            "atdma": atdma_stats,
-            "ofdma": ofdma_stats
-        })
-    except Exception as e:
-        logger.error(f"Upstream channel stats request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-# ============== PNM Measurement Endpoints (Proxy to PyPNM) ==============
-
-@api_bp.route('/modem/<mac_address>/rxmer', methods=['POST'])
-def get_rxmer(mac_address):
-    """
-    Get RxMER measurement for a modem via PyPNM.
-    
-    PyPNM Endpoint: POST /docs/pnm/ds/ofdm/rxmer/getCapture
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    tftp_ipv4 = request_data.get('tftp_ipv4')
-    output_type = request_data.get('output_type', 'json')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    if not tftp_ipv4:
-        return jsonify({"status": "error", "message": "tftp_ipv4 required for PNM measurements"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_rxmer_capture(
-            mac_address, modem_ip, tftp_ipv4, community, output_type=output_type
-        )
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"RxMER request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/modem/<mac_address>/spectrum', methods=['POST'])
-def get_spectrum(mac_address):
-    """
-    Get spectrum analysis for a modem via PyPNM.
-    
-    PyPNM Endpoint: POST /docs/pnm/spectrumAnalyzer/getCapture
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    tftp_ipv4 = request_data.get('tftp_ipv4')
-    output_type = request_data.get('output_type', 'json')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    if not tftp_ipv4:
-        return jsonify({"status": "error", "message": "tftp_ipv4 required for PNM measurements"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_spectrum_capture(
-            mac_address, modem_ip, tftp_ipv4, community, output_type=output_type
-        )
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Spectrum analysis request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/modem/<mac_address>/constellation', methods=['POST'])
-def get_constellation(mac_address):
-    """
-    Get constellation display for a modem via PyPNM.
-    
-    PyPNM Endpoint: POST /docs/pnm/ds/ofdm/const_display/getCapture
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    tftp_ipv4 = request_data.get('tftp_ipv4')
-    output_type = request_data.get('output_type', 'json')
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    if not tftp_ipv4:
-        return jsonify({"status": "error", "message": "tftp_ipv4 required for PNM measurements"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_constellation_display(
-            mac_address, modem_ip, tftp_ipv4, community, output_type=output_type
-        )
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Constellation display request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-# ============== Multi-RxMER Endpoints (Long-term monitoring) ==============
-
-@api_bp.route('/modem/<mac_address>/multi-rxmer/start', methods=['POST'])
-def start_multi_rxmer(mac_address):
-    """
-    Start multi-RxMER long-term monitoring via PyPNM.
-    
-    PyPNM Endpoint: POST /advance/multi/rxmer/start
-    """
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'private')
-    tftp_ipv4 = request_data.get('tftp_ipv4')
-    interval_minutes = request_data.get('interval_minutes', 5)
-    duration_hours = request_data.get('duration_hours', 24)
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    if not tftp_ipv4:
-        return jsonify({"status": "error", "message": "tftp_ipv4 required"}), 400
-    
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.start_multi_rxmer(
-            mac_address, modem_ip, tftp_ipv4, community,
-            interval_minutes, duration_hours
-        )
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Multi-RxMER start request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/multi-rxmer/status/<operation_id>', methods=['GET'])
-def get_multi_rxmer_status(operation_id):
-    """
-    Get status of multi-RxMER operation via PyPNM.
-    
-    PyPNM Endpoint: GET /advance/multi/rxmer/status/{operation_id}
-    """
-    try:
-        pypnm = get_pypnm_client()
-        result = pypnm.get_multi_rxmer_status(operation_id)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Multi-RxMER status request failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ============== CMTS Endpoints ==============
