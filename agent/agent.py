@@ -896,17 +896,20 @@ class PyPNMAgent:
             # Join with ; to run sequentially 
             batch_cmd = ' ; '.join(cmds)
             
+            self.logger.info(f"[DEBUG] Starting SNMP batch query for {modem_ip} with {len(oids)} OIDs")
             self.logger.debug(f"Executing batch SNMP query via cm_proxy")
             
             # Execute with overall timeout (5s per OID * number of OIDs + 5s buffer)
             overall_timeout = len(oids) * 5 + 5
             
+            self.logger.info(f"[DEBUG] Creating thread for SSH command execution")
             # Use threading to enforce timeout on SSH command
             import threading
             import queue
             
             result_queue = queue.Queue()
             def _exec_ssh_command():
+                self.logger.info(f"[DEBUG] Thread started, executing SSH command")
                 try:
                     stdin, stdout, stderr = ssh.exec_command(batch_cmd, timeout=overall_timeout)
                     # Set non-blocking mode and read with select
