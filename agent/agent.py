@@ -907,7 +907,18 @@ class PyPNMAgent:
                 text=True,
                 timeout=10
             )
-            self.logger.info(f"SSH test: {test_result.stdout.strip()}, stderr: {test_result.stderr[:100] if test_result.stderr else 'none'}")
+            self.logger.info(f"SSH test: {test_result.stdout.strip()}")
+            
+            # Test if snmpwalk is available on remote
+            test_snmp = subprocess.run(
+                ['ssh', ssh_target, 'which snmpwalk'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            self.logger.info(f"snmpwalk path: {test_snmp.stdout.strip()}, stderr: {test_snmp.stderr[:100] if test_snmp.stderr else 'none'}")
+            
+            self.logger.info(f"Running command: ssh {ssh_target} '{batch_cmd[:200]}...'")
             
             result = subprocess.run(
                 ['ssh', ssh_target, batch_cmd],
