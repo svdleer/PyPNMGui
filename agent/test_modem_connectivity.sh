@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-CM_PROXY_HOST="${CM_PROXY_HOST:-hop-access1.ext.oss.local}"
+CM_PROXY_HOST="${CM_PROXY_HOST:-hop-access1-sh.ext.oss.local}"
 CM_PROXY_USER="${CM_PROXY_USER:-svdleer}"
 CM_PROXY_KEY="${CM_PROXY_KEY:-$HOME/.ssh/id_rsa}"
 TEST_MODEM_IP="${TEST_MODEM_IP:-10.214.157.17}"

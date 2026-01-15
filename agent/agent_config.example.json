@@ -29,10 +29,10 @@
     
     "cm_proxy": {
         "_comment": "Server with connectivity to Cable Modems - SNMP commands executed here via SSH",
-        "host": "cm-connectivity-server.internal",
+        "host": "hop-access1-sh.ext.oss.local",
         "port": 22,
         "username": "pnm-agent",
-        "key_file": "~/.ssh/id_cm_proxy"
+        "key_file": "~/.ssh/id_rsa"
     },
     
     "tftp_server": {
