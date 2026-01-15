@@ -927,7 +927,9 @@ class PyPNMAgent:
             output = result.stdout
             error = result.stderr
             
-            self.logger.info(f"SSH command completed, got {len(output)} bytes")
+            self.logger.info(f"SSH command completed, got {len(output)} bytes stdout, {len(error)} bytes stderr")
+            self.logger.info(f"SSH stdout: {output[:500] if output else 'empty'}")
+            self.logger.info(f"SSH stderr first 200: {error[:200] if error else 'empty'}")
             
             if 'Timeout: No Response' in output or 'Timeout: No Response' in error:
                 return {
