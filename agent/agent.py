@@ -1368,7 +1368,9 @@ class PyPNMAgent:
             # DOCSIS 3.1 OFDM channel OIDs
             OID_OFDM_CHAN_ID = '1.3.6.1.4.1.4491.2.1.28.1.9.1.1'  # docsIf31CmDsOfdmChanChannelId
             
+            self.logger.info(f"Querying OFDM channels for {modem_ip}")
             result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_CHAN_ID, community, walk=True)
+            self.logger.info(f"OFDM query result: success={result.get('success')}")
             
             if not result.get('success'):
                 # Not an error - modem might be DOCSIS 3.0 only
