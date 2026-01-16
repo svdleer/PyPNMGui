@@ -24,7 +24,7 @@ createApp({
             searchValue: '',
             snmpCommunity: 'Z1gg0@LL',
             snmpCommunityRW: 'Z1gg0Sp3c1@l',
-            snmpCommunityModem: 'm0d3m1nf0',
+            snmpCommunityModem: 'z1gg0m0n1t0r1ng',
             selectedCmts: '',
             selectedInterface: '',
             searchPerformed: false,
@@ -46,7 +46,7 @@ createApp({
             // Live modem loading
             loadingLiveModems: false,
             liveModemSource: '',
-            enrichModems: false,
+            enrichModems: true,
             
             // Charts
             charts: {}
