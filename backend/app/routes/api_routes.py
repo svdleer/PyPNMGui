@@ -1279,13 +1279,13 @@ def pypnm_rxmer(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
-    tftp_ip = data.get('tftp_ip')
+    tftp_ip = data.get('tftp_ip', '')
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     client = PyPNMClient()
-    result = client.get_rxmer_capture(mac_address, modem_ip, community, tftp_ip)
+    result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community)
     
     if result.get('status') == 'error':
         return jsonify(result), 500
@@ -1300,13 +1300,13 @@ def pypnm_spectrum(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
-    tftp_ip = data.get('tftp_ip')
+    tftp_ip = data.get('tftp_ip', '')
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     client = PyPNMClient()
-    result = client.get_spectrum_capture(mac_address, modem_ip, community, tftp_ip)
+    result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, community)
     
     if result.get('status') == 'error':
         return jsonify(result), 500
@@ -1321,12 +1321,13 @@ def pypnm_fec(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
+    tftp_ip = data.get('tftp_ip', '')
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     client = PyPNMClient()
-    result = client.get_fec_summary(mac_address, modem_ip, community)
+    result = client.get_fec_summary(mac_address, modem_ip, tftp_ip, community)
     
     if result.get('status') == 'error':
         return jsonify(result), 500
@@ -1341,13 +1342,13 @@ def pypnm_constellation(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
-    tftp_ip = data.get('tftp_ip')
+    tftp_ip = data.get('tftp_ip', '')
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     client = PyPNMClient()
-    result = client.get_constellation_capture(mac_address, modem_ip, community, tftp_ip)
+    result = client.get_constellation_display(mac_address, modem_ip, tftp_ip, community)
     
     if result.get('status') == 'error':
         return jsonify(result), 500
@@ -1389,19 +1390,18 @@ def pypnm_channel_stats(mac_address):
 
 @api_bp.route('/pypnm/modem/<mac_address>/pre-eq', methods=['POST'])
 def pypnm_pre_eq(mac_address):
-    """Get pre-equalization data via PyPNM."""
+    """Get pre-equalization data via PyPNM (ATDMA only, no TFTP needed)."""
     from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
-    tftp_ip = data.get('tftp_ip')
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     client = PyPNMClient()
-    result = client.get_pre_eq_capture(mac_address, modem_ip, community, tftp_ip)
+    result = client.get_us_pre_equalization(mac_address, modem_ip, community)
     
     if result.get('status') == 'error':
         return jsonify(result), 500

@@ -192,10 +192,10 @@ class PyPNMClient:
         """
         Get upstream OFDMA channel statistics.
         
-        Endpoint: POST /docs/if31/us/ofdma/chan/stats
+        Endpoint: POST /docs/if31/us/ofdma/channel/stats
         """
         payload = self._build_cable_modem_request(mac_address, ip_address, community)
-        return self._post("/docs/if31/us/ofdma/chan/stats", payload)
+        return self._post("/docs/if31/us/ofdma/channel/stats", payload)
     
     # ============== PNM Measurements ==============
     
@@ -242,14 +242,14 @@ class PyPNMClient:
         """
         Trigger spectrum analyzer capture.
         
-        Endpoint: POST /docs/pnm/spectrumAnalyzer/getCapture
+        Endpoint: POST /docs/pnm/ds/spectrumAnalyzer/getCapture
         """
         payload = self._build_cable_modem_request(
             mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
         )
         payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
         
-        return self._post("/docs/pnm/spectrumAnalyzer/getCapture", payload)
+        return self._post("/docs/pnm/ds/spectrumAnalyzer/getCapture", payload)
     
     def get_constellation_display(
         self,
@@ -263,15 +263,68 @@ class PyPNMClient:
         """
         Trigger constellation display capture.
         
-        Endpoint: POST /docs/pnm/ds/ofdm/const_display/getCapture
+        Endpoint: POST /docs/pnm/ds/ofdm/constellationDisplay/getCapture
         """
         payload = self._build_cable_modem_request(
             mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
         )
         payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
         
-        return self._post("/docs/pnm/ds/ofdm/const_display/getCapture", payload)
+        return self._post("/docs/pnm/ds/ofdm/constellationDisplay/getCapture", payload)
     
+    def get_fec_summary(
+        self,
+        mac_address: str,
+        ip_address: str,
+        tftp_ipv4: str,
+        community: str = "private",
+        tftp_ipv6: str = "",
+        output_type: str = "json"
+    ) -> Dict[str, Any]:
+        """
+        Trigger FEC summary capture.
+        
+        Endpoint: POST /docs/pnm/ds/ofdm/fecSummary/getCapture
+        """
+        payload = self._build_cable_modem_request(
+            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
+        )
+        payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
+        
+        return self._post("/docs/pnm/ds/ofdm/fecSummary/getCapture", payload)
+    
+    def get_us_pre_equalization(
+        self,
+        mac_address: str,
+        ip_address: str,
+        community: str = "private"
+    ) -> Dict[str, Any]:
+        """
+        Get upstream pre-equalization data.
+        
+        Endpoint: POST /docs/if30/us/atdma/chan/preEqualization
+        """
+        payload = self._build_cable_modem_request(mac_address, ip_address, community)
+        return self._post("/docs/if30/us/atdma/chan/preEqualization", payload)
+    
+    def get_us_ofdma_pre_equalization(
+        self,
+        mac_address: str,
+        ip_address: str,
+        tftp_ipv4: str,
+        community: str = "private",
+        tftp_ipv6: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Get upstream OFDMA pre-equalization capture.
+        
+        Endpoint: POST /docs/pnm/us/ofdma/preEqualization/getCapture
+        """
+        payload = self._build_cable_modem_request(
+            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
+        )
+        return self._post("/docs/pnm/us/ofdma/preEqualization/getCapture", payload)
+
     # ============== Multi-RxMER (Long-term monitoring) ==============
     
     def start_multi_rxmer(
