@@ -1414,12 +1414,16 @@ class PyPNMAgent:
             OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_channel}'
             
             # Set filename
+            self.logger.info(f"Setting OFDM capture filename for {modem_ip} channel {ofdm_channel}")
             result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_FILENAME, filename, 's', community)
+            self.logger.info(f"Filename set result: success={result.get('success')}")
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
             
             # Trigger capture (enable = 1)
+            self.logger.info(f"Triggering OFDM capture for {modem_ip} channel {ofdm_channel}")
             result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_ENABLE, '1', 'i', community)
+            self.logger.info(f"Trigger result: success={result.get('success')}")
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to trigger capture: {result.get('error')}"}
             
