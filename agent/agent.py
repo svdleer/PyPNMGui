@@ -1526,9 +1526,10 @@ class PyPNMAgent:
             if result:
                 return {
                     'success': True,
-                    'message': f'TFTP destination set to {tftp_server}{tftp_path}',
+                    'message': f'TFTP destination set to {tftp_server}{tftp_path} with AUTO_UPLOAD enabled',
                     'tftp_server': tftp_server,
-                    'tftp_path': tftp_path
+                    'tftp_path': tftp_path,
+                    'auto_upload': True
                 }
             else:
                 return {'success': False, 'error': 'Failed to set TFTP destination'}
