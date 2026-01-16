@@ -625,6 +625,7 @@ class PyPNMAgent:
                     'request_id': request_id,
                     'result': result
                 }
+                self.logger.info(f"Handler returned for {request_id}")
             except Exception as e:
                 self.logger.exception(f"Command execution error: {e}")
                 response = {
@@ -639,7 +640,9 @@ class PyPNMAgent:
                 'error': f'Unknown command: {command}'
             }
         
+        self.logger.info(f"Sending response for {request_id}")
         ws.send(json.dumps(response))
+        self.logger.info(f"Response sent for {request_id}")
     
     # ============== Command Handlers ==============
     
