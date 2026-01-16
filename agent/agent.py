@@ -1458,11 +1458,17 @@ class PyPNMAgent:
             mer_values = []
             
             for line in result.get('output', '').split('\n'):
-                if '=' in line and 'INTEGER' in line:
+                if '=' in line and ('INTEGER' in line or 'Gauge32' in line):
                     try:
                         parts = line.split('=')[0].strip().split('.')
                         subcarrier_idx = int(parts[-1])
-                        mer_raw = int(line.split('INTEGER:')[-1].strip())
+                        # Parse both INTEGER: and Gauge32: formats
+                        if 'INTEGER:' in line:
+                            mer_raw = int(line.split('INTEGER:')[-1].strip())
+                        elif 'Gauge32:' in line:
+                            mer_raw = int(line.split('Gauge32:')[-1].strip())
+                        else:
+                            continue
                         mer_db = mer_raw / 10.0  # Convert to dB
                         
                         subcarriers.append(subcarrier_idx)
