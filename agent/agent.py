@@ -1493,13 +1493,10 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
 
     def _handle_pnm_set_tftp(self, params: dict) -> dict:
-        """Configure modem TFTP destination for PNM captures using PyPNM."""
-        import sys
-        sys.path.insert(0, '/home/svdleer/PyPNM')
-        
+        """Configure modem TFTP destination for PNM captures."""
         modem_ip = params.get('modem_ip')
         mac_address = params.get('mac_address')
-        tftp_server = params.get('tftp_server', '149.210.167.40')  # vps.serial.nl
+        tftp_server = params.get('tftp_server', '149.210.167.40')
         tftp_path = params.get('tftp_path', '')
         community = params.get('community', 'm0d3m1nf0')
         
@@ -1507,32 +1504,42 @@ class PyPNMAgent:
             return {'success': False, 'error': 'modem_ip required'}
         
         try:
-            import asyncio
-            from pypnm.lib.mac_address import MacAddress
-            from pypnm.lib.inet import Inet
-            from pypnm.docsis.cable_modem import CableModem
+            # OIDs from PyPNM
+            OID_IP_TYPE = '1.3.6.1.4.1.4491.2.1.27.1.1.1.1.0'  # docsPnmBulkDestIpAddrType
+            OID_IP_ADDR = '1.3.6.1.4.1.4491.2.1.27.1.1.1.2.0'  # docsPnmBulkDestIpAddr
+            OID_PATH = '1.3.6.1.4.1.4491.2.1.27.1.1.1.3.0'      # docsPnmBulkDestPath
+            OID_UPLOAD = '1.3.6.1.4.1.4491.2.1.27.1.1.1.4.0'    # docsPnmBulkUploadControl
             
-            async def set_tftp():
-                cm = CableModem(
-                    mac_address=MacAddress(mac_address),
-                    inet=Inet(modem_ip),
-                    write_community=community
-                )
-                success = await cm.setDocsPnmBulk(tftp_server=tftp_server, tftp_path=tftp_path)
-                return success
+            # Set IP address type (1 = IPv4)
+            result = self._set_modem_via_cm_proxy(modem_ip, OID_IP_TYPE, '1', 'i', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set IP type: {result.get('error')}"}
             
-            result = asyncio.run(set_tftp())
+            # Set IP address (as hex string: 149.210.167.40 = 95 d2 a7 28)
+            ip_parts = tftp_server.split('.')
+            ip_hex = ' '.join([f'{int(p):02x}' for p in ip_parts])
+            result = self._set_modem_via_cm_proxy(modem_ip, OID_IP_ADDR, ip_hex, 'x', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set IP address: {result.get('error')}"}
             
-            if result:
-                return {
-                    'success': True,
-                    'message': f'TFTP destination set to {tftp_server}{tftp_path} with AUTO_UPLOAD enabled',
-                    'tftp_server': tftp_server,
-                    'tftp_path': tftp_path,
-                    'auto_upload': True
-                }
-            else:
-                return {'success': False, 'error': 'Failed to set TFTP destination'}
+            # Set TFTP path
+            if tftp_path:
+                result = self._set_modem_via_cm_proxy(modem_ip, OID_PATH, tftp_path, 's', community)
+                if not result.get('success'):
+                    return {'success': False, 'error': f"Failed to set path: {result.get('error')}"}
+            
+            # Enable auto upload (2 = autoUpload)
+            result = self._set_modem_via_cm_proxy(modem_ip, OID_UPLOAD, '2', 'i', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to enable auto upload: {result.get('error')}"}
+            
+            return {
+                'success': True,
+                'message': f'TFTP destination set to {tftp_server}{tftp_path} with AUTO_UPLOAD enabled',
+                'tftp_server': tftp_server,
+                'tftp_path': tftp_path,
+                'auto_upload': True
+            }
                 
         except Exception as e:
             self.logger.error(f"Set TFTP error: {e}")
