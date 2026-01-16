@@ -1515,9 +1515,9 @@ class PyPNMAgent:
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to set IP type: {result.get('error')}"}
             
-            # Set IP address (as hex string: 149.210.167.40 = 95 d2 a7 28)
+            # Set IP address (as hex string: 149.210.167.40 = 95d2a728)
             ip_parts = tftp_server.split('.')
-            ip_hex = ' '.join([f'{int(p):02x}' for p in ip_parts])
+            ip_hex = ''.join([f'{int(p):02x}' for p in ip_parts])
             result = self._set_modem_via_cm_proxy(modem_ip, OID_IP_ADDR, ip_hex, 'x', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to set IP address: {result.get('error')}"}
