@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # LAB Version - Direct CMTS access, no agent needed
+  gui-server-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+    container_name: pypnm-gui-lab
+    image: docker_gui-server-lab:latest
+    ports:
+      - "5051:5050"  # Different port from production
+    environment:
+      - FLASK_ENV=lab
+      - PYPNM_MODE=lab
+      - REDIS_HOST=eve-li-redis
+      - REDIS_PORT=6379
+      - AGENT_REQUIRED=false
+    volumes:
+      - pypnm-data-lab:/app/data
+      - pypnm-logs-lab:/app/logs
+    networks:
+      - pypnm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  redis-lab:
+    image: redis:7-alpine
+    container_name: eve-li-redis-lab
+    ports:
+      - "6380:6379"  # Different port from production
+    volumes:
+      - redis-data-lab:/data
+    networks:
+      - pypnm-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+networks:
+  pypnm-net:
+    driver: bridge
+
+volumes:
+  pypnm-data-lab:
+    driver: local
+  pypnm-logs-lab:
+    driver: local
+  redis-data-lab:
+    driver: local
