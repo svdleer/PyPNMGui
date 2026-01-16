@@ -212,6 +212,7 @@
                                                 <th>IP Address</th>
                                                 <th>Vendor</th>
                                                 <th>Model</th>
+                                                <th>Firmware</th>
                                                 <th>DOCSIS</th>
                                                 <th>CMTS</th>
                                                 <th>Actions</th>
@@ -229,6 +230,7 @@
                                                 <td>{{ modem.ip_address }}</td>
                                                 <td>{{ modem.vendor }}</td>
                                                 <td>{{ modem.model }}</td>
+                                                <td><small>{{ modem.software_version }}</small></td>
                                                 <td>{{ modem.docsis_version }}</td>
                                                 <td>{{ modem.cmts }}<br><small class="text-muted">{{ modem.cmts_interface }}</small></td>
                                                 <td>
