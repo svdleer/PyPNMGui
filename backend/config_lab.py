@@ -12,7 +12,7 @@ LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccap001',
         'ip': 'mnd-gt0002-ccap001',
-        'snmp_community': 'oss1nf0',
+        'snmp_community': 'Zigg0@LL',
         'type': 'CCAP',
         'vendor': 'Arris',  # ccap0x = Arris E6000
         'location': 'LAB-MND-GT0002'
@@ -20,7 +20,7 @@ LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccap002', 
         'ip': 'mnd-gt0002-ccap002',
-        'snmp_community': 'oss1nf0',
+        'snmp_community': 'Zigg0@LL',
         'type': 'CCAP',
         'vendor': 'Arris',  # ccap0x = Arris E6000
         'location': 'LAB-MND-GT0002'
@@ -28,7 +28,7 @@ LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccap101',
         'ip': 'mnd-gt0002-ccap101', 
-        'snmp_community': 'oss1nf0',
+        'snmp_community': 'Zigg0@LL',
         'type': 'CCAP',
         'vendor': 'Casa',  # ccap1x = Casa 100G
         'location': 'LAB-MND-GT0002'
@@ -36,7 +36,7 @@ LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccap201',
         'ip': 'mnd-gt0002-ccap201',
-        'snmp_community': 'oss1nf0',
+        'snmp_community': 'Zigg0@LL',
         'type': 'CCAP',
         'vendor': 'Cisco',  # ccap2xx = Cisco cBR8
         'location': 'LAB-MND-GT0002'
@@ -44,7 +44,7 @@ LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccapv001',
         'ip': 'mnd-gt0002-ccapv001',
-        'snmp_community': 'oss1nf0',
+        'snmp_community': 'Zigg0@LL',
         'type': 'CCAP',
         'vendor': 'Commscope',  # ccapvxxx = Commscope EVO vCCAP
         'location': 'LAB-MND-GT0002'
@@ -52,7 +52,7 @@ LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccapv002',
         'ip': 'mnd-gt0002-ccapv002',
-        'snmp_community': 'oss1nf0',
+        'snmp_community': 'Zigg0@LL',
         'type': 'CCAP',
         'vendor': 'Commscope',  # ccapvxxx = Commscope EVO vCCAP
         'location': 'LAB-MND-GT0002'
