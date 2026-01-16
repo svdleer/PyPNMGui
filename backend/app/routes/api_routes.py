@@ -1412,6 +1412,7 @@ def pypnm_pre_eq(mac_address):
 def pypnm_sysdescr(mac_address):
     """Get system description via PyPNM."""
     from app.core.pypnm_client import PyPNMClient
+    import re
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
@@ -1423,8 +1424,51 @@ def pypnm_sysdescr(mac_address):
     client = PyPNMClient()
     result = client.get_sys_descr(mac_address, modem_ip, community)
     
-    if result.get('status') == 'error':
+    # PyPNM returns status: 0 for success
+    if result.get('status') != 0:
         return jsonify(result), 500
+    
+    # Check if PyPNM returned empty sysDescr (parsing failed)
+    sys_descr = result.get('results', {}).get('sysDescr', {})
+    if sys_descr.get('_is_empty', True):
+        # Try direct SNMP query as fallback
+        try:
+            from pysnmp.hlapi import getCmd, SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
+            iterator = getCmd(
+                SnmpEngine(),
+                CommunityData(community),
+                UdpTransportTarget((modem_ip, 161), timeout=2, retries=0),
+                ContextData(),
+                ObjectType(ObjectIdentity('1.3.6.1.2.1.1.1.0'))
+            )
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            
+            if not errorIndication and not errorStatus and varBinds:
+                raw_sysdescr = str(varBinds[0][1])
+                # Parse the <<...>> format ourselves
+                pattern = re.compile(r'<<\s*(.*?)\s*>>')
+                match = pattern.search(raw_sysdescr)
+                if match:
+                    content = match.group(1)
+                    entries = [item.strip() for item in content.split(';') if item.strip()]
+                    parsed = {}
+                    for entry in entries:
+                        if ':' in entry:
+                            key, val = [part.strip() for part in entry.split(':', 1)]
+                            parsed[key] = val
+                    
+                    result['results']['sysDescr'] = {
+                        'hw_rev': parsed.get('HW_REV', ''),
+                        'vendor': parsed.get('VENDOR', ''),
+                        'boot_rev': parsed.get('BOOTR', ''),
+                        'sw_rev': parsed.get('SW_REV', ''),
+                        'model': parsed.get('MODEL', ''),
+                        '_is_empty': False,
+                        '_raw': raw_sysdescr
+                    }
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Fallback SNMP sysDescr failed: {e}")
+    
     return jsonify(result)
 
 
@@ -1443,6 +1487,7 @@ def pypnm_event_log(mac_address):
     client = PyPNMClient()
     result = client.get_event_log(mac_address, modem_ip, community)
     
-    if result.get('status') == 'error':
+    # PyPNM returns status: 0 for success
+    if result.get('status') != 0:
         return jsonify(result), 500
     return jsonify(result)
