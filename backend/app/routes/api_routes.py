@@ -983,6 +983,44 @@ def snmp_bulk_get():
 
 # ============== PyPNM OFDM Capture Endpoints ==============
 
+@api_bp.route('/pnm/ofdm/tftp/configure', methods=['POST'])
+def configure_ofdm_tftp():
+    """Configure modem TFTP destination for PNM captures."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    mac_address = data.get('mac_address')
+    tftp_server = data.get('tftp_server', '149.210.167.40')  # vps.serial.nl
+    tftp_path = data.get('tftp_path', '')
+    
+    if not all([modem_ip, mac_address]):
+        return jsonify({"status": "error", "message": "modem_ip and mac_address required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('pnm_set_tftp') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent available with pnm_set_tftp capability"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_set_tftp',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'tftp_server': tftp_server,
+                'tftp_path': tftp_path,
+                'community': data.get('community', 'm0d3m1nf0')
+            },
+            timeout=30
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=30)
+        return handle_agent_result(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @api_bp.route('/pnm/ofdm/capture/trigger', methods=['POST'])
 def trigger_ofdm_capture():
     """Trigger OFDM RxMER capture on modem via PyPNM agent."""
