@@ -265,21 +265,35 @@ createApp({
             this.loadingSystemInfo = true;
             
             try {
-                const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/system-info`, {
+                // Use PyPNM API for channel stats
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/channel-stats`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: 'm0d3m1nf0'  // Modem community, not CMTS community
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.success) {
-                    this.systemInfo = data;
-                } else {
+                if (data.downstream || data.upstream) {
+                    // Transform PyPNM response to systemInfo format
+                    this.systemInfo = {
+                        downstream: this.transformChannelData(data.downstream),
+                        upstream: this.transformUpstreamData(data.upstream),
+                        timestamp: new Date().toISOString()
+                    };
+                } else if (data.error) {
                     this.showError('Failed to load system info', data.error || data.message);
+                } else {
+                    // If no data, try to show what we have
+                    this.systemInfo = {
+                        downstream: [],
+                        upstream: [],
+                        timestamp: new Date().toISOString()
+                    };
+                    this.showError('No channel data', 'Could not retrieve channel information from modem');
                 }
             } catch (error) {
                 console.error('Failed to load system info:', error);
@@ -289,40 +303,94 @@ createApp({
             }
         },
         
+        // Helper to transform PyPNM channel data
+        transformChannelData(dsData) {
+            if (!dsData) return [];
+            
+            // Handle SC-QAM data
+            const scqam = dsData.scqam || {};
+            const channels = [];
+            
+            // Parse PyPNM response format
+            if (scqam.channels) {
+                scqam.channels.forEach((ch, idx) => {
+                    channels.push({
+                        channel_id: ch.channel_id || idx + 1,
+                        frequency_mhz: ch.frequency_hz ? ch.frequency_hz / 1000000 : (ch.frequency_mhz || 0),
+                        power_dbmv: ch.power_dbmv || ch.power || 0,
+                        snr_db: ch.snr_db || ch.snr || 0
+                    });
+                });
+            }
+            
+            return channels;
+        },
+        
+        transformUpstreamData(usData) {
+            if (!usData) return [];
+            
+            const atdma = usData.atdma || {};
+            const channels = [];
+            
+            if (atdma.channels) {
+                atdma.channels.forEach((ch, idx) => {
+                    channels.push({
+                        channel_id: ch.channel_id || idx + 1,
+                        power_dbmv: ch.power_dbmv || ch.power || 0
+                    });
+                });
+            }
+            
+            return channels;
+        },
+        
         async loadChannelStats() {
             if (!this.selectedModem) return;
             
             this.runningTest = true;
             
             try {
-                // Load DS channels
-                const dsResponse = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/ds-channels`, {
+                // Use PyPNM API for channel stats
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/channel-stats`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
-                const dsData = await dsResponse.json();
                 
-                if (dsData.status === 'success') {
-                    this.dsChannels = dsData.data.downstream_ofdm_channels;
+                const data = await response.json();
+                
+                // Process DS OFDM channels if available
+                if (data.downstream && data.downstream.ofdm) {
+                    const ofdm = data.downstream.ofdm;
+                    if (ofdm.channels) {
+                        this.dsChannels = ofdm.channels.map((ch, idx) => ({
+                            channel_id: ch.channel_id || idx + 1,
+                            frequency_start_hz: ch.frequency_start_hz || 0,
+                            frequency_end_hz: ch.frequency_end_hz || 0,
+                            active_subcarriers: ch.active_subcarriers || 0,
+                            power_dbmv: ch.power_dbmv || 0,
+                            snr_db: ch.snr_db || 0,
+                            mer_db: ch.mer_db || 0
+                        }));
+                    }
                 }
                 
-                // Load US channels
-                const usResponse = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/us-channels`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
-                    })
-                });
-                const usData = await usResponse.json();
-                
-                if (usData.status === 'success') {
-                    this.usChannels = usData.data.upstream_ofdma_channels;
+                // Process US OFDMA channels if available
+                if (data.upstream && data.upstream.ofdma) {
+                    const ofdma = data.upstream.ofdma;
+                    if (ofdma.channels) {
+                        this.usChannels = ofdma.channels.map((ch, idx) => ({
+                            channel_id: ch.channel_id || idx + 1,
+                            frequency_start_hz: ch.frequency_start_hz || 0,
+                            frequency_end_hz: ch.frequency_end_hz || 0,
+                            active_subcarriers: ch.active_subcarriers || 0,
+                            power_dbmv: ch.power_dbmv || 0,
+                            timing_offset: ch.timing_offset || 0
+                        }));
+                    }
                 }
                 
                 this.showSuccess('Channel Stats Loaded', 'Channel statistics have been retrieved successfully.');
