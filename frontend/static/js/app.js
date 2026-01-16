@@ -307,18 +307,20 @@ createApp({
         transformChannelData(dsData) {
             if (!dsData) return [];
             
-            // Handle SC-QAM data
+            // Handle SC-QAM data from PyPNM response format
             const scqam = dsData.scqam || {};
             const channels = [];
             
-            // Parse PyPNM response format
-            if (scqam.channels) {
-                scqam.channels.forEach((ch, idx) => {
+            // PyPNM returns .results array
+            const results = scqam.results || scqam.channels || [];
+            if (Array.isArray(results)) {
+                results.forEach((ch, idx) => {
+                    const entry = ch.entry || ch;
                     channels.push({
-                        channel_id: ch.channel_id || idx + 1,
-                        frequency_mhz: ch.frequency_hz ? ch.frequency_hz / 1000000 : (ch.frequency_mhz || 0),
-                        power_dbmv: ch.power_dbmv || ch.power || 0,
-                        snr_db: ch.snr_db || ch.snr || 0
+                        channel_id: ch.channel_id || entry.docsIfDownChannelId || idx + 1,
+                        frequency_mhz: entry.docsIfDownChannelFrequency ? entry.docsIfDownChannelFrequency / 1000000 : (ch.frequency_mhz || 0),
+                        power_dbmv: entry.docsIfDownChannelPower ? entry.docsIfDownChannelPower / 10 : (ch.power_dbmv || 0),
+                        snr_db: entry.docsIfSigQSignalNoise ? entry.docsIfSigQSignalNoise / 10 : (ch.snr_db || 0)
                     });
                 });
             }
@@ -332,11 +334,14 @@ createApp({
             const atdma = usData.atdma || {};
             const channels = [];
             
-            if (atdma.channels) {
-                atdma.channels.forEach((ch, idx) => {
+            // PyPNM returns .results array
+            const results = atdma.results || atdma.channels || [];
+            if (Array.isArray(results)) {
+                results.forEach((ch, idx) => {
+                    const entry = ch.entry || ch;
                     channels.push({
-                        channel_id: ch.channel_id || idx + 1,
-                        power_dbmv: ch.power_dbmv || ch.power || 0
+                        channel_id: ch.channel_id || entry.docsIfUpChannelId || idx + 1,
+                        power_dbmv: entry.docsIf3CmStatusUsTxPower ? entry.docsIf3CmStatusUsTxPower / 10 : (ch.power_dbmv || 0)
                     });
                 });
             }
