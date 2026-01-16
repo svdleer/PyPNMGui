@@ -12,10 +12,30 @@
 ### LAB Environment  
 - **Port**: 5051
 - **Access**: Direct SSH to access-engineering.nl:65001
-- **CMTS Access**: Via direct SSH connection (no tunnels)
+- **Tunnel**: Local port 5051 → Remote port 5051
+- **CMTS Access**: Via direct SSH connection (no jump server)
 - **Config**: 4 CMTS systems only
 - **Data**: Separate volumes (lab data isolated)
-- **User**: svdleer (direct access, no jump server)
+- **User**: svdleer (direct access)
+
+## SSH Tunnels
+
+### Production Tunnel
+```bash
+./ssh-tunnel.sh start    # Port 5050
+```
+
+### LAB Tunnel
+```bash
+./ssh-tunnel-lab.sh start    # Port 5051
+```
+
+Access LAB: http://localhost:5051
+
+### Both Tunnels Running
+You can run both simultaneously:
+- Production: http://localhost:5050
+- LAB: http://localhost:5051
 
 ## Switching Between Environments
 
