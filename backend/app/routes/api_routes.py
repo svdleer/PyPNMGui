@@ -741,7 +741,7 @@ def get_cmts_modems(hostname):
                 logging.getLogger(__name__).warning(f"Redis cache write error: {e}")
         
         # Start background enrichment if requested - enrich ALL modems in batches
-        if enrich and agent_manager.get_agent_for_capability('cm_proxy'):
+        if enrich and (agent_manager.get_agent_for_capability('cm_proxy') or agent_manager.get_agent_for_capability('enrich_modems')):
             import threading
             all_modems = task_result.get('modems', [])
             
