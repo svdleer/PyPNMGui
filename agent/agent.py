@@ -1818,17 +1818,18 @@ class PyPNMAgent:
     
     def _handle_enrich_modems(self, params: dict) -> dict:
         """
-        Enrich modems with vendor/model/firmware info via cm_proxy (hop-access).
+        Enrich modems with vendor/model/firmware info via cm_proxy (hop-access) or cm_direct.
         This runs in background after initial modem list is returned.
         """
         modems = params.get('modems', [])
         modem_community = params.get('modem_community', 'm0d3m1nf0')
         
-        if not self.config.cm_proxy_host:
-            self.logger.error("cm_proxy_host not configured!")
+        # Check if we can reach modems - either via cm_proxy or cm_direct
+        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
+            self.logger.error("Neither cm_proxy_host nor cm_direct configured!")
             return {
                 'success': False,
-                'error': 'cm_proxy not configured for modem enrichment'
+                'error': 'No modem access method configured for enrichment'
             }
         
         # Log some stats about incoming modems
@@ -1839,7 +1840,11 @@ class PyPNMAgent:
         self.logger.info(f"Enrichment request: {len(modems)} modems, status breakdown: {status_counts}")
         
         try:
-            enriched = self._enrich_modems_parallel(modems, modem_community, max_workers=50)
+            # Use cm_direct if enabled (direct SNMP to modems), otherwise use cm_proxy
+            if self.config.cm_direct_enabled:
+                enriched = self._enrich_modems_direct(modems, modem_community, max_workers=50)
+            else:
+                enriched = self._enrich_modems_parallel(modems, modem_community, max_workers=50)
             
             # Count how many were enriched
             enriched_count = sum(1 for m in enriched if m.get('model') and m.get('model') not in ['N/A', 'Unknown'])
@@ -1857,6 +1862,75 @@ class PyPNMAgent:
                 'success': False,
                 'error': str(e)
             }
+    
+    def _enrich_modems_direct(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
+        """
+        Query each modem directly via SNMP to get sysDescr for model info.
+        Uses subprocess with parallel execution.
+        """
+        import subprocess
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'  # sysDescr
+        
+        # Query modems with valid IPs (any status that indicates online)
+        online_statuses = {'operational', 'registrationComplete', 'ipComplete', 'online'}
+        online_modems = [m for m in modems 
+                         if m.get('ip_address') and m.get('ip_address') != 'N/A' 
+                         and m.get('status') in online_statuses][:200]
+        
+        self.logger.info(f"Direct enrichment: {len(online_modems)} modems with valid IP (from {len(modems)} total)")
+        
+        if not online_modems:
+            self.logger.warning("No online modems to enrich")
+            return modems
+        
+        results = {}
+        
+        def query_modem(modem):
+            ip = modem.get('ip_address')
+            try:
+                cmd = ['snmpget', '-v2c', '-c', modem_community, '-t', '2', '-r', '0', ip, OID_SYS_DESCR]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and 'STRING:' in result.stdout:
+                    sys_descr = result.stdout.split('STRING:')[-1].strip().strip('"')
+                    return ip, sys_descr
+            except Exception as e:
+                pass
+            return ip, None
+        
+        self.logger.info(f"Running direct SNMP queries for {len(online_modems)} modems with {max_workers} workers")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(query_modem, m): m for m in online_modems}
+            for future in as_completed(futures):
+                ip, sys_descr = future.result()
+                if sys_descr:
+                    results[ip] = sys_descr
+        
+        self.logger.info(f"Direct query returned {len(results)} results")
+        
+        # Apply results to modems
+        enriched_count = 0
+        for modem in online_modems:
+            ip = modem.get('ip_address')
+            if ip in results:
+                model_info = self._parse_sys_descr(results[ip])
+                modem['model'] = model_info.get('model', 'Unknown')
+                modem['software_version'] = model_info.get('software', '')
+                if model_info.get('vendor'):
+                    modem['vendor'] = model_info.get('vendor')
+                enriched_count += 1
+        
+        self.logger.info(f"Direct enrichment done: {enriched_count}/{len(online_modems)} modems enriched")
+        
+        # Merge enriched modems back
+        enriched_map = {m['mac_address']: m for m in online_modems}
+        for modem in modems:
+            if modem['mac_address'] in enriched_map:
+                modem.update(enriched_map[modem['mac_address']])
+        
+        return modems
     
     def _enrich_modems_parallel(self, modems: list, modem_community: str = 'm0d3m1nf0', max_workers: int = 20) -> list:
         """
