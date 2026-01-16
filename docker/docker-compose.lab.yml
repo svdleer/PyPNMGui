@@ -15,7 +15,7 @@ services:
     environment:
       - FLASK_ENV=lab
       - PYPNM_MODE=lab
-      - REDIS_HOST=eve-li-redis
+      - REDIS_HOST=eve-li-redis-lab
       - REDIS_PORT=6379
       - AGENT_REQUIRED=false
     volumes:
