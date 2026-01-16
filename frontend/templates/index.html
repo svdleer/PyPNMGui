@@ -266,268 +266,599 @@
                 </div>
             </div>
 
-            <!-- Modems/Details View -->
+            <!-- Modems/Details View - Modern PNM Dashboard -->
             <div v-if="currentView === 'modems' && selectedModem">
-                <div class="row">
-                    <!-- Modem Info Card -->
-                    <div class="col-lg-4">
-                        <div class="card shadow-sm mb-4">
-                            <div class="card-header bg-primary text-white">
-                                <h5 class="mb-0"><i class="bi bi-router me-2"></i>Modem Information</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="d-flex align-items-center mb-3">
-                                    <span class="badge me-2" :class="selectedModem.status === 'online' ? 'bg-success' : 'bg-danger'" style="font-size: 1rem;">
-                                        {{ selectedModem.status.toUpperCase() }}
-                                    </span>
-                                    <span class="text-muted">{{ selectedModem.vendor }} {{ selectedModem.model }}</span>
+                <!-- Modem Header -->
+                <div class="card shadow-sm mb-4 border-0" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <div class="card-body text-white py-4">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center">
+                                    <div class="me-4">
+                                        <i class="bi bi-router" style="font-size: 3rem;"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="mb-1">{{ selectedModem.vendor }} {{ selectedModem.model || 'Cable Modem' }}</h3>
+                                        <p class="mb-0 opacity-75">
+                                            <code class="text-white bg-dark bg-opacity-25 px-2 py-1 rounded">{{ selectedModem.mac_address }}</code>
+                                            <span class="ms-3"><i class="bi bi-geo-alt me-1"></i>{{ selectedModem.ip_address }}</span>
+                                        </p>
+                                    </div>
                                 </div>
-                                <table class="table table-sm">
-                                    <tr>
-                                        <th>MAC Address</th>
-                                        <td><code>{{ selectedModem.mac_address }}</code></td>
-                                    </tr>
-                                    <tr>
-                                        <th>IP Address</th>
-                                        <td>{{ selectedModem.ip_address }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th>DOCSIS Version</th>
-                                        <td>{{ selectedModem.docsis_version }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th>CMTS</th>
-                                        <td>{{ selectedModem.cmts }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th>Interface</th>
-                                        <td>{{ selectedModem.cmts_interface }}</td>
-                                    </tr>
-                                </table>
-                                
-                                <!-- Channel Info (loaded separately) -->
-                                <div v-if="systemInfo && systemInfo.downstream">
-                                    <hr>
-                                    <h6><i class="bi bi-broadcast me-1"></i>Channel Information</h6>
-                                    
-                                    <div class="mb-3">
-                                        <strong>Downstream ({{ systemInfo.downstream.length }} channels)</strong>
-                                        <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
-                                            <table class="table table-sm table-striped">
-                                                <thead style="position: sticky; top: 0; background: white;">
+                            </div>
+                            <div class="col-md-4 text-md-end mt-3 mt-md-0">
+                                <span class="badge bg-light text-dark me-2 py-2 px-3" style="font-size: 0.9rem;">
+                                    <i class="bi bi-cpu me-1"></i>DOCSIS {{ selectedModem.docsis_version || '3.1' }}
+                                </span>
+                                <span class="badge py-2 px-3" :class="selectedModem.status === 'online' || selectedModem.status === 'registrationComplete' ? 'bg-success' : 'bg-danger'" style="font-size: 0.9rem;">
+                                    <i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>
+                                    {{ selectedModem.status === 'registrationComplete' ? 'Online' : selectedModem.status }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <ul class="nav nav-tabs nav-fill mb-4" id="pnmTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button">
+                            <i class="bi bi-speedometer2 me-2"></i>Overview
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="downstream-tab" data-bs-toggle="tab" data-bs-target="#downstream" type="button">
+                            <i class="bi bi-arrow-down-circle me-2"></i>Downstream
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="upstream-tab" data-bs-toggle="tab" data-bs-target="#upstream" type="button">
+                            <i class="bi bi-arrow-up-circle me-2"></i>Upstream
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="pnm-tab" data-bs-toggle="tab" data-bs-target="#pnm" type="button">
+                            <i class="bi bi-graph-up me-2"></i>PNM Measurements
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="events-tab" data-bs-toggle="tab" data-bs-target="#events" type="button">
+                            <i class="bi bi-journal-text me-2"></i>Event Log
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Tab Content -->
+                <div class="tab-content" id="pnmTabContent">
+                    
+                    <!-- Overview Tab -->
+                    <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                        <div class="row">
+                            <!-- Quick Stats -->
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #28a745 !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">Status</h6>
+                                                <h4 class="mb-0 text-success">Online</h4>
+                                            </div>
+                                            <i class="bi bi-check-circle-fill text-success" style="font-size: 2rem;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #007bff !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">CMTS</h6>
+                                                <h4 class="mb-0">{{ selectedModem.cmts || 'N/A' }}</h4>
+                                            </div>
+                                            <i class="bi bi-hdd-network text-primary" style="font-size: 2rem;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #6f42c1 !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">Interface</h6>
+                                                <h4 class="mb-0">{{ selectedModem.cmts_interface || 'N/A' }}</h4>
+                                            </div>
+                                            <i class="bi bi-ethernet text-purple" style="font-size: 2rem; color: #6f42c1;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #fd7e14 !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">Firmware</h6>
+                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.software_version">
+                                                    {{ selectedModem.software_version || 'N/A' }}
+                                                </h5>
+                                            </div>
+                                            <i class="bi bi-cpu" style="font-size: 2rem; color: #fd7e14;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Modem Details & Quick Actions -->
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Modem Details</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="table table-borderless mb-0">
+                                            <tr>
+                                                <td class="text-muted" style="width: 40%;">MAC Address</td>
+                                                <td><code>{{ selectedModem.mac_address }}</code></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">IP Address</td>
+                                                <td>{{ selectedModem.ip_address }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">Vendor</td>
+                                                <td>{{ selectedModem.vendor || 'Unknown' }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">Model</td>
+                                                <td>{{ selectedModem.model || 'Unknown' }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">DOCSIS Version</td>
+                                                <td><span class="badge bg-info">{{ selectedModem.docsis_version || '3.1' }}</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">Firmware</td>
+                                                <td><small>{{ selectedModem.software_version || 'N/A' }}</small></td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>Quick Actions</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-6">
+                                                <button @click="loadSystemInfo" class="btn btn-outline-primary w-100 py-3" :disabled="loadingSystemInfo">
+                                                    <i class="bi bi-arrow-clockwise d-block mb-1" :class="{ 'spin': loadingSystemInfo }" style="font-size: 1.5rem;"></i>
+                                                    <small>Refresh Info</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="loadChannelStats" class="btn btn-outline-info w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-bar-chart d-block mb-1" style="font-size: 1.5rem;"></i>
+                                                    <small>Channel Stats</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="runRxmerTest" class="btn btn-outline-success w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-graph-up d-block mb-1" style="font-size: 1.5rem;"></i>
+                                                    <small>RxMER Test</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="loadEventLog" class="btn btn-outline-secondary w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-journal-text d-block mb-1" style="font-size: 1.5rem;"></i>
+                                                    <small>Event Log</small>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Channel Summary -->
+                        <div class="row" v-if="systemInfo">
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-down text-success me-2"></i>Downstream Channels</h5>
+                                        <span class="badge bg-success">{{ systemInfo.downstream ? systemInfo.downstream.filter(c => c.frequency_mhz > 0).length : 0 }} active</span>
+                                    </div>
+                                    <div class="card-body p-0">
+                                        <div class="table-responsive" style="max-height: 250px;">
+                                            <table class="table table-sm table-hover mb-0">
+                                                <thead class="table-light sticky-top">
                                                     <tr>
                                                         <th>Ch</th>
                                                         <th>Freq (MHz)</th>
-                                                        <th>Power (dBmV)</th>
-                                                        <th>SNR (dB)</th>
+                                                        <th>Power</th>
+                                                        <th>SNR</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in (systemInfo.downstream || []).filter(c => c.frequency_mhz > 0)" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz.toFixed(0) }}</td>
+                                                        <td :class="ch.power_dbmv < -10 || ch.power_dbmv > 15 ? 'text-danger fw-bold' : 'text-success'">
+                                                            {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                        </td>
+                                                        <td :class="ch.snr_db < 35 ? 'text-danger fw-bold' : 'text-success'">
+                                                            {{ ch.snr_db.toFixed(1) }} dB
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-up text-primary me-2"></i>Upstream Channels</h5>
+                                        <span class="badge bg-primary">{{ systemInfo.upstream ? systemInfo.upstream.length : 0 }} active</span>
+                                    </div>
+                                    <div class="card-body p-0">
+                                        <div class="table-responsive" style="max-height: 250px;">
+                                            <table class="table table-sm table-hover mb-0">
+                                                <thead class="table-light sticky-top">
+                                                    <tr>
+                                                        <th>Ch</th>
+                                                        <th>Power</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in (systemInfo.upstream || [])" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td :class="ch.power_dbmv < 35 || ch.power_dbmv > 52 ? 'text-danger fw-bold' : 'text-success'">
+                                                            {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Load Channel Info Button -->
+                        <div class="text-center py-4" v-if="!systemInfo">
+                            <i class="bi bi-broadcast text-muted" style="font-size: 3rem;"></i>
+                            <p class="text-muted mt-2">Channel information not loaded</p>
+                            <button @click="loadSystemInfo" class="btn btn-primary" :disabled="loadingSystemInfo">
+                                <i class="bi bi-arrow-clockwise me-2" :class="{ 'spin': loadingSystemInfo }"></i>
+                                Load Channel Info
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Downstream Tab -->
+                    <div class="tab-pane fade" id="downstream" role="tabpanel">
+                        <div class="row">
+                            <!-- SC-QAM Channels -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-reception-4 me-2"></i>SC-QAM Downstream Channels</h5>
+                                    </div>
+                                    <div class="card-body" v-if="systemInfo && systemInfo.downstream">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-dark">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Frequency</th>
+                                                        <th>Modulation</th>
+                                                        <th>Power</th>
+                                                        <th>SNR</th>
+                                                        <th>Status</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     <tr v-for="ch in systemInfo.downstream.filter(c => c.frequency_mhz > 0)" :key="ch.channel_id">
-                                                        <td>{{ ch.channel_id }}</td>
-                                                        <td>{{ ch.frequency_mhz.toFixed(0) }}</td>
-                                                        <td :class="{'text-danger': ch.power_dbmv < -10 || ch.power_dbmv > 15}">
-                                                            {{ ch.power_dbmv.toFixed(1) }}
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz.toFixed(2) }} MHz</td>
+                                                        <td><span class="badge bg-secondary">256 QAM</span></td>
+                                                        <td>
+                                                            <span :class="ch.power_dbmv >= -10 && ch.power_dbmv <= 15 ? 'text-success' : 'text-danger'">
+                                                                {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                            </span>
                                                         </td>
-                                                        <td :class="{'text-danger': ch.snr_db < 35}">
-                                                            {{ ch.snr_db.toFixed(1) }}
+                                                        <td>
+                                                            <span :class="ch.snr_db >= 35 ? 'text-success' : 'text-danger'">
+                                                                {{ ch.snr_db.toFixed(1) }} dB
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span class="badge" :class="ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 15 ? 'bg-success' : 'bg-warning'">
+                                                                {{ ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 15 ? 'Good' : 'Check' }}
+                                                            </span>
                                                         </td>
                                                     </tr>
                                                 </tbody>
                                             </table>
                                         </div>
                                     </div>
-                                    
-                                    <div v-if="systemInfo.upstream && systemInfo.upstream.length">
-                                        <strong>Upstream ({{ systemInfo.upstream.length }} channels)</strong>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- OFDM Channels -->
+                            <div class="col-12 mb-4" v-if="dsChannels.length > 0">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-broadcast me-2"></i>OFDM Downstream Channels (DOCSIS 3.1)</h5>
+                                    </div>
+                                    <div class="card-body">
                                         <div class="table-responsive">
-                                            <table class="table table-sm table-striped">
-                                                <thead>
+                                            <table class="table table-hover">
+                                                <thead class="table-dark">
                                                     <tr>
                                                         <th>Channel</th>
-                                                        <th>Power (dBmV)</th>
+                                                        <th>Frequency Range</th>
+                                                        <th>Subcarriers</th>
+                                                        <th>Power</th>
+                                                        <th>SNR</th>
+                                                        <th>MER</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in systemInfo.upstream" :key="ch.channel_id">
-                                                        <td>{{ ch.channel_id }}</td>
-                                                        <td :class="{'text-danger': ch.power_dbmv < 35 || ch.power_dbmv > 52}">
-                                                            {{ ch.power_dbmv.toFixed(1) }}
-                                                        </td>
+                                                    <tr v-for="ch in dsChannels" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
+                                                        <td>{{ ch.active_subcarriers }}</td>
+                                                        <td>{{ ch.power_dbmv }} dBmV</td>
+                                                        <td>{{ ch.snr_db }} dB</td>
+                                                        <td><span class="badge" :class="getMerBadgeClass(ch.mer_db)">{{ ch.mer_db }} dB</span></td>
                                                     </tr>
                                                 </tbody>
                                             </table>
                                         </div>
                                     </div>
-                                    
-                                    <small class="text-muted">
-                                        <i class="bi bi-clock me-1"></i>{{ new Date(systemInfo.timestamp).toLocaleString() }}
-                                    </small>
-                                </div>
-                                
-                                <button @click="loadSystemInfo" class="btn btn-outline-primary btn-sm w-100 mt-2" :disabled="loadingSystemInfo">
-                                    <i class="bi bi-arrow-clockwise me-1" :class="{ 'spin': loadingSystemInfo }"></i>
-                                    {{ loadingSystemInfo ? 'Loading...' : 'Load Channel Info' }}
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <!-- Quick Actions -->
-                        <div class="card shadow-sm">
-                            <div class="card-header bg-white">
-                                <h5 class="mb-0"><i class="bi bi-lightning me-2"></i>Quick Actions</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="d-grid gap-2">
-                                    <button @click="runRxmerTest" class="btn btn-outline-primary" :disabled="runningTest">
-                                        <i class="bi bi-graph-up me-2"></i>RxMER Measurement
-                                    </button>
-                                    <button @click="runSpectrumTest" class="btn btn-outline-primary" :disabled="runningTest">
-                                        <i class="bi bi-broadcast me-2"></i>Spectrum Analysis
-                                    </button>
-                                    <button @click="loadEventLog" class="btn btn-outline-secondary" :disabled="runningTest">
-                                        <i class="bi bi-journal-text me-2"></i>View Event Log
-                                    </button>
-                                    <button @click="loadChannelStats" class="btn btn-outline-secondary" :disabled="runningTest">
-                                        <i class="bi bi-bar-chart me-2"></i>Channel Statistics
-                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Data Display Area -->
-                    <div class="col-lg-8">
-                        <!-- Downstream Channels -->
-                        <div class="card shadow-sm mb-4" v-if="dsChannels.length > 0">
-                            <div class="card-header bg-white">
-                                <h5 class="mb-0"><i class="bi bi-arrow-down me-2"></i>Downstream OFDM Channels</h5>
+                    <!-- Upstream Tab -->
+                    <div class="tab-pane fade" id="upstream" role="tabpanel">
+                        <div class="row">
+                            <!-- ATDMA Channels -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>ATDMA Upstream Channels</h5>
+                                    </div>
+                                    <div class="card-body" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.length">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-dark">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Power</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.upstream" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>
+                                                            <span :class="ch.power_dbmv >= 35 && ch.power_dbmv <= 52 ? 'text-success' : 'text-danger'">
+                                                                {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span class="badge" :class="ch.power_dbmv >= 35 && ch.power_dbmv <= 52 ? 'bg-success' : 'bg-warning'">
+                                                                {{ ch.power_dbmv >= 35 && ch.power_dbmv <= 52 ? 'Good' : 'Check' }}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <div class="table-responsive">
-                                    <table class="table table-sm">
-                                        <thead>
-                                            <tr>
-                                                <th>Channel ID</th>
-                                                <th>Frequency Range</th>
-                                                <th>Subcarriers</th>
-                                                <th>Power</th>
-                                                <th>SNR</th>
-                                                <th>MER</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr v-for="ch in dsChannels" :key="ch.channel_id">
-                                                <td><strong>{{ ch.channel_id }}</strong></td>
-                                                <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
-                                                <td>{{ ch.active_subcarriers }}</td>
-                                                <td>{{ ch.power_dbmv }} dBmV</td>
-                                                <td>{{ ch.snr_db }} dB</td>
-                                                <td><span class="badge" :class="getMerBadgeClass(ch.mer_db)">{{ ch.mer_db }} dB</span></td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+
+                            <!-- OFDMA Channels -->
+                            <div class="col-12 mb-4" v-if="usChannels.length > 0">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-broadcast me-2"></i>OFDMA Upstream Channels (DOCSIS 3.1)</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-dark">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Frequency Range</th>
+                                                        <th>Subcarriers</th>
+                                                        <th>Power</th>
+                                                        <th>Timing Offset</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in usChannels" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
+                                                        <td>{{ ch.active_subcarriers }}</td>
+                                                        <td>{{ ch.power_dbmv }} dBmV</td>
+                                                        <td>{{ ch.timing_offset }}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Upstream Channels -->
-                        <div class="card shadow-sm mb-4" v-if="usChannels.length > 0">
-                            <div class="card-header bg-white">
-                                <h5 class="mb-0"><i class="bi bi-arrow-up me-2"></i>Upstream OFDMA Channels</h5>
+                    <!-- PNM Measurements Tab -->
+                    <div class="tab-pane fade" id="pnm" role="tabpanel">
+                        <div class="row">
+                            <!-- PNM Test Buttons -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>Run PNM Measurements</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-3">
+                                                <button @click="runRxmerTest" class="btn btn-primary w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-graph-up d-block" style="font-size: 2rem;"></i>
+                                                    <span class="d-block mt-2">RxMER Capture</span>
+                                                    <small class="text-light opacity-75">OFDM RxMER per subcarrier</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runSpectrumTest" class="btn btn-success w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-soundwave d-block" style="font-size: 2rem;"></i>
+                                                    <span class="d-block mt-2">Spectrum Analysis</span>
+                                                    <small class="text-light opacity-75">Full spectrum capture</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runFecTest" class="btn btn-info w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-shield-check d-block" style="font-size: 2rem;"></i>
+                                                    <span class="d-block mt-2">FEC Summary</span>
+                                                    <small class="text-light opacity-75">Error correction stats</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runPreEqTest" class="btn btn-warning w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-sliders d-block" style="font-size: 2rem;"></i>
+                                                    <span class="d-block mt-2">Pre-Equalization</span>
+                                                    <small class="text-dark opacity-75">US pre-eq coefficients</small>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="mt-3 text-center" v-if="runningTest">
+                                            <div class="spinner-border text-primary me-2" role="status"></div>
+                                            <span>Running measurement... Please wait.</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <div class="table-responsive">
-                                    <table class="table table-sm">
-                                        <thead>
-                                            <tr>
-                                                <th>Channel ID</th>
-                                                <th>Frequency Range</th>
-                                                <th>Subcarriers</th>
-                                                <th>Power</th>
-                                                <th>Timing Offset</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr v-for="ch in usChannels" :key="ch.channel_id">
-                                                <td><strong>{{ ch.channel_id }}</strong></td>
-                                                <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
-                                                <td>{{ ch.active_subcarriers }}</td>
-                                                <td>{{ ch.power_dbmv }} dBmV</td>
-                                                <td>{{ ch.timing_offset }}</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+
+                            <!-- RxMER Results -->
+                            <div class="col-12 mb-4" v-if="rxmerData">
+                                <div class="card shadow-sm border-success">
+                                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>RxMER Measurement Results</h5>
+                                        <small>{{ rxmerData.timestamp || new Date().toLocaleString() }}</small>
+                                    </div>
+                                    <div class="card-body">
+                                        <div v-if="rxmerData.data && rxmerData.data.rxmer_measurements">
+                                            <div v-for="meas in rxmerData.data.rxmer_measurements" :key="meas.channel_id" class="mb-4">
+                                                <h6 class="border-bottom pb-2">Channel {{ meas.channel_id }}</h6>
+                                                <div class="row">
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Average MER</small>
+                                                            <h3 class="mb-0 text-primary">{{ meas.average_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Minimum MER</small>
+                                                            <h3 class="mb-0 text-warning">{{ meas.min_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Maximum MER</small>
+                                                            <h3 class="mb-0 text-success">{{ meas.max_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Std Deviation</small>
+                                                            <h3 class="mb-0 text-secondary">{{ meas.std_dev_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="chart-container mt-3" style="height: 200px;">
+                                                    <canvas :id="'rxmer-chart-' + meas.channel_id"></canvas>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div v-else class="text-center py-3">
+                                            <pre class="text-start bg-light p-3 rounded">{{ JSON.stringify(rxmerData, null, 2) }}</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Spectrum Results -->
+                            <div class="col-12 mb-4" v-if="spectrumData">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info text-white">
+                                        <h5 class="mb-0"><i class="bi bi-soundwave me-2"></i>Spectrum Analysis Results</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <pre class="bg-light p-3 rounded">{{ JSON.stringify(spectrumData, null, 2) }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- No Results -->
+                            <div class="col-12" v-if="!rxmerData && !spectrumData">
+                                <div class="card shadow-sm">
+                                    <div class="card-body text-center py-5">
+                                        <i class="bi bi-graph-up text-muted" style="font-size: 4rem;"></i>
+                                        <h5 class="mt-3 text-muted">No PNM Data</h5>
+                                        <p class="text-muted">Run a measurement above to capture PNM data from the modem.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- RxMER Results -->
-                        <div class="card shadow-sm mb-4" v-if="rxmerData">
+                    <!-- Event Log Tab -->
+                    <div class="tab-pane fade" id="events" role="tabpanel">
+                        <div class="card shadow-sm">
                             <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>RxMER Measurement Results</h5>
-                                <small class="text-muted">{{ rxmerData.timestamp }}</small>
+                                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Modem Event Log</h5>
+                                <button @click="loadEventLog" class="btn btn-sm btn-outline-primary" :disabled="runningTest">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                                </button>
                             </div>
-                            <div class="card-body">
-                                <div v-for="meas in rxmerData.data.rxmer_measurements" :key="meas.channel_id">
-                                    <h6>Channel {{ meas.channel_id }}</h6>
-                                    <div class="row mb-3">
-                                        <div class="col-md-3">
-                                            <div class="stat-card bg-light p-3 rounded text-center">
-                                                <small class="text-muted">Average MER</small>
-                                                <h4 class="mb-0">{{ meas.average_mer_db }} dB</h4>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="stat-card bg-light p-3 rounded text-center">
-                                                <small class="text-muted">Min MER</small>
-                                                <h4 class="mb-0 text-warning">{{ meas.min_mer_db }} dB</h4>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="stat-card bg-light p-3 rounded text-center">
-                                                <small class="text-muted">Max MER</small>
-                                                <h4 class="mb-0 text-success">{{ meas.max_mer_db }} dB</h4>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="stat-card bg-light p-3 rounded text-center">
-                                                <small class="text-muted">Std Dev</small>
-                                                <h4 class="mb-0">{{ meas.std_dev_mer_db }} dB</h4>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <!-- Simple chart placeholder -->
-                                    <div class="chart-container" style="height: 200px;">
-                                        <canvas :id="'rxmer-chart-' + meas.channel_id"></canvas>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Event Log -->
-                        <div class="card shadow-sm mb-4" v-if="eventLog.length > 0">
-                            <div class="card-header bg-white">
-                                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Event Log</h5>
-                            </div>
-                            <div class="card-body p-0">
-                                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                                    <table class="table table-sm mb-0">
-                                        <thead class="table-light sticky-top">
+                            <div class="card-body p-0" v-if="eventLog.length > 0">
+                                <div class="table-responsive" style="max-height: 500px;">
+                                    <table class="table table-hover mb-0">
+                                        <thead class="table-dark sticky-top">
                                             <tr>
-                                                <th>Time</th>
-                                                <th>Level</th>
+                                                <th style="width: 180px;">Timestamp</th>
+                                                <th style="width: 100px;">Level</th>
                                                 <th>Message</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <tr v-for="event in eventLog" :key="event.event_id" 
-                                                :class="getEventRowClass(event.level)">
-                                                <td style="white-space: nowrap;">{{ formatEventTime(event.timestamp) }}</td>
+                                            <tr v-for="event in eventLog" :key="event.event_id" :class="getEventRowClass(event.level)">
+                                                <td class="text-nowrap"><small>{{ formatEventTime(event.timestamp) }}</small></td>
                                                 <td>
-                                                    <span class="badge" :class="getEventBadgeClass(event.level)">
-                                                        {{ event.level }}
-                                                    </span>
+                                                    <span class="badge" :class="getEventBadgeClass(event.level)">{{ event.level }}</span>
                                                 </td>
                                                 <td>{{ event.message }}</td>
                                             </tr>
@@ -535,14 +866,13 @@
                                     </table>
                                 </div>
                             </div>
-                        </div>
-
-                        <!-- No Data Placeholder -->
-                        <div class="card shadow-sm" v-if="!dsChannels.length && !usChannels.length && !rxmerData && !eventLog.length">
-                            <div class="card-body text-center py-5">
-                                <i class="bi bi-bar-chart-fill text-muted" style="font-size: 4rem;"></i>
-                                <h5 class="mt-3 text-muted">No Data Loaded</h5>
-                                <p class="text-muted">Use the Quick Actions panel to load modem data.</p>
+                            <div class="card-body text-center py-5" v-else>
+                                <i class="bi bi-journal text-muted" style="font-size: 4rem;"></i>
+                                <h5 class="mt-3 text-muted">No Events Loaded</h5>
+                                <p class="text-muted">Click the Refresh button to load the modem event log.</p>
+                                <button @click="loadEventLog" class="btn btn-primary" :disabled="runningTest">
+                                    <i class="bi bi-journal-text me-2"></i>Load Event Log
+                                </button>
                             </div>
                         </div>
                     </div>

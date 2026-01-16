@@ -42,6 +42,8 @@ createApp({
             usChannels: [],
             rxmerData: null,
             spectrumData: null,
+            fecData: null,
+            preEqData: null,
             eventLog: [],
             
             // Live modem loading
@@ -389,15 +391,79 @@ createApp({
                 
                 const data = await response.json();
                 
-                if (data.status === 'success') {
+                if (data.status === 'success' || !data.status) {
                     this.spectrumData = data;
                     this.showSuccess('Spectrum Analysis Complete', 'Spectrum data has been retrieved successfully.');
                 } else {
-                    this.showError('Spectrum Analysis Failed', data.message);
+                    this.showError('Spectrum Analysis Failed', data.message || 'Unknown error');
                 }
             } catch (error) {
                 console.error('Spectrum analysis failed:', error);
                 this.showError('Spectrum Analysis Failed', error.message);
+            } finally {
+                this.runningTest = false;
+            }
+        },
+        
+        async runFecTest() {
+            if (!this.selectedModem) return;
+            
+            this.runningTest = true;
+            
+            try {
+                // Use PyPNM API for FEC summary
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/fec`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success' || !data.status) {
+                    this.fecData = data;
+                    this.showSuccess('FEC Summary Complete', 'FEC statistics retrieved successfully.');
+                } else {
+                    this.showError('FEC Summary Failed', data.message || 'Unknown error');
+                }
+            } catch (error) {
+                console.error('FEC summary failed:', error);
+                this.showError('FEC Summary Failed', error.message);
+            } finally {
+                this.runningTest = false;
+            }
+        },
+        
+        async runPreEqTest() {
+            if (!this.selectedModem) return;
+            
+            this.runningTest = true;
+            
+            try {
+                // Use PyPNM API for pre-equalization
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/pre-eq`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        modem_ip: this.selectedModem.ip_address,
+                        community: this.snmpCommunity 
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success' || !data.status) {
+                    this.preEqData = data;
+                    this.showSuccess('Pre-Equalization Complete', 'Pre-EQ data retrieved successfully.');
+                } else {
+                    this.showError('Pre-Equalization Failed', data.message || 'Unknown error');
+                }
+            } catch (error) {
+                console.error('Pre-equalization failed:', error);
+                this.showError('Pre-Equalization Failed', error.message);
             } finally {
                 this.runningTest = false;
             }
