@@ -1404,6 +1404,7 @@ class PyPNMAgent:
         ofdm_channel = params.get('ofdm_channel', 0)
         filename = params.get('filename', 'rxmer_capture')
         community = params.get('community', 'm0d3m1nf0')
+        tftp_server = params.get('tftp_server', '149.210.167.40')  # vps.serial.nl
         
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
@@ -1412,6 +1413,23 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
+            # Configure TFTP destination first
+            self.logger.info(f"Configuring TFTP destination {tftp_server} for {modem_ip}")
+            
+            # docsPnmBulkDataTransferCfg table index 1
+            tftp_config = [
+                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.3.1', '1', 'i'),  # AddrType = IPv4
+                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.4.1', tftp_server, 'a'),  # IP Address
+                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.5.1', '69', 'u'),  # Port
+                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.7.1', '1', 'i'),  # Protocol = TFTP
+                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.9.1', '4', 'i'),  # RowStatus = createAndGo
+            ]
+            
+            for oid, value, vtype in tftp_config:
+                result = self._set_modem_via_cm_proxy(modem_ip, oid, value, vtype, community)
+                if not result.get('success'):
+                    self.logger.warning(f"TFTP config {oid} failed: {result.get('error')}")
+            
             # Correct OIDs from PyPNM compiled_oids.py
             OID_RXMER_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.8.{ofdm_channel}'
             OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_channel}'
