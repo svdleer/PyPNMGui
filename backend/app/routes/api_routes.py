@@ -1237,3 +1237,212 @@ def get_ofdm_rxmer_data(mac_address):
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+# ============== PyPNM API Proxy Routes ==============
+# These routes proxy requests to PyPNM FastAPI for PNM operations
+
+@api_bp.route('/pypnm/health', methods=['GET'])
+def pypnm_health():
+    """Check PyPNM API health."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    client = PyPNMClient()
+    try:
+        import requests
+        response = requests.get(f"{client.config.base_url}/health", timeout=5)
+        if response.ok:
+            return jsonify({
+                "status": "ok",
+                "pypnm_url": client.config.base_url,
+                "pypnm_healthy": True
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "pypnm_url": client.config.base_url,
+                "pypnm_healthy": False
+            }), 503
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Cannot reach PyPNM: {str(e)}",
+            "pypnm_url": client.config.base_url,
+            "pypnm_healthy": False
+        }), 503
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/rxmer', methods=['POST'])
+def pypnm_rxmer(mac_address):
+    """Get RxMER capture via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    tftp_ip = data.get('tftp_ip')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_rxmer_capture(mac_address, modem_ip, community, tftp_ip)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/spectrum', methods=['POST'])
+def pypnm_spectrum(mac_address):
+    """Get spectrum analyzer capture via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    tftp_ip = data.get('tftp_ip')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_spectrum_capture(mac_address, modem_ip, community, tftp_ip)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/fec', methods=['POST'])
+def pypnm_fec(mac_address):
+    """Get FEC summary via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_fec_summary(mac_address, modem_ip, community)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/constellation', methods=['POST'])
+def pypnm_constellation(mac_address):
+    """Get constellation display via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    tftp_ip = data.get('tftp_ip')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_constellation_capture(mac_address, modem_ip, community, tftp_ip)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/channel-stats', methods=['POST'])
+def pypnm_channel_stats(mac_address):
+    """Get DOCSIS channel statistics via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    
+    # Get all channel stats
+    ds_scqam = client.get_ds_scqam_stats(mac_address, modem_ip, community)
+    ds_ofdm = client.get_ds_ofdm_stats(mac_address, modem_ip, community)
+    us_atdma = client.get_us_atdma_stats(mac_address, modem_ip, community)
+    us_ofdma = client.get_us_ofdma_stats(mac_address, modem_ip, community)
+    
+    return jsonify({
+        "mac_address": mac_address,
+        "downstream": {
+            "scqam": ds_scqam,
+            "ofdm": ds_ofdm
+        },
+        "upstream": {
+            "atdma": us_atdma,
+            "ofdma": us_ofdma
+        }
+    })
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/pre-eq', methods=['POST'])
+def pypnm_pre_eq(mac_address):
+    """Get pre-equalization data via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    tftp_ip = data.get('tftp_ip')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_pre_eq_capture(mac_address, modem_ip, community, tftp_ip)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/sysdescr', methods=['POST'])
+def pypnm_sysdescr(mac_address):
+    """Get system description via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_sys_descr(mac_address, modem_ip, community)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@api_bp.route('/pypnm/modem/<mac_address>/event-log', methods=['POST'])
+def pypnm_event_log(mac_address):
+    """Get event log via PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', 'm0d3m1nf0')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    result = client.get_event_log(mac_address, modem_ip, community)
+    
+    if result.get('status') == 'error':
+        return jsonify(result), 500
+    return jsonify(result)

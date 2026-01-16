@@ -1,12 +1,14 @@
 #!/bin/bash
 # SSH Tunnel for LAB Environment (access-engineering.nl)
-# Tunnel local port 5051 to remote port 5051 (LAB GUI)
+# Tunnel local ports to remote LAB services
 
 REMOTE_HOST="access-engineering.nl"
 REMOTE_PORT=65001
 REMOTE_USER="svdleer"
 LOCAL_PORT=5051
 REMOTE_GUI_PORT=5051
+LOCAL_PYPNM_PORT=8081
+REMOTE_PYPNM_PORT=8081
 
 PIDFILE="$HOME/.ssh-tunnel-lab.pid"
 LOGFILE="$HOME/.ssh-tunnel-lab.log"
@@ -16,7 +18,8 @@ start_tunnel() {
         PID=$(cat "$PIDFILE")
         if ps -p $PID > /dev/null 2>&1; then
             echo "LAB tunnel is already running (PID: $PID)"
-            echo "Local: http://localhost:$LOCAL_PORT"
+            echo "Local GUI: http://localhost:$LOCAL_PORT"
+            echo "Local PyPNM: http://localhost:$LOCAL_PYPNM_PORT"
             return 0
         else
             rm -f "$PIDFILE"
@@ -26,6 +29,7 @@ start_tunnel() {
     echo "Starting LAB SSH tunnel to $REMOTE_HOST:$REMOTE_PORT..."
     ssh -f -N -M -S ~/.ssh/lab-tunnel-socket \
         -L ${LOCAL_PORT}:localhost:${REMOTE_GUI_PORT} \
+        -L ${LOCAL_PYPNM_PORT}:localhost:${REMOTE_PYPNM_PORT} \
         -p ${REMOTE_PORT} \
         ${REMOTE_USER}@${REMOTE_HOST} \
         > "$LOGFILE" 2>&1
@@ -37,6 +41,7 @@ start_tunnel() {
         
         echo "LAB tunnel started successfully"
         echo "Access LAB GUI at: http://localhost:$LOCAL_PORT"
+        echo "Access PyPNM API at: http://localhost:$LOCAL_PYPNM_PORT/docs"
         echo "PID saved to $PIDFILE"
     else
         echo "Failed to start LAB tunnel. Check $LOGFILE for details."
