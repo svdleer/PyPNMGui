@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyPNM OFDM Spectrum Analysis</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .ofdm-container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .capture-controls {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-message {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="ofdm-container">
+        <h1>PyPNM OFDM Spectrum Analysis</h1>
+        <p>DOCSIS 3.1 Downstream OFDM RxMER Capture and Visualization</p>
+        
+        <div class="capture-controls">
+            <h2>Capture Controls</h2>
+            <div id="statusMessage"></div>
+            
+            <div class="form-group">
+                <label for="modemMac">Modem MAC Address:</label>
+                <input type="text" id="modemMac" placeholder="aa:bb:cc:dd:ee:ff" value="20:b8:2b:53:c5:e8">
+            </div>
+            
+            <div class="form-group">
+                <label for="modemIp">Modem IP Address:</label>
+                <input type="text" id="modemIp" placeholder="10.x.x.x" value="10.214.157.17">
+            </div>
+            
+            <div class="form-group">
+                <label for="ofdmChannel">OFDM Channel:</label>
+                <select id="ofdmChannel">
+                    <option value="0">Channel 0</option>
+                </select>
+            </div>
+            
+            <button class="btn" onclick="loadOfdmChannels()">Refresh Channel List</button>
+            <button class="btn" onclick="triggerCapture()" id="captureBtn">Trigger RxMER Capture</button>
+            <button class="btn" onclick="fetchCaptureData()" id="fetchBtn" disabled>Fetch Capture Data</button>
+        </div>
+        
+        <div class="chart-container" id="spectrumChart" style="display:none;">
+            <h2>RxMER Spectrum</h2>
+            <canvas id="merChart"></canvas>
+        </div>
+        
+        <div class="chart-container" id="channelChart" style="display:none;">
+            <h2>OFDM Channel Information</h2>
+            <canvas id="ofdmInfoChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let merChartInstance = null;
+        let ofdmChartInstance = null;
+
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.className = `status-message status-${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+
+        async function loadOfdmChannels() {
+            const mac = document.getElementById('modemMac').value;
+            const ip = document.getElementById('modemIp').value;
+            
+            if (!mac || !ip) {
+                showStatus('Please enter MAC and IP address', 'error');
+                return;
+            }
+            
+            showStatus('Loading OFDM channels...', 'info');
+            
+            try {
+                const response = await fetch('/api/pnm/ofdm/channels', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({modem_ip: ip, mac_address: mac})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.channels) {
+                    const select = document.getElementById('ofdmChannel');
+                    select.innerHTML = '';
+                    data.channels.forEach(ch => {
+                        const option = document.createElement('option');
+                        option.value = ch.index;
+                        option.textContent = `Channel ${ch.index} ${ch.description || ''}`;
+                        select.appendChild(option);
+                    });
+                    showStatus(`Loaded ${data.channels.length} OFDM channels`, 'success');
+                } else {
+                    showStatus('No OFDM channels found', 'info');
+                }
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function triggerCapture() {
+            const mac = document.getElementById('modemMac').value;
+            const ip = document.getElementById('modemIp').value;
+            const channel = document.getElementById('ofdmChannel').value;
+            
+            if (!mac || !ip) {
+                showStatus('Please enter MAC and IP address', 'error');
+                return;
+            }
+            
+            document.getElementById('captureBtn').disabled = true;
+            showStatus('Triggering RxMER capture... This may take 10-30 seconds...', 'info');
+            
+            try {
+                const response = await fetch('/api/pnm/ofdm/capture/trigger', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        modem_ip: ip,
+                        mac_address: mac,
+                        ofdm_channel: parseInt(channel),
+                        filename: `rxmer_${Date.now()}`
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showStatus('Capture triggered! Wait 10 seconds then click "Fetch Capture Data"', 'success');
+                    document.getElementById('fetchBtn').disabled = false;
+                    
+                    // Auto-fetch after 15 seconds
+                    setTimeout(() => fetchCaptureData(), 15000);
+                } else {
+                    showStatus(`Capture failed: ${data.message || 'Unknown error'}`, 'error');
+                    document.getElementById('captureBtn').disabled = false;
+                }
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                document.getElementById('captureBtn').disabled = false;
+            }
+        }
+
+        async function fetchCaptureData() {
+            const mac = document.getElementById('modemMac').value;
+            
+            showStatus('Fetching capture data...', 'info');
+            
+            try {
+                const response = await fetch(`/api/pnm/ofdm/rxmer/${mac}`);
+                const data = await response.json();
+                
+                if (data.subcarriers && data.mer_values) {
+                    plotSpectrum(data);
+                    showStatus('Capture data loaded successfully!', 'success');
+                    document.getElementById('captureBtn').disabled = false;
+                } else {
+                    showStatus('No capture data available yet. Try again in a few seconds.', 'info');
+                }
+            } catch (error) {
+                showStatus(`Error fetching data: ${error.message}`, 'error');
+            }
+        }
+
+        function plotSpectrum(data) {
+            document.getElementById('spectrumChart').style.display = 'block';
+            
+            const ctx = document.getElementById('merChart').getContext('2d');
+            
+            if (merChartInstance) {
+                merChartInstance.destroy();
+            }
+            
+            merChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.subcarriers,
+                    datasets: [{
+                        label: 'RxMER (dB)',
+                        data: data.mer_values,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `OFDM RxMER Spectrum - ${data.mac_address}`
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Subcarrier Index'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'MER (dB)'
+                            },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // Auto-load channels on page load
+        window.addEventListener('load', () => {
+            const mac = document.getElementById('modemMac').value;
+            const ip = document.getElementById('modemIp').value;
+            if (mac && ip) {
+                loadOfdmChannels();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -44,3 +44,10 @@ def files():
 def settings():
     """Serve the settings page."""
     return send_from_directory(get_frontend_path(), 'index.html')
+
+
+@main_bp.route('/ofdm-spectrum')
+def ofdm_spectrum():
+    """Serve the OFDM spectrum analysis page."""
+    return send_from_directory(get_frontend_path(), 'ofdm_spectrum.html')
+

@@ -942,3 +942,126 @@ def snmp_walk():
         return handle_agent_result(result)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/snmp/bulk_get', methods=['POST'])
+def snmp_bulk_get():
+    """Execute SNMP BULKGET via agent for faster data retrieval."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    oids = data.get('oids', [])
+    
+    if not modem_ip or not oids:
+        return jsonify({"status": "error", "message": "modem_ip and oids required"}), 400
+    
+    agent_manager = get_simple_agent_manager()
+    agent = agent_manager.get_agent_for_capability('snmp_bulk_get') if agent_manager else None
+    
+    if not agent:
+        return jsonify({"status": "error", "message": "No agent with snmp_bulk_get capability"}), 503
+    
+    try:
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_bulk_get',
+            params={
+                'target_ip': modem_ip,
+                'oids': oids,
+                'community': data.get('community', 'm0d3m1nf0'),
+                'non_repeaters': data.get('non_repeaters', 0),
+                'max_repetitions': data.get('max_repetitions', 25)
+            },
+            timeout=60
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        return handle_agent_result(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ============== PyPNM OFDM Capture Endpoints ==============
+
+@api_bp.route('/pnm/ofdm/capture/trigger', methods=['POST'])
+def trigger_ofdm_capture():
+    """Trigger OFDM RxMER capture on modem via PyPNM."""
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    mac_address = data.get('mac_address')
+    ofdm_channel = data.get('ofdm_channel', 0)
+    filename = data.get('filename', 'rxmer_capture')
+    
+    if not all([modem_ip, mac_address]):
+        return jsonify({"status": "error", "message": "modem_ip and mac_address required"}), 400
+    
+    # Store capture request in Redis for agent to process
+    capture_key = f"pnm:capture:{mac_address}"
+    if REDIS_AVAILABLE:
+        redis_client.setex(capture_key, 600, json.dumps({
+            "modem_ip": modem_ip,
+            "mac_address": mac_address,
+            "ofdm_channel": ofdm_channel,
+            "filename": filename,
+            "status": "pending",
+            "timestamp": str(os.times())
+        }))
+    
+    return jsonify({
+        "success": True,
+        "message": "OFDM capture triggered",
+        "mac_address": mac_address,
+        "ofdm_channel": ofdm_channel,
+        "status_url": f"/api/pnm/ofdm/capture/status/{mac_address}"
+    })
+
+
+@api_bp.route('/pnm/ofdm/capture/status/<mac_address>', methods=['GET'])
+def get_ofdm_capture_status(mac_address):
+    """Get OFDM capture status."""
+    if not REDIS_AVAILABLE:
+        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    
+    capture_key = f"pnm:capture:{mac_address}"
+    data = redis_client.get(capture_key)
+    
+    if not data:
+        return jsonify({"status": "not_found", "message": "No capture found"}), 404
+    
+    return jsonify(json.loads(data))
+
+
+@api_bp.route('/pnm/ofdm/channels', methods=['POST'])
+def get_ofdm_channels():
+    """Get list of OFDM channels for modem."""
+    data = request.json
+    modem_ip = data.get('modem_ip')
+    mac_address = data.get('mac_address')
+    
+    if not all([modem_ip, mac_address]):
+        return jsonify({"status": "error", "message": "modem_ip and mac_address required"}), 400
+    
+    # This will be implemented to query PyPNM for OFDM channel list
+    # For now, return a placeholder
+    return jsonify({
+        "success": True,
+        "channels": [
+            {"index": 0, "frequency": 578000000, "description": "OFDM Channel 1"}
+        ]
+    })
+
+
+@api_bp.route('/pnm/ofdm/rxmer/<mac_address>', methods=['GET'])
+def get_ofdm_rxmer_data(mac_address):
+    """Get OFDM RxMER spectrum data."""
+    if not REDIS_AVAILABLE:
+        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    
+    data_key = f"pnm:rxmer:{mac_address}"
+    data = redis_client.get(data_key)
+    
+    if not data:
+        return jsonify({"status": "not_found", "message": "No RxMER data found"}), 404
+    
+    return jsonify(json.loads(data))
+

@@ -10,7 +10,7 @@ async def test_pnm_data():
     cm = AgentCableModem(
         mac_address=MacAddress('20:b8:2b:53:c5:e8'),
         inet=Inet('10.214.157.17'),
-        backend_url='http://localhost:5050',
+        backend_url='http://appdb-sh.oss.local:5050',
         write_community='m0d3m1nf0'
     )
     
