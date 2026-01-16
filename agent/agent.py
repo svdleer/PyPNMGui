@@ -601,6 +601,9 @@ class PyPNMAgent:
         
         caps.append('execute_pnm')
         
+        # OFDM capture capabilities (requires PyPNM integration)
+        caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer'])
+        
         return caps
     
     def _handle_command(self, ws, data: dict):
@@ -1348,6 +1351,117 @@ class PyPNMAgent:
             'timestamp': datetime.now().isoformat(),
             'events': events[-50:],  # Last 50 events
             'total_events': len(events)
+        }
+
+    def _handle_pnm_ofdm_channels(self, params: dict) -> dict:
+        """Get list of OFDM channels via cm_proxy SNMP."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        if not self.config.cm_proxy_host:
+            return {'success': False, 'error': 'cm_proxy not configured'}
+        
+        # DOCSIS 3.1 OFDM channel OIDs
+        OID_OFDM_CHAN_ID = '1.3.6.1.4.1.4491.2.1.28.1.9.1.1'  # docsIf31CmDsOfdmChanChannelId
+        
+        result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_CHAN_ID, community, walk=True)
+        
+        if not result.get('success'):
+            # Not an error - modem might be DOCSIS 3.0 only
+            return {'success': True, 'channels': []}
+        
+        channels = []
+        for line in result.get('output', '').split('\n'):
+            if '=' in line and 'INTEGER' in line:
+                try:
+                    parts = line.split('=')[0].strip().split('.')
+                    idx = int(parts[-1])
+                    chan_id = int(line.split('INTEGER:')[-1].strip())
+                    channels.append({
+                        "index": idx,
+                        "channel_id": chan_id
+                    })
+                except:
+                    pass
+        
+        return {"success": True, "channels": channels}
+
+    def _handle_pnm_ofdm_capture(self, params: dict) -> dict:
+        """Trigger OFDM RxMER capture via cm_proxy SNMP SET."""
+        modem_ip = params.get('modem_ip')
+        ofdm_channel = params.get('ofdm_channel', 0)
+        filename = params.get('filename', 'rxmer_capture')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        if not self.config.cm_proxy_host:
+            return {'success': False, 'error': 'cm_proxy not configured'}
+        
+        # Correct OIDs from PyPNM compiled_oids.py
+        OID_RXMER_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.8.{ofdm_channel}'
+        OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_channel}'
+        
+        # Set filename
+        result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_FILENAME, filename, 's', community)
+        if not result.get('success'):
+            return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
+        
+        # Trigger capture (enable = 1)
+        result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_ENABLE, '1', 'i', community)
+        if not result.get('success'):
+            return {'success': False, 'error': f"Failed to trigger capture: {result.get('error')}"}
+        
+        return {'success': True, 'message': 'OFDM capture triggered', 'filename': filename}
+    def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
+        """Get OFDM RxMER data via cm_proxy SNMP walk."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        if not self.config.cm_proxy_host:
+            return {'success': False, 'error': 'cm_proxy not configured'}
+        
+        # docsPnmCmDsOfdmRxMerMean OID (MER values per subcarrier)
+        OID_RXMER_MEAN = '1.3.6.1.4.1.4491.2.1.27.1.2.5.1.3'
+        
+        result = self._query_modem_via_cm_proxy(modem_ip, OID_RXMER_MEAN, community, walk=True)
+        
+        if not result.get('success'):
+            return {'success': False, 'error': 'No RxMER data available'}
+        
+        subcarriers = []
+        mer_values = []
+        
+        for line in result.get('output', '').split('\n'):
+            if '=' in line and 'INTEGER' in line:
+                try:
+                    parts = line.split('=')[0].strip().split('.')
+                    subcarrier_idx = int(parts[-1])
+                    mer_raw = int(line.split('INTEGER:')[-1].strip())
+                    mer_db = mer_raw / 10.0  # Convert to dB
+                    
+                    subcarriers.append(subcarrier_idx)
+                    mer_values.append(mer_db)
+                except:
+                    pass
+        
+        if not subcarriers:
+            return {'success': False, 'error': 'No RxMER data available'}
+        
+        return {
+            'success': True,
+            'data': {
+                'mac_address': params.get('mac_address'),
+                'subcarriers': subcarriers,
+                'mer_values': mer_values
+            }
         }
 
     def _handle_cmts_get_modems(self, params: dict) -> dict:
@@ -2267,7 +2381,70 @@ def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# Add these methods to the PyPNMAgent class
-PyPNMAgent._handle_pnm_ofdm_channels = _handle_pnm_ofdm_channels
-PyPNMAgent._handle_pnm_ofdm_capture = _handle_pnm_ofdm_capture
-PyPNMAgent._handle_pnm_ofdm_rxmer = _handle_pnm_ofdm_rxmer
+def main():
+    """Main entry point for the PyPNM Agent."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='PyPNM Web GUI Agent')
+    parser.add_argument('--config', '-c', type=str, help='Path to agent_config.json')
+    parser.add_argument('--agent-id', type=str, help='Override agent ID from config')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Enable debug logging')
+    args = parser.parse_args()
+    
+    # Set log level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Load configuration
+    if args.config:
+        config = AgentConfig.from_file(args.config)
+        logger.info(f"Loaded config from {args.config}")
+    else:
+        # Try default locations
+        possible_configs = [
+            'agent_config.json',
+            os.path.expanduser('~/.pypnm-agent/agent_config.json'),
+            os.path.expanduser('~/agent_config.json'),
+            '/etc/pypnm-agent/agent_config.json',
+        ]
+        config = None
+        for config_path in possible_configs:
+            if os.path.exists(config_path):
+                config = AgentConfig.from_file(config_path)
+                logger.info(f"Loaded config from {config_path}")
+                break
+        
+        if not config:
+            logger.error("No configuration file found. Use --config or set environment variables.")
+            return
+    
+    # Override agent ID if provided
+    if args.agent_id:
+        config.agent_id = args.agent_id
+    
+    # Log configuration summary
+    logger.info(f"Agent ID: {config.agent_id}")
+    logger.info(f"PyPNM Server: {config.pypnm_server_url}")
+    logger.info(f"SSH Tunnel: {'enabled' if config.pypnm_ssh_tunnel_enabled else 'disabled'}")
+    if config.pypnm_ssh_tunnel_enabled:
+        logger.info(f"  SSH Host: {config.pypnm_ssh_host}")
+    logger.info(f"CM Proxy: {config.cm_proxy_host or 'not configured'}")
+    logger.info(f"CMTS SNMP Direct: {config.cmts_snmp_direct}")
+    logger.info(f"TFTP SSH: {config.tftp_ssh_host or 'not configured'}")
+    
+    # Start agent
+    agent = PyPNMAgent(config)
+    
+    try:
+        agent.connect()
+    except KeyboardInterrupt:
+        logger.info("Received interrupt signal")
+    finally:
+        agent.stop()
+
+
+if __name__ == '__main__':
+    main()
+
+
+
