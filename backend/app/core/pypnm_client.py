@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PyPNMConfig:
     """PyPNM server configuration."""
-    base_url: str = os.environ.get('PYPNM_BASE_URL', 'http://127.0.0.1:8000')
+    # Use Docker gateway IP to reach host network services
+    base_url: str = os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8000')
     timeout: int = 60
     verify_ssl: bool = False
 
