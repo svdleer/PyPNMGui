@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PyPNMConfig:
     """PyPNM server configuration."""
-    base_url: str = os.environ.get('PYPNM_BASE_URL', 'http://pypnm-api:8000')
+    base_url: str = os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8000')
     timeout: int = 60
     verify_ssl: bool = False
 
