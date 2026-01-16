@@ -10,32 +10,46 @@ LAB_SSH_USER = 'svdleer'  # Current user has direct access
 
 LAB_CMTS_SYSTEMS = [
     {
-        'name': 'GV-LC0001-CCAP001',
-        'ip': '172.16.19.11',
+        'name': 'mnd-gt0002-ccap001',
+        'ip': 'mnd-gt0002-ccap001',
         'snmp_community': 'oss1nf0',
         'type': 'CCAP',
-        'location': 'LAB-LC0001'
+        'location': 'LAB-MND-GT0002'
     },
     {
-        'name': 'GV-LC0002-CCAP001', 
-        'ip': '172.16.19.12',
+        'name': 'mnd-gt0002-ccap002', 
+        'ip': 'mnd-gt0002-ccap002',
         'snmp_community': 'oss1nf0',
         'type': 'CCAP',
-        'location': 'LAB-LC0002'
+        'location': 'LAB-MND-GT0002'
     },
     {
-        'name': 'GV-LC0003-CCAP001',
-        'ip': '172.16.19.13', 
+        'name': 'mnd-gt0002-ccap101',
+        'ip': 'mnd-gt0002-ccap101', 
         'snmp_community': 'oss1nf0',
         'type': 'CCAP',
-        'location': 'LAB-LC0003'
+        'location': 'LAB-MND-GT0002'
     },
     {
-        'name': 'GV-LC0004-CCAP001',
-        'ip': '172.16.19.14',
+        'name': 'mnd-gt0002-ccap201',
+        'ip': 'mnd-gt0002-ccap201',
         'snmp_community': 'oss1nf0',
         'type': 'CCAP',
-        'location': 'LAB-LC0004'
+        'location': 'LAB-MND-GT0002'
+    },
+    {
+        'name': 'mnd-gt0002-ccapv001',
+        'ip': 'mnd-gt0002-ccapv001',
+        'snmp_community': 'oss1nf0',
+        'type': 'CCAP',
+        'location': 'LAB-MND-GT0002'
+    },
+    {
+        'name': 'mnd-gt0002-ccapv002',
+        'ip': 'mnd-gt0002-ccapv002',
+        'snmp_community': 'oss1nf0',
+        'type': 'CCAP',
+        'location': 'LAB-MND-GT0002'
     }
 ]
 
