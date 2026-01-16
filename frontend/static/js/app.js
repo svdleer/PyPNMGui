@@ -554,17 +554,28 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.status === 'success') {
-                    this.eventLog = data.data.events;
-                    this.showSuccess('Event Log Loaded', `${data.data.events.length} events retrieved.`);
-                } else {
+                // PyPNM returns { logs: [...] }
+                if (data.logs && Array.isArray(data.logs)) {
+                    // Transform PyPNM event format to our format
+                    this.eventLog = data.logs.map((evt, idx) => ({
+                        event_id: idx + 1,
+                        timestamp: evt.docsDevEvLastTime || evt.docsDevEvFirstTime,
+                        level: this.getEventLevelName(evt.docsDevEvLevel),
+                        message: evt.docsDevEvText,
+                        count: evt.docsDevEvCounts
+                    }));
+                    this.showSuccess('Event Log Loaded', `${this.eventLog.length} events retrieved.`);
+                } else if (data.status === 'error') {
                     this.showError('Failed to load event log', data.message);
+                } else {
+                    this.eventLog = [];
+                    this.showError('No events', 'No event log entries found');
                 }
             } catch (error) {
                 console.error('Failed to load event log:', error);
@@ -572,6 +583,21 @@ createApp({
             } finally {
                 this.runningTest = false;
             }
+        },
+        
+        getEventLevelName(level) {
+            // DOCSIS event levels: 1=emergency, 2=alert, 3=critical, 4=error, 5=warning, 6=notice, 7=info, 8=debug
+            const levels = {
+                1: 'EMERGENCY',
+                2: 'ALERT', 
+                3: 'CRITICAL',
+                4: 'ERROR',
+                5: 'WARNING',
+                6: 'NOTICE',
+                7: 'INFO',
+                8: 'DEBUG'
+            };
+            return levels[level] || `LEVEL-${level}`;
         },
         
         quickPing(modem) {
