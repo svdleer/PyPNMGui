@@ -77,7 +77,7 @@ class CMTSProvider:
             return [{
                 'HostName': cmts['name'],
                 'IPAddress': cmts['ip'],
-                'Vendor': 'Casa',  # Default for LAB
+                'Vendor': cmts.get('vendor', 'Casa'),  # Use vendor from config
                 'Type': cmts.get('type', 'CCAP'),
                 'Alias': cmts.get('location', ''),
                 'snmp_community': cmts.get('snmp_community', 'oss1nf0')
