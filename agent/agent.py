@@ -1364,30 +1364,34 @@ class PyPNMAgent:
         if not self.config.cm_proxy_host:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
-        # DOCSIS 3.1 OFDM channel OIDs
-        OID_OFDM_CHAN_ID = '1.3.6.1.4.1.4491.2.1.28.1.9.1.1'  # docsIf31CmDsOfdmChanChannelId
-        
-        result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_CHAN_ID, community, walk=True)
-        
-        if not result.get('success'):
-            # Not an error - modem might be DOCSIS 3.0 only
-            return {'success': True, 'channels': []}
-        
-        channels = []
-        for line in result.get('output', '').split('\n'):
-            if '=' in line and 'INTEGER' in line:
-                try:
-                    parts = line.split('=')[0].strip().split('.')
-                    idx = int(parts[-1])
-                    chan_id = int(line.split('INTEGER:')[-1].strip())
-                    channels.append({
-                        "index": idx,
-                        "channel_id": chan_id
-                    })
-                except:
-                    pass
-        
-        return {"success": True, "channels": channels}
+        try:
+            # DOCSIS 3.1 OFDM channel OIDs
+            OID_OFDM_CHAN_ID = '1.3.6.1.4.1.4491.2.1.28.1.9.1.1'  # docsIf31CmDsOfdmChanChannelId
+            
+            result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_CHAN_ID, community, walk=True)
+            
+            if not result.get('success'):
+                # Not an error - modem might be DOCSIS 3.0 only
+                return {'success': True, 'channels': []}
+            
+            channels = []
+            for line in result.get('output', '').split('\n'):
+                if '=' in line and 'INTEGER' in line:
+                    try:
+                        parts = line.split('=')[0].strip().split('.')
+                        idx = int(parts[-1])
+                        chan_id = int(line.split('INTEGER:')[-1].strip())
+                        channels.append({
+                            "index": idx,
+                            "channel_id": chan_id
+                        })
+                    except:
+                        pass
+            
+            return {"success": True, "channels": channels}
+        except Exception as e:
+            self.logger.error(f"OFDM channels error: {e}")
+            return {'success': False, 'error': str(e)}
 
     def _handle_pnm_ofdm_capture(self, params: dict) -> dict:
         """Trigger OFDM RxMER capture via cm_proxy SNMP SET."""
@@ -1402,21 +1406,25 @@ class PyPNMAgent:
         if not self.config.cm_proxy_host:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
-        # Correct OIDs from PyPNM compiled_oids.py
-        OID_RXMER_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.8.{ofdm_channel}'
-        OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_channel}'
-        
-        # Set filename
-        result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_FILENAME, filename, 's', community)
-        if not result.get('success'):
-            return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
-        
-        # Trigger capture (enable = 1)
-        result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_ENABLE, '1', 'i', community)
-        if not result.get('success'):
-            return {'success': False, 'error': f"Failed to trigger capture: {result.get('error')}"}
-        
-        return {'success': True, 'message': 'OFDM capture triggered', 'filename': filename}
+        try:
+            # Correct OIDs from PyPNM compiled_oids.py
+            OID_RXMER_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.8.{ofdm_channel}'
+            OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_channel}'
+            
+            # Set filename
+            result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_FILENAME, filename, 's', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
+            
+            # Trigger capture (enable = 1)
+            result = self._set_modem_via_cm_proxy(modem_ip, OID_RXMER_ENABLE, '1', 'i', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to trigger capture: {result.get('error')}"}
+            
+            return {'success': True, 'message': 'OFDM capture triggered', 'filename': filename}
+        except Exception as e:
+            self.logger.error(f"OFDM capture error: {e}")
+            return {'success': False, 'error': str(e)}
     def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
         """Get OFDM RxMER data via cm_proxy SNMP walk."""
         modem_ip = params.get('modem_ip')
@@ -1428,41 +1436,45 @@ class PyPNMAgent:
         if not self.config.cm_proxy_host:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
-        # docsPnmCmDsOfdmRxMerMean OID (MER values per subcarrier)
-        OID_RXMER_MEAN = '1.3.6.1.4.1.4491.2.1.27.1.2.5.1.3'
-        
-        result = self._query_modem_via_cm_proxy(modem_ip, OID_RXMER_MEAN, community, walk=True)
-        
-        if not result.get('success'):
-            return {'success': False, 'error': 'No RxMER data available'}
-        
-        subcarriers = []
-        mer_values = []
-        
-        for line in result.get('output', '').split('\n'):
-            if '=' in line and 'INTEGER' in line:
-                try:
-                    parts = line.split('=')[0].strip().split('.')
-                    subcarrier_idx = int(parts[-1])
-                    mer_raw = int(line.split('INTEGER:')[-1].strip())
-                    mer_db = mer_raw / 10.0  # Convert to dB
-                    
-                    subcarriers.append(subcarrier_idx)
-                    mer_values.append(mer_db)
-                except:
-                    pass
-        
-        if not subcarriers:
-            return {'success': False, 'error': 'No RxMER data available'}
-        
-        return {
-            'success': True,
-            'data': {
-                'mac_address': params.get('mac_address'),
-                'subcarriers': subcarriers,
-                'mer_values': mer_values
+        try:
+            # docsPnmCmDsOfdmRxMerMean OID (MER values per subcarrier)
+            OID_RXMER_MEAN = '1.3.6.1.4.1.4491.2.1.27.1.2.5.1.3'
+            
+            result = self._query_modem_via_cm_proxy(modem_ip, OID_RXMER_MEAN, community, walk=True)
+            
+            if not result.get('success'):
+                return {'success': False, 'error': 'No RxMER data available'}
+            
+            subcarriers = []
+            mer_values = []
+            
+            for line in result.get('output', '').split('\n'):
+                if '=' in line and 'INTEGER' in line:
+                    try:
+                        parts = line.split('=')[0].strip().split('.')
+                        subcarrier_idx = int(parts[-1])
+                        mer_raw = int(line.split('INTEGER:')[-1].strip())
+                        mer_db = mer_raw / 10.0  # Convert to dB
+                        
+                        subcarriers.append(subcarrier_idx)
+                        mer_values.append(mer_db)
+                    except:
+                        pass
+            
+            if not subcarriers:
+                return {'success': False, 'error': 'No RxMER data available'}
+            
+            return {
+                'success': True,
+                'data': {
+                    'mac_address': params.get('mac_address'),
+                    'subcarriers': subcarriers,
+                    'mer_values': mer_values
+                }
             }
-        }
+        except Exception as e:
+            self.logger.error(f"OFDM RxMER error: {e}")
+            return {'success': False, 'error': str(e)}
 
     def _handle_cmts_get_modems(self, params: dict) -> dict:
         """
