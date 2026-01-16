@@ -11,10 +11,11 @@
 
 ### LAB Environment  
 - **Port**: 5051
-- **Uses**: Direct SNMP access (no agent)
-- **CMTS Access**: Direct network access
+- **Access**: Direct SSH to access-engineering.nl:65001
+- **CMTS Access**: Via direct SSH connection (no tunnels)
 - **Config**: 4 CMTS systems only
 - **Data**: Separate volumes (lab data isolated)
+- **User**: svdleer (direct access, no jump server)
 
 ## Switching Between Environments
 

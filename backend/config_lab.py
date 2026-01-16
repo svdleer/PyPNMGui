@@ -1,7 +1,12 @@
 """
-LAB Configuration - Direct CMTS access without agent
-4 CMTS systems for testing
+LAB Configuration - Direct access to access-engineering.nl
+4 CMTS systems for testing via direct SSH port 65001
 """
+
+# Direct SSH access to LAB server
+LAB_SSH_HOST = 'access-engineering.nl'
+LAB_SSH_PORT = 65001
+LAB_SSH_USER = 'svdleer'  # Current user has direct access
 
 LAB_CMTS_SYSTEMS = [
     {
@@ -34,6 +39,6 @@ LAB_CMTS_SYSTEMS = [
     }
 ]
 
-# LAB mode - no agent needed, direct SNMP access
+# LAB mode - direct SNMP access via SSH to access-engineering.nl
 LAB_MODE = True
-AGENT_REQUIRED = False
+DIRECT_SSH_ACCESS = True
