@@ -420,23 +420,23 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity,
-                        channel_ids: [159]
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.status === 'success') {
+                // PyPNM returns status: 0 for success
+                if (data.status === 0) {
                     this.rxmerData = data;
-                    this.showSuccess('RxMER Measurement Complete', 'RxMER data has been retrieved successfully.');
+                    this.showSuccess('RxMER Measurement Complete', data.message || 'RxMER data has been retrieved successfully.');
                     
                     // Draw charts after Vue updates DOM
                     this.$nextTick(() => {
                         this.drawRxmerCharts();
                     });
                 } else {
-                    this.showError('RxMER Measurement Failed', data.message);
+                    this.showError('RxMER Measurement Failed', data.message || `Error code: ${data.status}`);
                 }
             } catch (error) {
                 console.error('RxMER measurement failed:', error);
@@ -458,17 +458,18 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.status === 'success' || !data.status) {
+                // PyPNM returns status: 0 for success
+                if (data.status === 0) {
                     this.spectrumData = data;
-                    this.showSuccess('Spectrum Analysis Complete', 'Spectrum data has been retrieved successfully.');
+                    this.showSuccess('Spectrum Analysis Complete', data.message || 'Spectrum data has been retrieved successfully.');
                 } else {
-                    this.showError('Spectrum Analysis Failed', data.message || 'Unknown error');
+                    this.showError('Spectrum Analysis Failed', data.message || `Error code: ${data.status}`);
                 }
             } catch (error) {
                 console.error('Spectrum analysis failed:', error);
@@ -490,17 +491,18 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.status === 'success' || !data.status) {
+                // PyPNM returns status: 0 for success
+                if (data.status === 0) {
                     this.fecData = data;
-                    this.showSuccess('FEC Summary Complete', 'FEC statistics retrieved successfully.');
+                    this.showSuccess('FEC Summary Complete', data.message || 'FEC statistics retrieved successfully.');
                 } else {
-                    this.showError('FEC Summary Failed', data.message || 'Unknown error');
+                    this.showError('FEC Summary Failed', data.message || `Error code: ${data.status}`);
                 }
             } catch (error) {
                 console.error('FEC summary failed:', error);
@@ -522,17 +524,18 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunity 
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
                 
-                if (data.status === 'success' || !data.status) {
+                // PyPNM returns status: 0 for success
+                if (data.status === 0) {
                     this.preEqData = data;
-                    this.showSuccess('Pre-Equalization Complete', 'Pre-EQ data retrieved successfully.');
+                    this.showSuccess('Pre-Equalization Complete', data.message || 'Pre-EQ data retrieved successfully.');
                 } else {
-                    this.showError('Pre-Equalization Failed', data.message || 'Unknown error');
+                    this.showError('Pre-Equalization Failed', data.message || `Error code: ${data.status}`);
                 }
             } catch (error) {
                 console.error('Pre-equalization failed:', error);
@@ -560,8 +563,8 @@ createApp({
                 
                 const data = await response.json();
                 
-                // PyPNM returns { logs: [...] }
-                if (data.logs && Array.isArray(data.logs)) {
+                // PyPNM returns { status: 0, logs: [...] } - status 0 = success
+                if (data.status === 0 && data.logs && Array.isArray(data.logs)) {
                     // Transform PyPNM event format to our format
                     this.eventLog = data.logs.map((evt, idx) => ({
                         event_id: idx + 1,
@@ -571,8 +574,8 @@ createApp({
                         count: evt.docsDevEvCounts
                     }));
                     this.showSuccess('Event Log Loaded', `${this.eventLog.length} events retrieved.`);
-                } else if (data.status === 'error') {
-                    this.showError('Failed to load event log', data.message);
+                } else if (data.status !== 0) {
+                    this.showError('Failed to load event log', data.message || `Error code: ${data.status}`);
                 } else {
                     this.eventLog = [];
                     this.showError('No events', 'No event log entries found');
