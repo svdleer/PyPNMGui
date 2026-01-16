@@ -13,6 +13,7 @@ createApp({
             
             // API Status
             apiStatus: 'mock',
+            pypnmHealthy: false,
             
             // Loading state
             isLoading: false,
@@ -83,9 +84,19 @@ createApp({
                 const response = await fetch(`${API_BASE}/health`);
                 const data = await response.json();
                 this.apiStatus = data.status;
+                
+                // Also check PyPNM health
+                try {
+                    const pypnmResponse = await fetch(`${API_BASE}/pypnm/health`);
+                    const pypnmData = await pypnmResponse.json();
+                    this.pypnmHealthy = pypnmData.pypnm_healthy || false;
+                } catch (e) {
+                    this.pypnmHealthy = false;
+                }
             } catch (error) {
                 console.error('API health check failed:', error);
                 this.apiStatus = 'mock';
+                this.pypnmHealthy = false;
             }
         },
         
@@ -328,7 +339,8 @@ createApp({
             this.runningTest = true;
             
             try {
-                const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/rxmer`, {
+                // Use PyPNM API for RxMER capture
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/rxmer`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -365,7 +377,8 @@ createApp({
             this.runningTest = true;
             
             try {
-                const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/spectrum`, {
+                // Use PyPNM API for spectrum capture
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/spectrum`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -396,7 +409,8 @@ createApp({
             this.runningTest = true;
             
             try {
-                const response = await fetch(`${API_BASE}/modem/${this.selectedModem.mac_address}/event-log`, {
+                // Use PyPNM API for event log
+                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/event-log`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 

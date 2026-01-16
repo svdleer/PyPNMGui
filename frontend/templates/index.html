@@ -48,6 +48,12 @@
                         <span class="badge bg-warning me-2" v-else>
                             <i class="bi bi-exclamation-circle me-1"></i>Mock Data Mode
                         </span>
+                        <span class="badge bg-info me-2" v-if="pypnmHealthy">
+                            <i class="bi bi-lightning-charge me-1"></i>PyPNM
+                        </span>
+                        <span class="badge bg-secondary me-2" v-else>
+                            <i class="bi bi-lightning me-1"></i>PyPNM Offline
+                        </span>
                     </div>
                 </div>
             </div>
