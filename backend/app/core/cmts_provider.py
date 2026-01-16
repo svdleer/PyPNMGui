@@ -12,6 +12,19 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Check if running in LAB mode
+LAB_MODE = os.environ.get('FLASK_ENV') == 'lab' or os.environ.get('PYPNM_MODE') == 'lab'
+
+if LAB_MODE:
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+        from config_lab import LAB_CMTS_SYSTEMS
+        logger.info(f"LAB MODE: Loaded {len(LAB_CMTS_SYSTEMS)} CMTS systems from config_lab.py")
+    except ImportError as e:
+        logger.error(f"LAB MODE: Failed to load config_lab.py: {e}")
+        LAB_CMTS_SYSTEMS = []
+
 
 class CMTSProvider:
     """Provides CMTS data from appdb.oss.local with caching."""
@@ -48,7 +61,7 @@ class CMTSProvider:
     @classmethod
     def get_all_cmts(cls, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
-        Get all CMTS systems from appdb with caching.
+        Get all CMTS systems from appdb with caching (or LAB config in LAB mode).
         
         Args:
             force_refresh: If True, bypass cache and fetch fresh data
@@ -57,6 +70,19 @@ class CMTSProvider:
             List of CMTS dictionaries with fields:
             - HostName, IPAddress, Vendor, Type, Alias
         """
+        # LAB MODE: Return static config
+        if LAB_MODE:
+            logger.debug("LAB MODE: Returning CMTS from config_lab.py")
+            # Convert LAB config format to appdb format
+            return [{
+                'HostName': cmts['name'],
+                'IPAddress': cmts['ip'],
+                'Vendor': 'Casa',  # Default for LAB
+                'Type': cmts.get('type', 'CCAP'),
+                'Alias': cmts.get('location', ''),
+                'snmp_community': cmts.get('snmp_community', 'oss1nf0')
+            } for cmts in LAB_CMTS_SYSTEMS]
+        
         current_time = time.time()
         
         # Check if cache is valid
