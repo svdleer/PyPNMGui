@@ -18,6 +18,8 @@ services:
       - REDIS_HOST=eve-li-redis-lab
       - REDIS_PORT=6379
       - AGENT_REQUIRED=false
+      - ENABLE_AGENT_WEBSOCKET=true
+      - DATA_MODE=agent
     volumes:
       - pypnm-data-lab:/app/data
       - pypnm-logs-lab:/app/logs
