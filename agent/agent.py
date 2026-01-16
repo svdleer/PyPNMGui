@@ -442,6 +442,7 @@ class PyPNMAgent:
             'pnm_ofdm_channels': self._handle_pnm_ofdm_channels,
             'pnm_ofdm_capture': self._handle_pnm_ofdm_capture,
             'pnm_ofdm_rxmer': self._handle_pnm_ofdm_rxmer,
+            'pnm_set_tftp': self._handle_pnm_set_tftp,
         }
     
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
@@ -602,7 +603,7 @@ class PyPNMAgent:
         caps.append('execute_pnm')
         
         # OFDM capture capabilities (requires PyPNM integration)
-        caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer'])
+        caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer', 'pnm_set_tftp'])
         
         return caps
     
@@ -1404,7 +1405,6 @@ class PyPNMAgent:
         ofdm_channel = params.get('ofdm_channel', 0)
         filename = params.get('filename', 'rxmer_capture')
         community = params.get('community', 'm0d3m1nf0')
-        tftp_server = params.get('tftp_server', '149.210.167.40')  # vps.serial.nl
         
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
@@ -1413,23 +1413,6 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
-            # Configure TFTP destination first
-            self.logger.info(f"Configuring TFTP destination {tftp_server} for {modem_ip}")
-            
-            # docsPnmBulkDataTransferCfg table index 1
-            tftp_config = [
-                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.3.1', '1', 'i'),  # AddrType = IPv4
-                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.4.1', tftp_server, 'a'),  # IP Address
-                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.5.1', '69', 'u'),  # Port
-                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.7.1', '1', 'i'),  # Protocol = TFTP
-                ('1.3.6.1.4.1.4491.2.1.27.1.1.3.1.1.9.1', '4', 'i'),  # RowStatus = createAndGo
-            ]
-            
-            for oid, value, vtype in tftp_config:
-                result = self._set_modem_via_cm_proxy(modem_ip, oid, value, vtype, community)
-                if not result.get('success'):
-                    self.logger.warning(f"TFTP config {oid} failed: {result.get('error')}")
-            
             # Correct OIDs from PyPNM compiled_oids.py
             OID_RXMER_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.8.{ofdm_channel}'
             OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_channel}'
@@ -1507,6 +1490,51 @@ class PyPNMAgent:
             }
         except Exception as e:
             self.logger.error(f"OFDM RxMER error: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def _handle_pnm_set_tftp(self, params: dict) -> dict:
+        """Configure modem TFTP destination for PNM captures using PyPNM."""
+        import sys
+        sys.path.insert(0, '/home/svdleer/PyPNM')
+        
+        modem_ip = params.get('modem_ip')
+        mac_address = params.get('mac_address')
+        tftp_server = params.get('tftp_server', '149.210.167.40')  # vps.serial.nl
+        tftp_path = params.get('tftp_path', '')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        if not modem_ip:
+            return {'success': False, 'error': 'modem_ip required'}
+        
+        try:
+            import asyncio
+            from pypnm.lib.mac_address import MacAddress
+            from pypnm.lib.inet import Inet
+            from pypnm.docsis.cable_modem import CableModem
+            
+            async def set_tftp():
+                cm = CableModem(
+                    mac_address=MacAddress(mac_address),
+                    inet=Inet(modem_ip),
+                    write_community=community
+                )
+                success = await cm.setDocsPnmBulk(tftp_server=tftp_server, tftp_path=tftp_path)
+                return success
+            
+            result = asyncio.run(set_tftp())
+            
+            if result:
+                return {
+                    'success': True,
+                    'message': f'TFTP destination set to {tftp_server}{tftp_path}',
+                    'tftp_server': tftp_server,
+                    'tftp_path': tftp_path
+                }
+            else:
+                return {'success': False, 'error': 'Failed to set TFTP destination'}
+                
+        except Exception as e:
+            self.logger.error(f"Set TFTP error: {e}")
             return {'success': False, 'error': str(e)}
 
     def _handle_cmts_get_modems(self, params: dict) -> dict:
