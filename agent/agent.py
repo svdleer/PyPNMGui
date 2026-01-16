@@ -438,6 +438,10 @@ class PyPNMAgent:
             'pnm_pre_eq': self._handle_pnm_pre_eq,
             'pnm_channel_info': self._handle_pnm_channel_info,
             'pnm_event_log': self._handle_pnm_event_log,
+            # OFDM capture commands
+            'pnm_ofdm_channels': self._handle_pnm_ofdm_channels,
+            'pnm_ofdm_capture': self._handle_pnm_ofdm_capture,
+            'pnm_ofdm_rxmer': self._handle_pnm_ofdm_rxmer,
         }
     
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
@@ -2116,5 +2120,154 @@ def main():
         agent.stop()
 
 
-if __name__ == '__main__':
-    main()
+# OFDM Capture Handler Methods (add to PyPNMAgent class)
+def _handle_pnm_ofdm_channels(self, params: dict) -> dict:
+    """Get list of OFDM channels using PyPNM."""
+    import sys
+    sys.path.insert(0, '/home/svdleer/PyPNM')
+    
+    try:
+        import asyncio
+        from pypnm.lib.mac_address import MacAddress
+        from pypnm.lib.inet import Inet
+        from agent_cable_modem import AgentCableModem
+        
+        mac = params.get('mac_address')
+        ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        async def get_channels():
+            cm = AgentCableModem(
+                mac_address=MacAddress(mac),
+                inet=Inet(ip),
+                backend_url='http://localhost:5050',
+                write_community=community
+            )
+            channels_data = await cm.getDocsIf31CmDsOfdmChanEntry()
+            
+            channels = []
+            for ch in channels_data:
+                channels.append({
+                    "index": ch.index,
+                    "channel_id": getattr(ch.entry, 'docsIf31CmDsOfdmChanChannelId', None),
+                    "subcarrier_zero_freq": getattr(ch.entry, 'docsIf31CmDsOfdmChannelSubcarrierZeroFreq', None),
+                    "num_subcarriers": getattr(ch.entry, 'docsIf31CmDsOfdmChanNumActiveSubcarriers', None),
+                })
+            return channels
+        
+        channels = asyncio.run(get_channels())
+        return {"success": True, "channels": channels}
+        
+    except Exception as e:
+        logger.error(f"OFDM channels error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def _handle_pnm_ofdm_capture(self, params: dict) -> dict:
+    """Trigger OFDM RxMER capture using PyPNM."""
+    import sys
+    sys.path.insert(0, '/home/svdleer/PyPNM')
+    
+    try:
+        import asyncio
+        from pypnm.lib.mac_address import MacAddress
+        from pypnm.lib.inet import Inet
+        from agent_cable_modem import AgentCableModem
+        
+        mac = params.get('mac_address')
+        ip = params.get('modem_ip')
+        ofdm_channel = params.get('ofdm_channel', 0)
+        filename = params.get('filename', 'rxmer_capture')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        async def trigger_capture():
+            cm = AgentCableModem(
+                mac_address=MacAddress(mac),
+                inet=Inet(ip),
+                backend_url='http://localhost:5050',
+                write_community=community
+            )
+            success = await cm.setDocsPnmCmDsOfdmRxMer(
+                ofdm_idx=ofdm_channel,
+                rxmer_file_name=filename,
+                set_and_go=True
+            )
+            return success
+        
+        result = asyncio.run(trigger_capture())
+        
+        if result:
+            return {
+                "success": True,
+                "message": "OFDM capture triggered",
+                "filename": filename
+            }
+        else:
+            return {"success": False, "error": "Failed to trigger capture"}
+            
+    except Exception as e:
+        logger.error(f"OFDM capture error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
+    """Get OFDM RxMER data using PyPNM."""
+    import sys
+    sys.path.insert(0, '/home/svdleer/PyPNM')
+    
+    try:
+        import asyncio
+        from pypnm.lib.mac_address import MacAddress
+        from pypnm.lib.inet import Inet
+        from agent_cable_modem import AgentCableModem
+        
+        mac = params.get('mac_address')
+        ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        
+        async def get_rxmer():
+            cm = AgentCableModem(
+                mac_address=MacAddress(mac),
+                inet=Inet(ip),
+                backend_url='http://localhost:5050',
+                write_community=community
+            )
+            rxmer_data = await cm.getDocsPnmCmDsOfdmRxMerEntry()
+            
+            if not rxmer_data:
+                return None
+            
+            subcarriers = []
+            mer_values = []
+            
+            for entry in rxmer_data:
+                if hasattr(entry, 'index'):
+                    subcarriers.append(entry.index)
+                    # Extract MER value - structure may vary
+                    mer = 0
+                    if hasattr(entry, 'entry'):
+                        mer = getattr(entry.entry, 'docsPnmCmDsOfdmRxMerMean', 0)
+                    mer_values.append(mer / 10.0 if mer else 0)  # Convert to dB
+            
+            return {
+                "mac_address": mac,
+                "subcarriers": subcarriers,
+                "mer_values": mer_values
+            }
+        
+        data = asyncio.run(get_rxmer())
+        
+        if data:
+            return {"success": True, "data": data}
+        else:
+            return {"success": False, "error": "No RxMER data available"}
+            
+    except Exception as e:
+        logger.error(f"OFDM RxMER fetch error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# Add these methods to the PyPNMAgent class
+PyPNMAgent._handle_pnm_ofdm_channels = _handle_pnm_ofdm_channels
+PyPNMAgent._handle_pnm_ofdm_capture = _handle_pnm_ofdm_capture
+PyPNMAgent._handle_pnm_ofdm_rxmer = _handle_pnm_ofdm_rxmer
