@@ -73,6 +73,10 @@ class AgentConfig:
     cm_proxy_user: Optional[str] = None
     cm_proxy_key: Optional[str] = None
     
+    # CM Direct - Direct SNMP access to modems (no proxy)
+    cm_direct_enabled: bool = False
+    cm_direct_community: str = 'm0d3m1nf0'
+    
     # Equalizer Server - for SNMP queries via SSH (has best CMTS connectivity)
     equalizer_host: Optional[str] = None
     equalizer_port: int = 22
@@ -107,6 +111,7 @@ class AgentConfig:
         
         cmts = data.get('cmts_access', {})
         cm_proxy = data.get('cm_proxy', {})
+        cm_direct = data.get('cm_direct', {})
         equalizer = data.get('equalizer', {})
         redis_config = data.get('redis', {})
         tftp = data.get('tftp_server', {})
@@ -134,6 +139,9 @@ class AgentConfig:
             cm_proxy_port=cm_proxy.get('port', 22),
             cm_proxy_user=cm_proxy.get('username'),
             cm_proxy_key=expand_path(cm_proxy.get('key_file')),
+            # CM Direct (for direct SNMP to modems)
+            cm_direct_enabled=cm_direct.get('enabled', False),
+            cm_direct_community=cm_direct.get('community', 'm0d3m1nf0'),
             # Equalizer (for CMTS SNMP via SSH)
             equalizer_host=equalizer.get('host'),
             equalizer_port=equalizer.get('port', 22),
