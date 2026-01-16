@@ -1031,6 +1031,7 @@ def trigger_ofdm_capture():
     mac_address = data.get('mac_address')
     ofdm_channel = data.get('ofdm_channel', 0)
     filename = data.get('filename', f'rxmer_{mac_address.replace(":", "")}')
+    tftp_server = data.get('tftp_server', '149.210.167.40')  # vps.serial.nl
     
     if not all([modem_ip, mac_address]):
         return jsonify({"status": "error", "message": "modem_ip and mac_address required"}), 400
@@ -1042,7 +1043,28 @@ def trigger_ofdm_capture():
         return jsonify({"status": "error", "message": "No agent available"}), 503
     
     try:
-        # Send OFDM capture task to agent
+        # Step 1: Configure TFTP destination first
+        tftp_task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_set_tftp',
+            params={
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'tftp_server': tftp_server,
+                'tftp_path': '',
+                'community': data.get('community', 'm0d3m1nf0')
+            },
+            timeout=30
+        )
+        tftp_result = agent_manager.wait_for_task(tftp_task_id, timeout=30)
+        
+        if not tftp_result or not tftp_result.get('result', {}).get('success'):
+            return jsonify({
+                "status": "error", 
+                "message": f"Failed to configure TFTP: {tftp_result.get('result', {}).get('error', 'Unknown error')}"
+            }), 500
+        
+        # Step 2: Trigger OFDM capture
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='pnm_ofdm_capture',
