@@ -228,7 +228,7 @@ class PyPNMClient:
         
         payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
         
-        return self._post("/docs/pnm/ds/ofdm/rxmer/getCapture", payload)
+        return self._post("/docs/pnm/ds/ofdm/rxMer/getCapture", payload)
     
     def get_spectrum_capture(
         self,

@@ -376,31 +376,41 @@ createApp({
                 // Process DS OFDM channels if available
                 if (data.downstream && data.downstream.ofdm) {
                     const ofdm = data.downstream.ofdm;
-                    if (ofdm.channels) {
-                        this.dsChannels = ofdm.channels.map((ch, idx) => ({
-                            channel_id: ch.channel_id || idx + 1,
-                            frequency_start_hz: ch.frequency_start_hz || 0,
-                            frequency_end_hz: ch.frequency_end_hz || 0,
-                            active_subcarriers: ch.active_subcarriers || 0,
-                            power_dbmv: ch.power_dbmv || 0,
-                            snr_db: ch.snr_db || 0,
-                            mer_db: ch.mer_db || 0
-                        }));
+                    // PyPNM returns .results array
+                    const results = ofdm.results || ofdm.channels || [];
+                    if (Array.isArray(results) && results.length > 0) {
+                        this.dsChannels = results.map((ch, idx) => {
+                            const entry = ch.entry || ch;
+                            return {
+                                channel_id: ch.channel_id || entry.docsIf31CmDsOfdmChanChannelId || idx + 1,
+                                frequency_start_hz: entry.docsIf31CmDsOfdmChanPlcFreq || 0,
+                                frequency_end_hz: (entry.docsIf31CmDsOfdmChanPlcFreq || 0) + 192000000,
+                                active_subcarriers: entry.docsIf31CmDsOfdmChanNumActiveSubcarriers || 0,
+                                power_dbmv: entry.docsIf31CmDsOfdmChannelPower || 0,
+                                snr_db: entry.docsIf31CmDsOfdmChanMer ? entry.docsIf31CmDsOfdmChanMer / 10 : 0,
+                                mer_db: entry.docsIf31CmDsOfdmChanMer ? entry.docsIf31CmDsOfdmChanMer / 10 : 0
+                            };
+                        });
                     }
                 }
                 
                 // Process US OFDMA channels if available
                 if (data.upstream && data.upstream.ofdma) {
                     const ofdma = data.upstream.ofdma;
-                    if (ofdma.channels) {
-                        this.usChannels = ofdma.channels.map((ch, idx) => ({
-                            channel_id: ch.channel_id || idx + 1,
-                            frequency_start_hz: ch.frequency_start_hz || 0,
-                            frequency_end_hz: ch.frequency_end_hz || 0,
-                            active_subcarriers: ch.active_subcarriers || 0,
-                            power_dbmv: ch.power_dbmv || 0,
-                            timing_offset: ch.timing_offset || 0
-                        }));
+                    // PyPNM returns .results array
+                    const results = ofdma.results || ofdma.channels || [];
+                    if (Array.isArray(results) && results.length > 0) {
+                        this.usChannels = results.map((ch, idx) => {
+                            const entry = ch.entry || ch;
+                            return {
+                                channel_id: ch.channel_id || entry.docsIf31CmUsOfdmaChanChannelId || idx + 1,
+                                frequency_start_hz: entry.docsIf31CmUsOfdmaChanFirstActiveSubcarrierNum * 50000 || 0,
+                                frequency_end_hz: entry.docsIf31CmUsOfdmaChanLastActiveSubcarrierNum * 50000 || 0,
+                                active_subcarriers: entry.docsIf31CmUsOfdmaChanNumActiveSubcarriers || 0,
+                                power_dbmv: entry.docsIf31CmUsOfdmaChanTxPower ? entry.docsIf31CmUsOfdmaChanTxPower / 10 : 0,
+                                timing_offset: entry.docsIf31CmUsOfdmaChanT3Timeouts || 0
+                            };
+                        });
                     }
                 }
                 
@@ -441,6 +451,8 @@ createApp({
                     this.$nextTick(() => {
                         this.drawRxmerCharts();
                     });
+                } else if (data.status === 'error' && data.message && data.message.includes('404')) {
+                    this.showError('RxMER Not Available', 'RxMER capture requires TFTP server. Please configure TFTP settings.');
                 } else {
                     this.showError('RxMER Measurement Failed', data.message || `Error code: ${data.status}`);
                 }
@@ -474,6 +486,8 @@ createApp({
                 if (data.status === 0) {
                     this.spectrumData = data;
                     this.showSuccess('Spectrum Analysis Complete', data.message || 'Spectrum data has been retrieved successfully.');
+                } else if (data.status === 'error' && data.message && data.message.includes('404')) {
+                    this.showError('Spectrum Not Available', 'Spectrum capture requires TFTP server. Please configure TFTP settings.');
                 } else {
                     this.showError('Spectrum Analysis Failed', data.message || `Error code: ${data.status}`);
                 }
