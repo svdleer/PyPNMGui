@@ -206,14 +206,27 @@ def _extract_scqam_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    if isinstance(results, list):
+        # PyPNM may return list directly
+        channels = []
+        for ch in results:
+            channels.append({
+                'channel_id': ch.get('ifIndex', ch.get('channel_id')),
+                'frequency': ch.get('frequency'),
+                'modulation': ch.get('modulation'),
+                'power': ch.get('power'),
+                'snr': ch.get('rxMer', ch.get('snr'))
+            })
+        return channels
+    # Handle dict format
     channels = []
     for ch in results.get('channels', []):
         channels.append({
-            'channel_id': ch.get('ifIndex'),
+            'channel_id': ch.get('ifIndex', ch.get('channel_id')),
             'frequency': ch.get('frequency'),
             'modulation': ch.get('modulation'),
             'power': ch.get('power'),
-            'snr': ch.get('rxMer')
+            'snr': ch.get('rxMer', ch.get('snr'))
         })
     return channels
 
@@ -223,15 +236,27 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    if isinstance(results, list):
+        channels = []
+        for ch in results:
+            profiles = ch.get('profiles', [])
+            channels.append({
+                'channel_id': ch.get('channelId', ch.get('channel_id')),
+                'frequency': ch.get('frequency'),
+                'profiles': [p.get('profileId', p) for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255],
+                'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in profiles],
+                'active_profiles': len([p for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255])
+            })
+        return channels
     channels = []
     for ch in results.get('channels', []):
         profiles = ch.get('profiles', [])
         channels.append({
-            'channel_id': ch.get('channelId'),
+            'channel_id': ch.get('channelId', ch.get('channel_id')),
             'frequency': ch.get('frequency'),
-            'profiles': [p.get('profileId') for p in profiles if p.get('profileId') != 255],
-            'ncp_profile': 255 in [p.get('profileId') for p in profiles],
-            'active_profiles': len([p for p in profiles if p.get('profileId') != 255])
+            'profiles': [p.get('profileId', p) for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255],
+            'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in profiles],
+            'active_profiles': len([p for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255])
         })
     return channels
 
@@ -241,13 +266,23 @@ def _extract_atdma_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    if isinstance(results, list):
+        channels = []
+        for ch in results:
+            channels.append({
+                'channel_id': ch.get('ifIndex', ch.get('channel_id')),
+                'frequency': ch.get('frequency'),
+                'modulation': ch.get('channelType', ch.get('modulation')),
+                'power': ch.get('txPower', ch.get('power'))
+            })
+        return channels
     channels = []
     for ch in results.get('channels', []):
         channels.append({
-            'channel_id': ch.get('ifIndex'),
+            'channel_id': ch.get('ifIndex', ch.get('channel_id')),
             'frequency': ch.get('frequency'),
-            'modulation': ch.get('channelType'),
-            'power': ch.get('txPower')
+            'modulation': ch.get('channelType', ch.get('modulation')),
+            'power': ch.get('txPower', ch.get('power'))
         })
     return channels
 
@@ -257,12 +292,22 @@ def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    if isinstance(results, list):
+        channels = []
+        for ch in results:
+            channels.append({
+                'channel_id': ch.get('channelId', ch.get('channel_id')),
+                'frequency': ch.get('configuredCenterFrequency', ch.get('frequency')),
+                'bandwidth': ch.get('channelWidth', ch.get('bandwidth')),
+                'profiles': ch.get('activeProfiles', [])
+            })
+        return channels
     channels = []
     for ch in results.get('channels', []):
         channels.append({
-            'channel_id': ch.get('channelId'),
-            'frequency': ch.get('configuredCenterFrequency'),
-            'bandwidth': ch.get('channelWidth'),
+            'channel_id': ch.get('channelId', ch.get('channel_id')),
+            'frequency': ch.get('configuredCenterFrequency', ch.get('frequency')),
+            'bandwidth': ch.get('channelWidth', ch.get('bandwidth')),
             'profiles': ch.get('activeProfiles', [])
         })
     return channels
