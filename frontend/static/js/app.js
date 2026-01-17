@@ -699,10 +699,15 @@ createApp({
         
         drawMeasurementCharts(type, data) {
             const container = document.getElementById('measurement-charts-container');
-            if (!container) return;
+            if (!container) {
+                console.warn('Chart container not found');
+                return;
+            }
             
             // Clear old charts
             container.innerHTML = '';
+            
+            console.log('Drawing charts for type:', type, 'with data:', data);
             
             if (type === 'rxmer') {
                 this.drawRxmerCharts();
@@ -718,6 +723,8 @@ createApp({
                 this.drawConstellationCharts(data.data);
             } else if (type === 'us_pre_eq') {
                 this.drawPreEqCharts();
+            } else {
+                container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>No visualization available for this measurement type. Click "Raw Data" to see the results.</div>';
             }
         },
         
