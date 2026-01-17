@@ -523,6 +523,13 @@ createApp({
                         this.preEqData = data;
                     }
                     
+                    // Draw charts for JSON output
+                    if (this.pnmOutputType === 'json') {
+                        this.$nextTick(() => {
+                            this.drawMeasurementCharts(measurementType, data);
+                        });
+                    }
+                    
                     const typeNames = {
                         'rxmer': 'RxMER',
                         'channel_estimation': 'Channel Estimation',
@@ -689,6 +696,216 @@ createApp({
         },
         
         // ============== Chart Drawing ==============
+        
+        drawMeasurementCharts(type, data) {
+            const container = document.getElementById('measurement-charts-container');
+            if (!container) return;
+            
+            // Clear old charts
+            container.innerHTML = '';
+            
+            if (type === 'rxmer') {
+                this.drawRxmerCharts();
+            } else if (type === 'channel_estimation' && data.data) {
+                this.drawChannelEstimationCharts(data.data);
+            } else if (type === 'modulation_profile' && data.data) {
+                this.drawModulationProfileCharts(data.data);
+            } else if (type === 'fec_summary' && data.data) {
+                this.drawFecSummaryCharts(data.data);
+            } else if (type === 'histogram' && data.data) {
+                this.drawHistogramCharts(data.data);
+            } else if (type === 'constellation' && data.data) {
+                this.drawConstellationCharts(data.data);
+            } else if (type === 'us_pre_eq') {
+                this.drawPreEqCharts();
+            }
+        },
+        
+        drawChannelEstimationCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const measurements = data.rxmer_measurements || data.channel_measurements || [];
+            
+            measurements.forEach(meas => {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'mb-4';
+                chartDiv.innerHTML = `
+                    <h6>Channel ${meas.channel_id || meas.if_index}</h6>
+                    <canvas id="chanest-${meas.channel_id || meas.if_index}" height="250"></canvas>
+                `;
+                container.appendChild(chartDiv);
+                
+                const canvas = chartDiv.querySelector('canvas');
+                const coeffs = meas.coefficients || meas.channel_estimation || [];
+                
+                new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: coeffs.map((_, i) => i),
+                        datasets: [{
+                            label: 'Magnitude',
+                            data: coeffs.map(c => c.magnitude || c),
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { title: { display: true, text: 'Channel Estimation Coefficients' } }
+                    }
+                });
+            });
+        },
+        
+        drawModulationProfileCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const profiles = data.modulation_profiles || [];
+            
+            profiles.forEach(prof => {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'mb-4';
+                chartDiv.innerHTML = `
+                    <h6>Profile ${prof.profile_id}</h6>
+                    <canvas id="modprof-${prof.profile_id}" height="250"></canvas>
+                `;
+                container.appendChild(chartDiv);
+                
+                const canvas = chartDiv.querySelector('canvas');
+                const subcarriers = prof.subcarriers || [];
+                
+                new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: subcarriers.map(s => s.index),
+                        datasets: [{
+                            label: 'Modulation Order',
+                            data: subcarriers.map(s => s.modulation_order || s.modulation),
+                            backgroundColor: 'rgba(54, 162, 235, 0.5)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { title: { display: true, text: 'Modulation Profile' } }
+                    }
+                });
+            });
+        },
+        
+        drawFecSummaryCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const summaries = data.fec_summaries || [];
+            
+            summaries.forEach(fec => {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'mb-4';
+                chartDiv.innerHTML = `
+                    <h6>Channel ${fec.channel_id} - Profile ${fec.profile_id}</h6>
+                    <canvas id="fec-${fec.channel_id}-${fec.profile_id}" height="250"></canvas>
+                `;
+                container.appendChild(chartDiv);
+                
+                const canvas = chartDiv.querySelector('canvas');
+                
+                new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Total', 'Corrected', 'Uncorrectable'],
+                        datasets: [{
+                            label: 'Codewords',
+                            data: [
+                                fec.total_codewords || 0,
+                                fec.corrected_codewords || 0,
+                                fec.uncorrectable_codewords || 0
+                            ],
+                            backgroundColor: [
+                                'rgba(54, 162, 235, 0.5)',
+                                'rgba(75, 192, 192, 0.5)',
+                                'rgba(255, 99, 132, 0.5)'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { title: { display: true, text: 'FEC Statistics' } }
+                    }
+                });
+            });
+        },
+        
+        drawHistogramCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const histograms = data.histograms || [];
+            
+            histograms.forEach(hist => {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'mb-4';
+                chartDiv.innerHTML = `
+                    <h6>Channel ${hist.channel_id}</h6>
+                    <canvas id="hist-${hist.channel_id}" height="250"></canvas>
+                `;
+                container.appendChild(chartDiv);
+                
+                const canvas = chartDiv.querySelector('canvas');
+                const bins = hist.bins || hist.histogram_data || [];
+                
+                new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: bins.map(b => b.power_level || b.bin),
+                        datasets: [{
+                            label: 'Count',
+                            data: bins.map(b => b.count || b.value),
+                            backgroundColor: 'rgba(153, 102, 255, 0.5)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { title: { display: true, text: 'Power Histogram' } },
+                        scales: {
+                            x: { title: { display: true, text: 'Power Level (dBmV)' } },
+                            y: { title: { display: true, text: 'Count' } }
+                        }
+                    }
+                });
+            });
+        },
+        
+        drawConstellationCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const constellations = data.constellations || [];
+            
+            constellations.forEach(const => {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'mb-4';
+                chartDiv.innerHTML = `
+                    <h6>Channel ${const.channel_id}</h6>
+                    <canvas id="const-${const.channel_id}" height="400"></canvas>
+                `;
+                container.appendChild(chartDiv);
+                
+                const canvas = chartDiv.querySelector('canvas');
+                const points = const.points || [];
+                
+                new Chart(canvas.getContext('2d'), {
+                    type: 'scatter',
+                    data: {
+                        datasets: [{
+                            label: 'IQ Points',
+                            data: points.map(p => ({ x: p.i || p.real, y: p.q || p.imag })),
+                            backgroundColor: 'rgba(255, 159, 64, 0.5)',
+                            pointRadius: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { title: { display: true, text: 'Constellation Display' } },
+                        scales: {
+                            x: { title: { display: true, text: 'I (In-Phase)' } },
+                            y: { title: { display: true, text: 'Q (Quadrature)' } }
+                        }
+                    }
+                });
+            });
+        },
         
         drawRxmerCharts() {
             if (!this.rxmerData) return;
