@@ -85,6 +85,15 @@ class PyPNMClient:
                 json=payload,
                 timeout=self.config.timeout
             )
+            
+            # Log PyPNM errors
+            if response.status_code >= 400:
+                try:
+                    error_detail = response.json()
+                    logger.error(f"PyPNM returned {response.status_code}: {error_detail}")
+                except:
+                    logger.error(f"PyPNM returned {response.status_code}: {response.text[:500]}")
+            
             response.raise_for_status()
             
             # For archive responses, return binary content
