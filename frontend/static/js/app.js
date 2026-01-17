@@ -565,6 +565,7 @@ createApp({
                     
                     const typeNames = {
                         'rxmer': 'RxMER',
+                        'spectrum': 'Spectrum Analyzer',
                         'channel_estimation': 'Channel Estimation',
                         'modulation_profile': 'Modulation Profile',
                         'fec_summary': 'FEC Summary',
