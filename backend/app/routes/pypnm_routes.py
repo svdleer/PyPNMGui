@@ -76,6 +76,11 @@ def pnm_measurement(measurement_type, mac_address):
                 mac_address, modem_ip, tftp_ip, community, 
                 tftp_ipv6="::1", output_type=output_type
             )
+        elif measurement_type == 'spectrum':
+            result = client.get_spectrum_capture(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
         elif measurement_type == 'channel_estimation':
             result = client.get_channel_estimation(
                 mac_address, modem_ip, tftp_ip, community,
