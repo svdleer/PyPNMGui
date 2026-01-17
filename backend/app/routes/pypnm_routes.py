@@ -77,10 +77,13 @@ def pnm_measurement(measurement_type, mac_address):
                 tftp_ipv6="::1", output_type=output_type
             )
         elif measurement_type == 'spectrum':
+            # Spectrum analyzer: force JSON mode (archive not yet supported)
             result = client.get_spectrum_capture(
                 mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
+                tftp_ipv6="::1", output_type='json'
             )
+            # Override requested_archive since spectrum doesn't support it yet
+            requested_archive = False
         elif measurement_type == 'channel_estimation':
             result = client.get_channel_estimation(
                 mac_address, modem_ip, tftp_ip, community,
