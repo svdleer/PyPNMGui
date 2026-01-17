@@ -20,6 +20,7 @@ docker run -d \
   -e PYPNM_BASE_URL=http://pypnm-api:8000 \
   -e PYPNM_MODE=lab \
   -e FLASK_ENV=lab \
+  -e ENABLE_AGENT_WEBSOCKET=True \
   docker-gui-server
 
 echo "GUI deployed with PyPNM plot directory mounted"
