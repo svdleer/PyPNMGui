@@ -284,6 +284,12 @@ createApp({
                         upstream: this.transformUpstreamData(data.upstream),
                         timestamp: new Date().toISOString()
                     };
+                    
+                    // Draw charts after Vue updates DOM
+                    this.$nextTick(() => {
+                        this.drawDsChannelChart();
+                        this.drawUsChannelChart();
+                    });
                 } else if (data.error) {
                     this.showError('Failed to load system info', data.error || data.message);
                 } else {
@@ -534,6 +540,11 @@ createApp({
                 if (data.status === 0) {
                     this.preEqData = data;
                     this.showSuccess('Pre-Equalization Complete', data.message || 'Pre-EQ data retrieved successfully.');
+                    
+                    // Draw charts after Vue updates DOM
+                    this.$nextTick(() => {
+                        this.drawPreEqCharts();
+                    });
                 } else {
                     this.showError('Pre-Equalization Failed', data.message || `Error code: ${data.status}`);
                 }
@@ -680,6 +691,136 @@ createApp({
                                 min: 25,
                                 max: 50
                             }
+                        }
+                    }
+                });
+            });
+        },
+        
+        drawDsChannelChart() {
+            if (!this.systemInfo || !this.systemInfo.downstream) return;
+            
+            const canvas = document.getElementById('ds-channel-chart');
+            if (!canvas) return;
+            
+            // Destroy existing chart
+            if (this.charts['ds-channel-chart']) {
+                this.charts['ds-channel-chart'].destroy();
+            }
+            
+            const channels = this.systemInfo.downstream.filter(c => c.frequency_mhz > 0).sort((a, b) => a.frequency_mhz - b.frequency_mhz);
+            const labels = channels.map(c => c.frequency_mhz.toFixed(0));
+            const powerData = channels.map(c => c.power_dbmv);
+            const snrData = channels.map(c => c.snr_db);
+            
+            this.charts['ds-channel-chart'] = new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Power (dBmV)',
+                            data: powerData,
+                            backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                            borderColor: 'rgb(13, 110, 253)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'MER (dB)',
+                            data: snrData,
+                            backgroundColor: 'rgba(25, 135, 84, 0.7)',
+                            borderColor: 'rgb(25, 135, 84)',
+                            borderWidth: 1,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: {
+                        x: { title: { display: true, text: 'Frequency (MHz)' } },
+                        y: { type: 'linear', position: 'left', title: { display: true, text: 'Power (dBmV)' }, min: -10, max: 20 },
+                        y1: { type: 'linear', position: 'right', title: { display: true, text: 'MER (dB)' }, min: 30, max: 50, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        },
+        
+        drawUsChannelChart() {
+            if (!this.systemInfo || !this.systemInfo.upstream) return;
+            
+            const canvas = document.getElementById('us-channel-chart');
+            if (!canvas) return;
+            
+            if (this.charts['us-channel-chart']) {
+                this.charts['us-channel-chart'].destroy();
+            }
+            
+            const channels = this.systemInfo.upstream;
+            const labels = channels.map(c => `Ch ${c.channel_id}`);
+            const powerData = channels.map(c => c.power_dbmv);
+            const bgColors = powerData.map(p => p >= 35 && p <= 52 ? 'rgba(25, 135, 84, 0.7)' : 'rgba(220, 53, 69, 0.7)');
+            
+            this.charts['us-channel-chart'] = new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'TX Power (dBmV)',
+                        data: powerData,
+                        backgroundColor: bgColors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { title: { display: true, text: 'Power (dBmV)' }, min: 30, max: 55 }
+                    }
+                }
+            });
+        },
+        
+        drawPreEqCharts() {
+            if (!this.preEqData || !this.preEqData.results) return;
+            
+            Object.entries(this.preEqData.results).forEach(([chId, chData]) => {
+                const canvasId = `preeq-chart-${chId}`;
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                
+                if (this.charts[canvasId]) {
+                    this.charts[canvasId].destroy();
+                }
+                
+                const coeffs = chData.forward_coefficients || [];
+                const labels = coeffs.map((_, i) => i);
+                const magnitudes = coeffs.map(c => c.magnitude_power_dB);
+                
+                this.charts[canvasId] = new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Tap Magnitude (dB)',
+                            data: magnitudes,
+                            backgroundColor: 'rgba(111, 66, 193, 0.7)',
+                            borderColor: 'rgb(111, 66, 193)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { title: { display: true, text: 'Tap Index' } },
+                            y: { title: { display: true, text: 'Magnitude (dB)' } }
                         }
                     }
                 });
