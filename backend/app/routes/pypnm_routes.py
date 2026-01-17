@@ -57,8 +57,12 @@ def pnm_measurement(measurement_type, mac_address):
     tftp_ip = data.get('tftp_ip', get_default_tftp())
     output_type = data.get('output_type', 'json')
     
+    # Spectrum analyzer: force JSON mode (archive not yet working)
+    if measurement_type == 'spectrum':
+        output_type = 'json'
+        requested_archive = False
     # PyPNM only supports json output currently - archive mode falls back to json
-    if output_type == 'archive':
+    elif output_type == 'archive':
         # Keep archive mode - PyPNM will return ZIP with plots
         requested_archive = True
     else:
@@ -77,13 +81,10 @@ def pnm_measurement(measurement_type, mac_address):
                 tftp_ipv6="::1", output_type=output_type
             )
         elif measurement_type == 'spectrum':
-            # Spectrum analyzer: force JSON mode (archive not yet supported)
             result = client.get_spectrum_capture(
                 mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type='json'
+                tftp_ipv6="::1", output_type=output_type
             )
-            # Override requested_archive since spectrum doesn't support it yet
-            requested_archive = False
         elif measurement_type == 'channel_estimation':
             result = client.get_channel_estimation(
                 mac_address, modem_ip, tftp_ip, community,
