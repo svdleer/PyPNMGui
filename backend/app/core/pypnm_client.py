@@ -297,7 +297,7 @@ class PyPNMClient:
             "capture_parameters": {
                 "inactivity_timeout": 60,
                 "first_segment_center_freq": 300000000,
-                "last_segment_center_freq": 900000000,
+                "last_segment_center_freq": 1218000000,
                 "segment_freq_span": 1000000,
                 "num_bins_per_segment": 256,
                 "noise_bw": 150,
