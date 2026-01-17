@@ -205,28 +205,40 @@ class PyPNMClient:
         ip_address: str,
         tftp_ipv4: str,
         community: str = "private",
-        tftp_ipv6: str = "",
+        tftp_ipv6: Optional[str] = None,
         output_type: str = "json"
     ) -> Dict[str, Any]:
         """
         Trigger RxMER measurement capture.
         
-        Endpoint: POST /docs/pnm/ds/ofdm/rxmer/getCapture
+        Endpoint: POST /docs/pnm/ds/ofdm/rxMer/getCapture
         
         Args:
             output_type: "json" or "archive" (ZIP with plots)
         """
-        payload = self._build_cable_modem_request(
-            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
-        )
-        
-        # Add output type preference
-        if "cable_modem" not in payload:
-            payload["cable_modem"] = {}
-        if "pnm_parameters" not in payload["cable_modem"]:
-            payload["cable_modem"]["pnm_parameters"] = {}
-        
-        payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
+        # Build PyPNM PnmSingleCaptureRequest format
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {
+                    "snmpV2C": {
+                        "community": community
+                    }
+                },
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4 if tftp_ipv4 else None,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else None
+                    }
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "light"}}
+            }
+        }
         
         return self._post("/docs/pnm/ds/ofdm/rxMer/getCapture", payload)
     
@@ -236,7 +248,7 @@ class PyPNMClient:
         ip_address: str,
         tftp_ipv4: str,
         community: str = "private",
-        tftp_ipv6: str = "",
+        tftp_ipv6: Optional[str] = None,
         output_type: str = "json"
     ) -> Dict[str, Any]:
         """
@@ -244,10 +256,28 @@ class PyPNMClient:
         
         Endpoint: POST /docs/pnm/ds/spectrumAnalyzer/getCapture
         """
-        payload = self._build_cable_modem_request(
-            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
-        )
-        payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {
+                    "snmpV2C": {
+                        "community": community
+                    }
+                },
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4 if tftp_ipv4 else None,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else None
+                    }
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "light"}}
+            }
+        }
         
         return self._post("/docs/pnm/ds/spectrumAnalyzer/getCapture", payload)
     

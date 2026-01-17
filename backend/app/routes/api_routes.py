@@ -1275,19 +1275,25 @@ def pypnm_health():
 def pypnm_rxmer(mac_address):
     """Get RxMER capture via PyPNM."""
     from app.core.pypnm_client import PyPNMClient
+    import os
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
-    tftp_ip = data.get('tftp_ip', '')
+    # Default TFTP IP for lab environment
+    tftp_ip = data.get('tftp_ip', os.environ.get('TFTP_IPV4', '172.16.6.101'))
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
+    if not tftp_ip:
+        return jsonify({"status": "error", "message": "TFTP server not configured. Set TFTP_IPV4 environment variable."}), 400
+    
     client = PyPNMClient()
     result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community)
     
-    if result.get('status') == 'error':
+    # PyPNM returns status: 0 for success
+    if result.get('status') != 0:
         return jsonify(result), 500
     return jsonify(result)
 
