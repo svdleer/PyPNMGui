@@ -402,7 +402,7 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}
+                "plot": {"ui": {"theme": "dark"}}
             },
             "capture_settings": {
                 "fec_summary_type": fec_summary_type
@@ -442,7 +442,7 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}
+                "plot": {"ui": {"theme": "dark"}}
             },
             "capture_settings": {
                 "sample_duration": sample_duration
@@ -481,7 +481,7 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}
+                "plot": {"ui": {"theme": "dark"}}
             },
             "capture_settings": {
                 "modulation_order_offset": 0,
@@ -521,10 +521,10 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
-        return self._post("/docs/pnm/us/ofdma/preEqualizer/getCapture", payload)
+        return self._post("/docs/pnm/us/ofdma/preEqualization/getCapture", payload)
 
     # ============== Multi-RxMER (Long-term monitoring) ==============
     
