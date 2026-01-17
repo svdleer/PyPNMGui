@@ -114,8 +114,8 @@ def pnm_measurement(measurement_type, mac_address):
                 "message": f"Unknown measurement type: {measurement_type}"
             }), 400
         
-        # Handle archive (ZIP) response
-        if output_type == 'archive' and result.get('status') == 0:
+        # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
+        if requested_archive and result.get('status') == 0:
             # PyPNM returns archive data, extract plots and save ZIP
             import zipfile
             import io
