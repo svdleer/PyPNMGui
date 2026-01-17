@@ -59,7 +59,7 @@ def pnm_measurement(measurement_type, mac_address):
     
     # PyPNM only supports json output currently - archive mode falls back to json
     if output_type == 'archive':
-        output_type = 'json'
+        # Keep archive mode - PyPNM will return ZIP with plots
         requested_archive = True
     else:
         requested_archive = False
@@ -113,6 +113,46 @@ def pnm_measurement(measurement_type, mac_address):
                 "status": "error",
                 "message": f"Unknown measurement type: {measurement_type}"
             }), 400
+        
+        # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
+        if requested_archive and isinstance(result, bytes):
+            # PyPNM returned binary ZIP file
+            import zipfile
+            import io
+            import base64
+            from datetime import datetime
+            
+            # Save ZIP file
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            zip_filename = f"{measurement_type}_{mac_address}_{timestamp}.zip"
+            zip_path = f"/app/data/{zip_filename}"
+            
+            with open(zip_path, 'wb') as f:
+                f.write(result)
+            
+            # Extract PNG images from ZIP
+            plots = []
+            try:
+                with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
+                    for filename in zf.namelist():
+                        if filename.endswith('.png'):
+                            img_data = zf.read(filename)
+                            plots.append({
+                                'filename': filename,
+                                'data': base64.b64encode(img_data).decode('utf-8')
+                            })
+            except Exception as e:
+                logger.error(f"Failed to extract plots from ZIP: {e}")
+            
+            return jsonify({
+                "status": 0,
+                "message": f"Measurement complete - {len(plots)} plots generated",
+                "output_type": "archive",
+                "zip_file": zip_filename,
+                "download_url": f"/api/pypnm/download/{zip_filename}",
+                "plots": plots,
+                "mac_address": mac_address
+            })
         
         # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
         if requested_archive and result.get('status') == 0:

@@ -6,7 +6,7 @@
 import os
 import logging
 import requests
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class PyPNMClient:
         
         return payload
     
-    def _post(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _post(self, endpoint: str, payload: Dict[str, Any], expect_binary: bool = False) -> Union[Dict[str, Any], bytes]:
         """Make POST request to PyPNM API."""
         url = f"{self.config.base_url}{endpoint}"
         
@@ -86,6 +86,11 @@ class PyPNMClient:
                 timeout=self.config.timeout
             )
             response.raise_for_status()
+            
+            # For archive responses, return binary content
+            if expect_binary or payload.get('analysis', {}).get('output', {}).get('type') == 'archive':
+                return response.content
+            
             return response.json()
         
         except requests.exceptions.ConnectionError:
@@ -235,8 +240,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}  # Enable plots for archive output
+                "output": {"type": output_type}
             }
         }
         
