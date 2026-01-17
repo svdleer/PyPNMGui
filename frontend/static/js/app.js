@@ -873,17 +873,17 @@ createApp({
             const container = document.getElementById('measurement-charts-container');
             const constellations = data.constellations || [];
             
-            constellations.forEach(const => {
+            constellations.forEach(constellation => {
                 const chartDiv = document.createElement('div');
                 chartDiv.className = 'mb-4';
                 chartDiv.innerHTML = `
-                    <h6>Channel ${const.channel_id}</h6>
-                    <canvas id="const-${const.channel_id}" height="400"></canvas>
+                    <h6>Channel ${constellation.channel_id}</h6>
+                    <canvas id="const-${constellation.channel_id}" height="400"></canvas>
                 `;
                 container.appendChild(chartDiv);
                 
                 const canvas = chartDiv.querySelector('canvas');
-                const points = const.points || [];
+                const points = constellation.points || [];
                 
                 new Chart(canvas.getContext('2d'), {
                     type: 'scatter',
