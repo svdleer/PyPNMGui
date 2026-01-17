@@ -507,6 +507,12 @@ createApp({
                 
                 const data = await response.json();
                 
+                console.log('=== PNM Measurement Response ===');
+                console.log('Status:', data.status);
+                console.log('Plots:', data.plots);
+                console.log('Plots count:', data.plots ? data.plots.length : 0);
+                console.log('================================');
+                
                 if (data.status === 0) {
                     // Store data in the appropriate variable
                     this.selectedMeasurementData = data;
