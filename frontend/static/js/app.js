@@ -878,7 +878,7 @@ createApp({
                 chartDiv.className = 'mb-4';
                 chartDiv.innerHTML = `
                     <h6>Channel ${constellation.channel_id}</h6>
-                    <canvas id="const-${constellation.channel_id}" height="400"></canvas>
+                    <canvas id="constellation-${constellation.channel_id}" height="400"></canvas>
                 `;
                 container.appendChild(chartDiv);
                 
