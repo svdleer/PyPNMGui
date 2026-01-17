@@ -40,11 +40,23 @@ createApp({
             systemInfo: null,
             dsChannels: [],
             usChannels: [],
+            channelStats: null,  // Enhanced channel stats with profiles
             rxmerData: null,
             spectrumData: null,
             fecData: null,
             preEqData: null,
             eventLog: [],
+            
+            // PNM Measurement selection
+            pnmMeasurementType: 'rxmer',
+            pnmOutputType: 'json',  // json or archive
+            showRawData: false,
+            selectedMeasurementData: null,
+            
+            // Housekeeping
+            housekeepingDays: 7,
+            housekeepingDryRun: true,
+            housekeepingResult: null,
             
             // Live modem loading
             loadingLiveModems: false,
@@ -250,13 +262,19 @@ createApp({
             this.systemInfo = null;
             this.dsChannels = [];
             this.usChannels = [];
+            this.channelStats = null;
             this.rxmerData = null;
             this.eventLog = [];
+            this.selectedMeasurementData = null;
+            this.showRawData = false;
             
             this.currentView = 'modems';
             
-            // Load system info automatically
-            await this.loadSystemInfo();
+            // Load system info and channel stats automatically
+            await Promise.all([
+                this.loadSystemInfo(),
+                this.loadChannelStats()
+            ]);
         },
         
         async loadSystemInfo() {
@@ -425,130 +443,163 @@ createApp({
         },
         
         async runRxmerTest() {
-            if (!this.selectedModem) return;
-            
-            this.runningTest = true;
-            
-            try {
-                // Use PyPNM API for RxMER capture
-                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/rxmer`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
-                    })
-                });
-                
-                const data = await response.json();
-                
-                // PyPNM returns status: 0 for success
-                if (data.status === 0) {
-                    this.rxmerData = data;
-                    this.showSuccess('RxMER Measurement Complete', data.message || 'RxMER data has been retrieved successfully.');
-                    
-                    // Draw charts after Vue updates DOM
-                    this.$nextTick(() => {
-                        this.drawRxmerCharts();
-                    });
-                } else if (data.status === 'error' && data.message && data.message.includes('404')) {
-                    this.showError('RxMER Not Available', 'RxMER capture requires TFTP server. Please configure TFTP settings.');
-                } else {
-                    this.showError('RxMER Measurement Failed', data.message || `Error code: ${data.status}`);
-                }
-            } catch (error) {
-                console.error('RxMER measurement failed:', error);
-                this.showError('RxMER Measurement Failed', error.message);
-            } finally {
-                this.runningTest = false;
-            }
+            return this.runPnmMeasurement('rxmer');
         },
         
         async runSpectrumTest() {
-            if (!this.selectedModem) return;
-            
-            this.runningTest = true;
-            
-            try {
-                // Use PyPNM API for spectrum capture
-                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/spectrum`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
-                    })
-                });
-                
-                const data = await response.json();
-                
-                // PyPNM returns status: 0 for success
-                if (data.status === 0) {
-                    this.spectrumData = data;
-                    this.showSuccess('Spectrum Analysis Complete', data.message || 'Spectrum data has been retrieved successfully.');
-                } else if (data.status === 'error' && data.message && data.message.includes('404')) {
-                    this.showError('Spectrum Not Available', 'Spectrum capture requires TFTP server. Please configure TFTP settings.');
-                } else {
-                    this.showError('Spectrum Analysis Failed', data.message || `Error code: ${data.status}`);
-                }
-            } catch (error) {
-                console.error('Spectrum analysis failed:', error);
-                this.showError('Spectrum Analysis Failed', error.message);
-            } finally {
-                this.runningTest = false;
-            }
+            return this.runPnmMeasurement('spectrum');
         },
         
         async runFecTest() {
+            return this.runPnmMeasurement('fec_summary');
+        },
+        
+        async runPreEqTest() {
+            return this.runPnmMeasurement('us_pre_eq');
+        },
+        
+        async runChannelEstimation() {
+            return this.runPnmMeasurement('channel_estimation');
+        },
+        
+        async runModulationProfile() {
+            return this.runPnmMeasurement('modulation_profile');
+        },
+        
+        async runHistogram() {
+            return this.runPnmMeasurement('histogram');
+        },
+        
+        async runConstellation() {
+            return this.runPnmMeasurement('constellation');
+        },
+        
+        async runPnmMeasurement(measurementType) {
             if (!this.selectedModem) return;
             
             this.runningTest = true;
+            this.showRawData = false;
             
             try {
-                // Use PyPNM API for FEC summary
-                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/fec`, {
+                const payload = {
+                    modem_ip: this.selectedModem.ip_address,
+                    community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng',
+                    output_type: this.pnmOutputType
+                };
+                
+                // Add measurement-specific parameters
+                if (measurementType === 'fec_summary') {
+                    payload.fec_summary_type = 2;  // 10-minute interval
+                }
+                if (measurementType === 'histogram') {
+                    payload.sample_duration = 60;
+                }
+                
+                const response = await fetch(`${API_BASE}/pypnm/measurements/${measurementType}/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
-                    })
+                    body: JSON.stringify(payload)
                 });
                 
                 const data = await response.json();
                 
-                // PyPNM returns status: 0 for success
                 if (data.status === 0) {
-                    this.fecData = data;
-                    this.showSuccess('FEC Summary Complete', data.message || 'FEC statistics retrieved successfully.');
+                    // Store data in the appropriate variable
+                    this.selectedMeasurementData = data;
+                    
+                    // Map to legacy variables for compatibility
+                    if (measurementType === 'rxmer') {
+                        this.rxmerData = data;
+                        this.$nextTick(() => {
+                            this.drawRxmerCharts();
+                        });
+                    } else if (measurementType === 'fec_summary') {
+                        this.fecData = data;
+                    } else if (measurementType === 'us_pre_eq') {
+                        this.preEqData = data;
+                    }
+                    
+                    const typeNames = {
+                        'rxmer': 'RxMER',
+                        'channel_estimation': 'Channel Estimation',
+                        'modulation_profile': 'Modulation Profile',
+                        'fec_summary': 'FEC Summary',
+                        'histogram': 'Histogram',
+                        'constellation': 'Constellation Display',
+                        'us_pre_eq': 'Upstream Pre-Equalization'
+                    };
+                    
+                    this.showSuccess(
+                        `${typeNames[measurementType] || measurementType} Complete`,
+                        this.pnmOutputType === 'archive' 
+                            ? 'Plots and CSV data generated successfully'
+                            : 'Measurement data retrieved successfully'
+                    );
                 } else {
-                    this.showError('FEC Summary Failed', data.message || `Error code: ${data.status}`);
+                    this.showError('Measurement Failed', data.message || `Error code: ${data.status}`);
                 }
             } catch (error) {
-                console.error('FEC summary failed:', error);
-                this.showError('FEC Summary Failed', error.message);
+                console.error('PNM measurement failed:', error);
+                this.showError('Measurement Failed', error.message);
             } finally {
                 this.runningTest = false;
             }
         },
         
-        async runPreEqTest() {
+        toggleRawData() {
+            this.showRawData = !this.showRawData;
+        },
+        
+        async loadChannelStats() {
             if (!this.selectedModem) return;
             
-            this.runningTest = true;
-            
             try {
-                // Use PyPNM API for pre-equalization
-                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/pre-eq`, {
+                const response = await fetch(`${API_BASE}/pypnm/channel-stats/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         modem_ip: this.selectedModem.ip_address,
                         community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
                     })
                 });
                 
                 const data = await response.json();
+                
+                if (data.status === 0) {
+                    this.channelStats = data;
+                }
+            } catch (error) {
+                console.error('Failed to load channel stats:', error);
+            }
+        },
+        
+        async runHousekeeping() {
+            try {
+                const response = await fetch(`${API_BASE}/pypnm/housekeeping`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        max_age_days: this.housekeepingDays,
+                        dry_run: this.housekeepingDryRun
+                    })
+                });
+                
+                const data = await response.json();
+                this.housekeepingResult = data;
+                
+                if (data.status === 'success') {
+                    this.showSuccess(
+                        'Housekeeping Complete',
+                        `${this.housekeepingDryRun ? 'Would delete' : 'Deleted'} ${data.deleted_count} files (${data.total_size_mb} MB)`
+                    );
+                } else {
+                    this.showError('Housekeeping Failed', data.message);
+                }
+            } catch (error) {
+                console.error('Housekeeping failed:', error);
+                this.showError('Housekeeping Failed', error.message);
+            }
+        },                const data = await response.json();
                 
                 // PyPNM returns status: 0 for success
                 if (data.status === 0) {
