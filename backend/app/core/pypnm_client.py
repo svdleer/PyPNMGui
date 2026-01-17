@@ -17,7 +17,7 @@ class PyPNMConfig:
     """PyPNM server configuration."""
     # Use Docker gateway IP to reach host network services
     base_url: str = os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8000')
-    timeout: int = 60
+    timeout: int = 180
     verify_ssl: bool = False
 
 
@@ -417,7 +417,7 @@ class PyPNMClient:
         tftp_ipv4: str,
         community: str = "private",
         tftp_ipv6: Optional[str] = None,
-        sample_duration: int = 60,
+        sample_duration: int = 30,
         output_type: str = "json"
     ) -> Dict[str, Any]:
         """
