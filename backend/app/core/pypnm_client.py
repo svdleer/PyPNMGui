@@ -289,7 +289,21 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "dark"}}
+                "plot": {"ui": {"theme": "dark"}},
+                "spectrum_analysis": {
+                    "moving_average": {"points": 10}
+                }
+            },
+            "capture_parameters": {
+                "inactivity_timeout": 60,
+                "first_segment_center_freq": 300000000,
+                "last_segment_center_freq": 900000000,
+                "segment_freq_span": 1000000,
+                "num_bins_per_segment": 256,
+                "noise_bw": 150,
+                "window_function": 1,
+                "num_averages": 1,
+                "spectrum_retrieval_type": 1
             }
         }
         
