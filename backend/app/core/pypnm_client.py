@@ -487,7 +487,7 @@ class PyPNMClient:
             },
             "capture_settings": {
                 "modulation_order_offset": 0,
-                "number_sample_symbol": 1000
+                "number_sample_symbol": 8192
             }
         }
         return self._post("/docs/pnm/ds/ofdm/constellationDisplay/getCapture", payload)
