@@ -609,26 +609,6 @@ createApp({
                 console.error('Housekeeping failed:', error);
                 this.showError('Housekeeping Failed', error.message);
             }
-        },                const data = await response.json();
-                
-                // PyPNM returns status: 0 for success
-                if (data.status === 0) {
-                    this.preEqData = data;
-                    this.showSuccess('Pre-Equalization Complete', data.message || 'Pre-EQ data retrieved successfully.');
-                    
-                    // Draw charts after Vue updates DOM
-                    this.$nextTick(() => {
-                        this.drawPreEqCharts();
-                    });
-                } else {
-                    this.showError('Pre-Equalization Failed', data.message || `Error code: ${data.status}`);
-                }
-            } catch (error) {
-                console.error('Pre-equalization failed:', error);
-                this.showError('Pre-Equalization Failed', error.message);
-            } finally {
-                this.runningTest = false;
-            }
         },
         
         async loadEventLog() {
