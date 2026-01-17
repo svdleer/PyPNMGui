@@ -474,14 +474,16 @@ class PyPNMClient:
                     "tftp": {
                         "ipv4": tftp_ipv4,
                         "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
-                    },
-                    "capture": {"channel_ids": []}
+                    }
                 }
             },
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "dark"}}
+                "plot": {
+                    "ui": {"theme": "dark"},
+                    "options": {"display_cross_hair": True}
+                }
             },
             "capture_settings": {
                 "modulation_order_offset": 0,
