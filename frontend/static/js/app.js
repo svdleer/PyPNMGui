@@ -921,7 +921,10 @@ createApp({
         },
         
         drawRxmerCharts() {
-            if (!this.rxmerData) return;
+            if (!this.rxmerData || !this.rxmerData.data || !this.rxmerData.data.rxmer_measurements) {
+                console.warn('RxMER data not available for charting');
+                return;
+            }
             
             this.rxmerData.data.rxmer_measurements.forEach(meas => {
                 const canvasId = `rxmer-chart-${meas.channel_id}`;
