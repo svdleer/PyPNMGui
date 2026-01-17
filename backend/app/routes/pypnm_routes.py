@@ -57,6 +57,13 @@ def pnm_measurement(measurement_type, mac_address):
     tftp_ip = data.get('tftp_ip', get_default_tftp())
     output_type = data.get('output_type', 'json')
     
+    # PyPNM only supports json output currently - archive mode falls back to json
+    if output_type == 'archive':
+        output_type = 'json'
+        requested_archive = True
+    else:
+        requested_archive = False
+    
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
@@ -151,9 +158,11 @@ def pnm_measurement(measurement_type, mac_address):
                     "data": result.get('data', {})
                 })
             
+            # Archive data not available, return JSON
             return jsonify({
                 "status": 0,
-                "message": "Archive generated successfully",
+                "message": result.get('message', 'Measurement complete'),
+                "note": "Archive mode with PNG plots not yet supported by PyPNM API",
                 "data": result.get('data', {})
             })
         
