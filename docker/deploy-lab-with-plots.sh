@@ -12,7 +12,7 @@ docker run -d \
   -p 5051:5050 \
   --network docker_pypnm-net \
   --network compose_default \
-  -v pypnm-data:/pypnm-data:ro \
+  -v compose_pypnm_data:/pypnm-data:ro \
   -e REDIS_HOST=redis-lab \
   -e REDIS_PORT=6379 \
   -e AGENT_HOST=agent-lab \
