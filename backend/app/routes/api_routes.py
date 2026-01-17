@@ -1280,8 +1280,8 @@ def pypnm_rxmer(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', 'm0d3m1nf0')
-    # Default TFTP IP for lab environment
-    tftp_ip = data.get('tftp_ip', os.environ.get('TFTP_IPV4', '172.16.6.101'))
+    # Default TFTP IP for lab environment - 172.22.147.18 is the working TFTP server
+    tftp_ip = data.get('tftp_ip', os.environ.get('TFTP_IPV4', '172.22.147.18'))
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400

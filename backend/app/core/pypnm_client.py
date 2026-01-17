@@ -228,15 +228,15 @@ class PyPNMClient:
                 },
                 "pnm_parameters": {
                     "tftp": {
-                        "ipv4": tftp_ipv4 if tftp_ipv4 else None,
-                        "ipv6": tftp_ipv6 if tftp_ipv6 else None
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"  # PyPNM requires both IPv4 and IPv6
                     }
                 }
             },
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "plot": {"enable": False}  # Changed from "ui" format to "enable" boolean
             }
         }
         
