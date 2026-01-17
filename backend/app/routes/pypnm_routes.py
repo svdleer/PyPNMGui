@@ -216,6 +216,38 @@ def pnm_measurement(measurement_type, mac_address):
         # Handle errors
         if result.get('status') != 0:
             return jsonify(result), 500
+        
+        # Fetch matplotlib plots for successful measurements (regardless of output_type)
+        import glob
+        import os
+        import base64
+        import time
+        
+        plots = []
+        plot_dir = "/pypnm-data/png"
+        if os.path.exists(plot_dir):
+            mac_clean = mac_address.replace(':', '')
+            pattern = f"{plot_dir}/{mac_clean}*.png"
+            plot_files = glob.glob(pattern)
+            
+            # Get files modified in the last 120 seconds
+            recent_time = time.time() - 120
+            plot_files = [f for f in plot_files if os.path.getmtime(f) > recent_time]
+            plot_files.sort(key=os.path.getmtime, reverse=True)
+            
+            for filepath in plot_files[:10]:
+                try:
+                    with open(filepath, 'rb') as f:
+                        img_data = f.read()
+                        plots.append({
+                            'filename': os.path.basename(filepath),
+                            'data': base64.b64encode(img_data).decode('utf-8')
+                        })
+                except Exception as e:
+                    logger.error(f"Failed to read plot {filepath}: {e}")
+        
+        # Add plots to result
+        result['plots'] = plots
             
         return jsonify(result)
         
