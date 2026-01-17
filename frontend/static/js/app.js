@@ -271,10 +271,14 @@ createApp({
             this.currentView = 'modems';
             
             // Load system info and channel stats automatically
-            await Promise.all([
-                this.loadSystemInfo(),
-                this.loadChannelStats()
-            ]);
+            try {
+                await Promise.all([
+                    this.loadSystemInfo(),
+                    this.loadChannelStats()
+                ]);
+            } catch (error) {
+                console.error('Error loading modem data:', error);
+            }
         },
         
         async loadSystemInfo() {
@@ -563,13 +567,19 @@ createApp({
                     })
                 });
                 
+                if (!response.ok) {
+                    console.warn('Channel stats endpoint not available');
+                    return;
+                }
+                
                 const data = await response.json();
                 
                 if (data.status === 0) {
                     this.channelStats = data;
                 }
             } catch (error) {
-                console.error('Failed to load channel stats:', error);
+                console.warn('Failed to load channel stats:', error);
+                // Don't show error to user, just skip channel stats
             }
         },
         
