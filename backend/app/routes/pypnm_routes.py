@@ -109,8 +109,48 @@ def pnm_measurement(measurement_type, mac_address):
         
         # Handle archive (ZIP) response
         if output_type == 'archive' and result.get('status') == 0:
-            # PyPNM returns archive data, need to handle file download
-            # For now return JSON with message
+            # PyPNM returns archive data, extract plots and save ZIP
+            import zipfile
+            import io
+            import base64
+            from datetime import datetime
+            
+            # Get the archive data from PyPNM
+            archive_data = result.get('archive_data')
+            if archive_data:
+                # Save ZIP and extract plot images
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                zip_filename = f"{measurement_type}_{mac_address}_{timestamp}.zip"
+                zip_path = f"/app/data/{zip_filename}"
+                
+                # Write ZIP file
+                with open(zip_path, 'wb') as f:
+                    f.write(base64.b64decode(archive_data) if isinstance(archive_data, str) else archive_data)
+                
+                # Extract PNG images from ZIP
+                plots = []
+                try:
+                    with zipfile.ZipFile(zip_path, 'r') as zf:
+                        for filename in zf.namelist():
+                            if filename.endswith('.png'):
+                                img_data = zf.read(filename)
+                                plots.append({
+                                    'filename': filename,
+                                    'data': base64.b64encode(img_data).decode('utf-8')
+                                })
+                except Exception as e:
+                    logger.error(f"Failed to extract plots: {e}")
+                
+                return jsonify({
+                    "status": 0,
+                    "message": result.get('message', 'Archive generated successfully'),
+                    "output_type": "archive",
+                    "zip_file": zip_filename,
+                    "download_url": f"/api/pypnm/download/{zip_filename}",
+                    "plots": plots,
+                    "data": result.get('data', {})
+                })
+            
             return jsonify({
                 "status": 0,
                 "message": "Archive generated successfully",
@@ -384,3 +424,25 @@ def housekeeping():
             "status": "error",
             "message": str(e)
         }), 500
+
+
+@pypnm_bp.route('/download/<filename>', methods=['GET'])
+def download_archive(filename):
+    """
+    Download a PNM archive ZIP file.
+    
+    GET /api/pypnm/download/<filename>
+    """
+    import os
+    from flask import send_file
+    
+    file_path = f"/app/data/{filename}"
+    if not os.path.exists(file_path):
+        return jsonify({"status": "error", "message": "File not found"}), 404
+    
+    return send_file(
+        file_path,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename
+    )

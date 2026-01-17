@@ -918,6 +918,27 @@
                                 </div>
                             </div>
 
+                            <!-- Matplotlib Plots from Archive -->
+                            <div class="col-12 mb-4" v-if="selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>PNM Plots</h5>
+                                        <a v-if="selectedMeasurementData.download_url" 
+                                           :href="selectedMeasurementData.download_url" 
+                                           class="btn btn-sm btn-primary" 
+                                           download>
+                                            <i class="bi bi-download me-1"></i>Download ZIP
+                                        </a>
+                                    </div>
+                                    <div class="card-body">
+                                        <div v-for="plot in selectedMeasurementData.plots" :key="plot.filename" class="mb-4">
+                                            <h6 class="text-muted">{{ plot.filename }}</h6>
+                                            <img :src="'data:image/png;base64,' + plot.data" class="img-fluid border rounded" :alt="plot.filename">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- RxMER Results (existing)-->
                             <div class="col-12 mb-4" v-if="rxmerData">
                                 <div class="card shadow-sm border-success">
