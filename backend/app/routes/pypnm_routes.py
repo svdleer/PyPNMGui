@@ -165,6 +165,10 @@ def pnm_measurement(measurement_type, mac_address):
             import base64
             import time
             
+            logger.info(f"=== Plot Fetching Debug ===")
+            logger.info(f"requested_archive: {requested_archive}")
+            logger.info(f"result status: {result.get('status')}")
+            
             plots = []
             if result.get('status') == 0:
                 # Give PyPNM a moment to finish writing files
@@ -172,15 +176,20 @@ def pnm_measurement(measurement_type, mac_address):
                 
                 # Look for plots in /pypnm-data/png/
                 plot_dir = "/pypnm-data/png"
+                logger.info(f"Plot dir exists: {os.path.exists(plot_dir)}")
+                
                 if os.path.exists(plot_dir):
                     # Find recent plots for this modem
                     mac_clean = mac_address.replace(':', '')
                     pattern = f"{plot_dir}/{mac_clean}*.png"
                     plot_files = glob.glob(pattern)
+                    logger.info(f"Pattern: {pattern}")
+                    logger.info(f"Found {len(plot_files)} total files")
                     
                     # Get files modified in the last 60 seconds
                     recent_time = time.time() - 60
                     plot_files = [f for f in plot_files if os.path.getmtime(f) > recent_time]
+                    logger.info(f"Found {len(plot_files)} recent files (last 60s)")
                     plot_files.sort(key=os.path.getmtime, reverse=True)
                     
                     for filepath in plot_files[:10]:  # Max 10 plots
@@ -191,8 +200,11 @@ def pnm_measurement(measurement_type, mac_address):
                                     'filename': os.path.basename(filepath),
                                     'data': base64.b64encode(img_data).decode('utf-8')
                                 })
+                                logger.info(f"Added plot: {os.path.basename(filepath)}")
                         except Exception as e:
                             logger.error(f"Failed to read plot {filepath}: {e}")
+            
+            logger.info(f"Returning {len(plots)} plots")
             
             return jsonify({
                 "status": 0,
