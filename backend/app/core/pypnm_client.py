@@ -281,26 +281,77 @@ class PyPNMClient:
         
         return self._post("/docs/pnm/ds/spectrumAnalyzer/getCapture", payload)
     
-    def get_constellation_display(
+    def get_channel_estimation(
         self,
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
         community: str = "private",
-        tftp_ipv6: str = "",
+        tftp_ipv6: Optional[str] = None,
         output_type: str = "json"
     ) -> Dict[str, Any]:
         """
-        Trigger constellation display capture.
+        Channel Estimation Coefficients capture with plots.
         
-        Endpoint: POST /docs/pnm/ds/ofdm/constellationDisplay/getCapture
+        Endpoint: POST /docs/pnm/ds/ofdm/channelEstCoeff/getCapture
+        Returns: JSON with analysis or ZIP archive with CSV+plots
         """
-        payload = self._build_cable_modem_request(
-            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
-        )
-        payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {"snmpV2C": {"community": community}},
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
+                    },
+                    "capture": {"channel_ids": []}
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"enable": output_type == "archive"}
+            }
+        }
+        return self._post("/docs/pnm/ds/ofdm/channelEstCoeff/getCapture", payload)
+    
+    def get_modulation_profile(
+        self,
+        mac_address: str,
+        ip_address: str,
+        tftp_ipv4: str,
+        community: str = "private",
+        tftp_ipv6: Optional[str] = None,
+        output_type: str = "json"
+    ) -> Dict[str, Any]:
+        """
+        Modulation Profile capture with plots.
         
-        return self._post("/docs/pnm/ds/ofdm/constellationDisplay/getCapture", payload)
+        Endpoint: POST /docs/pnm/ds/ofdm/modulationProfile/getCapture
+        Returns: JSON with analysis or ZIP archive with CSV+plots
+        """
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {"snmpV2C": {"community": community}},
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
+                    },
+                    "capture": {"channel_ids": []}
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"enable": output_type == "archive"}
+            }
+        }
+        return self._post("/docs/pnm/ds/ofdm/modulationProfile/getCapture", payload)
     
     def get_fec_summary(
         self,
@@ -308,34 +359,122 @@ class PyPNMClient:
         ip_address: str,
         tftp_ipv4: str,
         community: str = "private",
-        tftp_ipv6: str = "",
+        tftp_ipv6: Optional[str] = None,
+        fec_summary_type: int = 2,
         output_type: str = "json"
     ) -> Dict[str, Any]:
         """
-        Trigger FEC summary capture.
+        FEC Summary capture with plots.
         
         Endpoint: POST /docs/pnm/ds/ofdm/fecSummary/getCapture
-        """
-        payload = self._build_cable_modem_request(
-            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
-        )
-        payload["cable_modem"]["pnm_parameters"]["output_type"] = output_type
+        Returns: JSON with analysis or ZIP archive with CSV+plots
         
+        Args:
+            fec_summary_type: 2 = 10-minute interval, 3 = 24-hour interval
+        """
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {"snmpV2C": {"community": community}},
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
+                    },
+                    "capture": {"channel_ids": []}
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"enable": output_type == "archive"}
+            },
+            "capture_settings": {
+                "fec_summary_type": fec_summary_type
+            }
+        }
         return self._post("/docs/pnm/ds/ofdm/fecSummary/getCapture", payload)
     
-    def get_us_pre_equalization(
+    def get_histogram(
         self,
         mac_address: str,
         ip_address: str,
-        community: str = "private"
+        tftp_ipv4: str,
+        community: str = "private",
+        tftp_ipv6: Optional[str] = None,
+        sample_duration: int = 60,
+        output_type: str = "json"
     ) -> Dict[str, Any]:
         """
-        Get upstream pre-equalization data.
+        Downstream Histogram capture with plots.
         
-        Endpoint: POST /docs/if30/us/atdma/chan/preEqualization
+        Endpoint: POST /docs/pnm/ds/histogram/getCapture
+        Returns: JSON with analysis or ZIP archive with CSV+plots
         """
-        payload = self._build_cable_modem_request(mac_address, ip_address, community)
-        return self._post("/docs/if30/us/atdma/chan/preEqualization", payload)
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {"snmpV2C": {"community": community}},
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
+                    },
+                    "capture": {"channel_ids": []}
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"enable": output_type == "archive"}
+            },
+            "capture_settings": {
+                "sample_duration": sample_duration
+            }
+        }
+        return self._post("/docs/pnm/ds/histogram/getCapture", payload)
+    
+    def get_constellation_display(
+        self,
+        mac_address: str,
+        ip_address: str,
+        tftp_ipv4: str,
+        community: str = "private",
+        tftp_ipv6: Optional[str] = None,
+        output_type: str = "json"
+    ) -> Dict[str, Any]:
+        """
+        Constellation Display capture with plots.
+        
+        Endpoint: POST /docs/pnm/ds/ofdm/constellationDisplay/getCapture
+        Returns: JSON with analysis or ZIP archive with CSV+plots
+        """
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {"snmpV2C": {"community": community}},
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
+                    },
+                    "capture": {"channel_ids": []}
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"enable": output_type == "archive"}
+            },
+            "capture_settings": {
+                "modulation_order_offset": 0,
+                "number_sample_symbol": 1000
+            }
+        }
+        return self._post("/docs/pnm/ds/ofdm/constellationDisplay/getCapture", payload)
     
     def get_us_ofdma_pre_equalization(
         self,
@@ -343,17 +482,35 @@ class PyPNMClient:
         ip_address: str,
         tftp_ipv4: str,
         community: str = "private",
-        tftp_ipv6: str = ""
+        tftp_ipv6: Optional[str] = None,
+        output_type: str = "json"
     ) -> Dict[str, Any]:
         """
-        Get upstream OFDMA pre-equalization capture.
+        Upstream OFDMA Pre-Equalization capture with plots.
         
-        Endpoint: POST /docs/pnm/us/ofdma/preEqualization/getCapture
+        Endpoint: POST /docs/pnm/us/ofdma/preEqualizer/getCapture
+        Returns: JSON with analysis or ZIP archive with CSV+plots
         """
-        payload = self._build_cable_modem_request(
-            mac_address, ip_address, community, tftp_ipv4, tftp_ipv6
-        )
-        return self._post("/docs/pnm/us/ofdma/preEqualization/getCapture", payload)
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {"snmpV2C": {"community": community}},
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
+                    },
+                    "capture": {"channel_ids": []}
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"enable": output_type == "archive"}
+            }
+        }
+        return self._post("/docs/pnm/us/ofdma/preEqualizer/getCapture", payload)
 
     # ============== Multi-RxMER (Long-term monitoring) ==============
     
