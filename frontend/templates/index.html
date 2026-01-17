@@ -322,6 +322,11 @@
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="housekeeping-tab" data-bs-toggle="tab" data-bs-target="#housekeeping" type="button">
+                            <i class="bi bi-trash3 me-2"></i>Housekeeping
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
                         <button class="nav-link" id="events-tab" data-bs-toggle="tab" data-bs-target="#events" type="button">
                             <i class="bi bi-journal-text me-2"></i>Event Log
                         </button>
@@ -744,52 +749,164 @@
                     <!-- PNM Measurements Tab -->
                     <div class="tab-pane fade" id="pnm" role="tabpanel">
                         <div class="row">
-                            <!-- PNM Test Buttons -->
+                            <!-- PNM Measurement Controls -->
                             <div class="col-12 mb-4">
                                 <div class="card shadow-sm">
                                     <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>Run PNM Measurements</h5>
+                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>PNM Measurements</h5>
                                     </div>
                                     <div class="card-body">
-                                        <div class="row g-3">
-                                            <div class="col-md-3">
-                                                <button @click="runRxmerTest" class="btn btn-primary w-100 py-3" :disabled="runningTest">
-                                                    <i class="bi bi-graph-up d-block" style="font-size: 2rem;"></i>
-                                                    <span class="d-block mt-2">RxMER Capture</span>
-                                                    <small class="text-light opacity-75">OFDM RxMER per subcarrier</small>
-                                                </button>
+                                        <div class="row g-3 mb-3">
+                                            <div class="col-md-4">
+                                                <label class="form-label">Measurement Type</label>
+                                                <select v-model="pnmMeasurementType" class="form-select">
+                                                    <option value="rxmer">RxMER - Per Subcarrier</option>
+                                                    <option value="channel_estimation">Channel Estimation</option>
+                                                    <option value="modulation_profile">Modulation Profile</option>
+                                                    <option value="fec_summary">FEC Summary</option>
+                                                    <option value="histogram">Histogram</option>
+                                                    <option value="constellation">Constellation Display</option>
+                                                    <option value="us_pre_eq">US Pre-Equalization</option>
+                                                </select>
                                             </div>
                                             <div class="col-md-3">
-                                                <button @click="runSpectrumTest" class="btn btn-success w-100 py-3" :disabled="runningTest">
-                                                    <i class="bi bi-soundwave d-block" style="font-size: 2rem;"></i>
-                                                    <span class="d-block mt-2">Spectrum Analysis</span>
-                                                    <small class="text-light opacity-75">Full spectrum capture</small>
+                                                <label class="form-label">Output Format</label>
+                                                <select v-model="pnmOutputType" class="form-select">
+                                                    <option value="json">JSON Data</option>
+                                                    <option value="archive">Archive (CSV + Plots)</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-3 d-flex align-items-end">
+                                                <button @click="runPnmMeasurement(pnmMeasurementType)" 
+                                                        class="btn btn-primary w-100" 
+                                                        :disabled="runningTest || !selectedModem">
+                                                    <span v-if="runningTest">
+                                                        <i class="bi bi-arrow-repeat spin me-1"></i>Running...
+                                                    </span>
+                                                    <span v-else>
+                                                        <i class="bi bi-play-fill me-1"></i>Run Measurement
+                                                    </span>
                                                 </button>
                                             </div>
-                                            <div class="col-md-3">
-                                                <button @click="runFecTest" class="btn btn-info w-100 py-3" :disabled="runningTest">
-                                                    <i class="bi bi-shield-check d-block" style="font-size: 2rem;"></i>
-                                                    <span class="d-block mt-2">FEC Summary</span>
-                                                    <small class="text-light opacity-75">Error correction stats</small>
-                                                </button>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <button @click="runPreEqTest" class="btn btn-warning w-100 py-3" :disabled="runningTest">
-                                                    <i class="bi bi-sliders d-block" style="font-size: 2rem;"></i>
-                                                    <span class="d-block mt-2">Pre-Equalization</span>
-                                                    <small class="text-dark opacity-75">US pre-eq coefficients</small>
+                                            <div class="col-md-2 d-flex align-items-end">
+                                                <button @click="toggleRawData" 
+                                                        class="btn btn-outline-secondary w-100" 
+                                                        :disabled="!selectedMeasurementData">
+                                                    <i class="bi bi-code-square me-1"></i>Raw Data
                                                 </button>
                                             </div>
                                         </div>
-                                        <div class="mt-3 text-center" v-if="runningTest">
-                                            <div class="spinner-border text-primary me-2" role="status"></div>
-                                            <span>Running measurement... Please wait.</span>
+                                        
+                                        <!-- Quick Action Buttons -->
+                                        <div class="row g-2">
+                                            <div class="col-md-3">
+                                                <button @click="runRxmerTest" class="btn btn-sm btn-outline-primary w-100" :disabled="runningTest">
+                                                    <i class="bi bi-graph-up me-1"></i>RxMER
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runChannelEstimation" class="btn btn-sm btn-outline-success w-100" :disabled="runningTest">
+                                                    <i class="bi bi-soundwave me-1"></i>Chan Est
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runModulationProfile" class="btn btn-sm btn-outline-info w-100" :disabled="runningTest">
+                                                    <i class="bi bi-reception-4 me-1"></i>Mod Profile
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runFecTest" class="btn btn-sm btn-outline-warning w-100" :disabled="runningTest">
+                                                    <i class="bi bi-shield-check me-1"></i>FEC
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- RxMER Results -->
+                            <!-- Channel Stats with Profile Info -->
+                            <div class="col-12 mb-4" v-if="channelStats">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>Channel Overview</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <!-- Downstream Channels -->
+                                            <div class="col-md-6">
+                                                <h6 class="text-primary border-bottom pb-2">
+                                                    <i class="bi bi-arrow-down-circle me-1"></i>Downstream
+                                                </h6>
+                                                <div v-if="channelStats.downstream.scqam.count > 0" class="mb-3">
+                                                    <small class="text-muted">{{ channelStats.downstream.scqam.type }}</small>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.downstream.scqam.count }}</strong>
+                                                    </div>
+                                                </div>
+                                                <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3">
+                                                    <small class="text-muted">{{ channelStats.downstream.ofdm.type }}</small>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.downstream.ofdm.count }}</strong>
+                                                    </div>
+                                                    <div v-for="ch in channelStats.downstream.ofdm.channels" :key="ch.channel_id" class="ms-3 mt-2">
+                                                        <small>
+                                                            Ch {{ ch.channel_id }}: 
+                                                            <span class="badge bg-info">Profiles: {{ ch.profiles.join(', ') || 'None' }}</span>
+                                                            <span class="badge bg-secondary" v-if="ch.ncp_profile">NCP</span>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <!-- Upstream Channels -->
+                                            <div class="col-md-6">
+                                                <h6 class="text-success border-bottom pb-2">
+                                                    <i class="bi bi-arrow-up-circle me-1"></i>Upstream
+                                                </h6>
+                                                <div v-if="channelStats.upstream.atdma.count > 0" class="mb-3">
+                                                    <small class="text-muted">{{ channelStats.upstream.atdma.type }}</small>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.upstream.atdma.count }}</strong>
+                                                    </div>
+                                                </div>
+                                                <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3">
+                                                    <small class="text-muted">{{ channelStats.upstream.ofdma.type }}</small>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.upstream.ofdma.count }}</strong>
+                                                    </div>
+                                                    <div v-for="ch in channelStats.upstream.ofdma.channels" :key="ch.channel_id" class="ms-3 mt-2">
+                                                        <small>
+                                                            Ch {{ ch.channel_id }}: 
+                                                            <span class="badge bg-success">{{ ch.bandwidth }} MHz</span>
+                                                            <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length">Profiles: {{ ch.profiles.join(', ') }}</span>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Raw Data View -->
+                            <div class="col-12 mb-4" v-if="showRawData && selectedMeasurementData">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-code-square me-2"></i>Raw Measurement Data</h5>
+                                        <button @click="showRawData = false" class="btn btn-sm btn-light">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <pre class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto;">{{ JSON.stringify(selectedMeasurementData, null, 2) }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- RxMER Results (existing)-->
                             <div class="col-12 mb-4" v-if="rxmerData">
                                 <div class="card shadow-sm border-success">
                                     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
@@ -888,6 +1005,61 @@
                                         <i class="bi bi-graph-up text-muted" style="font-size: 4rem;"></i>
                                         <h5 class="mt-3 text-muted">No PNM Data</h5>
                                         <p class="text-muted">Run a measurement above to capture PNM data from the modem.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Housekeeping Tab -->
+                    <div class="tab-pane fade" id="housekeeping" role="tabpanel">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-trash3 me-2"></i>File Housekeeping</h5>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Clean up old PNM measurement files to free disk space.</p>
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Delete files older than (days)</label>
+                                        <input type="number" v-model.number="housekeepingDays" class="form-control" min="1" max="365">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Mode</label>
+                                        <select v-model="housekeepingDryRun" class="form-select">
+                                            <option :value="true">Dry Run (Preview)</option>
+                                            <option :value="false">Delete Files</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3 d-flex align-items-end">
+                                        <button @click="runHousekeeping" class="btn btn-danger w-100">
+                                            <i class="bi bi-trash3 me-1"></i>
+                                            <span v-if="housekeepingDryRun">Preview</span>
+                                            <span v-else>Delete Files</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div v-if="housekeepingResult" class="alert" 
+                                     :class="housekeepingResult.status === 'success' ? 'alert-success' : 'alert-danger'">
+                                    <h6>Housekeeping Results</h6>
+                                    <p class="mb-2">
+                                        <strong>{{ housekeepingResult.deleted_count }}</strong> files 
+                                        {{ housekeepingResult.dry_run ? 'would be' : 'were' }} deleted
+                                        <br>
+                                        <strong>{{ housekeepingResult.total_size_mb }} MB</strong> disk space 
+                                        {{ housekeepingResult.dry_run ? 'would be' : 'was' }} freed
+                                    </p>
+                                    <div v-if="housekeepingResult.files && housekeepingResult.files.length > 0">
+                                        <hr>
+                                        <small class="text-muted">First {{ Math.min(housekeepingResult.files.length, 50) }} files:</small>
+                                        <ul class="small mb-0" style="max-height: 200px; overflow-y: auto;">
+                                            <li v-for="file in housekeepingResult.files" :key="file.path">
+                                                {{ file.path }} 
+                                                <span class="badge bg-secondary">{{ file.age_days }} days</span>
+                                                <span class="badge bg-info">{{ file.size_mb }} MB</span>
+                                            </li>
+                                        </ul>
                                     </div>
                                 </div>
                             </div>
