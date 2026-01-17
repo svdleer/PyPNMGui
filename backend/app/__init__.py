@@ -53,7 +53,9 @@ def create_app():
     
     # Register blueprints
     from app.routes import main_bp, api_bp
+    from app.routes.pypnm_routes import pypnm_bp
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(pypnm_bp)
     
     return app

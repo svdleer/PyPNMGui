@@ -1,0 +1,341 @@
+# PyPNM Web GUI - PyPNM Routes
+# SPDX-License-Identifier: Apache-2.0
+#
+# Complete PyPNM API integration with plot support
+
+from flask import Blueprint, request, jsonify, send_file
+from typing import Dict, Any
+import logging
+import os
+import tempfile
+import zipfile
+from io import BytesIO
+
+logger = logging.getLogger(__name__)
+
+pypnm_bp = Blueprint('pypnm', __name__, url_prefix='/api/pypnm')
+
+
+def get_default_community():
+    """Get default SNMP community based on mode."""
+    return 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
+
+
+def get_default_tftp():
+    """Get default TFTP IP."""
+    return os.environ.get('TFTP_IPV4', '172.22.147.18')
+
+
+@pypnm_bp.route('/measurements/<measurement_type>/<mac_address>', methods=['POST'])
+def pnm_measurement(measurement_type, mac_address):
+    """
+    Unified PNM measurement endpoint.
+    
+    Supported types:
+    - rxmer: RxMER per subcarrier
+    - channel_estimation: Channel estimation coefficients
+    - modulation_profile: Modulation profile
+    - fec_summary: FEC summary stats
+    - histogram: Power histogram
+    - constellation: Constellation display
+    - us_pre_eq: Upstream OFDMA pre-equalization
+    
+    POST body:
+    {
+        "modem_ip": "10.x.x.x",
+        "community": "optional",
+        "output_type": "json" | "archive",
+        "fec_summary_type": 2,  # Only for FEC (2=10min, 3=24hr)
+        "sample_duration": 60    # Only for histogram
+    }
+    """
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', get_default_community())
+    tftp_ip = data.get('tftp_ip', get_default_tftp())
+    output_type = data.get('output_type', 'json')
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    
+    # Route to appropriate method
+    try:
+        if measurement_type == 'rxmer':
+            result = client.get_rxmer_capture(
+                mac_address, modem_ip, tftp_ip, community, 
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'channel_estimation':
+            result = client.get_channel_estimation(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'modulation_profile':
+            result = client.get_modulation_profile(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'fec_summary':
+            fec_type = data.get('fec_summary_type', 2)
+            result = client.get_fec_summary(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", fec_summary_type=fec_type, output_type=output_type
+            )
+        elif measurement_type == 'histogram':
+            duration = data.get('sample_duration', 60)
+            result = client.get_histogram(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", sample_duration=duration, output_type=output_type
+            )
+        elif measurement_type == 'constellation':
+            result = client.get_constellation_display(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'us_pre_eq':
+            result = client.get_us_ofdma_pre_equalization(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        else:
+            return jsonify({
+                "status": "error",
+                "message": f"Unknown measurement type: {measurement_type}"
+            }), 400
+        
+        # Handle archive (ZIP) response
+        if output_type == 'archive' and result.get('status') == 0:
+            # PyPNM returns archive data, need to handle file download
+            # For now return JSON with message
+            return jsonify({
+                "status": 0,
+                "message": "Archive generated successfully",
+                "data": result.get('data', {})
+            })
+        
+        # Handle errors
+        if result.get('status') != 0:
+            return jsonify(result), 500
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"PNM measurement {measurement_type} failed: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+@pypnm_bp.route('/channel-stats/<mac_address>', methods=['POST'])
+def channel_stats(mac_address):
+    """
+    Get comprehensive channel statistics with profile information.
+    
+    Returns DS/US channel info including:
+    - Channel type (SC-QAM, OFDM, ATDMA, OFDMA)
+    - Active profiles
+    - Signal quality metrics
+    """
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', get_default_community())
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    
+    try:
+        # Get all channel stats
+        ds_scqam = client.get_ds_scqam_stats(mac_address, modem_ip, community)
+        ds_ofdm = client.get_ds_ofdm_stats(mac_address, modem_ip, community)
+        us_atdma = client.get_us_atdma_stats(mac_address, modem_ip, community)
+        us_ofdma = client.get_us_ofdma_stats(mac_address, modem_ip, community)
+        
+        # Process and enhance data with profile info
+        downstream = {
+            "scqam": {
+                "type": "SC-QAM (DOCSIS 3.0)",
+                "channels": _extract_scqam_channels(ds_scqam),
+                "count": len(_extract_scqam_channels(ds_scqam))
+            },
+            "ofdm": {
+                "type": "OFDM (DOCSIS 3.1)",
+                "channels": _extract_ofdm_channels(ds_ofdm),
+                "count": len(_extract_ofdm_channels(ds_ofdm))
+            }
+        }
+        
+        upstream = {
+            "atdma": {
+                "type": "ATDMA (DOCSIS 3.0)",
+                "channels": _extract_atdma_channels(us_atdma),
+                "count": len(_extract_atdma_channels(us_atdma))
+            },
+            "ofdma": {
+                "type": "OFDMA (DOCSIS 3.1)",
+                "channels": _extract_ofdma_channels(us_ofdma),
+                "count": len(_extract_ofdma_channels(us_ofdma))
+            }
+        }
+        
+        return jsonify({
+            "mac_address": mac_address,
+            "status": 0,
+            "downstream": downstream,
+            "upstream": upstream
+        })
+        
+    except Exception as e:
+        logger.error(f"Channel stats failed: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+def _extract_scqam_channels(data: Dict[str, Any]) -> list:
+    """Extract SC-QAM channel info."""
+    if data.get('status') != 0:
+        return []
+    results = data.get('results', {})
+    channels = []
+    for ch in results.get('channels', []):
+        channels.append({
+            'channel_id': ch.get('ifIndex'),
+            'frequency': ch.get('frequency'),
+            'modulation': ch.get('modulation'),
+            'power': ch.get('power'),
+            'snr': ch.get('rxMer')
+        })
+    return channels
+
+
+def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
+    """Extract OFDM channel info with profile data."""
+    if data.get('status') != 0:
+        return []
+    results = data.get('results', {})
+    channels = []
+    for ch in results.get('channels', []):
+        profiles = ch.get('profiles', [])
+        channels.append({
+            'channel_id': ch.get('channelId'),
+            'frequency': ch.get('frequency'),
+            'profiles': [p.get('profileId') for p in profiles if p.get('profileId') != 255],
+            'ncp_profile': 255 in [p.get('profileId') for p in profiles],
+            'active_profiles': len([p for p in profiles if p.get('profileId') != 255])
+        })
+    return channels
+
+
+def _extract_atdma_channels(data: Dict[str, Any]) -> list:
+    """Extract ATDMA channel info."""
+    if data.get('status') != 0:
+        return []
+    results = data.get('results', {})
+    channels = []
+    for ch in results.get('channels', []):
+        channels.append({
+            'channel_id': ch.get('ifIndex'),
+            'frequency': ch.get('frequency'),
+            'modulation': ch.get('channelType'),
+            'power': ch.get('txPower')
+        })
+    return channels
+
+
+def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
+    """Extract OFDMA channel info with profile data."""
+    if data.get('status') != 0:
+        return []
+    results = data.get('results', {})
+    channels = []
+    for ch in results.get('channels', []):
+        channels.append({
+            'channel_id': ch.get('channelId'),
+            'frequency': ch.get('configuredCenterFrequency'),
+            'bandwidth': ch.get('channelWidth'),
+            'profiles': ch.get('activeProfiles', [])
+        })
+    return channels
+
+
+@pypnm_bp.route('/housekeeping', methods=['POST'])
+def housekeeping():
+    """
+    Clean up old PNM files.
+    
+    POST body:
+    {
+        "max_age_days": 7,
+        "dry_run": false
+    }
+    """
+    data = request.get_json() or {}
+    max_age_days = data.get('max_age_days', 7)
+    dry_run = data.get('dry_run', False)
+    
+    try:
+        import os
+        import time
+        from pathlib import Path
+        
+        # PyPNM data directories
+        data_dirs = [
+            '/app/.data/pnm',
+            '/app/.data/csv',
+            '/app/.data/json',
+            '/app/.data/png',
+            '/app/.data/archive'
+        ]
+        
+        max_age_seconds = max_age_days * 24 * 60 * 60
+        current_time = time.time()
+        deleted_files = []
+        total_size = 0
+        
+        for dir_path in data_dirs:
+            if not os.path.exists(dir_path):
+                continue
+                
+            for root, dirs, files in os.walk(dir_path):
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    try:
+                        file_age = current_time - os.path.getmtime(file_path)
+                        file_size = os.path.getsize(file_path)
+                        
+                        if file_age > max_age_seconds:
+                            if not dry_run:
+                                os.remove(file_path)
+                            deleted_files.append({
+                                'path': file_path,
+                                'age_days': round(file_age / 86400, 1),
+                                'size_mb': round(file_size / 1024 / 1024, 2)
+                            })
+                            total_size += file_size
+                    except Exception as e:
+                        logger.warning(f"Could not process file {file_path}: {e}")
+        
+        return jsonify({
+            "status": "success",
+            "dry_run": dry_run,
+            "deleted_count": len(deleted_files),
+            "total_size_mb": round(total_size / 1024 / 1024, 2),
+            "files": deleted_files[:50]  # Return first 50
+        })
+        
+    except Exception as e:
+        logger.error(f"Housekeeping failed: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
