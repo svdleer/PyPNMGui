@@ -249,7 +249,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}  # Required when output_type is archive
             }
         }
         
