@@ -91,6 +91,33 @@ createApp({
     },
     
     methods: {
+        // ============== Utility Methods ==============
+        
+        formatPlotTitle(filename) {
+            // Convert filename to readable title
+            // Example: "90324bc81037_ubc1318zg_1768641563_34_rxmer.png" -> "RxMER - Channel 34"
+            const cleanName = filename.replace(/\.png$/i, '');
+            const parts = cleanName.split('_');
+            
+            // Extract meaningful parts
+            if (cleanName.includes('rxmer')) {
+                const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
+                return channel ? `RxMER - Channel ${channel}` : 'RxMER';
+            } else if (cleanName.includes('modulation_count')) {
+                const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
+                return channel ? `Modulation Profile - Channel ${channel}` : 'Modulation Profile';
+            } else if (cleanName.includes('signal_aggregate')) {
+                return 'Signal Aggregate (All Channels)';
+            } else if (cleanName.includes('channel_est')) {
+                return 'Channel Estimation Coefficients';
+            } else if (cleanName.includes('spectrum')) {
+                return 'Spectrum Analyzer';
+            }
+            
+            // Fallback: clean up the filename
+            return cleanName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        },
+        
         // ============== API Calls ==============
         
         async checkApiHealth() {

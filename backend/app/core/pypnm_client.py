@@ -289,7 +289,7 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
         
@@ -326,10 +326,10 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
-        return self._post("/docs/pnm/ds/ofdm/chanEstCoeff/getCapture", payload)
+        return self._post("/docs/pnm/ds/ofdm/channelEstCoeff/getCapture", payload)
     
     def get_modulation_profile(
         self,
@@ -362,7 +362,7 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": output_type == "archive"}
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
         return self._post("/docs/pnm/ds/ofdm/modulationProfile/getCapture", payload)

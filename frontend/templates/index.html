@@ -773,7 +773,6 @@
                                                 <label class="form-label">Output Format</label>
                                                 <select v-model="pnmOutputType" class="form-select">
                                                     <option value="archive">Archive (PNG plots + CSV + ZIP download)</option>
-                                                    <option value="json">JSON Data (Interactive charts)</option>
                                                 </select>
                                             </div>
                                             <div class="col-md-3 d-flex align-items-end">
@@ -906,18 +905,6 @@
                                 </div>
                             </div>
 
-                            <!-- Dynamic Measurement Charts -->
-                            <div class="col-12 mb-4" v-if="selectedMeasurementData && pnmOutputType === 'json'">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Measurement Plots</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div id="measurement-charts-container"></div>
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Matplotlib Plots from Archive -->
                             <div class="col-12 mb-4" v-if="selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length">
                                 <div class="card shadow-sm">
@@ -932,8 +919,10 @@
                                     </div>
                                     <div class="card-body">
                                         <div v-for="plot in selectedMeasurementData.plots" :key="plot.filename" class="mb-4">
-                                            <h6 class="text-muted">{{ plot.filename }}</h6>
-                                            <img :src="'data:image/png;base64,' + plot.data" class="img-fluid border rounded" :alt="plot.filename">
+                                            <h5 class="text-primary border-bottom pb-2 mb-3">
+                                                <i class="bi bi-graph-up-arrow me-2"></i>{{ formatPlotTitle(plot.filename) }}
+                                            </h5>
+                                            <img :src="'data:image/png;base64,' + plot.data" class="img-fluid border rounded shadow-sm" :alt="plot.filename">
                                         </div>
                                     </div>
                                 </div>
