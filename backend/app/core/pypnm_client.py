@@ -236,7 +236,7 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"enable": False}  # Changed from "ui" format to "enable" boolean
+                "plot": {"enable": output_type == "archive"}  # Enable plots for archive output
             }
         }
         
@@ -315,7 +315,7 @@ class PyPNMClient:
                 "plot": {"enable": output_type == "archive"}
             }
         }
-        return self._post("/docs/pnm/ds/ofdm/channelEstCoeff/getCapture", payload)
+        return self._post("/docs/pnm/ds/ofdm/chanEstCoeff/getCapture", payload)
     
     def get_modulation_profile(
         self,
