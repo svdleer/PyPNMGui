@@ -845,8 +845,8 @@
                                                     </div>
                                                     <div v-if="channelStats.downstream.scqam.channels && channelStats.downstream.scqam.channels.length > 0" class="ms-3 mt-1">
                                                         <small class="text-muted">
-                                                            Freq: {{ channelStats.downstream.scqam.channels[0].frequency_mhz || 'N/A' }} - 
-                                                            {{ channelStats.downstream.scqam.channels[channelStats.downstream.scqam.channels.length - 1].frequency_mhz || 'N/A' }} MHz
+                                                            Freq: {{ Math.min(...channelStats.downstream.scqam.channels.map(c => c.frequency_mhz || 0)) }} - 
+                                                            {{ Math.max(...channelStats.downstream.scqam.channels.map(c => c.frequency_mhz || 0)) }} MHz
                                                         </small>
                                                     </div>
                                                 </div>
@@ -879,8 +879,8 @@
                                                     </div>
                                                     <div v-if="channelStats.upstream.atdma.channels && channelStats.upstream.atdma.channels.length > 0" class="ms-3 mt-1">
                                                         <small class="text-muted">
-                                                            Freq: {{ channelStats.upstream.atdma.channels[0].frequency_mhz || 'N/A' }} - 
-                                                            {{ channelStats.upstream.atdma.channels[channelStats.upstream.atdma.channels.length - 1].frequency_mhz || 'N/A' }} MHz
+                                                            Freq: {{ Math.min(...channelStats.upstream.atdma.channels.map(c => c.frequency_mhz || 0)) }} - 
+                                                            {{ Math.max(...channelStats.upstream.atdma.channels.map(c => c.frequency_mhz || 0)) }} MHz
                                                         </small>
                                                     </div>
                                                 </div>
