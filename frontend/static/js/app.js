@@ -745,6 +745,8 @@ createApp({
             
             if (type === 'rxmer') {
                 this.drawRxmerCharts();
+            } else if (type === 'spectrum' && data.data) {
+                this.drawSpectrumCharts(data.data);
             } else if (type === 'channel_estimation' && data.data) {
                 this.drawChannelEstimationCharts(data.data);
             } else if (type === 'modulation_profile' && data.data) {
@@ -759,6 +761,135 @@ createApp({
                 this.drawPreEqCharts();
             } else {
                 container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>No visualization available for this measurement type. Click "Raw Data" to see the results.</div>';
+            }
+        },
+        
+        drawSpectrumCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            
+            // Extract spectrum analysis data
+            const analysis = data.analysis && data.analysis.length > 0 ? data.analysis[0] : null;
+            if (!analysis || !analysis.signal_analysis) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No spectrum analysis data available.</div>';
+                return;
+            }
+            
+            const signalAnalysis = analysis.signal_analysis;
+            const frequencies = signalAnalysis.frequencies || [];
+            const magnitudes = signalAnalysis.magnitudes || [];
+            
+            if (frequencies.length === 0 || magnitudes.length === 0) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Empty spectrum data.</div>';
+                return;
+            }
+            
+            // Convert frequencies from Hz to MHz for display
+            const freqsMHz = frequencies.map(f => f / 1000000);
+            
+            // Downsample if too many points (for performance)
+            const maxPoints = 5000;
+            let displayFreqs = freqsMHz;
+            let displayMags = magnitudes;
+            
+            if (frequencies.length > maxPoints) {
+                const step = Math.ceil(frequencies.length / maxPoints);
+                displayFreqs = freqsMHz.filter((_, i) => i % step === 0);
+                displayMags = magnitudes.filter((_, i) => i % step === 0);
+            }
+            
+            // Create chart container
+            const chartDiv = document.createElement('div');
+            chartDiv.className = 'mb-4';
+            chartDiv.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0">Full Spectrum Analysis (${analysis.capture_parameters.first_segment_center_freq / 1e6} - ${analysis.capture_parameters.last_segment_center_freq / 1e6} MHz)</h6>
+                    <small class="text-muted">${displayFreqs.length} points displayed (${frequencies.length} total)</small>
+                </div>
+                <canvas id="spectrum-chart" height="300"></canvas>
+            `;
+            container.appendChild(chartDiv);
+            
+            const canvas = chartDiv.querySelector('canvas');
+            
+            new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: displayFreqs,
+                    datasets: [{
+                        label: 'Magnitude (dBmV)',
+                        data: displayMags,
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        tension: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Spectrum Analyzer - Full Frequency Sweep'
+                        },
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return `${context[0].label} MHz`;
+                                },
+                                label: function(context) {
+                                    return `Power: ${context.parsed.y.toFixed(2)} dBmV`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Frequency (MHz)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toFixed(0);
+                                }
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Magnitude (dBmV)'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Add device info if available
+            if (analysis.device_details && analysis.device_details.system_description) {
+                const deviceInfo = analysis.device_details.system_description;
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'alert alert-info mt-3';
+                infoDiv.innerHTML = `
+                    <h6><i class="bi bi-info-circle me-2"></i>Device Information</h6>
+                    <div class="row">
+                        <div class="col-md-3"><strong>Vendor:</strong> ${deviceInfo.VENDOR || 'N/A'}</div>
+                        <div class="col-md-3"><strong>Model:</strong> ${deviceInfo.MODEL || 'N/A'}</div>
+                        <div class="col-md-3"><strong>SW Version:</strong> ${deviceInfo.SW_REV || 'N/A'}</div>
+                        <div class="col-md-3"><strong>HW Version:</strong> ${deviceInfo.HW_REV || 'N/A'}</div>
+                    </div>
+                `;
+                container.appendChild(infoDiv);
             }
         },
         
