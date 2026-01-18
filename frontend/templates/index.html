@@ -657,13 +657,14 @@
                             <!-- SC-QAM Channels -->
                             <div class="col-12 mb-4">
                                 <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-reception-4 me-2"></i>SC-QAM Downstream Channels</h5>
+                                        <span class="badge bg-secondary">DOCSIS 3.0</span>
                                     </div>
-                                    <div class="card-body" v-if="systemInfo && systemInfo.downstream">
+                                    <div class="card-body" v-if="systemInfo && systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM').length > 0">
                                         <div class="table-responsive">
                                             <table class="table table-hover">
-                                                <thead class="table-dark">
+                                                <thead class="table-secondary">
                                                     <tr>
                                                         <th>Channel</th>
                                                         <th>Frequency</th>
@@ -674,29 +675,33 @@
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in systemInfo.downstream.filter(c => c.frequency_mhz > 0)" :key="ch.channel_id">
+                                                    <tr v-for="ch in systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.frequency_mhz > 0)" :key="ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
                                                         <td>{{ ch.frequency_mhz.toFixed(2) }} MHz</td>
                                                         <td><span class="badge bg-secondary">256 QAM</span></td>
                                                         <td>
-                                                            <span :class="ch.power_dbmv >= -10 && ch.power_dbmv <= 15 ? 'text-success' : 'text-danger'">
-                                                                {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                            <span :class="getDsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
                                                             </span>
                                                         </td>
                                                         <td>
                                                             <span :class="ch.snr_db >= 35 ? 'text-success' : 'text-danger'">
-                                                                {{ ch.snr_db.toFixed(1) }} dB
+                                                                {{ ch.snr_db ? ch.snr_db.toFixed(1) : '-' }} dB
                                                             </span>
                                                         </td>
                                                         <td>
-                                                            <span class="badge" :class="ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 15 ? 'bg-success' : 'bg-warning'">
-                                                                {{ ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 15 ? 'Good' : 'Check' }}
+                                                            <span class="badge" :class="ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 10 ? 'bg-success' : 'bg-warning'">
+                                                                {{ ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 10 ? 'Good' : 'Check' }}
                                                             </span>
                                                         </td>
                                                     </tr>
                                                 </tbody>
                                             </table>
                                         </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.downstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No SC-QAM channels found</p>
                                     </div>
                                     <div class="card-body text-center py-5" v-else>
                                         <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
@@ -706,36 +711,53 @@
                             </div>
 
                             <!-- OFDM Channels -->
-                            <div class="col-12 mb-4" v-if="dsChannels.length > 0">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-broadcast me-2"></i>OFDM Downstream Channels (DOCSIS 3.1)</h5>
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0 text-info"><i class="bi bi-broadcast me-2"></i>OFDM Downstream Channels</h5>
+                                        <span class="badge bg-info">DOCSIS 3.1</span>
                                     </div>
-                                    <div class="card-body">
+                                    <div class="card-body" v-if="systemInfo && systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'OFDM').length > 0">
                                         <div class="table-responsive">
                                             <table class="table table-hover">
-                                                <thead class="table-dark">
+                                                <thead class="table-info">
                                                     <tr>
                                                         <th>Channel</th>
-                                                        <th>Frequency Range</th>
+                                                        <th>PLC Frequency</th>
+                                                        <th>Bandwidth</th>
                                                         <th>Subcarriers</th>
                                                         <th>Power</th>
-                                                        <th>SNR</th>
-                                                        <th>MER</th>
+                                                        <th>MER/SNR</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in dsChannels" :key="ch.channel_id">
+                                                    <tr v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
-                                                        <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
-                                                        <td>{{ ch.active_subcarriers }}</td>
-                                                        <td>{{ ch.power_dbmv }} dBmV</td>
-                                                        <td>{{ ch.snr_db }} dB</td>
-                                                        <td><span class="badge" :class="getMerBadgeClass(ch.mer_db)">{{ ch.mer_db }} dB</span></td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : '-' }} MHz</td>
+                                                        <td><span class="badge bg-info">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) : '-' }} MHz</span></td>
+                                                        <td>{{ ch.num_subcarriers || '-' }}</td>
+                                                        <td>
+                                                            <span :class="getDsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span :class="ch.snr_db >= 30 ? 'text-success' : 'text-warning'">
+                                                                {{ ch.snr_db ? ch.snr_db.toFixed(1) : '-' }} dB
+                                                            </span>
+                                                        </td>
                                                     </tr>
                                                 </tbody>
                                             </table>
                                         </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.downstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No OFDM channels - This modem may be DOCSIS 3.0 only</p>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
                                     </div>
                                 </div>
                             </div>
@@ -762,36 +784,43 @@
                             <!-- ATDMA Channels -->
                             <div class="col-12 mb-4">
                                 <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>ATDMA Upstream Channels</h5>
+                                        <span class="badge bg-secondary">DOCSIS 3.0</span>
                                     </div>
-                                    <div class="card-body" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.length">
+                                    <div class="card-body" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA').length > 0">
                                         <div class="table-responsive">
                                             <table class="table table-hover">
-                                                <thead class="table-dark">
+                                                <thead class="table-secondary">
                                                     <tr>
                                                         <th>Channel</th>
-                                                        <th>Power</th>
+                                                        <th>Frequency</th>
+                                                        <th>TX Power</th>
                                                         <th>Status</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in systemInfo.upstream" :key="ch.channel_id">
+                                                    <tr v-for="ch in systemInfo.upstream.filter(c => c.type === 'ATDMA')" :key="ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(2) : '-' }} MHz</td>
                                                         <td>
-                                                            <span :class="ch.power_dbmv >= 35 && ch.power_dbmv <= 52 ? 'text-success' : 'text-danger'">
-                                                                {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                            <span :class="getUsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
                                                             </span>
                                                         </td>
                                                         <td>
-                                                            <span class="badge" :class="ch.power_dbmv >= 35 && ch.power_dbmv <= 52 ? 'bg-success' : 'bg-warning'">
-                                                                {{ ch.power_dbmv >= 35 && ch.power_dbmv <= 52 ? 'Good' : 'Check' }}
+                                                            <span class="badge" :class="ch.power_dbmv >= 35 && ch.power_dbmv <= 51 ? 'bg-success' : 'bg-warning'">
+                                                                {{ ch.power_dbmv >= 35 && ch.power_dbmv <= 51 ? 'Good' : 'Check' }}
                                                             </span>
                                                         </td>
                                                     </tr>
                                                 </tbody>
                                             </table>
                                         </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.upstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No ATDMA channels found</p>
                                     </div>
                                     <div class="card-body text-center py-5" v-else>
                                         <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
@@ -801,34 +830,47 @@
                             </div>
 
                             <!-- OFDMA Channels -->
-                            <div class="col-12 mb-4" v-if="usChannels.length > 0">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-broadcast me-2"></i>OFDMA Upstream Channels (DOCSIS 3.1)</h5>
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0 text-info"><i class="bi bi-broadcast me-2"></i>OFDMA Upstream Channels</h5>
+                                        <span class="badge bg-info">DOCSIS 3.1</span>
                                     </div>
-                                    <div class="card-body">
+                                    <div class="card-body" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'OFDMA').length > 0">
                                         <div class="table-responsive">
                                             <table class="table table-hover">
-                                                <thead class="table-dark">
+                                                <thead class="table-info">
                                                     <tr>
                                                         <th>Channel</th>
-                                                        <th>Frequency Range</th>
+                                                        <th>Frequency</th>
+                                                        <th>Bandwidth</th>
                                                         <th>Subcarriers</th>
-                                                        <th>Power</th>
-                                                        <th>Timing Offset</th>
+                                                        <th>TX Power</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in usChannels" :key="ch.channel_id">
+                                                    <tr v-for="ch in systemInfo.upstream.filter(c => c.type === 'OFDMA')" :key="'ofdma-'+ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
-                                                        <td>{{ formatFreq(ch.frequency_start_hz) }} - {{ formatFreq(ch.frequency_end_hz) }}</td>
-                                                        <td>{{ ch.active_subcarriers }}</td>
-                                                        <td>{{ ch.power_dbmv }} dBmV</td>
-                                                        <td>{{ ch.timing_offset }}</td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : '-' }} MHz</td>
+                                                        <td><span class="badge bg-info">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(1) : '-' }} MHz</span></td>
+                                                        <td>{{ ch.num_subcarriers || '-' }}</td>
+                                                        <td>
+                                                            <span :class="getUsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                            </span>
+                                                        </td>
                                                     </tr>
                                                 </tbody>
                                             </table>
                                         </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.upstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No OFDMA channels - This modem may be DOCSIS 3.0 only</p>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
                                     </div>
                                 </div>
                             </div>
