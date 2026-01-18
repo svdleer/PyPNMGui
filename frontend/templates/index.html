@@ -843,6 +843,12 @@
                                                         <span>Channels:</span>
                                                         <strong>{{ channelStats.downstream.scqam.count }}</strong>
                                                     </div>
+                                                    <div v-if="channelStats.downstream.scqam.channels && channelStats.downstream.scqam.channels.length > 0" class="ms-3 mt-1">
+                                                        <small class="text-muted">
+                                                            Freq: {{ channelStats.downstream.scqam.channels[0].frequency_mhz || 'N/A' }} - 
+                                                            {{ channelStats.downstream.scqam.channels[channelStats.downstream.scqam.channels.length - 1].frequency_mhz || 'N/A' }} MHz
+                                                        </small>
+                                                    </div>
                                                 </div>
                                                 <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.downstream.ofdm.type }}</small>
@@ -855,9 +861,7 @@
                                                             Ch {{ ch.channel_id }}: 
                                                             <span class="badge bg-primary" v-if="ch.plc_freq_mhz">{{ ch.plc_freq_mhz }} MHz</span>
                                                             <span class="badge bg-secondary" v-if="ch.bandwidth_mhz">{{ ch.bandwidth_mhz }} MHz BW</span>
-                                                            <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
-                                                            <span class="badge bg-warning text-dark" v-if="!ch.profiles || ch.profiles.length === 0">No Profiles</span>
-                                                            <span class="badge bg-dark" v-if="ch.ncp_profile">NCP</span>
+                                                            <span class="badge bg-info" v-if="ch.num_subcarriers">{{ ch.num_subcarriers }} SCs</span>
                                                         </small>
                                                     </div>
                                                 </div>
@@ -872,6 +876,12 @@
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
                                                         <strong>{{ channelStats.upstream.atdma.count }}</strong>
+                                                    </div>
+                                                    <div v-if="channelStats.upstream.atdma.channels && channelStats.upstream.atdma.channels.length > 0" class="ms-3 mt-1">
+                                                        <small class="text-muted">
+                                                            Freq: {{ channelStats.upstream.atdma.channels[0].frequency_mhz || 'N/A' }} - 
+                                                            {{ channelStats.upstream.atdma.channels[channelStats.upstream.atdma.channels.length - 1].frequency_mhz || 'N/A' }} MHz
+                                                        </small>
                                                     </div>
                                                 </div>
                                                 <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3">

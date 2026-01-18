@@ -412,29 +412,45 @@ def _extract_scqam_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    
+    # Log the raw data for debugging
+    logger.debug(f"SC-QAM raw results: {results}")
+    
     if isinstance(results, list):
-        # PyPNM may return list directly
         channels = []
         for ch in results:
+            # Data may be nested in 'entry' object (like OFDM/OFDMA)
+            entry = ch.get('entry', ch)
+            
+            # Get frequency - try various DOCSIS 3.0 field names
+            freq = entry.get('docsIfDownChannelFrequency',
+                   entry.get('frequency', 0))
+            
+            # Get modulation
+            modulation = entry.get('docsIfDownChannelModulation',
+                         entry.get('modulation', ''))
+            
+            # Get power
+            power = entry.get('docsIfDownChannelPower',
+                    entry.get('power', None))
+            
+            # Get SNR/RxMER
+            snr = entry.get('docsIf3CmStatusUsSnr',
+                  entry.get('rxMer',
+                  entry.get('snr', None)))
+            
             channels.append({
-                'channel_id': ch.get('ifIndex', ch.get('channel_id')),
-                'frequency': ch.get('frequency'),
-                'modulation': ch.get('modulation'),
-                'power': ch.get('power'),
-                'snr': ch.get('rxMer', ch.get('snr'))
+                'channel_id': ch.get('channel_id', entry.get('docsIfDownChannelId',
+                              entry.get('ifIndex'))),
+                'frequency': freq,
+                'frequency_mhz': round(freq / 1000000, 1) if freq and freq > 1000 else freq,
+                'modulation': modulation,
+                'power': power,
+                'snr': snr
             })
         return channels
-    # Handle dict format
-    channels = []
-    for ch in results.get('channels', []):
-        channels.append({
-            'channel_id': ch.get('ifIndex', ch.get('channel_id')),
-            'frequency': ch.get('frequency'),
-            'modulation': ch.get('modulation'),
-            'power': ch.get('power'),
-            'snr': ch.get('rxMer', ch.get('snr'))
-        })
-    return channels
+    
+    return []
 
 
 def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
@@ -508,25 +524,41 @@ def _extract_atdma_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    
+    # Log the raw data for debugging
+    logger.debug(f"ATDMA raw results: {results}")
+    
     if isinstance(results, list):
         channels = []
         for ch in results:
+            # Data may be nested in 'entry' object (like OFDM/OFDMA)
+            entry = ch.get('entry', ch)
+            
+            # Get frequency - try various DOCSIS 3.0 field names
+            freq = entry.get('docsIfUpChannelFrequency',
+                   entry.get('frequency', 0))
+            
+            # Get modulation/channel type
+            modulation = entry.get('docsIfUpChannelType',
+                         entry.get('channelType',
+                         entry.get('modulation', '')))
+            
+            # Get TX power
+            tx_power = entry.get('docsIf3CmStatusUsTxPower',
+                       entry.get('txPower',
+                       entry.get('power', None)))
+            
             channels.append({
-                'channel_id': ch.get('ifIndex', ch.get('channel_id')),
-                'frequency': ch.get('frequency'),
-                'modulation': ch.get('channelType', ch.get('modulation')),
-                'power': ch.get('txPower', ch.get('power'))
+                'channel_id': ch.get('channel_id', entry.get('docsIfUpChannelId',
+                              entry.get('ifIndex'))),
+                'frequency': freq,
+                'frequency_mhz': round(freq / 1000000, 1) if freq and freq > 1000 else freq,
+                'modulation': modulation,
+                'power': tx_power
             })
         return channels
-    channels = []
-    for ch in results.get('channels', []):
-        channels.append({
-            'channel_id': ch.get('ifIndex', ch.get('channel_id')),
-            'frequency': ch.get('frequency'),
-            'modulation': ch.get('channelType', ch.get('modulation')),
-            'power': ch.get('txPower', ch.get('power'))
-        })
-    return channels
+    
+    return []
 
 
 def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
