@@ -1020,8 +1020,13 @@
                                                         </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
-                                                                <label class="form-label form-label-sm">RF Port ifIndex</label>
-                                                                <input type="number" v-model.number="utscConfig.rfPortIfindex" class="form-control form-control-sm" placeholder="e.g. 12345">
+                                                                <label class="form-label form-label-sm">RF Port / US Channel</label>
+                                                                <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select channel' }}</option>
+                                                                    <option v-for="ch in upstreamInterfaces.scqamChannels" :key="ch.ifindex" :value="ch.ifindex">
+                                                                        Ch {{ ch.channel_id }} (ifIndex {{ ch.ifindex }})
+                                                                    </option>
+                                                                </select>
                                                             </div>
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">Bins</label>
@@ -1062,8 +1067,13 @@
                                                     </div>
                                                     <div class="card-body">
                                                         <div class="mb-2">
-                                                            <label class="form-label form-label-sm">OFDMA Channel ifIndex</label>
-                                                            <input type="number" v-model.number="usRxmerConfig.ofdmaIfindex" class="form-control form-control-sm" placeholder="e.g. 54321">
+                                                            <label class="form-label form-label-sm">OFDMA Channel</label>
+                                                            <select v-model.number="usRxmerConfig.ofdmaIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
+                                                                <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
+                                                                <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
+                                                                    OFDMA {{ ch.index }} (ifIndex {{ ch.ifindex }})
+                                                                </option>
+                                                            </select>
                                                         </div>
                                                         <div class="mb-2">
                                                             <div class="form-check">

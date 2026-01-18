@@ -54,6 +54,11 @@ createApp({
             selectedMeasurementData: null,
             
             // Upstream PNM (CMTS-side)
+            upstreamInterfaces: {
+                loading: false,
+                scqamChannels: [],   // SC-QAM upstream channels [{ifindex, channel_id, frequency_mhz}]
+                ofdmaChannels: []    // OFDMA upstream channels [{ifindex, index}]
+            },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
                 centerFreqMhz: 30,
@@ -315,14 +320,26 @@ createApp({
             this.selectedMeasurementData = null;
             this.showRawData = false;
             
+            // Reset upstream interfaces
+            this.upstreamInterfaces = { loading: false, scqamChannels: [], ofdmaChannels: [] };
+            this.utscConfig.rfPortIfindex = null;
+            this.usRxmerConfig.ofdmaIfindex = null;
+            
             this.currentView = 'modems';
             
             // Load system info and channel stats automatically
             try {
-                await Promise.all([
+                const promises = [
                     this.loadSystemInfo(),
                     this.loadChannelStats()
-                ]);
+                ];
+                
+                // Also load upstream interfaces if CMTS IP is available (for upstream PNM)
+                if (modem.cmts_ip) {
+                    promises.push(this.loadUpstreamInterfaces());
+                }
+                
+                await Promise.all(promises);
             } catch (error) {
                 console.error('Error loading modem data:', error);
             }
@@ -612,6 +629,47 @@ createApp({
         },
         
         // ============== Upstream PNM Methods (CMTS-side) ==============
+        
+        async loadUpstreamInterfaces() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                return;
+            }
+            
+            this.upstreamInterfaces.loading = true;
+            try {
+                const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
+                    this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
+                    
+                    // Auto-select first SC-QAM channel for UTSC if available
+                    if (this.upstreamInterfaces.scqamChannels.length > 0 && !this.utscConfig.rfPortIfindex) {
+                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
+                    }
+                    
+                    // Auto-select first OFDMA channel for RxMER if available
+                    if (this.upstreamInterfaces.ofdmaChannels.length > 0 && !this.usRxmerConfig.ofdmaIfindex) {
+                        this.usRxmerConfig.ofdmaIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
+                    }
+                    
+                    console.log('Loaded upstream interfaces:', this.upstreamInterfaces);
+                } else {
+                    console.error('Failed to load upstream interfaces:', result.error);
+                }
+            } catch (error) {
+                console.error('Failed to load upstream interfaces:', error);
+            } finally {
+                this.upstreamInterfaces.loading = false;
+            }
+        },
         
         async configureUtsc() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
