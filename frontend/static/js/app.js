@@ -683,7 +683,7 @@ createApp({
             }
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/utsc/configure/${this.selectedModem.mac}`, {
+                const response = await fetch(`/api/pypnm/upstream/utsc/configure/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -724,7 +724,7 @@ createApp({
                 // First configure, then start
                 await this.configureUtsc();
                 
-                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac}`, {
+                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -756,7 +756,7 @@ createApp({
             }
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/utsc/stop/${this.selectedModem.mac}`, {
+                const response = await fetch(`/api/pypnm/upstream/utsc/stop/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -781,7 +781,7 @@ createApp({
             if (!this.runningUtsc) return;
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/utsc/status/${this.selectedModem.mac}`, {
+                const response = await fetch(`/api/pypnm/upstream/utsc/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -820,7 +820,7 @@ createApp({
             this.usRxmerStatus = null;
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/rxmer/start/${this.selectedModem.mac}`, {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -850,7 +850,7 @@ createApp({
             if (!this.runningUsRxmer) return;
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/rxmer/status/${this.selectedModem.mac}`, {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
