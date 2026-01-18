@@ -258,6 +258,19 @@ def pnm_measurement(measurement_type, mac_address):
             
             logger.info(f"Returning {len(plots)} plots")
             
+            # For spectrum analyzer, generate matplotlib plots from the JSON data
+            if measurement_type == 'spectrum' and result.get('status') == 0:
+                spectrum_data = result.get('data', {})
+                if spectrum_data:
+                    logger.info(f"Generating spectrum plot for {mac_address}")
+                    try:
+                        spectrum_plot = generate_spectrum_plot_from_data(spectrum_data, mac_address)
+                        if spectrum_plot:
+                            plots.append(spectrum_plot)
+                            logger.info(f"Successfully generated spectrum plot: {spectrum_plot['filename']}")
+                    except Exception as e:
+                        logger.error(f"Failed to generate spectrum plot: {e}", exc_info=True)
+            
             return jsonify({
                 "status": 0,
                 "message": result.get('message', 'Measurement complete'),
