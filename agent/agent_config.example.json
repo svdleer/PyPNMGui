@@ -22,6 +22,8 @@
     "cmts_access": {
         "_comment": "CMTS systems - can be reached directly via SNMP or SSH",
         "snmp_direct": true,
+        "community": "public",
+        "write_community": "private",
         "ssh_enabled": true,
         "ssh_user": "pnm-agent",
         "ssh_key_file": "~/.ssh/id_cmts"
