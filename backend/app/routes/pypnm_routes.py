@@ -11,6 +11,9 @@ import tempfile
 import zipfile
 from io import BytesIO
 
+# Import spectrum plotter for generating matplotlib plots
+from app.core.spectrum_plotter import generate_spectrum_plot_from_data
+
 logger = logging.getLogger(__name__)
 
 pypnm_bp = Blueprint('pypnm', __name__, url_prefix='/api/pypnm')
@@ -57,10 +60,10 @@ def pnm_measurement(measurement_type, mac_address):
     tftp_ip = data.get('tftp_ip', get_default_tftp())
     output_type = data.get('output_type', 'json')
     
-    # Spectrum analyzer: force JSON mode (archive not yet working)
+    # Spectrum analyzer: always use JSON mode from PyPNM, then generate plots ourselves
     if measurement_type == 'spectrum':
-        output_type = 'json'
-        requested_archive = False
+        output_type = 'json'  # PyPNM returns JSON, we generate plots in backend
+        requested_archive = data.get('output_type') == 'archive'  # Track if user wanted archive
     # PyPNM only supports json output currently - archive mode falls back to json
     elif output_type == 'archive':
         # Keep archive mode - PyPNM will return ZIP with plots
@@ -294,6 +297,19 @@ def pnm_measurement(measurement_type, mac_address):
                         })
                 except Exception as e:
                     logger.error(f"Failed to read plot {filepath}: {e}")
+        
+        # For spectrum analyzer, generate matplotlib plots from the JSON data
+        if measurement_type == 'spectrum' and result.get('status') == 0:
+            spectrum_data = result.get('data', {})
+            if spectrum_data:
+                logger.info(f"Generating spectrum plot for {mac_address}")
+                try:
+                    spectrum_plot = generate_spectrum_plot_from_data(spectrum_data, mac_address)
+                    if spectrum_plot:
+                        plots.append(spectrum_plot)
+                        logger.info(f"Successfully generated spectrum plot: {spectrum_plot['filename']}")
+                except Exception as e:
+                    logger.error(f"Failed to generate spectrum plot: {e}")
         
         # Add plots to result
         result['plots'] = plots

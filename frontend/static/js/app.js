@@ -554,6 +554,8 @@ createApp({
                         this.$nextTick(() => {
                             this.drawRxmerCharts();
                         });
+                    } else if (measurementType === 'spectrum') {
+                        this.spectrumData = data;
                     } else if (measurementType === 'fec_summary') {
                         this.fecData = data;
                     } else if (measurementType === 'us_pre_eq') {
@@ -561,12 +563,17 @@ createApp({
                     }
                     
                     // Draw charts if we have JSON data (data.data exists) or for measurements that always have charts
+                    // For spectrum, we rely on matplotlib plots from the backend (in data.plots)
                     const hasJsonData = data.data || measurementType === 'rxmer' || measurementType === 'us_pre_eq';
-                    if (hasJsonData) {
+                    const hasMatplotlibPlots = data.plots && data.plots.length > 0;
+                    
+                    if (hasJsonData && !hasMatplotlibPlots) {
                         console.log('Will call drawMeasurementCharts with:', measurementType, data);
                         this.$nextTick(() => {
                             this.drawMeasurementCharts(measurementType, data);
                         });
+                    } else if (hasMatplotlibPlots) {
+                        console.log(`Using ${data.plots.length} matplotlib plot(s) for ${measurementType}`);
                     } else {
                         console.log('Skipping chart draw - no JSON data available. Output type:', this.pnmOutputType);
                     }
@@ -751,10 +758,14 @@ createApp({
             
             console.log('Drawing charts for type:', type, 'with data:', data);
             
+            // SKIP Chart.js for spectrum - we use matplotlib PNG plots instead
+            if (type === 'spectrum') {
+                console.log('Spectrum uses matplotlib plots - skipping Chart.js');
+                return;
+            }
+            
             if (type === 'rxmer') {
                 this.drawRxmerCharts();
-            } else if (type === 'spectrum' && data.data) {
-                this.drawSpectrumCharts(data.data);
             } else if (type === 'channel_estimation' && data.data) {
                 this.drawChannelEstimationCharts(data.data);
             } else if (type === 'modulation_profile' && data.data) {

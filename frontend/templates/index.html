@@ -891,8 +891,8 @@
                                 </div>
                             </div>
 
-                            <!-- Measurement Charts Container (for spectrum, FEC, histogram, etc.) -->
-                            <div class="col-12 mb-4" v-if="selectedMeasurementData">
+                            <!-- Measurement Charts Container (for spectrum, FEC, histogram, etc.) - Only show when NO matplotlib plots available -->
+                            <div class="col-12 mb-4" v-if="selectedMeasurementData && (!selectedMeasurementData.plots || selectedMeasurementData.plots.length === 0)">
                                 <div class="card shadow-sm">
                                     <div class="card-body">
                                         <div id="measurement-charts-container"></div>
@@ -983,18 +983,6 @@
                                         <div v-else class="text-center py-3">
                                             <pre class="text-start bg-light p-3 rounded">{{ JSON.stringify(rxmerData, null, 2) }}</pre>
                                         </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Spectrum Results -->
-                            <div class="col-12 mb-4" v-if="spectrumData">
-                                <div class="card shadow-sm border-info">
-                                    <div class="card-header bg-info text-white">
-                                        <h5 class="mb-0"><i class="bi bi-soundwave me-2"></i>Spectrum Analysis Results</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <pre class="bg-light p-3 rounded">{{ JSON.stringify(spectrumData, null, 2) }}</pre>
                                     </div>
                                 </div>
                             </div>
