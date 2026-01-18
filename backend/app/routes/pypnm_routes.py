@@ -816,7 +816,7 @@ def get_upstream_interfaces(mac_address):
         "community": "optional"
     }
     """
-    from app.core.simple_ws import get_agent_manager as get_simple_agent_manager
+    from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
