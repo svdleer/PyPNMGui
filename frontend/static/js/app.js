@@ -276,6 +276,7 @@ createApp({
                         model: m.model || 'N/A',
                         docsis_version: m.docsis_version || 'Unknown',
                         cmts: data.cmts_hostname,
+                        cmts_ip: data.cmts_ip,  // For upstream PNM
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || ''
                     }));
