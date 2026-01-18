@@ -727,24 +727,40 @@
                                                         <th>Bandwidth</th>
                                                         <th>Subcarriers</th>
                                                         <th>Power</th>
-                                                        <th>MER/SNR</th>
+                                                        <th>MER</th>
+                                                        <th>Profiles</th>
+                                                        <th>Status</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     <tr v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
-                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : '-' }} MHz</td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : (ch.plc_freq_mhz ? ch.plc_freq_mhz.toFixed(1) : '-') }} MHz</td>
                                                         <td><span class="badge bg-info">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) : '-' }} MHz</span></td>
-                                                        <td>{{ ch.num_subcarriers || '-' }}</td>
+                                                        <td>
+                                                            {{ ch.num_subcarriers || '-' }}
+                                                            <small class="text-muted d-block" v-if="ch.subcarrier_spacing_khz">{{ ch.subcarrier_spacing_khz }}kHz</small>
+                                                        </td>
                                                         <td>
                                                             <span :class="getDsPowerClass(ch.power_dbmv)">
-                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                                {{ ch.power_dbmv !== null && ch.power_dbmv !== undefined ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
                                                             </span>
                                                         </td>
                                                         <td>
-                                                            <span :class="ch.snr_db >= 30 ? 'text-success' : 'text-warning'">
-                                                                {{ ch.snr_db ? ch.snr_db.toFixed(1) : '-' }} dB
+                                                            <span :class="ch.mer_db && ch.mer_db >= 30 ? 'text-success' : (ch.mer_db ? 'text-warning' : 'text-muted')">
+                                                                {{ ch.mer_db ? ch.mer_db.toFixed(1) : (ch.snr_db ? ch.snr_db.toFixed(1) : '-') }} dB
                                                             </span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.profiles && ch.profiles.length > 0">
+                                                                <span v-for="p in ch.profiles" :key="'profile-'+p" class="badge bg-primary me-1">{{ p }}</span>
+                                                            </span>
+                                                            <span v-else-if="ch.active_profiles" class="badge bg-secondary">{{ ch.active_profiles }} active</span>
+                                                            <span v-else class="text-muted">-</span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.is_partial" class="badge bg-warning text-dark">Partial</span>
+                                                            <span v-else class="badge bg-success">Full</span>
                                                         </td>
                                                     </tr>
                                                 </tbody>
@@ -846,6 +862,7 @@
                                                         <th>Bandwidth</th>
                                                         <th>Subcarriers</th>
                                                         <th>TX Power</th>
+                                                        <th>Profiles</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -856,8 +873,14 @@
                                                         <td>{{ ch.num_subcarriers || '-' }}</td>
                                                         <td>
                                                             <span :class="getUsPowerClass(ch.power_dbmv)">
-                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                                {{ ch.power_dbmv !== null && ch.power_dbmv !== undefined ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
                                                             </span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.profiles && ch.profiles.length > 0">
+                                                                <span v-for="p in ch.profiles" :key="'usprofile-'+p" class="badge bg-primary me-1">{{ p }}</span>
+                                                            </span>
+                                                            <span v-else class="text-muted">-</span>
                                                         </td>
                                                     </tr>
                                                 </tbody>

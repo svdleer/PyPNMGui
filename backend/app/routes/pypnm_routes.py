@@ -454,7 +454,7 @@ def _extract_scqam_channels(data: Dict[str, Any]) -> list:
 
 
 def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
-    """Extract OFDM channel info with profile data."""
+    """Extract OFDM channel info with profile data, MER, and power."""
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
@@ -482,6 +482,22 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
             subcarrier_spacing = entry.get('docsIf31CmDsOfdmChanSubcarrierSpacing', 50000)  # Default 50kHz
             bandwidth = (num_subcarriers * subcarrier_spacing) if num_subcarriers else 0
             
+            # Get power level (in tenths of dBmV)
+            power_raw = entry.get('docsIf31CmDsOfdmChannelPower',
+                        entry.get('power', 0))
+            power_dbmv = power_raw / 10 if power_raw and abs(power_raw) > 100 else power_raw
+            
+            # Get MER (in tenths of dB)
+            mer_raw = entry.get('docsIf31CmDsOfdmChanMer',
+                      entry.get('docsIf31CmDsOfdmChanRxMer',
+                      entry.get('mer', entry.get('rxMer', 0))))
+            mer_db = mer_raw / 10 if mer_raw and abs(mer_raw) > 100 else mer_raw
+            
+            # Get modulation profile - can be primary modulation type
+            modulation = entry.get('docsIf31CmDsOfdmChanModulationFormat',
+                         entry.get('modulationFormat',
+                         entry.get('modulation', None)))
+            
             # Try various field names for profiles
             profiles_raw = entry.get('docsIf31CmDsOfdmProfileStatsProfileList', 
                           entry.get('profiles', 
@@ -502,6 +518,11 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
             else:
                 profiles = []
             
+            # Check for partial service / NCP mode
+            is_partial = entry.get('docsIf31CmDsOfdmChanIsPartialSvc',
+                         entry.get('isPartialService',
+                         entry.get('partialService', False)))
+            
             channels.append({
                 'channel_id': ch.get('channel_id', entry.get('docsIf31CmDsOfdmChanChannelId', 
                               entry.get('channelId'))),
@@ -510,7 +531,12 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
                 'plc_freq_mhz': round(plc_freq / 1000000, 1) if plc_freq else None,
                 'bandwidth_mhz': round(bandwidth / 1000000, 1) if bandwidth else None,
                 'num_subcarriers': num_subcarriers,
+                'subcarrier_spacing_khz': subcarrier_spacing / 1000 if subcarrier_spacing else None,
+                'power_dbmv': round(power_dbmv, 1) if power_dbmv else None,
+                'mer_db': round(mer_db, 1) if mer_db else None,
+                'modulation': modulation,
                 'profiles': profiles,
+                'is_partial': bool(is_partial),
                 'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in (profiles_raw if isinstance(profiles_raw, list) else [])],
                 'active_profiles': len(profiles)
             })
