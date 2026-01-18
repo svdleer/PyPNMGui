@@ -592,51 +592,67 @@ class PyPNMClient:
     
     def get_upstream_spectrum_capture(
         self,
-        mac_address: str,
-        ip_address: str,
+        cmts_ip: str,
+        rf_port_ifindex: int,
         tftp_ipv4: str,
-        community: str = "private",
+        community: str = "Z1gg0Sp3c1@l",
         tftp_ipv6: Optional[str] = None,
-        output_type: str = "json"
+        output_type: str = "json",
+        trigger_mode: int = 2,
+        center_freq_hz: int = 30000000,
+        span_hz: int = 80000000,
+        num_bins: int = 800,
+        filename: str = "utsc_capture",
+        cm_mac: Optional[str] = None,
+        logical_ch_ifindex: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Trigger upstream spectrum analyzer capture (UTSC).
+        Trigger CMTS-based Upstream Triggered Spectrum Capture (UTSC).
         
         Endpoint: POST /docs/pnm/us/spectrumAnalyzer/getCapture
         
+        UTSC is CMTS-based, not modem-based. Configures and initiates spectrum
+        capture on CMTS using RF port ifIndex.
+        
+        Args:
+            cmts_ip: CMTS IP address
+            rf_port_ifindex: RF port ifIndex (e.g., 843071491 for cable-upstream)
+            tftp_ipv4: TFTP server IP for file upload
+            community: SNMP write community (default: Z1gg0Sp3c1@l)
+            trigger_mode: 2=FreeRunning, 6=CM MAC trigger
+            center_freq_hz: Center frequency in Hz (default: 30 MHz)
+            span_hz: Frequency span in Hz (default: 80 MHz)
+            num_bins: Number of FFT bins (default: 800)
+            filename: Output filename (CMTS adds timestamp)
+            cm_mac: Cable modem MAC (required if trigger_mode=6)
+            logical_ch_ifindex: Logical channel ifIndex (optional for trigger_mode=6)
+        
         Returns UTSC spectrum data for upstream channels (5-85 MHz typical).
+        Files saved to TFTP with timestamp: {filename}_YYYY-MM-DD_HH.MM.SS.mmm
         """
         payload = {
-            "cable_modem": {
-                "mac_address": mac_address,
-                "ip_address": ip_address,
-                "snmp": {
-                    "snmpV2C": {
-                        "community": community
-                    }
-                },
-                "pnm_parameters": {
-                    "tftp": {
-                        "ipv4": tftp_ipv4 if tftp_ipv4 else None,
-                        "ipv6": tftp_ipv6 if tftp_ipv6 else None
-                    }
-                }
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "rf_port_ifindex": rf_port_ifindex,
+                "community": community
+            },
+            "tftp": {
+                "ipv4": tftp_ipv4 if tftp_ipv4 else None,
+                "ipv6": tftp_ipv6 if tftp_ipv6 else None
+            },
+            "trigger": {
+                "cm_mac": cm_mac,
+                "logical_ch_ifindex": logical_ch_ifindex
+            } if cm_mac else {},
+            "capture_parameters": {
+                "trigger_mode": trigger_mode,
+                "center_freq_hz": center_freq_hz,
+                "span_hz": span_hz,
+                "num_bins": num_bins,
+                "filename": filename
             },
             "analysis": {
-                "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "dark"}},
-                "spectrum_analysis": {}
-            },
-            "capture_parameters": {
-                "inactivity_timeout": 60,
-                "first_segment_center_freq": 15000000,  # 15 MHz
-                "last_segment_center_freq": 85000000,   # 85 MHz
-                "segment_freq_span": 1000000,
-                "num_bins_per_segment": 256,
-                "noise_bw": 150,
-                "window_function": 1,  # HANN
-                "num_averages": 1
+                "output_type": output_type
             }
         }
         

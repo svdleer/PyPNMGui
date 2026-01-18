@@ -73,7 +73,7 @@ def pnm_measurement(measurement_type, mac_address):
     else:
         requested_archive = False
     
-    if not modem_ip:
+    if not modem_ip and measurement_type != 'us_spectrum':
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     client = PyPNMClient()
@@ -91,9 +91,37 @@ def pnm_measurement(measurement_type, mac_address):
                 tftp_ipv6="::1", output_type=output_type
             )
         elif measurement_type == 'us_spectrum':
+            # UTSC is CMTS-based, not modem-based - requires different parameters
+            cmts_ip = data.get('cmts_ip')
+            rf_port_ifindex = data.get('rf_port_ifindex')
+            trigger_mode = data.get('trigger_mode', 2)  # 2=FreeRunning
+            center_freq_hz = data.get('center_freq_hz', 30000000)  # 30 MHz
+            span_hz = data.get('span_hz', 80000000)  # 80 MHz
+            num_bins = data.get('num_bins', 800)
+            filename = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
+            cm_mac = data.get('cm_mac') if trigger_mode == 6 else None
+            logical_ch_ifindex = data.get('logical_ch_ifindex')
+            
+            if not cmts_ip or rf_port_ifindex is None:
+                return jsonify({
+                    "status": "error", 
+                    "message": "cmts_ip and rf_port_ifindex required for UTSC"
+                }), 400
+            
             result = client.get_upstream_spectrum_capture(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
+                cmts_ip=cmts_ip,
+                rf_port_ifindex=rf_port_ifindex,
+                tftp_ipv4=tftp_ip,
+                community=community,
+                tftp_ipv6=None,
+                output_type=output_type,
+                trigger_mode=trigger_mode,
+                center_freq_hz=center_freq_hz,
+                span_hz=span_hz,
+                num_bins=num_bins,
+                filename=filename,
+                cm_mac=cm_mac,
+                logical_ch_ifindex=logical_ch_ifindex
             )
         elif measurement_type == 'channel_estimation':
             result = client.get_channel_estimation(
@@ -880,76 +908,62 @@ def get_upstream_interfaces(mac_address):
 @pypnm_bp.route('/upstream/utsc/configure/<mac_address>', methods=['POST'])
 def configure_utsc(mac_address):
     """
-    Configure UTSC (Upstream Triggered Spectrum Capture) test.
+    Configure and start UTSC (Upstream Triggered Spectrum Capture) test via PyPNM API.
     
     POST body:
     {
         "cmts_ip": "x.x.x.x",
         "rf_port_ifindex": 12345,
-        "trigger_mode": 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
+        "trigger_mode": 2,  // 2=FreeRunning, 6=CM_MAC
         "center_freq_hz": 30000000,
         "span_hz": 80000000,
         "num_bins": 800,
-        "output_format": 2,  // 2=fftPower
         "filename": "utsc_capture",
-        "repeat_period_ms": 0,  // 0=single, >0=repeat
-        "freerun_duration_ms": 1000,
-        "logical_ch_ifindex": null,  // For IdleSID/CM_MAC
-        "community": "optional"
+        "logical_ch_ifindex": null,  // For CM_MAC trigger
+        "community": "optional",
+        "tftp_ip": "optional"
     }
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_default_community())
+    tftp_ip = data.get('tftp_ip', get_default_tftp())
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_configure') if agent_manager else None
+        client = PyPNMClient()
         
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for UTSC"}), 503
+        trigger_mode = data.get('trigger_mode', 2)
+        cm_mac = mac_address if trigger_mode == 6 else None
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_utsc_configure',
-            params={
-                "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
-                "trigger_mode": data.get('trigger_mode', 2),
-                "center_freq_hz": data.get('center_freq_hz', 30000000),
-                "span_hz": data.get('span_hz', 80000000),
-                "num_bins": data.get('num_bins', 800),
-                "output_format": data.get('output_format', 2),
-                "filename": data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
-                "repeat_period_ms": data.get('repeat_period_ms', 0),
-                "freerun_duration_ms": data.get('freerun_duration_ms', 1000),
-                "cm_mac_address": mac_address if data.get('trigger_mode') == 6 else None,
-                "logical_ch_ifindex": data.get('logical_ch_ifindex'),
-                "community": community
-            },
-            timeout=60
+        result = client.get_upstream_spectrum_capture(
+            cmts_ip=cmts_ip,
+            rf_port_ifindex=rf_port_ifindex,
+            tftp_ipv4=tftp_ip,
+            community=community,
+            output_type='json',
+            trigger_mode=trigger_mode,
+            center_freq_hz=data.get('center_freq_hz', 30000000),
+            span_hz=data.get('span_hz', 80000000),
+            num_bins=data.get('num_bins', 800),
+            filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
+            cm_mac=cm_mac,
+            logical_ch_ifindex=data.get('logical_ch_ifindex')
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
         return jsonify({
-            "success": task_result.get('success', False),
+            "success": result.get('success', False),
             "mac_address": mac_address,
-            **task_result
+            "cmts_ip": result.get('cmts_ip'),
+            "rf_port_ifindex": result.get('rf_port_ifindex'),
+            "filename": result.get('filename'),
+            "error": result.get('error'),
+            "data": result.get('data')
         })
         
     except Exception as e:
@@ -960,62 +974,11 @@ def configure_utsc(mac_address):
 @pypnm_bp.route('/upstream/utsc/start/<mac_address>', methods=['POST'])
 def start_utsc(mac_address):
     """
-    Start UTSC test on CMTS.
-    
-    POST body:
-    {
-        "cmts_ip": "x.x.x.x",
-        "rf_port_ifindex": 12345,
-        "community": "optional"
-    }
+    Start UTSC test on CMTS - Legacy endpoint, redirects to configure.
+    Use /upstream/utsc/configure instead for combined configure+start.
     """
-    from app.core.simple_ws import get_simple_agent_manager
-    
-    data = request.get_json() or {}
-    cmts_ip = data.get('cmts_ip')
-    rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
-    
-    if not cmts_ip or not rf_port_ifindex:
-        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
-    
-    try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_start') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for UTSC"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_utsc_start',
-            params={
-                "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
-                "community": community
-            },
-            timeout=60
-        )
-        
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        return jsonify({
-            "success": task_result.get('success', False),
-            "mac_address": mac_address,
-            **task_result
-        })
-        
-    except Exception as e:
-        logger.error(f"Start UTSC failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    # Just call configure which now does both
+    return configure_utsc(mac_address)
 
 
 @pypnm_bp.route('/upstream/utsc/stop/<mac_address>', methods=['POST'])
