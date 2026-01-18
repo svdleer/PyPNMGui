@@ -78,12 +78,15 @@ class PyPNMClient:
         """Make POST request to PyPNM API."""
         url = f"{self.config.base_url}{endpoint}"
         
+        # Spectrum analyzer needs longer timeout (full frequency sweep 300-1218 MHz)
+        timeout = 300 if 'spectrumAnalyzer' in endpoint else self.config.timeout
+        
         try:
             logger.debug(f"POST {url}")
             response = self.session.post(
                 url,
                 json=payload,
-                timeout=self.config.timeout
+                timeout=timeout
             )
             
             # Log PyPNM errors
