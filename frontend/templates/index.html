@@ -853,10 +853,11 @@
                                                     <div v-for="ch in channelStats.downstream.ofdm.channels" :key="ch.channel_id" class="ms-3 mt-2">
                                                         <small>
                                                             Ch {{ ch.channel_id }}: 
-                                                            <span class="badge bg-primary" v-if="ch.frequency_mhz">{{ ch.frequency_mhz }} MHz</span>
+                                                            <span class="badge bg-primary" v-if="ch.plc_freq_mhz">{{ ch.plc_freq_mhz }} MHz</span>
+                                                            <span class="badge bg-secondary" v-if="ch.bandwidth_mhz">{{ ch.bandwidth_mhz }} MHz BW</span>
                                                             <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
-                                                            <span class="badge bg-warning text-dark" v-else>No Active Profiles</span>
-                                                            <span class="badge bg-secondary" v-if="ch.ncp_profile">NCP</span>
+                                                            <span class="badge bg-warning text-dark" v-if="!ch.profiles || ch.profiles.length === 0">No Profiles</span>
+                                                            <span class="badge bg-dark" v-if="ch.ncp_profile">NCP</span>
                                                         </small>
                                                     </div>
                                                 </div>
@@ -883,7 +884,8 @@
                                                         <small>
                                                             Ch {{ ch.channel_id }}: 
                                                             <span class="badge bg-primary" v-if="ch.frequency_mhz">{{ ch.frequency_mhz }} MHz</span>
-                                                            <span class="badge bg-success" v-if="ch.bandwidth">{{ ch.bandwidth }} MHz BW</span>
+                                                            <span class="badge bg-secondary" v-if="ch.bandwidth_mhz">{{ ch.bandwidth_mhz }} MHz BW</span>
+                                                            <span class="badge bg-success" v-if="ch.tx_power">{{ ch.tx_power }} dBmV</span>
                                                             <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
                                                         </small>
                                                     </div>
