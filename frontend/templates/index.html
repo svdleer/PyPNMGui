@@ -853,7 +853,9 @@
                                                     <div v-for="ch in channelStats.downstream.ofdm.channels" :key="ch.channel_id" class="ms-3 mt-2">
                                                         <small>
                                                             Ch {{ ch.channel_id }}: 
-                                                            <span class="badge bg-info">Profiles: {{ ch.profiles.join(', ') || 'None' }}</span>
+                                                            <span class="badge bg-primary" v-if="ch.frequency_mhz">{{ ch.frequency_mhz }} MHz</span>
+                                                            <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
+                                                            <span class="badge bg-warning text-dark" v-else>No Active Profiles</span>
                                                             <span class="badge bg-secondary" v-if="ch.ncp_profile">NCP</span>
                                                         </small>
                                                     </div>
@@ -880,8 +882,9 @@
                                                     <div v-for="ch in channelStats.upstream.ofdma.channels" :key="ch.channel_id" class="ms-3 mt-2">
                                                         <small>
                                                             Ch {{ ch.channel_id }}: 
-                                                            <span class="badge bg-success">{{ ch.bandwidth }} MHz</span>
-                                                            <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length">Profiles: {{ ch.profiles.join(', ') }}</span>
+                                                            <span class="badge bg-primary" v-if="ch.frequency_mhz">{{ ch.frequency_mhz }} MHz</span>
+                                                            <span class="badge bg-success" v-if="ch.bandwidth">{{ ch.bandwidth }} MHz BW</span>
+                                                            <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
                                                         </small>
                                                     </div>
                                                 </div>

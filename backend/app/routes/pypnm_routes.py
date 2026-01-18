@@ -442,27 +442,77 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    
+    # Log the raw data for debugging
+    logger.debug(f"OFDM raw results: {results}")
+    
     if isinstance(results, list):
         channels = []
         for ch in results:
-            profiles = ch.get('profiles', [])
+            # Try various field names that PyPNM might use
+            profiles_raw = ch.get('docsIf31CmDsOfdmProfileStatsProfileList', 
+                          ch.get('profiles', 
+                          ch.get('activeProfiles', [])))
+            
+            # Parse profiles - could be list of ints, list of dicts, or comma-separated string
+            if isinstance(profiles_raw, str):
+                profiles = [int(p.strip()) for p in profiles_raw.split(',') if p.strip().isdigit()]
+            elif isinstance(profiles_raw, list):
+                profiles = []
+                for p in profiles_raw:
+                    if isinstance(p, dict):
+                        pid = p.get('profileId', p.get('profile_id'))
+                        if pid is not None and pid != 255:
+                            profiles.append(pid)
+                    elif isinstance(p, int) and p != 255:
+                        profiles.append(p)
+            else:
+                profiles = []
+            
+            # Get frequency - try various field names
+            freq = ch.get('docsIf31CmDsOfdmChannelLowerFrequency',
+                   ch.get('lowerFrequency',
+                   ch.get('frequency', 0)))
+            
             channels.append({
-                'channel_id': ch.get('channelId', ch.get('channel_id')),
-                'frequency': ch.get('frequency'),
-                'profiles': [p.get('profileId', p) for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255],
-                'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in profiles],
-                'active_profiles': len([p for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255])
+                'channel_id': ch.get('docsIf31CmDsOfdmChannelId', 
+                              ch.get('channelId', 
+                              ch.get('channel_id', ch.get('ifIndex')))),
+                'frequency': freq,
+                'frequency_mhz': round(freq / 1000000, 1) if freq else None,
+                'profiles': profiles,
+                'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in (profiles_raw if isinstance(profiles_raw, list) else [])],
+                'active_profiles': len(profiles)
             })
         return channels
+    
+    # Handle dict format with 'channels' key
     channels = []
     for ch in results.get('channels', []):
-        profiles = ch.get('profiles', [])
+        profiles_raw = ch.get('docsIf31CmDsOfdmProfileStatsProfileList',
+                      ch.get('profiles', 
+                      ch.get('activeProfiles', [])))
+        
+        if isinstance(profiles_raw, str):
+            profiles = [int(p.strip()) for p in profiles_raw.split(',') if p.strip().isdigit()]
+        elif isinstance(profiles_raw, list):
+            profiles = [p.get('profileId', p) if isinstance(p, dict) else p for p in profiles_raw if (p.get('profileId', p) if isinstance(p, dict) else p) != 255]
+        else:
+            profiles = []
+            
+        freq = ch.get('docsIf31CmDsOfdmChannelLowerFrequency',
+               ch.get('lowerFrequency',
+               ch.get('frequency', 0)))
+        
         channels.append({
-            'channel_id': ch.get('channelId', ch.get('channel_id')),
-            'frequency': ch.get('frequency'),
-            'profiles': [p.get('profileId', p) for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255],
-            'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in profiles],
-            'active_profiles': len([p for p in profiles if (p.get('profileId') if isinstance(p, dict) else p) != 255])
+            'channel_id': ch.get('docsIf31CmDsOfdmChannelId',
+                          ch.get('channelId', 
+                          ch.get('channel_id'))),
+            'frequency': freq,
+            'frequency_mhz': round(freq / 1000000, 1) if freq else None,
+            'profiles': profiles,
+            'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in (profiles_raw if isinstance(profiles_raw, list) else [])],
+            'active_profiles': len(profiles)
         })
     return channels
 
@@ -498,23 +548,87 @@ def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         return []
     results = data.get('results', {})
+    
+    # Log the raw data for debugging
+    logger.debug(f"OFDMA raw results: {results}")
+    
     if isinstance(results, list):
         channels = []
         for ch in results:
+            # Get frequency - try various field names
+            freq = ch.get('docsIf31CmUsOfdmaChannelConfiguredCenterFrequency',
+                   ch.get('configuredCenterFrequency',
+                   ch.get('centerFrequency',
+                   ch.get('frequency', 0))))
+            
+            # Get bandwidth - try various field names (usually in Hz, convert to MHz)
+            bw = ch.get('docsIf31CmUsOfdmaChannelChannelWidth',
+                 ch.get('channelWidth',
+                 ch.get('bandwidth', 0)))
+            bw_mhz = round(bw / 1000000, 1) if bw and bw > 1000 else bw
+            
+            # Get profiles
+            profiles_raw = ch.get('docsIf31CmUsOfdmaProfileStatsList',
+                          ch.get('activeProfiles',
+                          ch.get('profiles', [])))
+            
+            if isinstance(profiles_raw, str):
+                profiles = [int(p.strip()) for p in profiles_raw.split(',') if p.strip().isdigit()]
+            elif isinstance(profiles_raw, list):
+                profiles = []
+                for p in profiles_raw:
+                    if isinstance(p, dict):
+                        pid = p.get('profileId', p.get('profile_id'))
+                        if pid is not None:
+                            profiles.append(pid)
+                    elif isinstance(p, int):
+                        profiles.append(p)
+            else:
+                profiles = []
+            
             channels.append({
-                'channel_id': ch.get('channelId', ch.get('channel_id')),
-                'frequency': ch.get('configuredCenterFrequency', ch.get('frequency')),
-                'bandwidth': ch.get('channelWidth', ch.get('bandwidth')),
-                'profiles': ch.get('activeProfiles', [])
+                'channel_id': ch.get('docsIf31CmUsOfdmaChannelId',
+                              ch.get('channelId', 
+                              ch.get('channel_id', ch.get('ifIndex')))),
+                'frequency': freq,
+                'frequency_mhz': round(freq / 1000000, 1) if freq and freq > 1000 else freq,
+                'bandwidth': bw_mhz,
+                'profiles': profiles
             })
         return channels
+    
+    # Handle dict format with 'channels' key
     channels = []
     for ch in results.get('channels', []):
+        freq = ch.get('docsIf31CmUsOfdmaChannelConfiguredCenterFrequency',
+               ch.get('configuredCenterFrequency',
+               ch.get('centerFrequency',
+               ch.get('frequency', 0))))
+        
+        bw = ch.get('docsIf31CmUsOfdmaChannelChannelWidth',
+             ch.get('channelWidth',
+             ch.get('bandwidth', 0)))
+        bw_mhz = round(bw / 1000000, 1) if bw and bw > 1000 else bw
+        
+        profiles_raw = ch.get('docsIf31CmUsOfdmaProfileStatsList',
+                      ch.get('activeProfiles',
+                      ch.get('profiles', [])))
+        
+        if isinstance(profiles_raw, str):
+            profiles = [int(p.strip()) for p in profiles_raw.split(',') if p.strip().isdigit()]
+        elif isinstance(profiles_raw, list):
+            profiles = [p.get('profileId', p) if isinstance(p, dict) else p for p in profiles_raw]
+        else:
+            profiles = []
+        
         channels.append({
-            'channel_id': ch.get('channelId', ch.get('channel_id')),
-            'frequency': ch.get('configuredCenterFrequency', ch.get('frequency')),
-            'bandwidth': ch.get('channelWidth', ch.get('bandwidth')),
-            'profiles': ch.get('activeProfiles', [])
+            'channel_id': ch.get('docsIf31CmUsOfdmaChannelId',
+                          ch.get('channelId', 
+                          ch.get('channel_id'))),
+            'frequency': freq,
+            'frequency_mhz': round(freq / 1000000, 1) if freq and freq > 1000 else freq,
+            'bandwidth': bw_mhz,
+            'profiles': profiles
         })
     return channels
 
