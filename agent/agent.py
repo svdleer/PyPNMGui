@@ -62,6 +62,8 @@ class AgentConfig:
     
     # CMTS Access (can be direct SNMP or via SSH)
     cmts_snmp_direct: bool = True
+    cmts_community: str = 'public'  # Read community
+    cmts_write_community: Optional[str] = None  # Write community for SNMP SET (upstream PNM)
     cmts_ssh_enabled: bool = False
     cmts_ssh_user: Optional[str] = None
     cmts_ssh_key: Optional[str] = None
@@ -131,6 +133,8 @@ class AgentConfig:
             pypnm_tunnel_remote_port=tunnel_config.get('remote_port', 8080),
             # CMTS Access
             cmts_snmp_direct=cmts.get('snmp_direct', True),
+            cmts_community=cmts.get('community', 'public'),
+            cmts_write_community=cmts.get('write_community'),
             cmts_ssh_enabled=cmts.get('ssh_enabled', False),
             cmts_ssh_user=cmts.get('ssh_user'),
             cmts_ssh_key=expand_path(cmts.get('ssh_key_file')),
@@ -1619,7 +1623,7 @@ class PyPNMAgent:
         """Get upstream interface information from CMTS for a specific modem."""
         cmts_ip = params.get('cmts_ip')
         cm_mac = params.get('cm_mac_address')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip:
             return {'success': False, 'error': 'cmts_ip required'}
@@ -1697,7 +1701,7 @@ class PyPNMAgent:
         """Configure UTSC test parameters on CMTS."""
         cmts_ip = params.get('cmts_ip')
         rf_port_ifindex = params.get('rf_port_ifindex')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip or not rf_port_ifindex:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
@@ -1780,7 +1784,7 @@ class PyPNMAgent:
         """Start UTSC test (set InitiateTest to true)."""
         cmts_ip = params.get('cmts_ip')
         rf_port_ifindex = params.get('rf_port_ifindex')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip or not rf_port_ifindex:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
@@ -1808,7 +1812,7 @@ class PyPNMAgent:
         """Stop UTSC test (set InitiateTest to false)."""
         cmts_ip = params.get('cmts_ip')
         rf_port_ifindex = params.get('rf_port_ifindex')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip or not rf_port_ifindex:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
@@ -1836,7 +1840,7 @@ class PyPNMAgent:
         """Get UTSC test status."""
         cmts_ip = params.get('cmts_ip')
         rf_port_ifindex = params.get('rf_port_ifindex')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip or not rf_port_ifindex:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
@@ -1882,7 +1886,7 @@ class PyPNMAgent:
         cmts_ip = params.get('cmts_ip')
         ofdma_ifindex = params.get('ofdma_ifindex')
         cm_mac = params.get('cm_mac_address')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip or not ofdma_ifindex or not cm_mac:
             return {'success': False, 'error': 'cmts_ip, ofdma_ifindex, and cm_mac_address required'}
@@ -1930,7 +1934,7 @@ class PyPNMAgent:
         """Get Upstream RxMER measurement status."""
         cmts_ip = params.get('cmts_ip')
         ofdma_ifindex = params.get('ofdma_ifindex')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         
         if not cmts_ip or not ofdma_ifindex:
             return {'success': False, 'error': 'cmts_ip and ofdma_ifindex required'}
@@ -1982,7 +1986,7 @@ class PyPNMAgent:
         - docsIf3CmtsCmRegStatusMdIfIndex (interface): 1.3.6.1.4.1.4491.2.1.20.1.3.1.5
         """
         cmts_ip = params.get('cmts_ip')
-        community = params.get('community', 'Z1gg0@LL')
+        community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
         limit = params.get('limit', 10000)  # Increased limit
         use_bulk = params.get('use_bulk', True)
         use_cache = params.get('use_cache', True)
@@ -2801,6 +2805,9 @@ def main():
         logger.info(f"  SSH Host: {config.pypnm_ssh_host}")
     logger.info(f"CM Proxy: {config.cm_proxy_host or 'not configured'}")
     logger.info(f"CMTS SNMP Direct: {config.cmts_snmp_direct}")
+    if config.cmts_snmp_direct:
+        logger.info(f"  CMTS Read Community: {config.cmts_community}")
+        logger.info(f"  CMTS Write Community: {'configured' if config.cmts_write_community else 'not configured (upstream PNM disabled)'}")
     logger.info(f"TFTP SSH: {config.tftp_ssh_host or 'not configured'}")
     
     # Start agent
