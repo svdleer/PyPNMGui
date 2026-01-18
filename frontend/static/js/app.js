@@ -383,20 +383,89 @@ createApp({
             return channels;
         },
         
+        // Helper to transform PyPNM channel data (SC-QAM + OFDM)
+        transformChannelData(dsData) {
+            if (!dsData) return [];
+            
+            const channels = [];
+            
+            // Handle SC-QAM data from PyPNM response format
+            const scqam = dsData.scqam || {};
+            const scqamResults = scqam.results || [];
+            if (Array.isArray(scqamResults)) {
+                scqamResults.forEach((ch, idx) => {
+                    const entry = ch.entry || ch;
+                    channels.push({
+                        channel_id: ch.channel_id || entry.docsIfDownChannelId || idx + 1,
+                        frequency_mhz: entry.docsIfDownChannelFrequency ? entry.docsIfDownChannelFrequency / 1000000 : 0,
+                        power_dbmv: entry.docsIfDownChannelPower || 0,
+                        snr_db: entry.docsIf3SignalQualityExtRxMER ? entry.docsIf3SignalQualityExtRxMER / 10 : 0,
+                        type: 'SC-QAM'
+                    });
+                });
+            }
+            
+            // Handle OFDM data (DOCSIS 3.1)
+            const ofdm = dsData.ofdm || {};
+            const ofdmResults = ofdm.results || [];
+            if (Array.isArray(ofdmResults)) {
+                ofdmResults.forEach((ch, idx) => {
+                    const entry = ch.entry || ch;
+                    const plcFreq = entry.docsIf31CmDsOfdmChanPlcFreq || 0;
+                    const numSubcarriers = entry.docsIf31CmDsOfdmChanNumActiveSubcarriers || 0;
+                    const subcarrierSpacing = entry.docsIf31CmDsOfdmChanSubcarrierSpacing || 50000;
+                    channels.push({
+                        channel_id: ch.channel_id || entry.docsIf31CmDsOfdmChanChannelId || 100 + idx,
+                        frequency_mhz: plcFreq ? plcFreq / 1000000 : 0,
+                        bandwidth_mhz: (numSubcarriers * subcarrierSpacing) / 1000000,
+                        power_dbmv: entry.docsIf31CmDsOfdmChannelPower || 0,
+                        snr_db: entry.docsIf31CmDsOfdmChanMer ? entry.docsIf31CmDsOfdmChanMer / 10 : 0,
+                        num_subcarriers: numSubcarriers,
+                        type: 'OFDM'
+                    });
+                });
+            }
+            
+            return channels;
+        },
+        
         transformUpstreamData(usData) {
             if (!usData) return [];
             
-            const atdma = usData.atdma || {};
             const channels = [];
             
-            // PyPNM returns .results array
-            const results = atdma.results || [];
-            if (Array.isArray(results)) {
-                results.forEach((ch, idx) => {
+            // Handle ATDMA data
+            const atdma = usData.atdma || {};
+            const atdmaResults = atdma.results || [];
+            if (Array.isArray(atdmaResults)) {
+                atdmaResults.forEach((ch, idx) => {
                     const entry = ch.entry || ch;
+                    const freq = entry.docsIfUpChannelFrequency || 0;
                     channels.push({
                         channel_id: ch.channel_id || entry.docsIfUpChannelId || idx + 1,
-                        power_dbmv: entry.docsIf3CmStatusUsTxPower || 0
+                        frequency_mhz: freq ? freq / 1000000 : null,
+                        power_dbmv: entry.docsIf3CmStatusUsTxPower || 0,
+                        type: 'ATDMA'
+                    });
+                });
+            }
+            
+            // Handle OFDMA data (DOCSIS 3.1)
+            const ofdma = usData.ofdma || {};
+            const ofdmaResults = ofdma.results || [];
+            if (Array.isArray(ofdmaResults)) {
+                ofdmaResults.forEach((ch, idx) => {
+                    const entry = ch.entry || ch;
+                    const freq = entry.docsIf31CmUsOfdmaChanSubcarrierZeroFreq || 0;
+                    const numSubcarriers = entry.docsIf31CmUsOfdmaChanNumActiveSubcarriers || 0;
+                    const subcarrierSpacing = entry.docsIf31CmUsOfdmaChanSubcarrierSpacing || 50;  // in kHz
+                    channels.push({
+                        channel_id: ch.channel_id || entry.docsIf31CmUsOfdmaChanChannelId || 100 + idx,
+                        frequency_mhz: freq ? freq / 1000000 : 0,
+                        bandwidth_mhz: (numSubcarriers * subcarrierSpacing) / 1000,  // subcarrierSpacing is in kHz
+                        power_dbmv: entry.docsIf31CmUsOfdmaChanTxPower || 0,
+                        num_subcarriers: numSubcarriers,
+                        type: 'OFDMA'
                     });
                 });
             }

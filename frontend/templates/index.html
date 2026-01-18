@@ -477,36 +477,53 @@
                                 <div class="card shadow-sm">
                                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-arrow-down text-success me-2"></i>Downstream Channels</h5>
-                                        <span class="badge bg-success">{{ systemInfo.downstream ? systemInfo.downstream.filter(c => c.frequency_mhz > 0).length : 0 }} active</span>
+                                        <div>
+                                            <span class="badge bg-secondary me-1" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM').length > 0">
+                                                {{ systemInfo.downstream.filter(c => c.type === 'SC-QAM').length }} SC-QAM
+                                            </span>
+                                            <span class="badge bg-info" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'OFDM').length > 0">
+                                                {{ systemInfo.downstream.filter(c => c.type === 'OFDM').length }} OFDM
+                                            </span>
+                                        </div>
                                     </div>
                                     <div class="card-body">
                                         <!-- Summary Stats -->
-                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.downstream && systemInfo.downstream.length > 0">
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).length > 0">
                                             <div class="col-4">
-                                                <small class="text-muted d-block">Power Range</small>
-                                                <strong :class="getDsPowerClass(Math.min(...systemInfo.downstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)))">
-                                                    {{ Math.min(...systemInfo.downstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }}
+                                                <small class="text-muted d-block">SC-QAM Power</small>
+                                                <strong :class="getDsPowerClass(Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }}
                                                 </strong>
                                                 <span class="text-muted mx-1">to</span>
-                                                <strong :class="getDsPowerClass(Math.max(...systemInfo.downstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)))">
-                                                    {{ Math.max(...systemInfo.downstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }} dBmV
+                                                <strong :class="getDsPowerClass(Math.max(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.max(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }} dBmV
                                                 </strong>
                                             </div>
                                             <div class="col-4">
                                                 <small class="text-muted d-block">Avg Power</small>
-                                                <strong :class="getDsPowerClass((systemInfo.downstream.reduce((a,c) => a + (c.power_dbmv || 0), 0) / systemInfo.downstream.length))">
-                                                    {{ (systemInfo.downstream.reduce((a,c) => a + (c.power_dbmv || 0), 0) / systemInfo.downstream.length).toFixed(1) }} dBmV
+                                                <strong :class="getDsPowerClass((systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).length))">
+                                                    {{ (systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).length).toFixed(1) }} dBmV
                                                 </strong>
                                             </div>
                                             <div class="col-4">
                                                 <small class="text-muted d-block">Min SNR</small>
-                                                <strong :class="Math.min(...systemInfo.downstream.filter(c => c.snr_db).map(c => c.snr_db)) < 35 ? 'text-danger' : 'text-success'">
-                                                    {{ Math.min(...systemInfo.downstream.filter(c => c.snr_db).map(c => c.snr_db)).toFixed(1) }} dB
+                                                <strong :class="Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.snr_db).map(c => c.snr_db)) < 35 ? 'text-danger' : 'text-success'">
+                                                    {{ Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.snr_db).map(c => c.snr_db)).toFixed(1) }} dB
                                                 </strong>
                                             </div>
                                         </div>
-                                        <!-- Channel Table -->
-                                        <div class="table-responsive" style="max-height: 200px;">
+                                        <!-- OFDM Summary -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'OFDM').length > 0">
+                                            <div class="col-12">
+                                                <small class="text-muted d-block">OFDM Channels</small>
+                                                <span v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id" class="me-2">
+                                                    <span class="badge bg-info">Ch {{ ch.channel_id }}: {{ ch.frequency_mhz.toFixed(0) }} MHz</span>
+                                                    <small class="text-muted">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) + ' MHz BW' : '' }}</small>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <!-- Channel Table (SC-QAM only) -->
+                                        <div class="table-responsive" style="max-height: 180px;" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM').length > 0">
                                             <table class="table table-sm table-hover mb-0">
                                                 <thead class="table-light sticky-top">
                                                     <tr>
@@ -517,17 +534,17 @@
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in (systemInfo.downstream || []).filter(c => c.frequency_mhz > 0)" :key="ch.channel_id">
+                                                    <tr v-for="ch in (systemInfo.downstream || []).filter(c => c.type === 'SC-QAM' && c.frequency_mhz > 0)" :key="ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
                                                         <td class="text-muted">{{ ch.frequency_mhz.toFixed(0) }}</td>
                                                         <td>
                                                             <span :class="getDsPowerClass(ch.power_dbmv)">
-                                                                {{ ch.power_dbmv.toFixed(1) }}
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }}
                                                             </span>
                                                         </td>
                                                         <td>
                                                             <span :class="ch.snr_db < 35 ? 'text-danger fw-bold' : (ch.snr_db < 38 ? 'text-warning' : 'text-success')">
-                                                                {{ ch.snr_db.toFixed(1) }}
+                                                                {{ ch.snr_db ? ch.snr_db.toFixed(1) : '-' }}
                                                             </span>
                                                         </td>
                                                     </tr>
@@ -541,30 +558,48 @@
                                 <div class="card shadow-sm">
                                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-arrow-up text-primary me-2"></i>Upstream Channels</h5>
-                                        <span class="badge bg-primary">{{ systemInfo.upstream ? systemInfo.upstream.length : 0 }} active</span>
+                                        <div>
+                                            <span class="badge bg-secondary me-1" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA').length > 0">
+                                                {{ systemInfo.upstream.filter(c => c.type === 'ATDMA').length }} ATDMA
+                                            </span>
+                                            <span class="badge bg-info" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'OFDMA').length > 0">
+                                                {{ systemInfo.upstream.filter(c => c.type === 'OFDMA').length }} OFDMA
+                                            </span>
+                                        </div>
                                     </div>
                                     <div class="card-body">
-                                        <!-- Summary Stats -->
-                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.upstream && systemInfo.upstream.length > 0">
+                                        <!-- ATDMA Summary Stats -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).length > 0">
                                             <div class="col-6">
-                                                <small class="text-muted d-block">TX Power Range</small>
-                                                <strong :class="getUsPowerClass(Math.min(...systemInfo.upstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)))">
-                                                    {{ Math.min(...systemInfo.upstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }}
+                                                <small class="text-muted d-block">ATDMA TX Power</small>
+                                                <strong :class="getUsPowerClass(Math.min(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.min(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }}
                                                 </strong>
                                                 <span class="text-muted mx-1">to</span>
-                                                <strong :class="getUsPowerClass(Math.max(...systemInfo.upstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)))">
-                                                    {{ Math.max(...systemInfo.upstream.filter(c => c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }} dBmV
+                                                <strong :class="getUsPowerClass(Math.max(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.max(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }} dBmV
                                                 </strong>
                                             </div>
                                             <div class="col-6">
                                                 <small class="text-muted d-block">Avg TX Power</small>
-                                                <strong :class="getUsPowerClass((systemInfo.upstream.reduce((a,c) => a + (c.power_dbmv || 0), 0) / systemInfo.upstream.length))">
-                                                    {{ (systemInfo.upstream.reduce((a,c) => a + (c.power_dbmv || 0), 0) / systemInfo.upstream.length).toFixed(1) }} dBmV
+                                                <strong :class="getUsPowerClass((systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).length))">
+                                                    {{ (systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).length).toFixed(1) }} dBmV
                                                 </strong>
                                             </div>
                                         </div>
-                                        <!-- Channel Table -->
-                                        <div class="table-responsive" style="max-height: 200px;">
+                                        <!-- OFDMA Summary -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'OFDMA').length > 0">
+                                            <div class="col-12">
+                                                <small class="text-muted d-block">OFDMA Channels</small>
+                                                <span v-for="ch in systemInfo.upstream.filter(c => c.type === 'OFDMA')" :key="'ofdma-'+ch.channel_id" class="me-2">
+                                                    <span class="badge bg-info">Ch {{ ch.channel_id }}: {{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : 'N/A' }} MHz</span>
+                                                    <span class="badge bg-success">{{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : 'N/A' }} dBmV</span>
+                                                    <small class="text-muted">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(1) + ' MHz BW' : '' }}</small>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <!-- Channel Table (ATDMA only) -->
+                                        <div class="table-responsive" style="max-height: 180px;" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA').length > 0">
                                             <table class="table table-sm table-hover mb-0">
                                                 <thead class="table-light sticky-top">
                                                     <tr>
@@ -574,12 +609,12 @@
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <tr v-for="ch in (systemInfo.upstream || [])" :key="ch.channel_id">
+                                                    <tr v-for="ch in (systemInfo.upstream || []).filter(c => c.type === 'ATDMA')" :key="ch.channel_id">
                                                         <td><strong>{{ ch.channel_id }}</strong></td>
                                                         <td class="text-muted">{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : 'N/A' }}</td>
                                                         <td>
                                                             <span :class="getUsPowerClass(ch.power_dbmv)">
-                                                                {{ ch.power_dbmv.toFixed(1) }} dBmV
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
                                                             </span>
                                                         </td>
                                                     </tr>
