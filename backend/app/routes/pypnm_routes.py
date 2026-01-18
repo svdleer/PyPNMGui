@@ -36,6 +36,8 @@ def pnm_measurement(measurement_type, mac_address):
     
     Supported types:
     - rxmer: RxMER per subcarrier
+    - spectrum: Downstream spectrum analyzer (DOCSIS 3.x/4.0)
+    - us_spectrum: Upstream spectrum analyzer (UTSC)
     - channel_estimation: Channel estimation coefficients
     - modulation_profile: Modulation profile
     - fec_summary: FEC summary stats
@@ -85,6 +87,11 @@ def pnm_measurement(measurement_type, mac_address):
             )
         elif measurement_type == 'spectrum':
             result = client.get_spectrum_capture(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'us_spectrum':
+            result = client.get_upstream_spectrum_capture(
                 mac_address, modem_ip, tftp_ip, community,
                 tftp_ipv6="::1", output_type=output_type
             )

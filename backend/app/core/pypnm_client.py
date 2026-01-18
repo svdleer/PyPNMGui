@@ -590,6 +590,57 @@ class PyPNMClient:
     
     # ============== Health Check ==============
     
+    def get_upstream_spectrum_capture(
+        self,
+        mac_address: str,
+        ip_address: str,
+        tftp_ipv4: str,
+        community: str = "private",
+        tftp_ipv6: Optional[str] = None,
+        output_type: str = "json"
+    ) -> Dict[str, Any]:
+        """
+        Trigger upstream spectrum analyzer capture (UTSC).
+        
+        Endpoint: POST /docs/pnm/us/spectrumAnalyzer/getCapture
+        
+        Returns UTSC spectrum data for upstream channels (5-85 MHz typical).
+        """
+        payload = {
+            "cable_modem": {
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "snmp": {
+                    "snmpV2C": {
+                        "community": community
+                    }
+                },
+                "pnm_parameters": {
+                    "tftp": {
+                        "ipv4": tftp_ipv4 if tftp_ipv4 else None,
+                        "ipv6": tftp_ipv6 if tftp_ipv6 else None
+                    }
+                }
+            },
+            "analysis": {
+                "type": "basic",
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}},
+                "spectrum_analysis": {}
+            },
+            "capture_parameters": {
+                "inactivity_timeout": 60,
+                "first_segment_center_freq": 15000000,  # 15 MHz
+                "last_segment_center_freq": 85000000,   # 85 MHz
+                "segment_freq_span": 1000000,
+                "num_bins_per_segment": 256,
+                "noise_bw": 150,
+                "window_function": 1,  # HANN
+                "num_averages": 1
+            }
+        }
+        
+        return self._post("/docs/pnm/us/spectrumAnalyzer/getCapture", payload)
     def health_check(self) -> bool:
         """Check if PyPNM server is reachable."""
         try:
