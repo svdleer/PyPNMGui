@@ -1343,6 +1343,28 @@ createApp({
             return classes[level] || '';
         },
         
+        // ============== Power Level Classes ==============
+        
+        getDsPowerClass(power) {
+            // Downstream power: ideal range is -7 to +7 dBmV
+            // Warning: -10 to -7 or +7 to +10
+            // Danger: below -10 or above +10
+            if (power === null || power === undefined) return 'text-muted';
+            if (power < -10 || power > 10) return 'text-danger fw-bold';
+            if (power < -7 || power > 7) return 'text-warning';
+            return 'text-success';
+        },
+        
+        getUsPowerClass(power) {
+            // Upstream TX power: ideal range is 35 to 49 dBmV
+            // Warning: 49-51 or 33-35
+            // Danger: above 51 or below 33
+            if (power === null || power === undefined) return 'text-muted';
+            if (power > 51 || power < 33) return 'text-danger fw-bold';
+            if (power > 49 || power < 35) return 'text-warning';
+            return 'text-success';
+        },
+        
         // ============== Notifications ==============
         
         showSuccess(title, text) {
