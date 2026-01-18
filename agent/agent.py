@@ -621,6 +621,13 @@ class PyPNMAgent:
         # OFDM capture capabilities (requires PyPNM integration)
         caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer', 'pnm_set_tftp'])
         
+        # Upstream PNM capabilities (CMTS-side measurements)
+        if self.config.cmts_snmp_direct:
+            caps.extend([
+                'pnm_utsc_configure', 'pnm_utsc_start', 'pnm_utsc_stop', 'pnm_utsc_status',
+                'pnm_us_rxmer_start', 'pnm_us_rxmer_status', 'pnm_us_get_interfaces'
+            ])
+        
         return caps
     
     def _handle_command(self, ws, data: dict):
