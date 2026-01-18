@@ -1235,3 +1235,133 @@ def get_us_rxmer_status(mac_address):
     except Exception as e:
         logger.error(f"Get US RxMER status failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/data/<mac_address>', methods=['POST'])
+def get_utsc_data(mac_address):
+    """
+    Fetch UTSC spectrum data from TFTP server.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "rf_port_ifindex": 12345,
+        "filename": "optional",
+        "community": "optional"
+    }
+    
+    Returns spectrum data with frequencies and amplitudes for graphing.
+    """
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    rf_port_ifindex = data.get('rf_port_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip:
+        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
+    
+    try:
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability('pnm_utsc_data') if agent_manager else None
+        
+        if not agent:
+            return jsonify({"status": "error", "message": "No agent available for UTSC data"}), 503
+        
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_utsc_data',
+            params={
+                "cmts_ip": cmts_ip,
+                "rf_port_ifindex": rf_port_ifindex,
+                "filename": data.get('filename'),
+                "community": community
+            },
+            timeout=120  # File fetch may take longer
+        )
+        
+        result = agent_manager.wait_for_task(task_id, timeout=120)
+        
+        if result is None:
+            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        
+        if result.get('error'):
+            return jsonify({"status": "error", "message": result.get('error')}), 500
+        
+        task_result = result.get('result', {})
+        
+        return jsonify({
+            "success": task_result.get('success', False),
+            "mac_address": mac_address,
+            **task_result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get UTSC data failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/rxmer/data/<mac_address>', methods=['POST'])
+def get_us_rxmer_data(mac_address):
+    """
+    Fetch Upstream RxMER data from TFTP server.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 12345,
+        "filename": "optional",
+        "community": "optional"
+    }
+    
+    Returns RxMER per subcarrier for graphing.
+    """
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip:
+        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
+    
+    try:
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_data') if agent_manager else None
+        
+        if not agent:
+            return jsonify({"status": "error", "message": "No agent available for US RxMER data"}), 503
+        
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_us_rxmer_data',
+            params={
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+                "filename": data.get('filename'),
+                "community": community
+            },
+            timeout=120
+        )
+        
+        result = agent_manager.wait_for_task(task_id, timeout=120)
+        
+        if result is None:
+            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        
+        if result.get('error'):
+            return jsonify({"status": "error", "message": result.get('error')}), 500
+        
+        task_result = result.get('result', {})
+        
+        return jsonify({
+            "success": task_result.get('success', False),
+            "mac_address": mac_address,
+            **task_result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get US RxMER data failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500

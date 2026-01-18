@@ -460,8 +460,10 @@ class PyPNMAgent:
             'pnm_utsc_start': self._handle_pnm_utsc_start,
             'pnm_utsc_stop': self._handle_pnm_utsc_stop,
             'pnm_utsc_status': self._handle_pnm_utsc_status,
+            'pnm_utsc_data': self._handle_pnm_utsc_data,
             'pnm_us_rxmer_start': self._handle_pnm_us_rxmer_start,
             'pnm_us_rxmer_status': self._handle_pnm_us_rxmer_status,
+            'pnm_us_rxmer_data': self._handle_pnm_us_rxmer_data,
             'pnm_us_get_interfaces': self._handle_pnm_us_get_interfaces,
         }
     
@@ -628,8 +630,8 @@ class PyPNMAgent:
         # Upstream PNM capabilities (CMTS-side measurements)
         if self.config.cmts_snmp_direct:
             caps.extend([
-                'pnm_utsc_configure', 'pnm_utsc_start', 'pnm_utsc_stop', 'pnm_utsc_status',
-                'pnm_us_rxmer_start', 'pnm_us_rxmer_status', 'pnm_us_get_interfaces'
+                'pnm_utsc_configure', 'pnm_utsc_start', 'pnm_utsc_stop', 'pnm_utsc_status', 'pnm_utsc_data',
+                'pnm_us_rxmer_start', 'pnm_us_rxmer_status', 'pnm_us_rxmer_data', 'pnm_us_get_interfaces'
             ])
         
         return caps
@@ -1879,6 +1881,202 @@ class PyPNMAgent:
             
         except Exception as e:
             self.logger.error(f"UTSC status error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_utsc_data(self, params: dict) -> dict:
+        """Fetch and parse UTSC spectrum data from TFTP server."""
+        cmts_ip = params.get('cmts_ip')
+        rf_port_ifindex = params.get('rf_port_ifindex')
+        filename = params.get('filename', 'utsc_capture')
+        community = params.get('community') or self.config.cmts_community
+        
+        if not cmts_ip:
+            return {'success': False, 'error': 'cmts_ip required'}
+        
+        try:
+            # First try to get the filename from CMTS if not provided
+            if not filename or filename == 'utsc_capture':
+                base = '1.3.6.1.4.1.4491.2.1.27.1.3.2.1'
+                idx = f".{rf_port_ifindex}.1" if rf_port_ifindex else ".1.1"
+                result = self._query_cmts_direct(cmts_ip, f"{base}.13{idx}", community)
+                if result.get('success') and 'STRING' in result.get('output', ''):
+                    filename = result['output'].split('STRING:')[-1].strip().strip('"')
+            
+            # Construct full path on TFTP server
+            # Format: /tftpboot/pnm/utsc/<cmts_name>/<filename>
+            tftp_path = self.config.tftp_path or '/tftpboot'
+            cmts_name = cmts_ip.replace('.', '_')
+            full_path = f"{tftp_path}/pnm/utsc/{cmts_name}/{filename}"
+            
+            self.logger.info(f"Fetching UTSC data from: {full_path}")
+            
+            # Fetch file via SSH/SFTP
+            if not self.config.tftp_ssh_host:
+                return {'success': False, 'error': 'TFTP SSH not configured'}
+            
+            binary_data = self._fetch_file_via_ssh(
+                self.config.tftp_ssh_host,
+                self.config.tftp_ssh_user,
+                self.config.tftp_ssh_key,
+                full_path,
+                self.config.tftp_ssh_port
+            )
+            
+            if not binary_data:
+                return {'success': False, 'error': f'Could not fetch file: {full_path}'}
+            
+            # Parse with PyPNM CmSpectrumAnalysis
+            try:
+                from pypnm.pnm.parser.CmSpectrumAnalysis import CmSpectrumAnalysis
+                parser = CmSpectrumAnalysis(binary_data)
+                model = parser.to_model()
+                
+                # Convert to JSON-serializable format
+                spectrum_data = {
+                    'channel_id': model.channel_id,
+                    'mac_address': model.mac_address,
+                    'first_freq_hz': model.first_segment_center_frequency,
+                    'last_freq_hz': model.last_segment_center_frequency,
+                    'span_hz': model.segment_frequency_span,
+                    'num_bins': model.num_bins_per_segment,
+                    'bin_spacing_hz': model.bin_frequency_spacing,
+                    'segments': []
+                }
+                
+                # Build frequency and amplitude arrays for graphing
+                frequencies = []
+                amplitudes = []
+                
+                for seg_idx, segment in enumerate(model.amplitude_bin_segments_float):
+                    seg_center = model.first_segment_center_frequency + (seg_idx * model.segment_frequency_span)
+                    for bin_idx, amplitude in enumerate(segment):
+                        freq = seg_center - (model.segment_frequency_span / 2) + (bin_idx * model.bin_frequency_spacing)
+                        frequencies.append(freq / 1e6)  # Convert to MHz
+                        amplitudes.append(amplitude)
+                
+                spectrum_data['frequencies_mhz'] = frequencies
+                spectrum_data['amplitudes_dbmv'] = amplitudes
+                
+                return {
+                    'success': True,
+                    'data': spectrum_data
+                }
+                
+            except ImportError:
+                self.logger.warning("CmSpectrumAnalysis not available, returning raw data")
+                import base64
+                return {
+                    'success': True,
+                    'data': {
+                        'raw_data': base64.b64encode(binary_data).decode('ascii'),
+                        'file_size': len(binary_data)
+                    }
+                }
+            
+        except Exception as e:
+            self.logger.error(f"UTSC data fetch error: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return {'success': False, 'error': str(e)}
+    
+    def _fetch_file_via_ssh(self, host: str, user: str, key_file: str, remote_path: str, port: int = 22) -> bytes:
+        """Fetch a file from remote server via SSH/SFTP."""
+        if not paramiko:
+            self.logger.error("paramiko not installed")
+            return None
+        
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            connect_kwargs = {
+                'hostname': host,
+                'port': port,
+                'username': user,
+                'timeout': 30
+            }
+            
+            if key_file and os.path.exists(os.path.expanduser(key_file)):
+                connect_kwargs['key_filename'] = os.path.expanduser(key_file)
+            
+            ssh.connect(**connect_kwargs)
+            sftp = ssh.open_sftp()
+            
+            with sftp.file(remote_path, 'rb') as f:
+                data = f.read()
+            
+            sftp.close()
+            ssh.close()
+            
+            return data
+            
+        except Exception as e:
+            self.logger.error(f"SSH file fetch error: {e}")
+            return None
+    
+    def _handle_pnm_us_rxmer_data(self, params: dict) -> dict:
+        """Fetch and parse Upstream OFDMA RxMER data from TFTP server."""
+        cmts_ip = params.get('cmts_ip')
+        ofdma_ifindex = params.get('ofdma_ifindex')
+        filename = params.get('filename', 'us_rxmer')
+        community = params.get('community') or self.config.cmts_community
+        
+        if not cmts_ip:
+            return {'success': False, 'error': 'cmts_ip required'}
+        
+        try:
+            # Construct full path on TFTP server
+            tftp_path = self.config.tftp_path or '/tftpboot'
+            cmts_name = cmts_ip.replace('.', '_')
+            full_path = f"{tftp_path}/pnm/rxmer/{cmts_name}/{filename}"
+            
+            self.logger.info(f"Fetching US RxMER data from: {full_path}")
+            
+            if not self.config.tftp_ssh_host:
+                return {'success': False, 'error': 'TFTP SSH not configured'}
+            
+            binary_data = self._fetch_file_via_ssh(
+                self.config.tftp_ssh_host,
+                self.config.tftp_ssh_user,
+                self.config.tftp_ssh_key,
+                full_path,
+                self.config.tftp_ssh_port
+            )
+            
+            if not binary_data:
+                return {'success': False, 'error': f'Could not fetch file: {full_path}'}
+            
+            # Parse the RxMER data - usually simple binary format
+            # Each value is typically a 2-byte signed integer representing dB * 10
+            import struct
+            rxmer_values = []
+            subcarriers = []
+            
+            # Skip header if present (check file type byte)
+            offset = 0
+            if len(binary_data) > 4 and binary_data[0:2] == b'PM':  # PNM header
+                # Skip PNM header - typically 20+ bytes
+                offset = 24  # Adjust based on actual header size
+            
+            idx = 0
+            while offset + 2 <= len(binary_data):
+                val = struct.unpack('>h', binary_data[offset:offset+2])[0]
+                rxmer_values.append(val / 10.0)  # Convert to dB
+                subcarriers.append(idx)
+                idx += 1
+                offset += 2
+            
+            return {
+                'success': True,
+                'data': {
+                    'subcarriers': subcarriers,
+                    'rxmer_values': rxmer_values,
+                    'ofdma_ifindex': ofdma_ifindex
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"US RxMER data fetch error: {e}")
             return {'success': False, 'error': str(e)}
     
     def _handle_pnm_us_rxmer_start(self, params: dict) -> dict:

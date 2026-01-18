@@ -76,6 +76,10 @@ createApp({
             runningUsRxmer: false,
             utscStatus: null,
             usRxmerStatus: null,
+            utscSpectrumData: null,
+            usRxmerSpectrumData: null,
+            utscChartInstance: null,
+            usRxmerChartInstance: null,
             
             // Housekeeping
             housekeepingDays: 7,
@@ -796,7 +800,9 @@ createApp({
                 
                 if (result.is_ready) {
                     this.runningUtsc = false;
-                    this.$toast?.success('UTSC capture complete - check /pnm/utsc on CMTS');
+                    this.$toast?.success('UTSC capture complete - fetching data...');
+                    // Auto-fetch spectrum data
+                    await this.fetchUtscData();
                 } else if (result.is_error) {
                     this.runningUtsc = false;
                     this.$toast?.error('UTSC test failed');
@@ -865,7 +871,9 @@ createApp({
                 
                 if (result.is_ready) {
                     this.runningUsRxmer = false;
-                    this.$toast?.success('US RxMER complete - check /pnm/mer on CMTS');
+                    this.$toast?.success('US RxMER complete - fetching data...');
+                    // Auto-fetch RxMER data
+                    await this.fetchUsRxmerData();
                 } else if (result.is_error) {
                     this.runningUsRxmer = false;
                     this.$toast?.error('US RxMER measurement failed');
@@ -875,6 +883,206 @@ createApp({
             } catch (error) {
                 console.error('Poll US RxMER status error:', error);
                 this.runningUsRxmer = false;
+            }
+        },
+        
+        async fetchUtscData() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/utsc/data/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    this.utscSpectrumData = result.data;
+                    this.$toast?.success('UTSC spectrum data loaded');
+                    // Wait for DOM to update, then render chart
+                    this.$nextTick(() => this.renderUtscChart());
+                } else {
+                    this.$toast?.error(result.error || 'Failed to fetch UTSC data');
+                }
+            } catch (error) {
+                console.error('Fetch UTSC data error:', error);
+                this.$toast?.error('Failed to fetch UTSC data');
+            }
+        },
+        
+        async fetchUsRxmerData() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/data/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    this.usRxmerSpectrumData = result.data;
+                    this.$toast?.success('US RxMER data loaded');
+                    this.$nextTick(() => this.renderUsRxmerChart());
+                } else {
+                    this.$toast?.error(result.error || 'Failed to fetch US RxMER data');
+                }
+            } catch (error) {
+                console.error('Fetch US RxMER data error:', error);
+                this.$toast?.error('Failed to fetch US RxMER data');
+            }
+        },
+        
+        renderUtscChart() {
+            const canvas = document.getElementById('utscChart');
+            if (!canvas || !this.utscSpectrumData) return;
+            
+            // Destroy existing chart
+            if (this.utscChartInstance) {
+                this.utscChartInstance.destroy();
+            }
+            
+            const data = this.utscSpectrumData;
+            const ctx = canvas.getContext('2d');
+            
+            this.utscChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.frequencies_mhz || [],
+                    datasets: [{
+                        label: 'Power (dBmV)',
+                        data: data.amplitudes_dbmv || [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        borderWidth: 1,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Frequency (MHz)'
+                            },
+                            ticks: {
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Power (dBmV)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        title: {
+                            display: true,
+                            text: `Upstream Spectrum - Channel ${data.channel_id || 'N/A'}`
+                        }
+                    }
+                }
+            });
+        },
+        
+        renderUsRxmerChart() {
+            const canvas = document.getElementById('usRxmerChart');
+            if (!canvas || !this.usRxmerSpectrumData) return;
+            
+            if (this.usRxmerChartInstance) {
+                this.usRxmerChartInstance.destroy();
+            }
+            
+            const data = this.usRxmerSpectrumData;
+            const ctx = canvas.getContext('2d');
+            
+            this.usRxmerChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.subcarriers || [],
+                    datasets: [{
+                        label: 'RxMER (dB)',
+                        data: data.rxmer_values || [],
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        borderWidth: 1,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Subcarrier Index'
+                            },
+                            ticks: {
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'RxMER (dB)'
+                            },
+                            min: 20,
+                            max: 50
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        title: {
+                            display: true,
+                            text: `Upstream OFDMA RxMER - OFDMA ifIndex ${data.ofdma_ifindex || 'N/A'}`
+                        }
+                    }
+                }
+            });
+        },
+        
+        closeUtscSpectrum() {
+            this.utscSpectrumData = null;
+            if (this.utscChartInstance) {
+                this.utscChartInstance.destroy();
+                this.utscChartInstance = null;
+            }
+        },
+        
+        closeUsRxmerSpectrum() {
+            this.usRxmerSpectrumData = null;
+            if (this.usRxmerChartInstance) {
+                this.usRxmerChartInstance.destroy();
+                this.usRxmerChartInstance = null;
             }
         },
 
