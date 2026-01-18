@@ -891,6 +891,15 @@
                                 </div>
                             </div>
 
+                            <!-- Measurement Charts Container (for spectrum, FEC, histogram, etc.) -->
+                            <div class="col-12 mb-4" v-if="selectedMeasurementData">
+                                <div class="card shadow-sm">
+                                    <div class="card-body">
+                                        <div id="measurement-charts-container"></div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Raw Data View -->
                             <div class="col-12 mb-4" v-if="showRawData && selectedMeasurementData">
                                 <div class="card shadow-sm border-info">

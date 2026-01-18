@@ -536,6 +536,10 @@ createApp({
                 
                 console.log('=== PNM Measurement Response ===');
                 console.log('Status:', data.status);
+                console.log('Has data field:', !!data.data);
+                console.log('data.data:', data.data);
+                console.log('Measurement type:', measurementType);
+                console.log('Output type:', this.pnmOutputType);
                 console.log('Plots:', data.plots);
                 console.log('Plots count:', data.plots ? data.plots.length : 0);
                 console.log('================================');
@@ -556,11 +560,15 @@ createApp({
                         this.preEqData = data;
                     }
                     
-                    // Draw charts for JSON output
-                    if (this.pnmOutputType === 'json') {
+                    // Draw charts if we have JSON data (data.data exists) or for measurements that always have charts
+                    const hasJsonData = data.data || measurementType === 'rxmer' || measurementType === 'us_pre_eq';
+                    if (hasJsonData) {
+                        console.log('Will call drawMeasurementCharts with:', measurementType, data);
                         this.$nextTick(() => {
                             this.drawMeasurementCharts(measurementType, data);
                         });
+                    } else {
+                        console.log('Skipping chart draw - no JSON data available. Output type:', this.pnmOutputType);
                     }
                     
                     const typeNames = {
@@ -767,9 +775,16 @@ createApp({
         drawSpectrumCharts(data) {
             const container = document.getElementById('measurement-charts-container');
             
+            console.log('=== drawSpectrumCharts Debug ===');
+            console.log('data:', data);
+            console.log('data.analysis:', data.analysis);
+            
             // Extract spectrum analysis data
             const analysis = data.analysis && data.analysis.length > 0 ? data.analysis[0] : null;
+            console.log('analysis:', analysis);
+            
             if (!analysis || !analysis.signal_analysis) {
+                console.error('No spectrum analysis data found');
                 container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No spectrum analysis data available.</div>';
                 return;
             }
