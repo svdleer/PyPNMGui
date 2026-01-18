@@ -53,6 +53,25 @@ createApp({
             showRawData: false,
             selectedMeasurementData: null,
             
+            // Upstream PNM (CMTS-side)
+            utscConfig: {
+                triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
+                centerFreqMhz: 30,
+                spanMhz: 80,
+                numBins: 800,
+                rfPortIfindex: null,
+                repeatPeriodMs: 0,
+                freerunDurationMs: 1000
+            },
+            usRxmerConfig: {
+                ofdmaIfindex: null,
+                preEq: true
+            },
+            runningUtsc: false,
+            runningUsRxmer: false,
+            utscStatus: null,
+            usRxmerStatus: null,
+            
             // Housekeeping
             housekeepingDays: 7,
             housekeepingDryRun: true,
@@ -591,6 +610,215 @@ createApp({
             return this.runPnmMeasurement('constellation');
         },
         
+        // ============== Upstream PNM Methods (CMTS-side) ==============
+        
+        async configureUtsc() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                this.$toast?.error('No CMTS IP available for this modem');
+                return;
+            }
+            
+            if (!this.utscConfig.rfPortIfindex) {
+                this.$toast?.error('RF Port ifIndex is required');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/utsc/configure/${this.selectedModem.mac}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        trigger_mode: this.utscConfig.triggerMode,
+                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
+                        span_hz: this.utscConfig.spanMhz * 1000000,
+                        num_bins: this.utscConfig.numBins,
+                        output_format: 2,  // fftPower
+                        repeat_period_ms: this.utscConfig.repeatPeriodMs,
+                        freerun_duration_ms: this.utscConfig.freerunDurationMs,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    this.$toast?.success('UTSC configured successfully');
+                } else {
+                    this.$toast?.error(result.error || 'Failed to configure UTSC');
+                }
+            } catch (error) {
+                console.error('Configure UTSC error:', error);
+                this.$toast?.error('Failed to configure UTSC');
+            }
+        },
+        
+        async startUtsc() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
+                return;
+            }
+            
+            this.runningUtsc = true;
+            this.utscStatus = null;
+            
+            try {
+                // First configure, then start
+                await this.configureUtsc();
+                
+                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    this.$toast?.success('UTSC test started');
+                    // Poll for status
+                    this.pollUtscStatus();
+                } else {
+                    this.$toast?.error(result.error || 'Failed to start UTSC');
+                    this.runningUtsc = false;
+                }
+            } catch (error) {
+                console.error('Start UTSC error:', error);
+                this.$toast?.error('Failed to start UTSC');
+                this.runningUtsc = false;
+            }
+        },
+        
+        async stopUtsc() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/utsc/stop/${this.selectedModem.mac}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                this.runningUtsc = false;
+                if (result.success) {
+                    this.$toast?.success('UTSC test stopped');
+                }
+            } catch (error) {
+                console.error('Stop UTSC error:', error);
+                this.runningUtsc = false;
+            }
+        },
+        
+        async pollUtscStatus() {
+            if (!this.runningUtsc) return;
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/utsc/status/${this.selectedModem.mac}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                this.utscStatus = result;
+                
+                if (result.is_ready) {
+                    this.runningUtsc = false;
+                    this.$toast?.success('UTSC capture complete - check /pnm/utsc on CMTS');
+                } else if (result.is_error) {
+                    this.runningUtsc = false;
+                    this.$toast?.error('UTSC test failed');
+                } else if (result.is_busy) {
+                    // Continue polling
+                    setTimeout(() => this.pollUtscStatus(), 2000);
+                }
+            } catch (error) {
+                console.error('Poll UTSC status error:', error);
+                this.runningUtsc = false;
+            }
+        },
+        
+        async startUsRxmer() {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.usRxmerConfig.ofdmaIfindex) {
+                this.$toast?.error('CMTS IP and OFDMA ifIndex required');
+                return;
+            }
+            
+            this.runningUsRxmer = true;
+            this.usRxmerStatus = null;
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/start/${this.selectedModem.mac}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
+                        pre_eq: this.usRxmerConfig.preEq,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    this.$toast?.success('US RxMER measurement started');
+                    this.pollUsRxmerStatus();
+                } else {
+                    this.$toast?.error(result.error || 'Failed to start US RxMER');
+                    this.runningUsRxmer = false;
+                }
+            } catch (error) {
+                console.error('Start US RxMER error:', error);
+                this.$toast?.error('Failed to start US RxMER');
+                this.runningUsRxmer = false;
+            }
+        },
+        
+        async pollUsRxmerStatus() {
+            if (!this.runningUsRxmer) return;
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/status/${this.selectedModem.mac}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
+                });
+                
+                const result = await response.json();
+                this.usRxmerStatus = result;
+                
+                if (result.is_ready) {
+                    this.runningUsRxmer = false;
+                    this.$toast?.success('US RxMER complete - check /pnm/mer on CMTS');
+                } else if (result.is_error) {
+                    this.runningUsRxmer = false;
+                    this.$toast?.error('US RxMER measurement failed');
+                } else if (result.is_busy) {
+                    setTimeout(() => this.pollUsRxmerStatus(), 2000);
+                }
+            } catch (error) {
+                console.error('Poll US RxMER status error:', error);
+                this.runningUsRxmer = false;
+            }
+        },
+
         async runPnmMeasurement(measurementType) {
             if (!this.selectedModem) return;
             

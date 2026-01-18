@@ -439,18 +439,26 @@ class PyPNMAgent:
             'cmts_get_modems': self._handle_cmts_get_modems,
             'cmts_get_modem_info': self._handle_cmts_get_modem_info,
             'enrich_modems': self._handle_enrich_modems,
-            # PNM measurement commands
+            # PNM measurement commands (downstream - on CM)
             'pnm_rxmer': self._handle_pnm_rxmer,
             'pnm_spectrum': self._handle_pnm_spectrum,
             'pnm_fec': self._handle_pnm_fec,
             'pnm_pre_eq': self._handle_pnm_pre_eq,
             'pnm_channel_info': self._handle_pnm_channel_info,
             'pnm_event_log': self._handle_pnm_event_log,
-            # OFDM capture commands
+            # OFDM capture commands (downstream - on CM)
             'pnm_ofdm_channels': self._handle_pnm_ofdm_channels,
             'pnm_ofdm_capture': self._handle_pnm_ofdm_capture,
             'pnm_ofdm_rxmer': self._handle_pnm_ofdm_rxmer,
             'pnm_set_tftp': self._handle_pnm_set_tftp,
+            # Upstream PNM commands (on CMTS)
+            'pnm_utsc_configure': self._handle_pnm_utsc_configure,
+            'pnm_utsc_start': self._handle_pnm_utsc_start,
+            'pnm_utsc_stop': self._handle_pnm_utsc_stop,
+            'pnm_utsc_status': self._handle_pnm_utsc_status,
+            'pnm_us_rxmer_start': self._handle_pnm_us_rxmer_start,
+            'pnm_us_rxmer_status': self._handle_pnm_us_rxmer_status,
+            'pnm_us_get_interfaces': self._handle_pnm_us_get_interfaces,
         }
     
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
@@ -1551,6 +1559,408 @@ class PyPNMAgent:
                 
         except Exception as e:
             self.logger.error(f"Set TFTP error: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # ============== Upstream PNM Handlers (CMTS-side) ==============
+    
+    def _query_cmts_direct(self, cmts_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+        """Query CMTS directly via SNMP (not through cm_proxy)."""
+        try:
+            cmd = 'snmpwalk' if walk else 'snmpget'
+            full_cmd = f"{cmd} -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid}"
+            
+            self.logger.info(f"CMTS SNMP: {cmd} {cmts_ip} {oid}")
+            result = subprocess.run(
+                full_cmd.split(),
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                return {'success': False, 'error': result.stderr or 'SNMP query failed'}
+            
+            return {'success': True, 'output': result.stdout}
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'SNMP timeout'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _set_cmts_direct(self, cmts_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
+        """Set SNMP value on CMTS directly."""
+        try:
+            full_cmd = f"snmpset -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid} {value_type} {value}"
+            
+            self.logger.info(f"CMTS SNMP SET: {cmts_ip} {oid} = {value}")
+            result = subprocess.run(
+                full_cmd.split(),
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                return {'success': False, 'error': result.stderr or 'SNMP set failed'}
+            
+            return {'success': True, 'output': result.stdout}
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'SNMP timeout'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_us_get_interfaces(self, params: dict) -> dict:
+        """Get upstream interface information from CMTS for a specific modem."""
+        cmts_ip = params.get('cmts_ip')
+        cm_mac = params.get('cm_mac_address')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip:
+            return {'success': False, 'error': 'cmts_ip required'}
+        
+        try:
+            # Get upstream RF ports (ifTable for US ports)
+            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
+            OID_IF_TYPE = '1.3.6.1.2.1.2.2.1.3'   # ifType
+            
+            # Query upstream OFDMA channels
+            OID_OFDMA_IFINDEX = '1.3.6.1.4.1.4491.2.1.28.1.14.1.1'  # docsIf31CmtsUsOfdmaChannelIfIndex
+            OID_OFDMA_CENTER_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.14.1.3'  # CenterFrequency
+            OID_OFDMA_SUBCARRIER_SPACING = '1.3.6.1.4.1.4491.2.1.28.1.14.1.4'  # SubcarrierSpacing
+            
+            # Get OFDMA channels
+            result = self._query_cmts_direct(cmts_ip, OID_OFDMA_IFINDEX, community, walk=True)
+            
+            ofdma_channels = []
+            if result.get('success'):
+                for line in result.get('output', '').split('\n'):
+                    if '=' in line and 'INTEGER' in line:
+                        try:
+                            parts = line.split('=')
+                            idx = parts[0].strip().split('.')[-1]
+                            ifindex = int(parts[1].split(':')[-1].strip())
+                            ofdma_channels.append({
+                                'index': idx,
+                                'ifindex': ifindex
+                            })
+                        except:
+                            pass
+            
+            # Get SC-QAM upstream channels
+            OID_US_CHANNEL = '1.3.6.1.2.1.10.127.1.1.2.1.1'  # docsIfUpChannelId
+            OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'     # docsIfUpChannelFrequency
+            
+            result = self._query_cmts_direct(cmts_ip, OID_US_CHANNEL, community, walk=True)
+            
+            scqam_channels = []
+            if result.get('success'):
+                for line in result.get('output', '').split('\n'):
+                    if '=' in line and 'INTEGER' in line:
+                        try:
+                            parts = line.split('=')
+                            ifindex = int(parts[0].strip().split('.')[-1])
+                            channel_id = int(parts[1].split(':')[-1].strip())
+                            scqam_channels.append({
+                                'ifindex': ifindex,
+                                'channel_id': channel_id
+                            })
+                        except:
+                            pass
+            
+            # If we have a CM MAC, get its TCS (Transmission Channel Set)
+            cm_tcs = None
+            if cm_mac:
+                # docsIf3CmtsCmUsStatusTable shows which US channels a CM uses
+                OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4'
+                # TODO: Query modem's specific US channel assignments
+            
+            return {
+                'success': True,
+                'cmts_ip': cmts_ip,
+                'ofdma_channels': ofdma_channels,
+                'scqam_channels': scqam_channels,
+                'cm_mac': cm_mac,
+                'cm_tcs': cm_tcs
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Get US interfaces error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_utsc_configure(self, params: dict) -> dict:
+        """Configure UTSC test parameters on CMTS."""
+        cmts_ip = params.get('cmts_ip')
+        rf_port_ifindex = params.get('rf_port_ifindex')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip or not rf_port_ifindex:
+            return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
+        
+        try:
+            # UTSC OIDs (with ifIndex suffix)
+            base = '1.3.6.1.4.1.4491.2.1.27.1.3.1.1'  # docsPnmCmtsUtscCfgTable
+            idx = f".{rf_port_ifindex}.1"  # ifIndex.cfgIndex
+            
+            # Set trigger mode
+            trigger_mode = params.get('trigger_mode', 2)  # Default: FreeRunning
+            result = self._set_cmts_direct(cmts_ip, f"{base}.3{idx}", str(trigger_mode), 'i', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set trigger mode: {result.get('error')}"}
+            
+            # Set center frequency (in Hz)
+            center_freq = params.get('center_freq_hz', 30000000)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.8{idx}", str(center_freq), 'u', community)
+            if not result.get('success'):
+                self.logger.warning(f"Failed to set center freq: {result.get('error')}")
+            
+            # Set span (in Hz)
+            span = params.get('span_hz', 80000000)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.9{idx}", str(span), 'u', community)
+            if not result.get('success'):
+                self.logger.warning(f"Failed to set span: {result.get('error')}")
+            
+            # Set number of bins
+            num_bins = params.get('num_bins', 800)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.10{idx}", str(num_bins), 'u', community)
+            if not result.get('success'):
+                self.logger.warning(f"Failed to set num_bins: {result.get('error')}")
+            
+            # Set output format (2 = fftPower)
+            output_format = params.get('output_format', 2)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.17{idx}", str(output_format), 'i', community)
+            if not result.get('success'):
+                self.logger.warning(f"Failed to set output format: {result.get('error')}")
+            
+            # Set filename
+            filename = params.get('filename', 'utsc_capture')
+            result = self._set_cmts_direct(cmts_ip, f"{base}.13{idx}", filename, 's', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
+            
+            # For CM MAC trigger mode
+            if trigger_mode == 6 and params.get('cm_mac_address'):
+                mac = params['cm_mac_address'].replace(':', '').replace('-', '').upper()
+                mac_hex = ' '.join([mac[i:i+2] for i in range(0, 12, 2)])
+                result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", mac_hex, 'x', community)
+                if not result.get('success'):
+                    self.logger.warning(f"Failed to set CM MAC: {result.get('error')}")
+                
+                # Set logical channel ifindex if provided
+                if params.get('logical_ch_ifindex'):
+                    result = self._set_cmts_direct(cmts_ip, f"{base}.2{idx}", 
+                                                   str(params['logical_ch_ifindex']), 'i', community)
+            
+            # For FreeRunning mode, set repeat period and duration
+            if trigger_mode == 2:
+                repeat_period = params.get('repeat_period_ms', 0)
+                result = self._set_cmts_direct(cmts_ip, f"{base}.18{idx}", str(repeat_period), 'u', community)
+                
+                freerun_duration = params.get('freerun_duration_ms', 1000)
+                result = self._set_cmts_direct(cmts_ip, f"{base}.19{idx}", str(freerun_duration), 'u', community)
+            
+            return {
+                'success': True,
+                'message': 'UTSC configured',
+                'rf_port_ifindex': rf_port_ifindex,
+                'trigger_mode': trigger_mode,
+                'filename': filename
+            }
+            
+        except Exception as e:
+            self.logger.error(f"UTSC configure error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_utsc_start(self, params: dict) -> dict:
+        """Start UTSC test (set InitiateTest to true)."""
+        cmts_ip = params.get('cmts_ip')
+        rf_port_ifindex = params.get('rf_port_ifindex')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip or not rf_port_ifindex:
+            return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
+        
+        try:
+            # docsPnmCmtsUtscCtrlInitiateTest
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.2.1.1.{rf_port_ifindex}.1"
+            
+            result = self._set_cmts_direct(cmts_ip, oid, '1', 'i', community)  # 1 = true
+            
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to start UTSC: {result.get('error')}"}
+            
+            return {
+                'success': True,
+                'message': 'UTSC test started',
+                'rf_port_ifindex': rf_port_ifindex
+            }
+            
+        except Exception as e:
+            self.logger.error(f"UTSC start error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_utsc_stop(self, params: dict) -> dict:
+        """Stop UTSC test (set InitiateTest to false)."""
+        cmts_ip = params.get('cmts_ip')
+        rf_port_ifindex = params.get('rf_port_ifindex')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip or not rf_port_ifindex:
+            return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
+        
+        try:
+            # docsPnmCmtsUtscCtrlInitiateTest
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.2.1.1.{rf_port_ifindex}.1"
+            
+            result = self._set_cmts_direct(cmts_ip, oid, '2', 'i', community)  # 2 = false
+            
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to stop UTSC: {result.get('error')}"}
+            
+            return {
+                'success': True,
+                'message': 'UTSC test stopped',
+                'rf_port_ifindex': rf_port_ifindex
+            }
+            
+        except Exception as e:
+            self.logger.error(f"UTSC stop error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_utsc_status(self, params: dict) -> dict:
+        """Get UTSC test status."""
+        cmts_ip = params.get('cmts_ip')
+        rf_port_ifindex = params.get('rf_port_ifindex')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip or not rf_port_ifindex:
+            return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
+        
+        try:
+            # docsPnmCmtsUtscStatusMeasStatus
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.3.1.1.{rf_port_ifindex}.1"
+            
+            result = self._query_cmts_direct(cmts_ip, oid, community, walk=False)
+            
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to get UTSC status: {result.get('error')}"}
+            
+            # Parse status value
+            status_value = 1  # other
+            status_name = 'unknown'
+            output = result.get('output', '')
+            if 'INTEGER' in output:
+                try:
+                    status_value = int(output.split(':')[-1].strip().split('(')[0])
+                    status_names = {1: 'other', 2: 'inactive', 3: 'busy', 4: 'sampleReady', 
+                                    5: 'error', 6: 'resourceUnavailable', 7: 'sampleTruncated'}
+                    status_name = status_names.get(status_value, 'unknown')
+                except:
+                    pass
+            
+            return {
+                'success': True,
+                'rf_port_ifindex': rf_port_ifindex,
+                'meas_status': status_value,
+                'meas_status_name': status_name,
+                'is_ready': status_value == 4,
+                'is_busy': status_value == 3,
+                'is_error': status_value == 5
+            }
+            
+        except Exception as e:
+            self.logger.error(f"UTSC status error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_us_rxmer_start(self, params: dict) -> dict:
+        """Start Upstream OFDMA RxMER measurement on CMTS."""
+        cmts_ip = params.get('cmts_ip')
+        ofdma_ifindex = params.get('ofdma_ifindex')
+        cm_mac = params.get('cm_mac_address')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip or not ofdma_ifindex or not cm_mac:
+            return {'success': False, 'error': 'cmts_ip, ofdma_ifindex, and cm_mac_address required'}
+        
+        try:
+            # docsPnmCmtsUsOfdmaRxMerTable OIDs
+            base = '1.3.6.1.4.1.4491.2.1.27.1.3.8.1'
+            idx = f".{ofdma_ifindex}"
+            
+            # Set filename first
+            filename = params.get('filename', 'us_rxmer')
+            result = self._set_cmts_direct(cmts_ip, f"{base}.5{idx}", filename, 's', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
+            
+            # Set CM MAC address
+            mac = cm_mac.replace(':', '').replace('-', '').upper()
+            mac_hex = ' '.join([mac[i:i+2] for i in range(0, 12, 2)])
+            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", mac_hex, 'x', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set CM MAC: {result.get('error')}"}
+            
+            # Set pre-equalization option
+            pre_eq = 1 if params.get('pre_eq', True) else 2  # 1=true, 2=false
+            result = self._set_cmts_direct(cmts_ip, f"{base}.2{idx}", str(pre_eq), 'i', community)
+            
+            # Enable measurement (1 = true)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.1{idx}", '1', 'i', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to start US RxMER: {result.get('error')}"}
+            
+            return {
+                'success': True,
+                'message': 'US OFDMA RxMER measurement started',
+                'ofdma_ifindex': ofdma_ifindex,
+                'cm_mac': cm_mac,
+                'filename': filename
+            }
+            
+        except Exception as e:
+            self.logger.error(f"US RxMER start error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_pnm_us_rxmer_status(self, params: dict) -> dict:
+        """Get Upstream RxMER measurement status."""
+        cmts_ip = params.get('cmts_ip')
+        ofdma_ifindex = params.get('ofdma_ifindex')
+        community = params.get('community', 'Z1gg0@LL')
+        
+        if not cmts_ip or not ofdma_ifindex:
+            return {'success': False, 'error': 'cmts_ip and ofdma_ifindex required'}
+        
+        try:
+            # docsPnmCmtsUsOfdmaRxMerMeasStatus
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.8.1.4.{ofdma_ifindex}"
+            
+            result = self._query_cmts_direct(cmts_ip, oid, community, walk=False)
+            
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to get status: {result.get('error')}"}
+            
+            # Parse status value
+            status_value = 1
+            status_name = 'unknown'
+            output = result.get('output', '')
+            if 'INTEGER' in output:
+                try:
+                    status_value = int(output.split(':')[-1].strip().split('(')[0])
+                    status_names = {1: 'other', 2: 'inactive', 3: 'busy', 4: 'sampleReady', 5: 'error'}
+                    status_name = status_names.get(status_value, 'unknown')
+                except:
+                    pass
+            
+            return {
+                'success': True,
+                'ofdma_ifindex': ofdma_ifindex,
+                'meas_status': status_value,
+                'meas_status_name': status_name,
+                'is_ready': status_value == 4,
+                'is_busy': status_value == 3,
+                'is_error': status_value == 5
+            }
+            
+        except Exception as e:
+            self.logger.error(f"US RxMER status error: {e}")
             return {'success': False, 'error': str(e)}
 
     def _handle_cmts_get_modems(self, params: dict) -> dict:

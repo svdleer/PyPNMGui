@@ -800,3 +800,314 @@ def get_plots(mac_address):
         "count": len(plots),
         "plots": plots
     })
+
+
+# ============== Upstream PNM Routes ==============
+
+@pypnm_bp.route('/upstream/interfaces/<mac_address>', methods=['POST'])
+def get_upstream_interfaces(mac_address):
+    """
+    Get upstream interface information for a modem from CMTS.
+    Returns OFDMA channels and SC-QAM channels available.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "community": "optional"
+    }
+    """
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip:
+        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_us_get_interfaces",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "cm_mac_address": mac_address,
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0,
+            "mac_address": mac_address,
+            "cmts_ip": cmts_ip,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get upstream interfaces failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/configure/<mac_address>', methods=['POST'])
+def configure_utsc(mac_address):
+    """
+    Configure UTSC (Upstream Triggered Spectrum Capture) test.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "rf_port_ifindex": 12345,
+        "trigger_mode": 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
+        "center_freq_hz": 30000000,
+        "span_hz": 80000000,
+        "num_bins": 800,
+        "output_format": 2,  // 2=fftPower
+        "filename": "utsc_capture",
+        "repeat_period_ms": 0,  // 0=single, >0=repeat
+        "freerun_duration_ms": 1000,
+        "logical_ch_ifindex": null,  // For IdleSID/CM_MAC
+        "community": "optional"
+    }
+    """
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    rf_port_ifindex = data.get('rf_port_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip or not rf_port_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_utsc_configure",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "rf_port_ifindex": rf_port_ifindex,
+                "trigger_mode": data.get('trigger_mode', 2),
+                "center_freq_hz": data.get('center_freq_hz', 30000000),
+                "span_hz": data.get('span_hz', 80000000),
+                "num_bins": data.get('num_bins', 800),
+                "output_format": data.get('output_format', 2),
+                "filename": data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
+                "repeat_period_ms": data.get('repeat_period_ms', 0),
+                "freerun_duration_ms": data.get('freerun_duration_ms', 1000),
+                "cm_mac_address": mac_address if data.get('trigger_mode') == 6 else None,
+                "logical_ch_ifindex": data.get('logical_ch_ifindex'),
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0 if result.get('success') else 1,
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Configure UTSC failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/start/<mac_address>', methods=['POST'])
+def start_utsc(mac_address):
+    """
+    Start UTSC test on CMTS.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "rf_port_ifindex": 12345,
+        "community": "optional"
+    }
+    """
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    rf_port_ifindex = data.get('rf_port_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip or not rf_port_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_utsc_start",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "rf_port_ifindex": rf_port_ifindex,
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0 if result.get('success') else 1,
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Start UTSC failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/stop/<mac_address>', methods=['POST'])
+def stop_utsc(mac_address):
+    """Stop UTSC test on CMTS."""
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    rf_port_ifindex = data.get('rf_port_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip or not rf_port_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_utsc_stop",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "rf_port_ifindex": rf_port_ifindex,
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0 if result.get('success') else 1,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Stop UTSC failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/status/<mac_address>', methods=['POST'])
+def get_utsc_status(mac_address):
+    """
+    Get UTSC test status from CMTS.
+    
+    Returns:
+    - meas_status: 1=other, 2=inactive, 3=busy, 4=sampleReady, 5=error
+    """
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    rf_port_ifindex = data.get('rf_port_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip or not rf_port_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_utsc_status",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "rf_port_ifindex": rf_port_ifindex,
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0 if result.get('success') else 1,
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get UTSC status failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/rxmer/start/<mac_address>', methods=['POST'])
+def start_us_rxmer(mac_address):
+    """
+    Start Upstream OFDMA RxMER measurement on CMTS.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 12345,
+        "pre_eq": true,
+        "filename": "optional",
+        "community": "optional"
+    }
+    """
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_us_rxmer_start",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+                "cm_mac_address": mac_address,
+                "pre_eq": data.get('pre_eq', True),
+                "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0 if result.get('success') else 1,
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Start US RxMER failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/rxmer/status/<mac_address>', methods=['POST'])
+def get_us_rxmer_status(mac_address):
+    """Get Upstream RxMER measurement status."""
+    from app.core.agent_manager import AgentManager
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
+    
+    try:
+        agent_manager = AgentManager.get_instance()
+        result = agent_manager.send_request({
+            "action": "pnm_us_rxmer_status",
+            "params": {
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+                "community": community
+            }
+        })
+        
+        return jsonify({
+            "status": 0 if result.get('success') else 1,
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get US RxMER status failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
