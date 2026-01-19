@@ -57,7 +57,9 @@ createApp({
             upstreamInterfaces: {
                 loading: false,
                 scqamChannels: [],   // SC-QAM upstream channels [{ifindex, channel_id, frequency_mhz}]
-                rfPorts: []    // us-conn RF ports for UTSC [{ifindex, description}]
+                rfPorts: [],    // us-conn RF ports for UTSC [{ifindex, description}]
+                allRfPorts: [],  // All us-conn RF ports
+                modemRfPort: null  // Detected RF port for the modem
             },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
