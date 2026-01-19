@@ -1213,7 +1213,7 @@ def get_us_rxmer_status(mac_address):
 @pypnm_bp.route('/upstream/utsc/data/<mac_address>', methods=['POST'])
 def get_utsc_data(mac_address):
     """
-    Fetch UTSC spectrum data from TFTP server.
+    Fetch UTSC spectrum data from TFTP server (local filesystem access).
     
     POST body:
     {
@@ -1225,53 +1225,61 @@ def get_utsc_data(mac_address):
     
     Returns spectrum data with frequencies and amplitudes for graphing.
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    import glob
+    import os
+    from pypnm.pnm.parser.CmSpectrumAnalysis import CmSpectrumAnalysis
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    filename_base = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_data') if agent_manager else None
+        # TFTP files are mounted at /var/lib/tftpboot
+        tftp_base = '/var/lib/tftpboot'
         
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for UTSC data"}), 503
+        # Find the most recent UTSC file matching the pattern
+        pattern = f"{tftp_base}/{filename_base}_*"
+        files = sorted(glob.glob(pattern), reverse=True)
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_utsc_data',
-            params={
-                "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
-                "filename": data.get('filename'),
-                "community": community
-            },
-            timeout=120  # File fetch may take longer
-        )
+        if not files:
+            return jsonify({
+                "success": False,
+                "message": f"No UTSC files found matching {filename_base}_*"
+            }), 404
         
-        result = agent_manager.wait_for_task(task_id, timeout=120)
+        # Get the most recent file
+        latest_file = files[0]
+        logger.info(f"Reading UTSC file: {latest_file}")
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        # Read and parse the binary file
+        with open(latest_file, 'rb') as f:
+            binary_data = f.read()
         
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
+        # Parse with PyPNM
+        parser = CmSpectrumAnalysis(binary_data)
+        model = parser.to_model()
         
-        task_result = result.get('result', {})
+        # Convert to JSON-serializable format
+        spectrum_data = {
+            'filename': os.path.basename(latest_file),
+            'channel_id': model.channel_id,
+            'mac_address': model.mac_address,
+            'first_freq_hz': model.first_segment_center_frequency,
+            'frequencies': model.frequencies,
+            'amplitudes': model.amplitudes
+        }
         
         return jsonify({
-            "success": task_result.get('success', False),
+            "success": True,
             "mac_address": mac_address,
-            **task_result
+            "data": spectrum_data
         })
         
     except Exception as e:
-        logger.error(f"Get UTSC data failed: {e}")
+        logger.error(f"Get UTSC data failed: {e}", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
