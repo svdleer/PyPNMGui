@@ -729,10 +729,8 @@ createApp({
         },
         
         async startUtsc() {
-            console.log('startUtsc called, selectedModem:', this.selectedModem);
-            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+            if (!this.selectedModem) {
                 this.$toast?.warning('Please select a modem first');
-                console.error('Missing CMTS IP. selectedModem:', this.selectedModem);
                 return;
             }
             if (!this.utscConfig.rfPortIfindex) {
@@ -740,15 +738,15 @@ createApp({
                 return;
             }
             
+            // Get CMTS IP from modem or fallback to selectedCmts
+            const cmtsIp = this.selectedModem.cmts_ip || this.selectedCmts;
+            if (!cmtsIp) {
+                this.$toast?.error('CMTS IP not available');
+                return;
+            }
+            
             this.runningUtsc = true;
             this.utscStatus = null;
-            
-            console.log('Starting UTSC with:', {
-                mac: this.selectedModem.mac_address,
-                cmts_ip: this.selectedModem.cmts_ip,
-                rf_port: this.utscConfig.rfPortIfindex,
-                community: this.selectedModem.cmts_community
-            });
             
             try {
                 // Show progress message
@@ -761,7 +759,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
                         tftp_ip: this.selectedModem.tftp_ip
