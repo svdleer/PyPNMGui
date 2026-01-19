@@ -1640,19 +1640,33 @@ class PyPNMAgent:
             scqam_channels = []  # us-conn RF ports for SC-QAM UTSC
             
             if result.get('success'):
-                for line in result.get('output', '').split('\n'):
+                output = result.get('output', '')
+                self.logger.info(f"ifDescr output length: {len(output)} chars, lines: {len(output.split(chr(10)))}")
+                
+                for line in output.split('\n'):
                     if '=' not in line:
                         continue
                     try:
-                        parts = line.split('=')
-                        ifindex = int(parts[0].strip().split('.')[-1])
-                        descr = parts[1].split(':', 1)[-1].strip().strip('"')
+                        parts = line.split('=', 1)
+                        # Get ifIndex from OID
+                        oid_part = parts[0].strip()
+                        ifindex = int(oid_part.split('.')[-1])
+                        
+                        # Get description from value (handle "STRING: value" format)
+                        value_part = parts[1].strip()
+                        if ':' in value_part:
+                            descr = value_part.split(':', 1)[-1].strip().strip('"')
+                        else:
+                            descr = value_part.strip().strip('"')
                         
                         # OFDMA upstream channels (cable-us-ofdma X/ofd/Y.0)
-                        if 'cable-us-ofdma' in descr.lower() and '.0' in descr:
+                        if 'cable-us-ofdma' in descr.lower():
                             # Parse channel from "cable-us-ofdma 1/ofd/0.0"
-                            match = descr.split('/')[-1].replace('.0', '')
-                            channel_id = int(match) if match.isdigit() else 0
+                            try:
+                                match = descr.split('/')[-1].replace('.0', '')
+                                channel_id = int(match) if match.isdigit() else 0
+                            except:
+                                channel_id = 0
                             ofdma_channels.append({
                                 'ifindex': ifindex,
                                 'channel_id': channel_id,
@@ -1661,13 +1675,19 @@ class PyPNMAgent:
                         
                         # us-conn RF ports (for SC-QAM UTSC)
                         elif 'us-conn' in descr.lower():
-                            channel_id = int(descr.split('us-conn')[-1].strip())
+                            try:
+                                channel_id = int(descr.split('us-conn')[-1].strip())
+                            except:
+                                channel_id = 0
                             scqam_channels.append({
                                 'ifindex': ifindex,
                                 'channel_id': channel_id,
                                 'description': descr
                             })
-                    except:
+                    except Exception as e:
+                        pass
+                
+                self.logger.info(f"Found {len(ofdma_channels)} OFDMA channels, {len(scqam_channels)} us-conn ports")
                         pass
             
             # Find modem's upstream channels if CM MAC provided
