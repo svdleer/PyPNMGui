@@ -1631,64 +1631,91 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            # Get upstream RF ports (ifTable for US ports)
-            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
-            OID_IF_TYPE = '1.3.6.1.2.1.2.2.1.3'   # ifType
-            
-            # Query upstream OFDMA channels
-            OID_OFDMA_IFINDEX = '1.3.6.1.4.1.4491.2.1.28.1.14.1.1'  # docsIf31CmtsUsOfdmaChannelIfIndex
-            OID_OFDMA_CENTER_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.14.1.3'  # CenterFrequency
-            OID_OFDMA_SUBCARRIER_SPACING = '1.3.6.1.4.1.4491.2.1.28.1.14.1.4'  # SubcarrierSpacing
-            
-            # Get OFDMA channels
-            result = self._query_cmts_direct(cmts_ip, OID_OFDMA_IFINDEX, community, walk=True)
-            
-            ofdma_channels = []
-            if result.get('success'):
-                for line in result.get('output', '').split('\n'):
-                    if '=' in line and 'INTEGER' in line:
-                        try:
-                            parts = line.split('=')
-                            idx = parts[0].strip().split('.')[-1]
-                            ifindex = int(parts[1].split(':')[-1].strip())
-                            ofdma_channels.append({
-                                'index': idx,
-                                'ifindex': ifindex
-                            })
-                        except:
-                            pass
-            
-            # Get upstream RF ports (us-conn interfaces) - these are needed for UTSC
-            # UTSC requires the us-conn ifIndex, NOT the logical channel ifIndex
             OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
             
+            # Get all interfaces to find OFDMA and us-conn ports
             result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
             
-            scqam_channels = []  # Actually us-conn RF ports for UTSC
+            ofdma_channels = []
+            scqam_channels = []  # us-conn RF ports for SC-QAM UTSC
+            
             if result.get('success'):
                 for line in result.get('output', '').split('\n'):
-                    if '=' in line and 'us-conn' in line.lower():
-                        try:
-                            parts = line.split('=')
-                            ifindex = int(parts[0].strip().split('.')[-1])
-                            # Extract the description like "MNDGT0002RPS01-0 us-conn 0"
-                            descr = parts[1].split(':', 1)[-1].strip().strip('"')
-                            # Parse channel number from "us-conn X"
+                    if '=' not in line:
+                        continue
+                    try:
+                        parts = line.split('=')
+                        ifindex = int(parts[0].strip().split('.')[-1])
+                        descr = parts[1].split(':', 1)[-1].strip().strip('"')
+                        
+                        # OFDMA upstream channels (cable-us-ofdma X/ofd/Y.0)
+                        if 'cable-us-ofdma' in descr.lower() and '.0' in descr:
+                            # Parse channel from "cable-us-ofdma 1/ofd/0.0"
+                            match = descr.split('/')[-1].replace('.0', '')
+                            channel_id = int(match) if match.isdigit() else 0
+                            ofdma_channels.append({
+                                'ifindex': ifindex,
+                                'channel_id': channel_id,
+                                'description': descr
+                            })
+                        
+                        # us-conn RF ports (for SC-QAM UTSC)
+                        elif 'us-conn' in descr.lower():
                             channel_id = int(descr.split('us-conn')[-1].strip())
                             scqam_channels.append({
                                 'ifindex': ifindex,
                                 'channel_id': channel_id,
                                 'description': descr
                             })
-                        except:
-                            pass
+                    except:
+                        pass
             
-            # If we have a CM MAC, get its TCS (Transmission Channel Set)
-            cm_tcs = None
+            # Find modem's upstream channels if CM MAC provided
+            modem_us_ifindex = None
+            modem_ofdma_ifindex = None
+            
             if cm_mac:
-                # docsIf3CmtsCmUsStatusTable shows which US channels a CM uses
-                OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4'
-                # TODO: Query modem's specific US channel assignments
+                # Step 1: Find CM index from MAC address
+                OID_CM_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
+                result = self._query_cmts_direct(cmts_ip, OID_CM_MAC, community, walk=True)
+                
+                cm_index = None
+                mac_normalized = cm_mac.lower().replace('-', ':')
+                
+                if result.get('success'):
+                    for line in result.get('output', '').split('\n'):
+                        if mac_normalized in line.lower():
+                            # Extract CM index from OID like docsIf3CmtsCmRegStatusMacAddr.57
+                            try:
+                                cm_index = int(line.split('.')[-2].split()[0])
+                            except:
+                                try:
+                                    cm_index = int(line.split('=')[0].strip().split('.')[-1])
+                                except:
+                                    pass
+                            break
+                
+                if cm_index:
+                    # Step 2: Find modem's upstream channel ifIndices
+                    OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4.1.1'  # docsIf3CmtsCmUsStatusModulationType
+                    result = self._query_cmts_direct(cmts_ip, OID_CM_US_STATUS, community, walk=True)
+                    
+                    if result.get('success'):
+                        for line in result.get('output', '').split('\n'):
+                            if f'.{cm_index}.' in line:
+                                try:
+                                    # OID format: ...1.1.cmIndex.usIfIndex
+                                    us_ifindex = int(line.split('=')[0].strip().split('.')[-1])
+                                    
+                                    # Check if this is an OFDMA channel (843087xxx range)
+                                    if us_ifindex >= 843087000 and us_ifindex < 843090000:
+                                        if not modem_ofdma_ifindex:
+                                            modem_ofdma_ifindex = us_ifindex
+                                    else:
+                                        if not modem_us_ifindex:
+                                            modem_us_ifindex = us_ifindex
+                                except:
+                                    pass
             
             return {
                 'success': True,
@@ -1696,7 +1723,8 @@ class PyPNMAgent:
                 'ofdma_channels': ofdma_channels,
                 'scqam_channels': scqam_channels,
                 'cm_mac': cm_mac,
-                'cm_tcs': cm_tcs
+                'modem_us_ifindex': modem_us_ifindex,
+                'modem_ofdma_ifindex': modem_ofdma_ifindex
             }
             
         except Exception as e:

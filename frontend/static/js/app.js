@@ -654,13 +654,20 @@ createApp({
                     this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
                     this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
                     
-                    // Auto-select first SC-QAM channel for UTSC if available
-                    if (this.upstreamInterfaces.scqamChannels.length > 0 && !this.utscConfig.rfPortIfindex) {
+                    // Auto-select modem's OFDMA channel for UTSC (preferred), or first available
+                    if (result.modem_ofdma_ifindex) {
+                        this.utscConfig.rfPortIfindex = result.modem_ofdma_ifindex;
+                        console.log('Auto-selected modem OFDMA channel:', result.modem_ofdma_ifindex);
+                    } else if (this.upstreamInterfaces.ofdmaChannels.length > 0) {
+                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
+                    } else if (this.upstreamInterfaces.scqamChannels.length > 0) {
                         this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
                     }
                     
-                    // Auto-select first OFDMA channel for RxMER if available
-                    if (this.upstreamInterfaces.ofdmaChannels.length > 0 && !this.usRxmerConfig.ofdmaIfindex) {
+                    // Auto-select modem's OFDMA channel for RxMER, or first available
+                    if (result.modem_ofdma_ifindex) {
+                        this.usRxmerConfig.ofdmaIfindex = result.modem_ofdma_ifindex;
+                    } else if (this.upstreamInterfaces.ofdmaChannels.length > 0) {
                         this.usRxmerConfig.ofdmaIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
                     }
                     
