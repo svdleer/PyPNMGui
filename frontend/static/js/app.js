@@ -654,17 +654,15 @@ createApp({
                     this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
                     this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
                     
-                    // Auto-select modem's OFDMA channel for UTSC (preferred), or first available
+                    // Auto-select modem's OFDMA channel for UTSC (PNM only works with OFDMA)
                     if (result.modem_ofdma_ifindex) {
                         this.utscConfig.rfPortIfindex = result.modem_ofdma_ifindex;
                         console.log('Auto-selected modem OFDMA channel:', result.modem_ofdma_ifindex);
                     } else if (this.upstreamInterfaces.ofdmaChannels.length > 0) {
                         this.utscConfig.rfPortIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
-                    } else if (this.upstreamInterfaces.scqamChannels.length > 0) {
-                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
                     }
                     
-                    // Auto-select modem's OFDMA channel for RxMER, or first available
+                    // Auto-select modem's OFDMA channel for RxMER
                     if (result.modem_ofdma_ifindex) {
                         this.usRxmerConfig.ofdmaIfindex = result.modem_ofdma_ifindex;
                     } else if (this.upstreamInterfaces.ofdmaChannels.length > 0) {

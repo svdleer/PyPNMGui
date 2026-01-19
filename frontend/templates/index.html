@@ -1020,19 +1020,12 @@
                                                         </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
-                                                                <label class="form-label form-label-sm">Upstream Channel</label>
+                                                                <label class="form-label form-label-sm">OFDMA Channel</label>
                                                                 <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select channel' }}</option>
-                                                                    <optgroup label="OFDMA Channels" v-if="upstreamInterfaces.ofdmaChannels.length">
-                                                                        <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="'ofdma-'+ch.ifindex" :value="ch.ifindex">
-                                                                            {{ ch.description }} ({{ ch.ifindex }})
-                                                                        </option>
-                                                                    </optgroup>
-                                                                    <optgroup label="SC-QAM / US-Conn" v-if="upstreamInterfaces.scqamChannels.length">
-                                                                        <option v-for="ch in upstreamInterfaces.scqamChannels" :key="'scqam-'+ch.ifindex" :value="ch.ifindex">
-                                                                            {{ ch.description || ('us-conn ' + ch.channel_id) }} ({{ ch.ifindex }})
-                                                                        </option>
-                                                                    </optgroup>
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
+                                                                    <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
+                                                                        {{ ch.description }} ({{ ch.ifindex }})
+                                                                    </option>
                                                                 </select>
                                                             </div>
                                                             <div class="col-6">

@@ -1696,26 +1696,28 @@ class PyPNMAgent:
                             break
                 
                 if cm_index:
-                    # Step 2: Find modem's upstream channel ifIndices
-                    OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4.1.1'  # docsIf3CmtsCmUsStatusModulationType
-                    result = self._query_cmts_direct(cmts_ip, OID_CM_US_STATUS, community, walk=True)
+                    # Step 2: Find modem's OFDMA upstream channel (PNM only works with OFDMA)
+                    # Use docsIf31CmtsCmUsOfdmaProfileTotalCodewords table
+                    OID_CM_OFDMA_STATUS = '1.3.6.1.4.1.4491.2.1.28.1.5.1.1'  # docsIf31CmtsCmUsOfdmaProfileTotalCodewords
+                    result = self._query_cmts_direct(cmts_ip, OID_CM_OFDMA_STATUS, community, walk=True)
                     
                     if result.get('success'):
                         for line in result.get('output', '').split('\n'):
                             if f'.{cm_index}.' in line:
                                 try:
-                                    # OID format: ...1.1.cmIndex.usIfIndex
-                                    us_ifindex = int(line.split('=')[0].strip().split('.')[-1])
-                                    
-                                    # Check if this is an OFDMA channel (843087xxx range)
-                                    if us_ifindex >= 843087000 and us_ifindex < 843090000:
-                                        if not modem_ofdma_ifindex:
-                                            modem_ofdma_ifindex = us_ifindex
-                                    else:
-                                        if not modem_us_ifindex:
-                                            modem_us_ifindex = us_ifindex
+                                    # OID format: ...cmIndex.ofdmaIfIndex.profileId
+                                    parts = line.split('=')[0].strip().split('.')
+                                    # Find the OFDMA ifIndex (second to last before profile)
+                                    for i, part in enumerate(parts):
+                                        if part == str(cm_index) and i+1 < len(parts):
+                                            ofdma_ifindex = int(parts[i+1])
+                                            if ofdma_ifindex >= 843087000 and ofdma_ifindex < 843100000:
+                                                modem_ofdma_ifindex = ofdma_ifindex
+                                                break
                                 except:
                                     pass
+                            if modem_ofdma_ifindex:
+                                break
             
             return {
                 'success': True,
