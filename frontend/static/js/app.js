@@ -729,11 +729,10 @@ createApp({
         },
         
         async startUtsc() {
-            console.log('startUtsc - selectedModem:', this.selectedModem);
-            console.log('startUtsc - utscConfig:', this.utscConfig);
-            
+            console.log('startUtsc called, selectedModem:', this.selectedModem);
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 this.$toast?.warning('Please select a modem first');
+                console.error('Missing CMTS IP. selectedModem:', this.selectedModem);
                 return;
             }
             if (!this.utscConfig.rfPortIfindex) {
@@ -743,6 +742,13 @@ createApp({
             
             this.runningUtsc = true;
             this.utscStatus = null;
+            
+            console.log('Starting UTSC with:', {
+                mac: this.selectedModem.mac_address,
+                cmts_ip: this.selectedModem.cmts_ip,
+                rf_port: this.utscConfig.rfPortIfindex,
+                community: this.selectedModem.cmts_community
+            });
             
             try {
                 // Show progress message
