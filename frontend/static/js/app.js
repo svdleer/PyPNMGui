@@ -289,6 +289,8 @@ createApp({
                         docsis_version: m.docsis_version || 'Unknown',
                         cmts: data.cmts_hostname,
                         cmts_ip: data.cmts_ip,  // For upstream PNM
+                        cmts_community: data.cmts_community || 'Z1gg0Sp3c1@l',  // SNMP write community for PNM
+                        tftp_ip: data.tftp_ip || data.cmts_ip,  // TFTP server IP
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || ''
                     }));
