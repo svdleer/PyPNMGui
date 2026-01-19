@@ -737,8 +737,11 @@ createApp({
             this.utscStatus = null;
             
             try {
-                // First configure, then start
-                await this.configureUtsc();
+                // Show progress message
+                this.$toast?.info('UTSC capture in progress - this may take up to 2 minutes...');
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
                 
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
@@ -746,9 +749,13 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
-                    })
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
+                        tftp_ip: this.selectedModem.tftp_ip
+                    }),
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 const result = await response.json();
                 if (result.success) {
