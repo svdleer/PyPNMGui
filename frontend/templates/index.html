@@ -1159,7 +1159,7 @@
                                                 <h6 class="text-primary border-bottom pb-2">
                                                     <i class="bi bi-arrow-down-circle me-1"></i>Downstream
                                                 </h6>
-                                                <div v-if="channelStats.downstream.scqam.count > 0" class="mb-3">
+                                                <div v-if="channelStats.downstream && channelStats.downstream.scqam && channelStats.downstream.scqam.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.downstream.scqam.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1172,7 +1172,7 @@
                                                         </small>
                                                     </div>
                                                 </div>
-                                                <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3">
+                                                <div v-if="channelStats.downstream && channelStats.downstream.ofdm && channelStats.downstream.ofdm.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.downstream.ofdm.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1193,7 +1193,7 @@
                                                 <h6 class="text-success border-bottom pb-2">
                                                     <i class="bi bi-arrow-up-circle me-1"></i>Upstream
                                                 </h6>
-                                                <div v-if="channelStats.upstream.atdma.count > 0" class="mb-3">
+                                                <div v-if="channelStats.upstream && channelStats.upstream.atdma && channelStats.upstream.atdma.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.upstream.atdma.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1206,7 +1206,7 @@
                                                         </small>
                                                     </div>
                                                 </div>
-                                                <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3">
+                                                <div v-if="channelStats.upstream && channelStats.upstream.ofdma && channelStats.upstream.ofdma.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.upstream.ofdma.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
