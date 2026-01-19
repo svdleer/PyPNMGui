@@ -1022,7 +1022,7 @@
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">RF Port (us-conn)</label>
                                                                 <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.rfPorts.length ? 'Select RF port' : 'No RF ports') }}</option>
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : ((upstreamInterfaces.rfPorts && upstreamInterfaces.rfPorts.length) ? 'Select RF port' : 'No RF ports') }}</option>
                                                                     <option v-for="port in upstreamInterfaces.rfPorts" :key="port.ifindex" :value="port.ifindex">
                                                                         {{ port.description }} ({{ port.ifindex }})
                                                                     </option>
@@ -1069,7 +1069,7 @@
                                                         <div class="mb-2">
                                                             <label class="form-label form-label-sm">OFDMA Channel</label>
                                                             <select v-model.number="usRxmerConfig.ofdmaIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
+                                                                <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : ((upstreamInterfaces.ofdmaChannels && upstreamInterfaces.ofdmaChannels.length) ? 'Select channel' : 'No OFDMA channels') }}</option>
                                                                 <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
                                                                     OFDMA {{ ch.index }} (ifIndex {{ ch.ifindex }})
                                                                 </option>
