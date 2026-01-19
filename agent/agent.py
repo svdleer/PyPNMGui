@@ -1700,25 +1700,23 @@ class PyPNMAgent:
                 
                 cm_index = None
                 mac_normalized = cm_mac.lower().replace('-', ':')
-                self.logger.info(f"Looking for CM MAC: {mac_normalized}")
+                # Create hex format for matching: "E4 57 40 F7 12 99" (uppercase with spaces)
+                mac_hex = ' '.join([b.upper() for b in mac_normalized.split(':')])
+                self.logger.info(f"Looking for CM MAC: {mac_normalized} or {mac_hex}")
                 
                 if result.get('success'):
                     output = result.get('output', '')
-                    # Also check for hex format like "e4 57 40 f7 12 99"
-                    mac_hex = ' '.join([mac_normalized.split(':')[i] for i in range(6)])
-                    self.logger.info(f"CM MAC table output first 500 chars: {output[:500]}")
                     
                     for line in output.split('\n'):
-                        line_lower = line.lower()
-                        if mac_normalized in line_lower or mac_hex in line_lower:
-                            # Extract CM index from OID like docsIf3CmtsCmRegStatusMacAddr.57
+                        # Match hex format like "Hex-STRING: E4 57 40 F7 12 99"
+                        if mac_hex in line or mac_normalized in line.lower():
+                            # Extract CM index from OID like ...2.57 = Hex-STRING
                             try:
-                                cm_index = int(line.split('.')[-2].split()[0])
+                                # OID format: iso.3.6.1.4.1.4491.2.1.20.1.3.1.2.57 = Hex-STRING: ...
+                                oid_part = line.split('=')[0].strip()
+                                cm_index = int(oid_part.split('.')[-1])
                             except:
-                                try:
-                                    cm_index = int(line.split('=')[0].strip().split('.')[-1])
-                                except:
-                                    pass
+                                pass
                             self.logger.info(f"Found CM index: {cm_index} from line: {line[:100]}")
                             break
                 
