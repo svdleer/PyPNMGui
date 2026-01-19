@@ -1038,7 +1038,7 @@
                                                                 </select>
                                                             </div>
                                                         </div>
-                                                        <div class="d-flex gap-2">
+                                                        <div class="d-flex gap-2 mb-2">
                                                             <button @click="configureUtsc" class="btn btn-sm btn-outline-secondary flex-grow-1" :disabled="runningUtsc">
                                                                 <i class="bi bi-gear me-1"></i>Configure
                                                             </button>
@@ -1049,6 +1049,18 @@
                                                             <button @click="stopUtsc" class="btn btn-sm btn-danger" :disabled="!runningUtsc">
                                                                 <i class="bi bi-stop-fill"></i>
                                                             </button>
+                                                        </div>
+                                                        <div class="d-flex gap-2 align-items-center">
+                                                            <button @click="toggleUtscLiveMode" 
+                                                                    class="btn btn-sm flex-grow-1"
+                                                                    :class="utscLiveMode ? 'btn-danger' : 'btn-outline-primary'"
+                                                                    :disabled="!utscSpectrumData">
+                                                                <i class="bi me-1" :class="utscLiveMode ? 'bi-broadcast' : 'bi-broadcast-pin'"></i>
+                                                                {{ utscLiveMode ? 'Live Mode ON' : 'Enable Live Mode' }}
+                                                            </button>
+                                                            <input v-if="utscLiveMode" type="number" v-model.number="utscRefreshRate" 
+                                                                   class="form-control form-control-sm" style="width: 80px;"
+                                                                   min="1000" max="10000" step="500" title="Refresh interval (ms)">
                                                         </div>
                                                         <div v-if="utscStatus" class="mt-2">
                                                             <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">
