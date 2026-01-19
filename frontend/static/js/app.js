@@ -1001,17 +1001,6 @@ createApp({
                 this.utscLiveInterval = null;
             }
         },
-                    this.$toast?.success('UTSC spectrum data loaded');
-                    // Wait for DOM to update, then render chart
-                    this.$nextTick(() => this.renderUtscChart());
-                } else {
-                    this.$toast?.error(result.error || 'Failed to fetch UTSC data');
-                }
-            } catch (error) {
-                console.error('Fetch UTSC data error:', error);
-                this.$toast?.error('Failed to fetch UTSC data');
-            }
-        },
         
         async fetchUsRxmerData() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
