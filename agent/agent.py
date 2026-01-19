@@ -1638,7 +1638,9 @@ class PyPNMAgent:
             OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
             
             # Get all interfaces to find OFDMA and us-conn ports
+            self.logger.info(f"Querying ifDescr table from {cmts_ip}")
             result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
+            self.logger.info(f"ifDescr query result: success={result.get('success')}, error={result.get('error')}")
             
             ofdma_channels = []
             scqam_channels = []  # us-conn RF ports for SC-QAM UTSC
