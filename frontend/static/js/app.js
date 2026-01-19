@@ -752,9 +752,15 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    this.$toast?.success('UTSC test started');
-                    // Poll for status
-                    this.pollUtscStatus();
+                    this.$toast?.success('UTSC test completed');
+                    this.runningUtsc = false;
+                    // Use the spectrum data directly from the response
+                    if (result.data && result.data.spectrum_data) {
+                        this.utscSpectrumData = result.data.spectrum_data;
+                        this.renderUtscChart();
+                    } else {
+                        this.$toast?.warning('UTSC completed but no spectrum data returned');
+                    }
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
                     this.runningUtsc = false;
