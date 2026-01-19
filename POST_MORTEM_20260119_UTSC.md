@@ -73,6 +73,15 @@ Attempted to implement UTSC (Upstream Test Signal Capture) live monitoring featu
 - **Fix:** Changed `"ipv6": tftp_ipv6 if tftp_ipv6 is not None else None` to `"ipv6": tftp_ipv6 if tftp_ipv6 else ""`
 - **Time Lost:** 30+ minutes across multiple fix attempts that got lost
 
+### 7. Wrong TFTP IP Used (FIXED BEFORE, LOST AGAIN)
+**Problem:** GUI sends CMTS IP as TFTP server instead of actual TFTP server from pypnm_system.json
+- **File:** `frontend/static/js/app.js` - startUtsc function
+- **Error:** UTSC capture fails because CMTS cannot upload files to itself
+- **Impact:** All UTSC requests return "Failed to initiate UTSC capture"
+- **Root Cause:** Frontend hardcoded `tftp_ip: selectedModem.cmts_ip` instead of using proper TFTP server
+- **Correct Value:** `172.16.6.101` (from pypnm_system.json) not `172.16.6.212` (CMTS)
+- **Time Lost:** 20+ minutes - this was already identified and fixed earlier but got lost
+
 ### 4. Agent Config Volume Empty
 **Problem:** Agent container started but config file missing
 - **Impact:** Agent crashed on startup
