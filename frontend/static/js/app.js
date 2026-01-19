@@ -762,14 +762,13 @@ createApp({
                 const result = await response.json();
                 console.log('UTSC response:', result);
                 if (result.success) {
-                    this.runningUtsc = false;
                     const filename = result.filename || 'N/A';
                     const message = result.data?.message || 'UTSC completed';
-                    this.$toast?.success(`${message} - File: ${filename} (saved to TFTP server)`);
+                    this.$toast?.info(`${message} - fetching spectrum data...`);
                     
-                    // Note: PyPNM API doesn't return spectrum data in response - it only saves to TFTP
-                    // Future: implement TFTP file retrieval and parsing
-                    console.info(`UTSC file saved to TFTP: ${filename}_*.bin`);
+                    // Wait a moment for files to be written, then fetch the data
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    await this.fetchUtscData();
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
                     this.runningUtsc = false;
@@ -915,6 +914,7 @@ createApp({
         
         async fetchUtscData() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                this.runningUtsc = false;
                 return;
             }
             
@@ -925,11 +925,12 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
                 });
                 
                 const result = await response.json();
+                console.log('UTSC data response:', result);
                 
                 if (result.success && result.data) {
                     this.utscSpectrumData = result.data;
@@ -937,11 +938,13 @@ createApp({
                     // Wait for DOM to update, then render chart
                     this.$nextTick(() => this.renderUtscChart());
                 } else {
-                    this.$toast?.error(result.error || 'Failed to fetch UTSC data');
+                    this.$toast?.error(result.message || result.error || 'Failed to fetch UTSC data');
                 }
             } catch (error) {
                 console.error('Fetch UTSC data error:', error);
                 this.$toast?.error('Failed to fetch UTSC data');
+            } finally {
+                this.runningUtsc = false;
             }
         },
         
