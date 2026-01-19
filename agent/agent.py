@@ -1583,11 +1583,13 @@ class PyPNMAgent:
             full_cmd = f"{cmd} -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid}"
             
             self.logger.info(f"CMTS SNMP: {cmd} {cmts_ip} {oid}")
+            # Use longer timeout for walks (can return 1000+ lines)
+            timeout = 120 if walk else 30
             result = subprocess.run(
                 full_cmd.split(),
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=timeout
             )
             
             if result.returncode != 0:
