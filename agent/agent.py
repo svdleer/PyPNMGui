@@ -1658,23 +1658,27 @@ class PyPNMAgent:
                         except:
                             pass
             
-            # Get SC-QAM upstream channels
-            OID_US_CHANNEL = '1.3.6.1.2.1.10.127.1.1.2.1.1'  # docsIfUpChannelId
-            OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'     # docsIfUpChannelFrequency
+            # Get upstream RF ports (us-conn interfaces) - these are needed for UTSC
+            # UTSC requires the us-conn ifIndex, NOT the logical channel ifIndex
+            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
             
-            result = self._query_cmts_direct(cmts_ip, OID_US_CHANNEL, community, walk=True)
+            result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
             
-            scqam_channels = []
+            scqam_channels = []  # Actually us-conn RF ports for UTSC
             if result.get('success'):
                 for line in result.get('output', '').split('\n'):
-                    if '=' in line and 'INTEGER' in line:
+                    if '=' in line and 'us-conn' in line.lower():
                         try:
                             parts = line.split('=')
                             ifindex = int(parts[0].strip().split('.')[-1])
-                            channel_id = int(parts[1].split(':')[-1].strip())
+                            # Extract the description like "MNDGT0002RPS01-0 us-conn 0"
+                            descr = parts[1].split(':', 1)[-1].strip().strip('"')
+                            # Parse channel number from "us-conn X"
+                            channel_id = int(descr.split('us-conn')[-1].strip())
                             scqam_channels.append({
                                 'ifindex': ifindex,
-                                'channel_id': channel_id
+                                'channel_id': channel_id,
+                                'description': descr
                             })
                         except:
                             pass

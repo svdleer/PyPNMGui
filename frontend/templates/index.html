@@ -1020,11 +1020,11 @@
                                                         </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
-                                                                <label class="form-label form-label-sm">RF Port / US Channel</label>
+                                                                <label class="form-label form-label-sm">RF Port / US Connector</label>
                                                                 <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select channel' }}</option>
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select RF port' }}</option>
                                                                     <option v-for="ch in upstreamInterfaces.scqamChannels" :key="ch.ifindex" :value="ch.ifindex">
-                                                                        Ch {{ ch.channel_id }} (ifIndex {{ ch.ifindex }})
+                                                                        {{ ch.description || ('us-conn ' + ch.channel_id) }} ({{ ch.ifindex }})
                                                                     </option>
                                                                 </select>
                                                             </div>
