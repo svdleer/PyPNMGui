@@ -1672,15 +1672,18 @@ class PyPNMAgent:
                         # OFDMA upstream channels (cable-us-ofdma X/ofd/Y.0)
                         if 'cable-us-ofdma' in descr.lower():
                             # Parse channel from "cable-us-ofdma 1/ofd/0.0"
+                            # Remove .0 suffix (logical channel indicator) for display
                             try:
                                 match = descr.split('/')[-1].replace('.0', '')
                                 channel_id = int(match) if match.isdigit() else 0
                             except:
                                 channel_id = 0
+                            # Clean description: remove .0 suffix
+                            clean_descr = descr.replace('.0', '') if descr.endswith('.0') else descr
                             ofdma_channels.append({
                                 'ifindex': ifindex,
                                 'channel_id': channel_id,
-                                'description': descr
+                                'description': clean_descr
                             })
                         
                         # us-conn RF ports (for SC-QAM UTSC)

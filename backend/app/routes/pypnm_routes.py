@@ -897,7 +897,8 @@ def get_upstream_interfaces(mac_address):
             "mac_address": mac_address,
             "cmts_ip": cmts_ip,
             "scqam_channels": task_result.get('scqam_channels', []),
-            "ofdma_channels": task_result.get('ofdma_channels', [])
+            "ofdma_channels": task_result.get('ofdma_channels', []),
+            "modem_ofdma_ifindex": task_result.get('modem_ofdma_ifindex')
         })
         
     except Exception as e:
