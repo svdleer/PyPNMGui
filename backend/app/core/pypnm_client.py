@@ -643,7 +643,7 @@ class PyPNMClient:
             },
             "tftp": {
                 "ipv4": tftp_ipv4 if tftp_ipv4 else None,
-                "ipv6": tftp_ipv6 if tftp_ipv6 else None
+                "ipv6": tftp_ipv6 if tftp_ipv6 is not None else None
             },
             "trigger": {
                 "cm_mac": cm_mac,
@@ -660,7 +660,6 @@ class PyPNMClient:
                 "output_type": output_type
             }
         }
-        
         return self._post("/docs/pnm/us/spectrumAnalyzer/getCapture", payload)
     def health_check(self) -> bool:
         """Check if PyPNM server is reachable."""
