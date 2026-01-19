@@ -932,7 +932,7 @@ def configure_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0Sp3c1@l')  # UTSC needs CMTS write community
+    community = data.get('community', 'Z1gg0@LL')  # UTSC needs CMTS write community
     tftp_ip = data.get('tftp_ip', get_default_tftp())
     
     if not cmts_ip or not rf_port_ifindex:
