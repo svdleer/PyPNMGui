@@ -1591,12 +1591,16 @@ class PyPNMAgent:
             )
             
             if result.returncode != 0:
+                self.logger.warning(f"CMTS SNMP failed rc={result.returncode}: {result.stderr[:200] if result.stderr else 'no stderr'}")
                 return {'success': False, 'error': result.stderr or 'SNMP query failed'}
             
+            self.logger.debug(f"CMTS SNMP OK: {len(result.stdout)} bytes stdout")
             return {'success': True, 'output': result.stdout}
         except subprocess.TimeoutExpired:
+            self.logger.error("CMTS SNMP timeout")
             return {'success': False, 'error': 'SNMP timeout'}
         except Exception as e:
+            self.logger.error(f"CMTS SNMP exception: {e}")
             return {'success': False, 'error': str(e)}
     
     def _set_cmts_direct(self, cmts_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
