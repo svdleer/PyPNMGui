@@ -1020,11 +1020,11 @@
                                                         </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
-                                                                <label class="form-label form-label-sm">OFDMA Channel</label>
+                                                                <label class="form-label form-label-sm">RF Port (us-conn)</label>
                                                                 <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
-                                                                    <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
-                                                                        {{ ch.description }} ({{ ch.ifindex }})
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.rfPorts.length ? 'Select RF port' : 'No RF ports') }}</option>
+                                                                    <option v-for="port in upstreamInterfaces.rfPorts" :key="port.ifindex" :value="port.ifindex">
+                                                                        {{ port.description }} ({{ port.ifindex }})
                                                                     </option>
                                                                 </select>
                                                             </div>

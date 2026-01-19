@@ -896,8 +896,7 @@ def get_upstream_interfaces(mac_address):
             "success": task_result.get('success', False),
             "mac_address": mac_address,
             "cmts_ip": cmts_ip,
-            "scqam_channels": task_result.get('scqam_channels', []),
-            "ofdma_channels": task_result.get('ofdma_channels', []),
+            "rf_ports": task_result.get('rf_ports', []),  # us-conn RF ports for UTSC
             "modem_ofdma_ifindex": task_result.get('modem_ofdma_ifindex')
         })
         

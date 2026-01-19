@@ -1628,7 +1628,7 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _handle_pnm_us_get_interfaces(self, params: dict) -> dict:
-        """Get upstream interface information from CMTS for a specific modem."""
+        """Get upstream RF port interfaces from CMTS for UTSC."""
         cmts_ip = params.get('cmts_ip')
         cm_mac = params.get('cm_mac_address')
         community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
@@ -1637,45 +1637,36 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            # Get OFDMA channels from docsIf31CmtsCmUsOfdmaChannelRxPower table
-            # This is much faster than walking entire ifDescr table
-            OID_OFDMA_RXPOWER = '1.3.6.1.4.1.4491.2.1.28.1.4.1.1'  # docsIf31CmtsCmUsOfdmaChannelRxPower
+            # UTSC requires us-conn RF port ifindexes, NOT OFDMA channel ifindexes!
+            # Query ifDescr for us-conn ports (e.g., "us-conn 0" with ifindex 1074339840)
+            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'
             
-            self.logger.info(f"Querying OFDMA channels from {cmts_ip}")
-            result = self._query_cmts_direct(cmts_ip, OID_OFDMA_RXPOWER, community, walk=True)
+            self.logger.info(f"Querying us-conn RF ports from {cmts_ip}")
+            result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
             
-            ofdma_channels = []
-            ofdma_ifindexes = set()  # Track unique ifindexes
+            rf_ports = []
             
             if result.get('success'):
                 output = result.get('output', '')
                 for line in output.split('\n'):
-                    if '=' not in line:
+                    if 'us-conn' not in line.lower():
                         continue
                     try:
-                        # OID format: ...cmIndex.ofdmaIfIndex = INTEGER: value
-                        oid_part = line.split('=')[0].strip()
-                        parts = oid_part.split('.')
-                        ofdma_ifindex = int(parts[-1])
+                        # Parse: IF-MIB::ifDescr.1074339840 = STRING: MNDGT0002RPS01-0 us-conn 0
+                        parts = line.split('=', 1)
+                        oid_part = parts[0].strip()
+                        ifindex = int(oid_part.split('.')[-1])
+                        descr = parts[1].split(':', 1)[-1].strip().strip('"')
                         
-                        if ofdma_ifindex not in ofdma_ifindexes:
-                            ofdma_ifindexes.add(ofdma_ifindex)
-                            # Generate description from ifindex (e.g., 843087883 -> ofd/4)
-                            # OFDMA ifindexes typically start at 843087875 with step of 2
-                            channel_num = (ofdma_ifindex - 843087875) // 2
-                            ofdma_channels.append({
-                                'ifindex': ofdma_ifindex,
-                                'channel_id': channel_num,
-                                'description': f'OFDMA {channel_num}'
-                            })
+                        rf_ports.append({
+                            'ifindex': ifindex,
+                            'description': descr
+                        })
                     except:
                         pass
             
-            # Sort by channel number
-            ofdma_channels.sort(key=lambda x: x['channel_id'])
-            self.logger.info(f"Found {len(ofdma_channels)} OFDMA channels")
-            
-            scqam_channels = []  # Not used for PNM
+            rf_ports.sort(key=lambda x: x['ifindex'])
+            self.logger.info(f"Found {len(rf_ports)} us-conn RF ports")
 
             # Find modem's upstream channels if CM MAC provided
             modem_us_ifindex = None
@@ -1741,8 +1732,7 @@ class PyPNMAgent:
             return {
                 'success': True,
                 'cmts_ip': cmts_ip,
-                'ofdma_channels': ofdma_channels,
-                'scqam_channels': scqam_channels,
+                'rf_ports': rf_ports,  # us-conn RF ports for UTSC
                 'cm_mac': cm_mac,
                 'modem_us_ifindex': modem_us_ifindex,
                 'modem_ofdma_ifindex': modem_ofdma_ifindex

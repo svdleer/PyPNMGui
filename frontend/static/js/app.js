@@ -57,7 +57,7 @@ createApp({
             upstreamInterfaces: {
                 loading: false,
                 scqamChannels: [],   // SC-QAM upstream channels [{ifindex, channel_id, frequency_mhz}]
-                ofdmaChannels: []    // OFDMA upstream channels [{ifindex, index}]
+                rfPorts: []    // us-conn RF ports for UTSC [{ifindex, description}]
             },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
@@ -325,7 +325,7 @@ createApp({
             this.showRawData = false;
             
             // Reset upstream interfaces
-            this.upstreamInterfaces = { loading: false, scqamChannels: [], ofdmaChannels: [] };
+            this.upstreamInterfaces = { loading: false, rfPorts: [] };
             this.utscConfig.rfPortIfindex = null;
             this.usRxmerConfig.ofdmaIfindex = null;
             
@@ -651,25 +651,15 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
-                    this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
+                    this.upstreamInterfaces.rfPorts = result.rf_ports || [];
                     
-                    // Auto-select modem's OFDMA channel for UTSC (PNM only works with OFDMA)
-                    if (result.modem_ofdma_ifindex) {
-                        this.utscConfig.rfPortIfindex = result.modem_ofdma_ifindex;
-                        console.log('Auto-selected modem OFDMA channel:', result.modem_ofdma_ifindex);
-                    } else if (this.upstreamInterfaces.ofdmaChannels.length > 0) {
-                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
+                    // Auto-select first RF port for UTSC
+                    if (this.upstreamInterfaces.rfPorts.length > 0) {
+                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.rfPorts[0].ifindex;
+                        console.log('Auto-selected RF port:', this.utscConfig.rfPortIfindex);
                     }
                     
-                    // Auto-select modem's OFDMA channel for RxMER
-                    if (result.modem_ofdma_ifindex) {
-                        this.usRxmerConfig.ofdmaIfindex = result.modem_ofdma_ifindex;
-                    } else if (this.upstreamInterfaces.ofdmaChannels.length > 0) {
-                        this.usRxmerConfig.ofdmaIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
-                    }
-                    
-                    console.log('Loaded upstream interfaces:', this.upstreamInterfaces);
+                    console.log('Loaded RF ports:', this.upstreamInterfaces.rfPorts);
                 } else {
                     console.error('Failed to load upstream interfaces:', result.error);
                 }
