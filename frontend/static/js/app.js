@@ -760,15 +760,28 @@ createApp({
                 clearTimeout(timeoutId);
                 
                 const result = await response.json();
+                console.log('UTSC response:', result);
                 if (result.success) {
-                    this.$toast?.success('UTSC test completed');
                     this.runningUtsc = false;
-                    // Use the spectrum data directly from the response
-                    if (result.data && result.data.spectrum_data) {
-                        this.utscSpectrumData = result.data.spectrum_data;
+                    // Check multiple possible data locations
+                    let spectrumData = null;
+                    if (result.data) {
+                        if (result.data.spectrum_data) {
+                            spectrumData = result.data.spectrum_data;
+                        } else if (Array.isArray(result.data)) {
+                            spectrumData = result.data;
+                        } else if (result.data.frequencies || result.data.amplitudes) {
+                            spectrumData = result.data;
+                        }
+                    }
+                    
+                    if (spectrumData) {
+                        this.$toast?.success('UTSC test completed - spectrum data received');
+                        this.utscSpectrumData = spectrumData;
                         this.renderUtscChart();
                     } else {
-                        this.$toast?.warning('UTSC completed but no spectrum data returned');
+                        console.warn('No spectrum data found in response:', result);
+                        this.$toast?.warning(`UTSC started but data format unexpected. Check console. File: ${result.filename || 'N/A'}`);
                     }
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
