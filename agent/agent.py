@@ -1700,16 +1700,17 @@ class PyPNMAgent:
             if cm_mac:
                 # Step 1: Find CM index from MAC address
                 OID_CM_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
-                result = self._query_cmts_direct(cmts_ip, OID_CM_MAC, community, walk=True)
+                cm_result = self._query_cmts_direct(cmts_ip, OID_CM_MAC, community, walk=True)
                 
                 cm_index = None
                 mac_normalized = cm_mac.lower().replace('-', ':')
                 # Create hex format for matching: "E4 57 40 F7 12 99" (uppercase with spaces)
                 mac_hex = ' '.join([b.upper() for b in mac_normalized.split(':')])
                 self.logger.info(f"Looking for CM MAC: {mac_normalized} or hex: {mac_hex}")
+                self.logger.info(f"CM query result success: {cm_result.get('success')}, has output: {'output' in cm_result}")
                 
-                if result.get('success'):
-                    output = result.get('output', '')
+                if cm_result.get('success'):
+                    output = cm_result.get('output', '')
                     self.logger.info(f"CM MAC table: {len(output)} chars, {len(output.split(chr(10)))} lines")
                     
                     for line in output.split('\n'):
@@ -1725,7 +1726,7 @@ class PyPNMAgent:
                             self.logger.info(f"Found CM index: {cm_index} from line: {line[:100]}")
                             break
                 else:
-                    self.logger.warning(f"CM MAC table query failed: {result.get('error')}")
+                    self.logger.warning(f"CM MAC table query failed: {cm_result.get('error')}")
                 
                 if cm_index:
                     # Step 2: Find modem's OFDMA upstream channel (PNM only works with OFDMA)
