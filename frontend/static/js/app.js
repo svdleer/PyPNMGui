@@ -327,7 +327,7 @@ createApp({
             this.showRawData = false;
             
             // Reset upstream interfaces
-            this.upstreamInterfaces = { loading: false, rfPorts: [] };
+            this.upstreamInterfaces = { loading: false, rfPorts: [], allRfPorts: [], modemRfPort: null };
             this.utscConfig.rfPortIfindex = null;
             this.usRxmerConfig.ofdmaIfindex = null;
             
