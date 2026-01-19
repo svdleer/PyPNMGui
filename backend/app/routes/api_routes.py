@@ -723,6 +723,8 @@ def get_cmts_modems(hostname):
             "status": "success",
             "cmts_hostname": hostname,
             "cmts_ip": cmts_ip,
+            "cmts_community": cmts.get('snmp_rw_community', 'Z1gg0Sp3c1@l'),
+            "tftp_ip": cmts.get('tftp_ip', cmts_ip),
             "cmts_vendor": cmts.get('Vendor'),
             "cmts_type": cmts.get('Type'),
             "count": task_result.get('count', 0),

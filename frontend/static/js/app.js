@@ -83,6 +83,9 @@ createApp({
             usRxmerSpectrumData: null,
             utscChartInstance: null,
             usRxmerChartInstance: null,
+            utscLiveMode: false,
+            utscLiveInterval: null,
+            utscRefreshRate: 3000,  // 3 seconds between updates
             
             // Housekeeping
             housekeepingDays: 7,
@@ -761,14 +764,16 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    this.$toast?.success('UTSC test completed');
-                    this.runningUtsc = false;
-                    // Use the spectrum data directly from the response
-                    if (result.data && result.data.spectrum_data) {
-                        this.utscSpectrumData = result.data.spectrum_data;
-                        this.renderUtscChart();
-                    } else {
-                        this.$toast?.warning('UTSC completed but no spectrum data returned');
+                    const message = result.data?.message || 'UTSC completed';
+                    this.$toast?.info(`${message} - fetching spectrum data...`);
+                    
+                    // Wait a moment for files to be written, then fetch the data
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    await this.fetchUtscData();
+                    
+                    // Suggest enabling live mode
+                    if (!this.utscLiveMode) {
+                        this.$toast?.info('💡 Tip: Enable Live Mode to continuously monitor the spectrum', { duration: 5000 });
                     }
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
@@ -915,6 +920,7 @@ createApp({
         
         async fetchUtscData() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                this.runningUtsc = false;
                 return;
             }
             
@@ -925,14 +931,69 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
                 });
                 
                 const result = await response.json();
+                console.log('UTSC data response:', result);
                 
                 if (result.success && result.data) {
                     this.utscSpectrumData = result.data;
+                    if (!this.utscLiveMode) {
+                        this.$toast?.success('UTSC spectrum data loaded');
+                    }
+                    // Wait for DOM to update, then render chart
+                    this.$nextTick(() => this.renderUtscChart());
+                } else {
+                    this.$toast?.error(result.message || result.error || 'Failed to fetch UTSC data');
+                }
+            } catch (error) {
+                console.error('Fetch UTSC data error:', error);
+                if (!this.utscLiveMode) {
+                    this.$toast?.error('Failed to fetch UTSC data');
+                }
+            } finally {
+                this.runningUtsc = false;
+            }
+        },
+        
+        toggleUtscLiveMode() {
+            this.utscLiveMode = !this.utscLiveMode;
+            
+            if (this.utscLiveMode) {
+                this.$toast?.success(`Live monitoring enabled - refreshing every ${this.utscRefreshRate/1000}s`);
+                this.startUtscLiveMonitoring();
+            } else {
+                this.$toast?.info('Live monitoring disabled');
+                this.stopUtscLiveMonitoring();
+            }
+        },
+        
+        startUtscLiveMonitoring() {
+            if (this.utscLiveInterval) {
+                clearInterval(this.utscLiveInterval);
+            }
+            
+            // Fetch immediately
+            this.fetchUtscData();
+            
+            // Then fetch at regular intervals
+            this.utscLiveInterval = setInterval(() => {
+                if (this.utscLiveMode && this.selectedModem && this.utscConfig.rfPortIfindex) {
+                    this.fetchUtscData();
+                } else {
+                    this.stopUtscLiveMonitoring();
+                }
+            }, this.utscRefreshRate);
+        },
+        
+        stopUtscLiveMonitoring() {
+            if (this.utscLiveInterval) {
+                clearInterval(this.utscLiveInterval);
+                this.utscLiveInterval = null;
+            }
+        },
                     this.$toast?.success('UTSC spectrum data loaded');
                     // Wait for DOM to update, then render chart
                     this.$nextTick(() => this.renderUtscChart());
