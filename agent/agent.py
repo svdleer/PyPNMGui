@@ -1676,7 +1676,7 @@ class PyPNMAgent:
             self.logger.info(f"Found {len(ofdma_channels)} OFDMA channels")
             
             scqam_channels = []  # Not used for PNM
-                            })
+
             # Find modem's upstream channels if CM MAC provided
             modem_us_ifindex = None
             modem_ofdma_ifindex = None
