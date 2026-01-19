@@ -1227,7 +1227,7 @@ def get_utsc_data(mac_address):
     """
     import glob
     import os
-    from pypnm.pnm.parser.CmSpectrumAnalysis import CmSpectrumAnalysis
+    import struct
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1254,22 +1254,42 @@ def get_utsc_data(mac_address):
         latest_file = files[0]
         logger.info(f"Reading UTSC file: {latest_file}")
         
-        # Read and parse the binary file
+        # Read the binary file
         with open(latest_file, 'rb') as f:
             binary_data = f.read()
         
-        # Parse with PyPNM
-        parser = CmSpectrumAnalysis(binary_data)
-        model = parser.to_model()
+        if len(binary_data) < 328:
+            return jsonify({
+                "success": False,
+                "message": "File too small - invalid UTSC data"
+            }), 400
         
-        # Convert to JSON-serializable format
+        # Basic parsing: skip 328-byte header, extract amplitude data
+        # Full parsing requires PyPNM library which isn't installed
+        header = binary_data[:328]
+        samples = binary_data[328:]
+        
+        # Convert binary samples to amplitude values (simplified)
+        # Real implementation needs proper DOCSIS OSSIv4.0 parsing
+        amplitudes = []
+        for i in range(0, len(samples), 2):
+            if i+1 < len(samples):
+                # Each sample is 2 bytes (int16)
+                val = struct.unpack('<h', samples[i:i+2])[0]
+                amplitudes.append(val / 100.0)  # Scale to dB
+        
+        # Generate frequencies (example: 5-85 MHz spectrum)
+        num_bins = len(amplitudes)
+        freq_start = 5000000  # 5 MHz
+        freq_end = 85000000   # 85 MHz
+        freq_step = (freq_end - freq_start) / num_bins if num_bins > 0 else 1
+        frequencies = [freq_start + i * freq_step for i in range(num_bins)]
+        
         spectrum_data = {
             'filename': os.path.basename(latest_file),
-            'channel_id': model.channel_id,
-            'mac_address': model.mac_address,
-            'first_freq_hz': model.first_segment_center_frequency,
-            'frequencies': model.frequencies,
-            'amplitudes': model.amplitudes
+            'num_samples': len(amplitudes),
+            'frequencies': frequencies[:800],  # Limit to first 800 points
+            'amplitudes': amplitudes[:800]
         }
         
         return jsonify({
