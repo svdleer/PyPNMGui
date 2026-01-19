@@ -17,9 +17,13 @@ class PyPNMConfig:
     """PyPNM server configuration."""
     # Use Docker gateway IP to reach host network services
     # Support both PYPNM_API_URL and PYPNM_BASE_URL environment variables
-    base_url: str = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8081'))
+    base_url: str = None
     timeout: int = 180
     verify_ssl: bool = False
+    
+    def __post_init__(self):
+        if self.base_url is None:
+            self.base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8081'))
 
 
 class PyPNMClient:
