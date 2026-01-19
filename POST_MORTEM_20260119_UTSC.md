@@ -49,6 +49,21 @@ Attempted to implement UTSC (Upstream Test Signal Capture) live monitoring featu
 - **Root Cause:** Docker Compose state corruption
 - **Time Lost:** 30 minutes
 
+### 4. Code Not Committed Before Docker Build (REPEATED MULTIPLE TIMES)
+**Problem:** Changes made to local files but not pushed to git before rebuilding Docker
+- **File:** `backend/app/routes/pypnm_routes.py`, `frontend/static/js/app.js`
+- **Impact:** Docker images built with old code, debugging logs never appeared
+- **Root Cause:** Forgot to commit+push before building Docker
+- **Time Lost:** 45+ minutes across multiple occurrences
+
+### 5. Orphaned Code Causing JS Syntax Error
+**Problem:** Botched edit left orphaned code after `stopUtscLiveMonitoring()` function
+- **File:** `frontend/static/js/app.js` line 1004
+- **Error:** `Unexpected token '.'` - code fragment `this.$toast?.success` outside any function
+- **Impact:** Complete frontend failure - Vue app wouldn't initialize, loading bar stuck forever
+- **Root Cause:** Incomplete replacement when adding fetchUtscData function
+- **Time Lost:** 20 minutes
+
 ### 4. Agent Config Volume Empty
 **Problem:** Agent container started but config file missing
 - **Impact:** Agent crashed on startup
