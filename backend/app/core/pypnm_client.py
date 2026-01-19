@@ -643,7 +643,7 @@ class PyPNMClient:
             },
             "tftp": {
                 "ipv4": tftp_ipv4 if tftp_ipv4 else None,
-                "ipv6": tftp_ipv6 if tftp_ipv6 else ""  # PyPNM requires ipv6 field even if empty
+                "ipv6": tftp_ipv6 if tftp_ipv6 else None  # Must be null, not empty string
             },
             "trigger": {
                 "cm_mac": cm_mac,

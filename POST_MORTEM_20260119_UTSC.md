@@ -64,6 +64,15 @@ Attempted to implement UTSC (Upstream Test Signal Capture) live monitoring featu
 - **Root Cause:** Incomplete replacement when adding fetchUtscData function
 - **Time Lost:** 20 minutes
 
+### 6. PyPNM API ipv6 Field Requirement (FIXED MULTIPLE TIMES, KEPT GETTING LOST)
+**Problem:** PyPNM API requires `tftp.ipv6` field even when empty, returning validation error
+- **File:** `backend/app/core/pypnm_client.py`
+- **Error:** `{"detail": [{"type": "missing", "loc": ["body", "tftp", "ipv6"], "msg": "Field required"}]}`
+- **Impact:** All UTSC requests failed with "Failed to initiate UTSC capture"
+- **Root Cause:** Code changes not committed to git before Docker rebuild - FIX WAS LOST MULTIPLE TIMES
+- **Fix:** Changed `"ipv6": tftp_ipv6 if tftp_ipv6 is not None else None` to `"ipv6": tftp_ipv6 if tftp_ipv6 else ""`
+- **Time Lost:** 30+ minutes across multiple fix attempts that got lost
+
 ### 4. Agent Config Volume Empty
 **Problem:** Agent container started but config file missing
 - **Impact:** Agent crashed on startup
