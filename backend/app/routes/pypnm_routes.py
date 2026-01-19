@@ -930,10 +930,14 @@ def configure_utsc(mac_address):
     from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
+    logger.info(f"UTSC configure received data: {data}")
+    
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
     community = data.get('community', 'Z1gg0@LL')  # UTSC needs CMTS write community
     tftp_ip = data.get('tftp_ip', get_default_tftp())
+    
+    logger.info(f"UTSC params: cmts_ip={cmts_ip}, rf_port={rf_port_ifindex}, community={community}")
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
