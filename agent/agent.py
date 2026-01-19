@@ -1703,8 +1703,14 @@ class PyPNMAgent:
                 self.logger.info(f"Looking for CM MAC: {mac_normalized}")
                 
                 if result.get('success'):
-                    for line in result.get('output', '').split('\n'):
-                        if mac_normalized in line.lower():
+                    output = result.get('output', '')
+                    # Also check for hex format like "e4 57 40 f7 12 99"
+                    mac_hex = ' '.join([mac_normalized.split(':')[i] for i in range(6)])
+                    self.logger.info(f"CM MAC table output first 500 chars: {output[:500]}")
+                    
+                    for line in output.split('\n'):
+                        line_lower = line.lower()
+                        if mac_normalized in line_lower or mac_hex in line_lower:
                             # Extract CM index from OID like docsIf3CmtsCmRegStatusMacAddr.57
                             try:
                                 cm_index = int(line.split('.')[-2].split()[0])
