@@ -1637,73 +1637,46 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
+            # Get OFDMA channels from docsIf31CmtsCmUsOfdmaChannelRxPower table
+            # This is much faster than walking entire ifDescr table
+            OID_OFDMA_RXPOWER = '1.3.6.1.4.1.4491.2.1.28.1.4.1.1'  # docsIf31CmtsCmUsOfdmaChannelRxPower
             
-            # Get all interfaces to find OFDMA and us-conn ports
-            self.logger.info(f"Querying ifDescr table from {cmts_ip}")
-            result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
-            self.logger.info(f"ifDescr query result: success={result.get('success')}, error={result.get('error')}")
+            self.logger.info(f"Querying OFDMA channels from {cmts_ip}")
+            result = self._query_cmts_direct(cmts_ip, OID_OFDMA_RXPOWER, community, walk=True)
             
             ofdma_channels = []
-            scqam_channels = []  # us-conn RF ports for SC-QAM UTSC
+            ofdma_ifindexes = set()  # Track unique ifindexes
             
             if result.get('success'):
                 output = result.get('output', '')
-                self.logger.info(f"ifDescr output length: {len(output)} chars, lines: {len(output.split(chr(10)))}")
-                
                 for line in output.split('\n'):
                     if '=' not in line:
                         continue
                     try:
-                        parts = line.split('=', 1)
-                        # Get ifIndex from OID
-                        oid_part = parts[0].strip()
-                        ifindex = int(oid_part.split('.')[-1])
+                        # OID format: ...cmIndex.ofdmaIfIndex = INTEGER: value
+                        oid_part = line.split('=')[0].strip()
+                        parts = oid_part.split('.')
+                        ofdma_ifindex = int(parts[-1])
                         
-                        # Get description from value (handle "STRING: value" format)
-                        value_part = parts[1].strip()
-                        if ':' in value_part:
-                            descr = value_part.split(':', 1)[-1].strip().strip('"')
-                        else:
-                            descr = value_part.strip().strip('"')
-                        
-                        # Debug: log first few lines to see format
-                        if ifindex < 843087880 and 'ofdma' in line.lower():
-                            self.logger.info(f"OFDMA line: {line[:100]}, descr: {descr}")
-                        
-                        # OFDMA upstream channels (cable-us-ofdma X/ofd/Y.0)
-                        if 'cable-us-ofdma' in descr.lower():
-                            # Parse channel from "cable-us-ofdma 1/ofd/0.0"
-                            # Remove .0 suffix (logical channel indicator) for display
-                            try:
-                                match = descr.split('/')[-1].replace('.0', '')
-                                channel_id = int(match) if match.isdigit() else 0
-                            except:
-                                channel_id = 0
-                            # Clean description: remove .0 suffix
-                            clean_descr = descr.replace('.0', '') if descr.endswith('.0') else descr
+                        if ofdma_ifindex not in ofdma_ifindexes:
+                            ofdma_ifindexes.add(ofdma_ifindex)
+                            # Generate description from ifindex (e.g., 843087883 -> ofd/4)
+                            # OFDMA ifindexes typically start at 843087875 with step of 2
+                            channel_num = (ofdma_ifindex - 843087875) // 2
                             ofdma_channels.append({
-                                'ifindex': ifindex,
-                                'channel_id': channel_id,
-                                'description': clean_descr
+                                'ifindex': ofdma_ifindex,
+                                'channel_id': channel_num,
+                                'description': f'OFDMA {channel_num}'
                             })
-                        
-                        # us-conn RF ports (for SC-QAM UTSC)
-                        elif 'us-conn' in descr.lower():
-                            try:
-                                channel_id = int(descr.split('us-conn')[-1].strip())
-                            except:
-                                channel_id = 0
-                            scqam_channels.append({
-                                'ifindex': ifindex,
-                                'channel_id': channel_id,
-                                'description': descr
-                            })
-                    except Exception as e:
+                    except:
                         pass
-                
-                self.logger.info(f"Found {len(ofdma_channels)} OFDMA channels, {len(scqam_channels)} us-conn ports")
             
+            # Sort by channel number
+            ofdma_channels.sort(key=lambda x: x['channel_id'])
+            self.logger.info(f"Found {len(ofdma_channels)} OFDMA channels")
+            
+            scqam_channels = []  # Not used for PNM
+                            })
             # Find modem's upstream channels if CM MAC provided
             modem_us_ifindex = None
             modem_ofdma_ifindex = None
@@ -1722,26 +1695,21 @@ class PyPNMAgent:
                 # Create hex format for matching: "E4 57 40 F7 12 99" (uppercase with spaces)
                 mac_hex = ' '.join([b.upper() for b in mac_normalized.split(':')])
                 self.logger.info(f"Looking for CM MAC: {mac_normalized} or hex: {mac_hex}")
-                self.logger.info(f"CM query result: {cm_result}")
                 
                 if cm_result.get('success'):
                     output = cm_result.get('output', '')
-                    self.logger.info(f"CM MAC table: {len(output)} chars, {len(output.split(chr(10)))} lines")
                     
                     for line in output.split('\n'):
                         # Match hex format like "Hex-STRING: E4 57 40 F7 12 99"
                         if mac_hex in line or mac_normalized in line.lower():
                             # Extract CM index from OID like ...2.57 = Hex-STRING
                             try:
-                                # OID format: iso.3.6.1.4.1.4491.2.1.20.1.3.1.2.57 = Hex-STRING: ...
                                 oid_part = line.split('=')[0].strip()
                                 cm_index = int(oid_part.split('.')[-1])
                             except:
                                 pass
-                            self.logger.info(f"Found CM index: {cm_index} from line: {line[:100]}")
+                            self.logger.info(f"Found CM index: {cm_index}")
                             break
-                else:
-                    self.logger.warning(f"CM MAC table query failed: {cm_result.get('error')}")
                 
                 if cm_index:
                     # Step 2: Find modem's OFDMA upstream channel (PNM only works with OFDMA)
