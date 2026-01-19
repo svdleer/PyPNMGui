@@ -958,7 +958,7 @@ def configure_utsc(mac_address):
             cm_mac=cm_mac,
             logical_ch_ifindex=data.get('logical_ch_ifindex')
         )
-        
+        logger.info(f"UTSC API full response: {result}")
         return jsonify({
             "success": result.get('success', False),
             "mac_address": mac_address,
