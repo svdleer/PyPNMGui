@@ -1700,6 +1700,7 @@ class PyPNMAgent:
                 
                 cm_index = None
                 mac_normalized = cm_mac.lower().replace('-', ':')
+                self.logger.info(f"Looking for CM MAC: {mac_normalized}")
                 
                 if result.get('success'):
                     for line in result.get('output', '').split('\n'):
@@ -1712,6 +1713,7 @@ class PyPNMAgent:
                                     cm_index = int(line.split('=')[0].strip().split('.')[-1])
                                 except:
                                     pass
+                            self.logger.info(f"Found CM index: {cm_index} from line: {line[:100]}")
                             break
                 
                 if cm_index:
@@ -1732,11 +1734,14 @@ class PyPNMAgent:
                                             ofdma_ifindex = int(parts[i+1])
                                             if ofdma_ifindex >= 843087000 and ofdma_ifindex < 843100000:
                                                 modem_ofdma_ifindex = ofdma_ifindex
+                                                self.logger.info(f"Found modem OFDMA ifindex: {ofdma_ifindex}")
                                                 break
                                 except:
                                     pass
                             if modem_ofdma_ifindex:
                                 break
+                else:
+                    self.logger.warning(f"CM index not found for MAC: {mac_normalized}")
             
             return {
                 'success': True,
