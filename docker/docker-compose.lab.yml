@@ -24,6 +24,7 @@ services:
     volumes:
       - pypnm-data-lab:/app/data
       - pypnm-logs-lab:/app/logs
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
     networks:
       - pypnm-net
     restart: unless-stopped
