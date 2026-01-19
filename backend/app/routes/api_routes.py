@@ -672,7 +672,7 @@ def get_cmts_modems(hostname):
         # Check if enriched data exists in cache
         # Enrich is enabled by default
         enrich = request.args.get('enrich', 'true').lower() != 'false'
-        modem_community = request.args.get('modem_community', 'm0d3m1nf0')
+        modem_community = request.args.get('modem_community', 'z1gg0m0n1t0r1ng')
         enriched_cache_key = f"modems_enriched:{hostname}:{cmts_ip}"
         
         # Try enriched cache first if enrich requested
