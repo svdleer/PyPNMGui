@@ -763,26 +763,13 @@ createApp({
                 console.log('UTSC response:', result);
                 if (result.success) {
                     this.runningUtsc = false;
-                    // Check multiple possible data locations
-                    let spectrumData = null;
-                    if (result.data) {
-                        if (result.data.spectrum_data) {
-                            spectrumData = result.data.spectrum_data;
-                        } else if (Array.isArray(result.data)) {
-                            spectrumData = result.data;
-                        } else if (result.data.frequencies || result.data.amplitudes) {
-                            spectrumData = result.data;
-                        }
-                    }
+                    const filename = result.filename || 'N/A';
+                    const message = result.data?.message || 'UTSC completed';
+                    this.$toast?.success(`${message} - File: ${filename} (saved to TFTP server)`);
                     
-                    if (spectrumData) {
-                        this.$toast?.success('UTSC test completed - spectrum data received');
-                        this.utscSpectrumData = spectrumData;
-                        this.renderUtscChart();
-                    } else {
-                        console.warn('No spectrum data found in response:', result);
-                        this.$toast?.warning(`UTSC started but data format unexpected. Check console. File: ${result.filename || 'N/A'}`);
-                    }
+                    // Note: PyPNM API doesn't return spectrum data in response - it only saves to TFTP
+                    // Future: implement TFTP file retrieval and parsing
+                    console.info(`UTSC file saved to TFTP: ${filename}_*.bin`);
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
                     this.runningUtsc = false;
