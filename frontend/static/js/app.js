@@ -729,6 +729,9 @@ createApp({
         },
         
         async startUtsc() {
+            console.log('startUtsc - selectedModem:', this.selectedModem);
+            console.log('startUtsc - utscConfig:', this.utscConfig);
+            
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 this.$toast?.warning('Please select a modem first');
                 return;
