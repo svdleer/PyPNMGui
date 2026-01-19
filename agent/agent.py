@@ -1688,7 +1688,6 @@ class PyPNMAgent:
                         pass
                 
                 self.logger.info(f"Found {len(ofdma_channels)} OFDMA channels, {len(scqam_channels)} us-conn ports")
-                        pass
             
             # Find modem's upstream channels if CM MAC provided
             modem_us_ifindex = None
