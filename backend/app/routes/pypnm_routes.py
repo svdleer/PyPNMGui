@@ -987,10 +987,13 @@ def configure_utsc(mac_address):
 @pypnm_bp.route('/upstream/utsc/start/<mac_address>', methods=['POST'])
 def start_utsc(mac_address):
     """
-    Start UTSC test on CMTS - Legacy endpoint, redirects to configure.
-    Use /upstream/utsc/configure instead for combined configure+start.
+    Start UTSC test on CMTS - calls configure_utsc with same request data.
     """
-    # Just call configure which now does both
+    logger.info(f"=== START_UTSC CALLED === MAC: {mac_address}")
+    logger.info(f"Request object: {request}")
+    logger.info(f"Request data in start_utsc: {request.data}")
+    logger.info(f"Request JSON in start_utsc: {request.get_json()}")
+    # Call configure_utsc which handles the full flow
     return configure_utsc(mac_address)
 
 
