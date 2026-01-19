@@ -724,7 +724,12 @@ createApp({
         },
         
         async startUtsc() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                this.$toast?.warning('Please select a modem first');
+                return;
+            }
+            if (!this.utscConfig.rfPortIfindex) {
+                this.$toast?.warning('Please select an RF Port');
                 return;
             }
             
