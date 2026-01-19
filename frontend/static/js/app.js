@@ -651,15 +651,24 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
+                    // Use modem's specific RF port if detected, otherwise show all ports
                     this.upstreamInterfaces.rfPorts = result.rf_ports || [];
+                    this.upstreamInterfaces.allRfPorts = result.all_rf_ports || [];
+                    this.upstreamInterfaces.modemRfPort = result.modem_rf_port;
                     
-                    // Auto-select first RF port for UTSC
-                    if (this.upstreamInterfaces.rfPorts.length > 0) {
+                    // Auto-select modem's RF port for UTSC
+                    if (result.modem_rf_port) {
+                        this.utscConfig.rfPortIfindex = result.modem_rf_port.ifindex;
+                        console.log('Auto-selected modem RF port:', result.modem_rf_port);
+                    } else if (this.upstreamInterfaces.rfPorts.length > 0) {
                         this.utscConfig.rfPortIfindex = this.upstreamInterfaces.rfPorts[0].ifindex;
-                        console.log('Auto-selected RF port:', this.utscConfig.rfPortIfindex);
+                        console.log('Auto-selected first RF port:', this.utscConfig.rfPortIfindex);
                     }
                     
                     console.log('Loaded RF ports:', this.upstreamInterfaces.rfPorts);
+                    if (result.cm_index) {
+                        console.log('CM Index:', result.cm_index);
+                    }
                 } else {
                     console.error('Failed to load upstream interfaces:', result.error);
                 }

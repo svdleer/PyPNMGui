@@ -882,7 +882,7 @@ def get_upstream_interfaces(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        result = agent_manager.wait_for_task(task_id, timeout=90)
         
         if result is None:
             return jsonify({"status": "error", "message": "Task timed out"}), 504
@@ -896,7 +896,10 @@ def get_upstream_interfaces(mac_address):
             "success": task_result.get('success', False),
             "mac_address": mac_address,
             "cmts_ip": cmts_ip,
-            "rf_ports": task_result.get('rf_ports', []),  # us-conn RF ports for UTSC
+            "cm_index": task_result.get('cm_index'),
+            "rf_ports": task_result.get('rf_ports', []),  # Modem's specific RF port(s)
+            "all_rf_ports": task_result.get('all_rf_ports', []),  # All us-conn ports
+            "modem_rf_port": task_result.get('modem_rf_port'),  # Modem's detected RF port
             "modem_ofdma_ifindex": task_result.get('modem_ofdma_ifindex')
         })
         
