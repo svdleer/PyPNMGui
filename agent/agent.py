@@ -1663,6 +1663,10 @@ class PyPNMAgent:
                         else:
                             descr = value_part.strip().strip('"')
                         
+                        # Debug: log first few lines to see format
+                        if ifindex < 843087880 and 'ofdma' in line.lower():
+                            self.logger.info(f"OFDMA line: {line[:100]}, descr: {descr}")
+                        
                         # OFDMA upstream channels (cable-us-ofdma X/ofd/Y.0)
                         if 'cable-us-ofdma' in descr.lower():
                             # Parse channel from "cable-us-ofdma 1/ofd/0.0"
