@@ -57,6 +57,7 @@ createApp({
             upstreamInterfaces: {
                 loading: false,
                 scqamChannels: [],   // SC-QAM upstream channels [{ifindex, channel_id, frequency_mhz}]
+                ofdmaChannels: [],   // OFDMA upstream channels [{ifindex, index}]
                 rfPorts: [],    // us-conn RF ports for UTSC [{ifindex, description}]
                 allRfPorts: [],  // All us-conn RF ports
                 modemRfPort: null  // Detected RF port for the modem
@@ -327,7 +328,7 @@ createApp({
             this.showRawData = false;
             
             // Reset upstream interfaces
-            this.upstreamInterfaces = { loading: false, rfPorts: [], allRfPorts: [], modemRfPort: null };
+            this.upstreamInterfaces = { loading: false, scqamChannels: [], ofdmaChannels: [], rfPorts: [], allRfPorts: [], modemRfPort: null };
             this.utscConfig.rfPortIfindex = null;
             this.usRxmerConfig.ofdmaIfindex = null;
             
