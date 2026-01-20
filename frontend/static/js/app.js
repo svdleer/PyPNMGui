@@ -947,17 +947,24 @@ createApp({
                 console.log('UTSC data response:', result);
                 
                 if (result.success && result.data) {
+                    console.log('[UTSC] Success, updating data, plot exists:', !!result.plot, 'has data:', !!result.plot?.data);
                     this.utscSpectrumData = result.data;
                     // Force Vue reactivity by creating new object reference
                     this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
+                    console.log('[UTSC] Updated utscPlotImage:', !!this.utscPlotImage, 'timestamp:', this.utscPlotImage?._timestamp);
                     if (!this.utscLiveMode) {
                         this.$toast?.success('UTSC spectrum data loaded');
                     }
                     // Force immediate render after Vue updates
+                    console.log('[UTSC] Calling $nextTick to render');
                     this.$nextTick(() => {
+                        console.log('[UTSC] Inside $nextTick, calling renderUtscChart');
                         this.renderUtscChart();
                         // Force another render after a tick to ensure DOM is updated
-                        setTimeout(() => this.renderUtscChart(), 50);
+                        setTimeout(() => {
+                            console.log('[UTSC] Delayed render call');
+                            this.renderUtscChart();
+                        }, 50);
                     });
                 } else {
                     this.$toast?.error(result.message || result.error || 'Failed to fetch UTSC data');
