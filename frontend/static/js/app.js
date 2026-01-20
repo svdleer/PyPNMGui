@@ -69,7 +69,7 @@ createApp({
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1 second between captures (max supported by CommScope E6000)
-                freerunDurationMs: 60000,  // 60 seconds total duration
+                freerunDurationMs: 3600000,  // 1 hour - effectively continuous until Stop is pressed
                 triggerCount: 100  // Number of spectrum captures (100 samples = ~1.5 minutes at 1000ms repeat)
             },
             usRxmerConfig: {
@@ -89,6 +89,9 @@ createApp({
             utscLiveInterval: null,
             utscWebSocket: null,  // WebSocket for live UTSC streaming
             utscRefreshRate: 500,  // 0.5 seconds between updates
+            utscInteractive: false,  // Toggle for SciChart interactive mode
+            utscSciChart: null,  // SciChart instance
+            utscSciChartSeries: null,  // SciChart data series
             
             // Housekeeping
             housekeepingDays: 7,
@@ -1037,18 +1040,29 @@ createApp({
                     try {
                         const data = JSON.parse(event.data);
                         
-                        if (data.type === 'spectrum' && data.plot) {
-                            // Update the plot image
-                            this.utscPlotImage = {
-                                data: data.plot.data,
-                                filename: data.plot.filename,
-                                _timestamp: data.timestamp
-                            };
+                        if (data.type === 'spectrum') {
+                            // Handle interactive mode with SciChart
+                            if (this.utscInteractive && data.raw_data) {
+                                this.$nextTick(() => {
+                                    this.updateUtscSciChart(data.raw_data);
+                                });
+                            }
                             
-                            // Render the chart
-                            this.$nextTick(() => {
-                                this.renderUtscChart();
-                            });
+                            // Always update plot for fallback/static mode
+                            if (data.plot) {
+                                this.utscPlotImage = {
+                                    data: data.plot.data,
+                                    filename: data.plot.filename,
+                                    _timestamp: data.timestamp
+                                };
+                                
+                                // Render Chart.js if not in interactive mode
+                                if (!this.utscInteractive) {
+                                    this.$nextTick(() => {
+                                        this.renderUtscChart();
+                                    });
+                                }
+                            }
                         } else if (data.type === 'error') {
                             console.error('[UTSC] Stream error:', data.message);
                         } else if (data.type === 'connected') {
@@ -1091,6 +1105,101 @@ createApp({
             if (this.utscLiveInterval) {
                 clearInterval(this.utscLiveInterval);
                 this.utscLiveInterval = null;
+            }
+            // Clean up SciChart
+            this.destroyUtscSciChart();
+        },
+        
+        async initUtscSciChart() {
+            // Destroy existing chart
+            this.destroyUtscSciChart();
+            
+            try {
+                // Wait for SciChart to load
+                if (typeof SciChart === 'undefined') {
+                    console.warn('SciChart not loaded yet');
+                    return;
+                }
+                
+                const { SciChartSurface, NumericAxis, FastLineRenderableSeries, XyDataSeries, EAxisAlignment, NumberRange, ZoomPanModifier, MouseWheelZoomModifier, ZoomExtentsModifier } = SciChart;
+                
+                // Create the chart surface
+                const { sciChartSurface, wasmContext } = await SciChartSurface.create('utscSciChart');
+                
+                // Add axes
+                sciChartSurface.xAxes.add(new NumericAxis(wasmContext, { 
+                    axisAlignment: EAxisAlignment.Bottom,
+                    axisTitle: 'Frequency (MHz)',
+                    labelPrecision: 0,
+                    visibleRange: new NumberRange(0, 100)
+                }));
+                
+                sciChartSurface.yAxes.add(new NumericAxis(wasmContext, { 
+                    axisAlignment: EAxisAlignment.Left,
+                    axisTitle: 'Power (dBmV)',
+                    labelPrecision: 1,
+                    autoRange: 'Always'
+                }));
+                
+                // Create data series
+                const dataSeries = new XyDataSeries(wasmContext);
+                const series = new FastLineRenderableSeries(wasmContext, {
+                    dataSeries,
+                    strokeThickness: 2,
+                    stroke: '#00aaff'
+                });
+                
+                sciChartSurface.renderableSeries.add(series);
+                
+                // Add interactivity
+                sciChartSurface.chartModifiers.add(new ZoomPanModifier());
+                sciChartSurface.chartModifiers.add(new MouseWheelZoomModifier());
+                sciChartSurface.chartModifiers.add(new ZoomExtentsModifier());
+                
+                // Store references
+                this.utscSciChart = sciChartSurface;
+                this.utscSciChartSeries = dataSeries;
+                
+                console.log('[SciChart] Initialized successfully');
+            } catch (error) {
+                console.error('[SciChart] Initialization failed:', error);
+                this.$toast?.error('Failed to initialize interactive chart');
+            }
+        },
+        
+        updateUtscSciChart(rawData) {
+            if (!this.utscSciChart || !this.utscSciChartSeries) {
+                // Initialize if not already done
+                this.initUtscSciChart().then(() => {
+                    if (rawData) this.updateUtscSciChart(rawData);
+                });
+                return;
+            }
+            
+            try {
+                const { frequencies, amplitudes } = rawData;
+                
+                // Convert Hz to MHz for display
+                const freqsMhz = frequencies.map(f => f / 1e6);
+                
+                // Update the data series
+                this.utscSciChartSeries.clear();
+                this.utscSciChartSeries.appendRange(freqsMhz, amplitudes);
+                
+            } catch (error) {
+                console.error('[SciChart] Update failed:', error);
+            }
+        },
+        
+        destroyUtscSciChart() {
+            if (this.utscSciChart) {
+                try {
+                    this.utscSciChart.delete();
+                } catch (e) {
+                    console.error('[SciChart] Destroy error:', e);
+                }
+                this.utscSciChart = null;
+                this.utscSciChartSeries = null;
             }
         },
         
@@ -2234,6 +2343,18 @@ createApp({
         utscRefreshRate(newRate) {
             console.log('[UTSC] Refresh rate changed to:', newRate, 'ms');
             this.restartUtscLiveMonitoring();
+        },
+        utscInteractive(newVal) {
+            console.log('[UTSC] Interactive mode:', newVal);
+            if (newVal) {
+                // Initialize SciChart when switching to interactive mode
+                this.$nextTick(() => {
+                    this.initUtscSciChart();
+                });
+            } else {
+                // Cleanup SciChart when switching back to static mode
+                this.destroyUtscSciChart();
+            }
         }
     }
 }).mount('#app');

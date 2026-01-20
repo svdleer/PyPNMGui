@@ -155,12 +155,18 @@ def init_websocket(app):
                                 plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
 
                                 if plot:
-                                    # Send the plot via websocket
+                                    # Send both plot AND raw data via websocket for interactive mode
                                     ws.send(json.dumps({
                                         'type': 'spectrum',
                                         'timestamp': current_time,
                                         'filename': os.path.basename(filepath),
-                                        'plot': plot
+                                        'plot': plot,
+                                        'raw_data': {
+                                            'frequencies': frequencies[:3200],
+                                            'amplitudes': amplitudes[:3200],
+                                            'span_hz': span_hz,
+                                            'center_freq_hz': center_freq_hz
+                                        }
                                     }))
                                 
                     except Exception as e:
