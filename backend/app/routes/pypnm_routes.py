@@ -840,9 +840,9 @@ def get_plots(mac_address):
     if timestamp:
         plot_files = [f for f in plot_files if timestamp in f]
     
-    # Sort by modification time (newest first) and limit to last 10
+    # Sort by modification time (newest first) and limit to last 50
     plot_files.sort(key=os.path.getmtime, reverse=True)
-    plot_files = plot_files[:10]
+    plot_files = plot_files[:50]
     
     plots = []
     for filepath in plot_files:

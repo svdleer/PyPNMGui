@@ -108,7 +108,7 @@ def init_websocket(app):
                         current_mtime = 0
                     
                     # Process if new file or file modified
-                    if (latest_file != last_file or current_mtime != last_mtime) and (current_time - last_send_time > 0.1):
+                    if (latest_file != last_file or current_mtime != last_mtime) and (current_time - last_send_time > 0.01):
                         last_file = latest_file
                         last_mtime = current_mtime
                         last_send_time = current_time
