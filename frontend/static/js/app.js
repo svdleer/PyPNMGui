@@ -68,8 +68,9 @@ createApp({
                 spanMhz: 100,
                 numBins: 3200,
                 rfPortIfindex: null,
-                repeatPeriodMs: 0,
-                freerunDurationMs: 1000
+                repeatPeriodMs: 3000,  // 3 seconds between captures
+                freerunDurationMs: 60000,  // 60 seconds total duration
+                triggerCount: 20  // Maximum 20 captures
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,
