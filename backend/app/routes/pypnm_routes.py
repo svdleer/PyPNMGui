@@ -123,6 +123,20 @@ def pnm_measurement(measurement_type, mac_address):
                 cm_mac=cm_mac,
                 logical_ch_ifindex=logical_ch_ifindex
             )
+            
+            # Store UTSC config in Redis for later plot generation
+            try:
+                redis_client.setex(
+                    f'utsc_config:{mac_address}',
+                    3600,  # 1 hour TTL
+                    json.dumps({
+                        'span_hz': span_hz,
+                        'center_freq_hz': center_freq_hz,
+                        'num_bins': num_bins
+                    })
+                )
+            except Exception as e:
+                logger.warning(f"Failed to cache UTSC config: {e}")
         elif measurement_type == 'channel_estimation':
             result = client.get_channel_estimation(
                 mac_address, modem_ip, tftp_ip, community,
@@ -1305,9 +1319,25 @@ def get_utsc_data(mac_address):
             'amplitudes': amplitudes[:800]
         }
         
-        # Generate matplotlib plot
+        # Retrieve UTSC config from Redis to get correct span
+        utsc_config = {}
+        try:
+            config_json = redis_client.get(f'utsc_config:{mac_address}')
+            if config_json:
+                utsc_config = json.loads(config_json)
+        except Exception as e:
+            logger.warning(f"Failed to retrieve UTSC config: {e}")
+        
+        # Generate matplotlib plot with correct span
         from app.core.utsc_plotter import generate_utsc_plot_from_data
         rf_port_desc = data.get('rf_port_description', '')
+        
+        # Update spectrum_data with config parameters
+        if utsc_config:
+            spectrum_data['span_hz'] = utsc_config.get('span_hz', 80000000)
+            spectrum_data['center_freq_hz'] = utsc_config.get('center_freq_hz')
+            spectrum_data['num_bins'] = utsc_config.get('num_bins')
+        
         plot = generate_utsc_plot_from_data(spectrum_data, mac_address, rf_port_desc)
         
         return jsonify({

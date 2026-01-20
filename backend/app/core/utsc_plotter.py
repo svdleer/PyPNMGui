@@ -108,9 +108,16 @@ def generate_utsc_plot(
     
     # Add statistics annotation (top-right)
     peak_idx = np.argmax(amps)
+    
+    # Use configured span if available, otherwise calculate from data
+    if capture_params and 'span_hz' in capture_params:
+        span_mhz = capture_params['span_hz'] / 1e6
+    else:
+        span_mhz = (freqs.max() - freqs.min()) / 1e6
+    
     stats_text = (f'Peak: {amps.max():.1f} dBmV @ {freqs[peak_idx]/1e6:.1f} MHz\n'
                   f'Min: {amps.min():.1f} dBmV | Avg: {amps.mean():.1f} dBmV\n'
-                  f'Span: {(freqs.max() - freqs.min())/1e6:.1f} MHz')
+                  f'Span: {span_mhz:.1f} MHz')
     ax.annotate(stats_text, xy=(0.98, 0.97), xycoords='axes fraction',
                 fontsize=9, color=text_color, verticalalignment='top',
                 horizontalalignment='right',
@@ -133,12 +140,18 @@ def generate_utsc_plot(
     
     # Save to bytes
     buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
-                facecolor=bg_color, edgecolor='none')
-    buf.seek(0)
-    plt.close(fig)
+    try:
+        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                    facecolor=bg_color, edgecolor='none')
+        buf.seek(0)
+        image_data = buf.getvalue()
+    finally:
+        # Ensure figure is closed and memory is freed
+        plt.close(fig)
+        plt.clf()
+        buf.close()
     
-    return buf.getvalue()
+    return image_data
 
 
 def generate_utsc_plot_from_data(
@@ -168,16 +181,23 @@ def generate_utsc_plot_from_data(
         logger.info(f"Generating UTSC plot: {len(frequencies)} points, "
                    f"{frequencies[0]/1e6:.1f} - {frequencies[-1]/1e6:.1f} MHz")
         
+        # Build capture params with span if available
+        capture_params = {
+            'num_bins': data.get('num_bins', data.get('num_samples', len(amplitudes))),
+            'center_freq_hz': data.get('center_freq_hz', (frequencies[0] + frequencies[-1]) / 2) if frequencies else 0
+        }
+        
+        # Add span if provided in data
+        if 'span_hz' in data:
+            capture_params['span_hz'] = data['span_hz']
+        
         # Generate the plot
         png_bytes = generate_utsc_plot(
             frequencies=frequencies,
             amplitudes=amplitudes,
             mac_address=mac_address,
             rf_port_description=rf_port_description,
-            capture_params={
-                'num_bins': data.get('num_samples', len(amplitudes)),
-                'center_freq_hz': (frequencies[0] + frequencies[-1]) / 2 if frequencies else 0
-            }
+            capture_params=capture_params
         )
         
         # Create filename
