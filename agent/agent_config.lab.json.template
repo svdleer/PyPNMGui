@@ -1,0 +1,31 @@
+{
+    "agent_id": "jump-server-script3a",
+    
+    "pypnm_server": {
+        "url": "ws://pypnm-gui-lab:5050/ws/agent",
+        "auth_token": "dev-token-change-in-production",
+        "reconnect_interval": 5
+    },
+    
+    "cmts": {
+        "snmp_direct": true,
+        "community": "Z1gg0Sp3c1@l",
+        "write_community": "Z1gg0Sp3c1@l"
+    },
+    
+    "cm_direct": {
+        "enabled": true,
+        "community": "m0d3m1nf0"
+    },
+    
+    "tftp_server": {
+        "host": "172.16.6.101",
+        "protocol": "tftp"
+    },
+    
+    "redis": {
+        "host": "eve-li-redis-lab",
+        "port": 6379,
+        "db": 0
+    }
+}
