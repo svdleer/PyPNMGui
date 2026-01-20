@@ -1041,6 +1041,7 @@ createApp({
         },
         
         renderUtscChart() {
+            console.log('[UTSC] renderUtscChart called, hasPlotImage:', !!this.utscPlotImage, 'timestamp:', this.utscPlotImage?._timestamp);
             const container = document.getElementById('utscChartContainer');
             if (!container) return;
             
@@ -1048,6 +1049,7 @@ createApp({
             if (this.utscPlotImage && this.utscPlotImage.data) {
                 // Use a unique key to force image reload
                 const imageKey = `utsc-${this.utscPlotImage._timestamp || Date.now()}`;
+                console.log('[UTSC] Updating image with key:', imageKey, 'data length:', this.utscPlotImage.data.length);
                 // Completely replace container content
                 container.innerHTML = `
                     <img id="${imageKey}" 
