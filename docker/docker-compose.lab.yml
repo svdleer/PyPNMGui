@@ -1,16 +1,6 @@
 version: '3.8'
 
 services:
-  # PyPNM API - MANDATORY - Backend for PNM measurements
-  pypnm-api:
-    image: pypnm:latest
-    container_name: pypnm-api
-    ports:
-      - "8081:8000"  # Map internal 8000 to external 8081
-    networks:
-      - pypnm-net
-    restart: unless-stopped
-
   # GUI Server - LAB Version
   gui-server-lab:
     build:
@@ -25,7 +15,7 @@ services:
     environment:
       - FLASK_ENV=lab
       - PYPNM_MODE=lab
-      - PYPNM_BASE_URL=http://pypnm-api:8000
+      - PYPNM_BASE_URL=http://host.docker.internal:8000
       - REDIS_HOST=eve-li-redis-lab
       - REDIS_PORT=6379
       - AGENT_REQUIRED=false
