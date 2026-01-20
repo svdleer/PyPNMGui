@@ -1305,10 +1305,16 @@ def get_utsc_data(mac_address):
             'amplitudes': amplitudes[:800]
         }
         
+        # Generate matplotlib plot
+        from app.core.utsc_plotter import generate_utsc_plot_from_data
+        rf_port_desc = data.get('rf_port_description', '')
+        plot = generate_utsc_plot_from_data(spectrum_data, mac_address, rf_port_desc)
+        
         return jsonify({
             "success": True,
             "mac_address": mac_address,
-            "data": spectrum_data
+            "data": spectrum_data,
+            "plot": plot  # Add matplotlib PNG plot
         })
         
     except Exception as e:

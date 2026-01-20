@@ -80,6 +80,7 @@ createApp({
             utscStatus: null,
             usRxmerStatus: null,
             utscSpectrumData: null,
+            utscPlotImage: null,  // Matplotlib plot data
             usRxmerSpectrumData: null,
             utscChartInstance: null,
             usRxmerChartInstance: null,
@@ -947,6 +948,7 @@ createApp({
                 
                 if (result.success && result.data) {
                     this.utscSpectrumData = result.data;
+                    this.utscPlotImage = result.plot;  // Store matplotlib plot
                     if (!this.utscLiveMode) {
                         this.$toast?.success('UTSC spectrum data loaded');
                     }
@@ -1034,6 +1036,20 @@ createApp({
         },
         
         renderUtscChart() {
+            const container = document.getElementById('utscChartContainer');
+            if (!container) return;
+            
+            // If we have a matplotlib plot, display it as an image
+            if (this.utscPlotImage && this.utscPlotImage.data) {
+                container.innerHTML = `
+                    <img src="data:image/png;base64,${this.utscPlotImage.data}" 
+                         alt="UTSC Spectrum" 
+                         style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" />
+                `;
+                return;
+            }
+            
+            // Fallback to Chart.js if no matplotlib plot available
             const canvas = document.getElementById('utscChart');
             if (!canvas || !this.utscSpectrumData) return;
             
@@ -1043,15 +1059,19 @@ createApp({
             }
             
             const data = this.utscSpectrumData;
+            
+            // Convert frequencies from Hz to MHz for display
+            const freqsMhz = (data.frequencies || []).map(f => f / 1e6);
+            
             const ctx = canvas.getContext('2d');
             
             this.utscChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.frequencies_mhz || [],
+                    labels: freqsMhz,
                     datasets: [{
                         label: 'Power (dBmV)',
-                        data: data.amplitudes_dbmv || [],
+                        data: data.amplitudes || [],
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.1)',
                         borderWidth: 1,
@@ -1086,7 +1106,7 @@ createApp({
                         },
                         title: {
                             display: true,
-                            text: `Upstream Spectrum - Channel ${data.channel_id || 'N/A'}`
+                            text: `Upstream Spectrum - ${data.filename || 'N/A'}`
                         }
                     }
                 }
@@ -1156,6 +1176,7 @@ createApp({
         
         closeUtscSpectrum() {
             this.utscSpectrumData = null;
+            this.utscPlotImage = null;
             if (this.utscChartInstance) {
                 this.utscChartInstance.destroy();
                 this.utscChartInstance = null;
