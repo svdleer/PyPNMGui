@@ -948,7 +948,8 @@ createApp({
                 
                 if (result.success && result.data) {
                     this.utscSpectrumData = result.data;
-                    this.utscPlotImage = result.plot;  // Store matplotlib plot
+                    // Force Vue reactivity by creating new object
+                    this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
                     if (!this.utscLiveMode) {
                         this.$toast?.success('UTSC spectrum data loaded');
                     }
