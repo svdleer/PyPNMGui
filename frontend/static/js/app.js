@@ -1054,16 +1054,34 @@ createApp({
             
             // If we have a matplotlib plot, display it as an image
             if (this.utscPlotImage && this.utscPlotImage.data) {
-                // Use a unique key to force image reload
-                const imageKey = `utsc-${this.utscPlotImage._timestamp || Date.now()}`;
-                console.log('[UTSC] Updating image with key:', imageKey, 'data length:', this.utscPlotImage.data.length);
-                // Completely replace container content
-                container.innerHTML = `
-                    <img id="${imageKey}" 
-                         src="data:image/png;base64,${this.utscPlotImage.data}" 
-                         alt="UTSC Spectrum" 
-                         style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" />
-                `;
+                // Convert base64 to Blob URL to bypass browser caching
+                try {
+                    const binary = atob(this.utscPlotImage.data);
+                    const array = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        array[i] = binary.charCodeAt(i);
+                    }
+                    const blob = new Blob([array], { type: 'image/png' });
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    // Revoke old blob URL if exists
+                    if (this._currentBlobUrl) {
+                        URL.revokeObjectURL(this._currentBlobUrl);
+                    }
+                    this._currentBlobUrl = blobUrl;
+                    
+                    const imageKey = `utsc-${this.utscPlotImage._timestamp || Date.now()}`;
+                    console.log('[UTSC] Updating image with Blob URL, key:', imageKey, 'url:', blobUrl);
+                    
+                    container.innerHTML = `
+                        <img id="${imageKey}" 
+                             src="${blobUrl}" 
+                             alt="UTSC Spectrum" 
+                             style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" />
+                    `;
+                } catch (e) {
+                    console.error('[UTSC] Failed to create Blob URL:', e);
+                }
                 return;
             }
             
