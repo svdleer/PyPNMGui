@@ -1021,7 +1021,7 @@ createApp({
             if (this.utscLiveMode) {
                 this.startUtscLiveMonitoring();
             }
-        }
+        },
         
         async fetchUsRxmerData() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
