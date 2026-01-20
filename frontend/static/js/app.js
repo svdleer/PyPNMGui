@@ -1039,12 +1039,14 @@ createApp({
             const container = document.getElementById('utscChartContainer');
             if (!container) return;
             
-            // If we have a matplotlib plot, display it as an image
+            // If we have a matplotlib plot, display it as an image with cache-busting
             if (this.utscPlotImage && this.utscPlotImage.data) {
+                const timestamp = Date.now();
                 container.innerHTML = `
                     <img src="data:image/png;base64,${this.utscPlotImage.data}" 
                          alt="UTSC Spectrum" 
-                         style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" />
+                         style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" 
+                         key="${timestamp}" />
                 `;
                 return;
             }
