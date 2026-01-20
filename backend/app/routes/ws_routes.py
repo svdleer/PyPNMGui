@@ -104,10 +104,6 @@ def init_websocket(app):
                     if filepath in processed_files:
                         continue  # Already sent this one
                     
-                    # Rate limit: don't send too fast
-                    if (current_time - last_send_time < 0.01):
-                        break  # Wait a bit before processing more
-                    
                     processed_files.add(filepath)
                     last_send_time = current_time
                     
