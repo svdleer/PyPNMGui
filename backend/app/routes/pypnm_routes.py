@@ -1304,6 +1304,16 @@ def get_utsc_data(mac_address):
                 "message": "File too small - invalid UTSC data"
             }), 400
         
+        # Retrieve UTSC config from Redis FIRST to get correct span
+        utsc_config = {}
+        try:
+            config_json = redis_client.get(f'utsc_config:{mac_address}')
+            if config_json:
+                utsc_config = json.loads(config_json)
+                logger.info(f"Retrieved UTSC config: {utsc_config}")
+        except Exception as e:
+            logger.warning(f"Failed to retrieve UTSC config: {e}")
+        
         # Basic parsing: skip 328-byte header, extract amplitude data
         # Full parsing requires PyPNM library which isn't installed
         header = binary_data[:328]
@@ -1318,38 +1328,30 @@ def get_utsc_data(mac_address):
                 val = struct.unpack('<h', samples[i:i+2])[0]
                 amplitudes.append(val / 100.0)  # Scale to dB
         
-        # Generate frequencies (example: 5-85 MHz spectrum)
+        # Generate frequencies using configured span (defaults: 5-85 MHz = 80 MHz span, center 45 MHz)
         num_bins = len(amplitudes)
-        freq_start = 5000000  # 5 MHz
-        freq_end = 85000000   # 85 MHz
-        freq_step = (freq_end - freq_start) / num_bins if num_bins > 0 else 1
+        span_hz = utsc_config.get('span_hz', 80000000)  # 80 MHz default
+        center_freq_hz = utsc_config.get('center_freq_hz', 45000000)  # 45 MHz default
+        freq_start = center_freq_hz - (span_hz / 2)
+        freq_end = center_freq_hz + (span_hz / 2)
+        freq_step = span_hz / num_bins if num_bins > 0 else 1
         frequencies = [freq_start + i * freq_step for i in range(num_bins)]
+        
+        logger.info(f"UTSC freq range: {freq_start/1e6:.1f} - {freq_end/1e6:.1f} MHz, {num_bins} bins")
         
         spectrum_data = {
             'filename': os.path.basename(latest_file),
             'num_samples': len(amplitudes),
             'frequencies': frequencies[:800],  # Limit to first 800 points
-            'amplitudes': amplitudes[:800]
+            'amplitudes': amplitudes[:800],
+            'span_hz': span_hz,
+            'center_freq_hz': center_freq_hz,
+            'num_bins': num_bins
         }
-        
-        # Retrieve UTSC config from Redis to get correct span
-        utsc_config = {}
-        try:
-            config_json = redis_client.get(f'utsc_config:{mac_address}')
-            if config_json:
-                utsc_config = json.loads(config_json)
-        except Exception as e:
-            logger.warning(f"Failed to retrieve UTSC config: {e}")
         
         # Generate matplotlib plot with correct span
         from app.core.utsc_plotter import generate_utsc_plot_from_data
         rf_port_desc = data.get('rf_port_description', '')
-        
-        # Update spectrum_data with config parameters
-        if utsc_config:
-            spectrum_data['span_hz'] = utsc_config.get('span_hz', 80000000)
-            spectrum_data['center_freq_hz'] = utsc_config.get('center_freq_hz')
-            spectrum_data['num_bins'] = utsc_config.get('num_bins')
         
         plot = generate_utsc_plot_from_data(spectrum_data, mac_address, rf_port_desc)
         logger.info(f"Plot generated: {plot is not None}, has data: {plot.get('data')[:50] if plot and plot.get('data') else 'None'}...")

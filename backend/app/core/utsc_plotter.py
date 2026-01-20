@@ -26,7 +26,8 @@ def generate_utsc_plot(
     amplitudes: List[float],
     mac_address: str = "",
     rf_port_description: str = "",
-    capture_params: Optional[Dict[str, Any]] = None
+    capture_params: Optional[Dict[str, Any]] = None,
+    max_hold_amplitudes: Optional[List[float]] = None
 ) -> bytes:
     """
     Generate a matplotlib UTSC spectrum plot matching PyPNM dark theme style.
@@ -37,6 +38,7 @@ def generate_utsc_plot(
         mac_address: Modem MAC address for title
         rf_port_description: RF port description (e.g., "MNDGT0002RPS01-0 us-conn 0")
         capture_params: Capture parameters for annotations
+        max_hold_amplitudes: Optional max hold amplitude values
         
     Returns:
         PNG image as bytes
@@ -44,6 +46,9 @@ def generate_utsc_plot(
     # Convert to numpy arrays
     freqs = np.array(frequencies)
     amps = np.array(amplitudes)
+    
+    # Clamp amplitudes to minimum of 0 dBmV (no negative spikes displayed)
+    amps = np.clip(amps, 0, None)
     
     # PyPNM dark theme colors
     bg_color = '#1e1e2e'
@@ -62,10 +67,17 @@ def generate_utsc_plot(
     ax.set_facecolor(plot_bg)
     
     # Plot the spectrum line
-    ax.plot(freqs, amps, color=line_color, linewidth=1.0, alpha=0.9)
+    ax.plot(freqs, amps, color=line_color, linewidth=1.0, alpha=0.9, label='Current')
+    
+    # Plot max hold if provided
+    if max_hold_amplitudes is not None:
+        max_hold = np.array(max_hold_amplitudes)
+        max_hold = np.clip(max_hold, 0, None)  # Also clamp max hold to 0
+        ax.plot(freqs, max_hold, color='#ff6600', linewidth=1.0, alpha=0.7, 
+                linestyle='--', label='Max Hold')
     
     # Fill under the curve
-    ax.fill_between(freqs, amps, amps.min() - 5, color=line_color, alpha=0.15)
+    ax.fill_between(freqs, amps, 0, color=line_color, alpha=0.15)
     
     # Configure axes
     ax.set_xlabel('Frequency (MHz)', fontsize=11, color=text_color, labelpad=10)
@@ -84,10 +96,17 @@ def generate_utsc_plot(
     # Format x-axis to show MHz
     ax.xaxis.set_major_formatter(FuncFormatter(format_freq_mhz))
     
-    # Set axis limits
+    # Set axis limits - Y axis always starts at 0 (no negative values)
     ax.set_xlim(freqs.min(), freqs.max())
-    y_min, y_max = amps.min() - 5, amps.max() + 5
-    ax.set_ylim(y_min, y_max)
+    y_max = max(amps.max(), 10) + 5  # At least show up to 10 dBmV
+    if max_hold_amplitudes is not None:
+        y_max = max(y_max, np.max(max_hold_amplitudes) + 5)
+    ax.set_ylim(0, y_max)
+    
+    # Add legend if max hold is shown
+    if max_hold_amplitudes is not None:
+        ax.legend(loc='upper right', fontsize=9, facecolor=plot_bg, 
+                  edgecolor=grid_color, labelcolor=text_color)
     
     # Grid styling
     ax.grid(True, linestyle='--', alpha=0.4, color=grid_color)
