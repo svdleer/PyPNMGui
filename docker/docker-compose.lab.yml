@@ -1,7 +1,23 @@
 version: '3.8'
 
 services:
-  # LAB Version - Direct CMTS access, no agent needed
+  # PyPNM API - MANDATORY - Backend for PNM measurements
+  pypnm-api:
+    image: pypnm:latest
+    container_name: pypnm-api
+    ports:
+      - "8081:8080"  # Map internal 8080 to external 8081
+    networks:
+      - pypnm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # GUI Server - LAB Version
   gui-server-lab:
     build:
       context: ..
@@ -15,7 +31,7 @@ services:
     environment:
       - FLASK_ENV=lab
       - PYPNM_MODE=lab
-      - PYPNM_BASE_URL=http://172.17.0.1:8081
+      - PYPNM_BASE_URL=http://pypnm-api:8080
       - REDIS_HOST=eve-li-redis-lab
       - REDIS_PORT=6379
       - AGENT_REQUIRED=false
@@ -28,6 +44,11 @@ services:
     networks:
       - pypnm-net
     restart: unless-stopped
+    depends_on:
+      pypnm-api:
+        condition: service_healthy
+      redis-lab:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
       interval: 30s
@@ -57,11 +78,14 @@ services:
     environment:
       - AGENT_ID=lab-agent-local
       - SERVER_URL=ws://localhost:5051/ws/agent
-      - AGENT_CAPABILITIES=cmts_get_modems,cmts_get_modem_info,enrich_modems,execute_pnm
+      - AGENT_CAPABILITIES=snmp_get,snmp_walk,snmp_set,snmp_bulk_get,cmts_snmp_direct,cmts_get_modems,cmts_get_modem_info,enrich_modems,execute_pnm,pnm_ofdm_channels,pnm_ofdm_capture,pnm_ofdm_rxmer,pnm_set_tftp,pnm_utsc_configure,pnm_utsc_start,pnm_utsc_stop,pnm_utsc_status,pnm_utsc_data,pnm_us_rxmer_start,pnm_us_rxmer_status,pnm_us_rxmer_data,pnm_us_get_interfaces
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
+      - ../agent/agent_config.json:/app/config/agent_config.json:ro
     restart: unless-stopped
+    depends_on:
+      - gui-server-lab
 
 networks:
   pypnm-net:
