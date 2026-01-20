@@ -10,6 +10,7 @@ import os
 import tempfile
 import zipfile
 from io import BytesIO
+import json
 
 # Import spectrum plotter for generating matplotlib plots
 from app.core.spectrum_plotter import generate_spectrum_plot_from_data
@@ -17,6 +18,18 @@ from app.core.spectrum_plotter import generate_spectrum_plot_from_data
 logger = logging.getLogger(__name__)
 
 pypnm_bp = Blueprint('pypnm', __name__, url_prefix='/api/pypnm')
+
+# Redis client for caching
+try:
+    import redis
+    REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+    REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    redis_client.ping()
+    REDIS_AVAILABLE = True
+except:
+    redis_client = None
+    REDIS_AVAILABLE = False
 
 
 def get_default_community():
