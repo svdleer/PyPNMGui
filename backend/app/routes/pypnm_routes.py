@@ -1352,6 +1352,7 @@ def get_utsc_data(mac_address):
             spectrum_data['num_bins'] = utsc_config.get('num_bins')
         
         plot = generate_utsc_plot_from_data(spectrum_data, mac_address, rf_port_desc)
+        logger.info(f"Plot generated: {plot is not None}, has data: {plot.get('data')[:50] if plot and plot.get('data') else 'None'}...")
         
         return jsonify({
             "success": True,
