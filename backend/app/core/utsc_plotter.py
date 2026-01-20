@@ -47,8 +47,8 @@ def generate_utsc_plot(
     freqs = np.array(frequencies)
     amps = np.array(amplitudes)
     
-    # Clamp amplitudes to minimum of 0 dBmV (no negative spikes displayed)
-    amps = np.clip(amps, 0, None)
+    # Clamp amplitudes to range -40 to 0 dBmV (typical UTSC range)
+    amps = np.clip(amps, -40, 0)
     
     # PyPNM dark theme colors
     bg_color = '#1e1e2e'
@@ -76,8 +76,8 @@ def generate_utsc_plot(
         ax.plot(freqs, max_hold, color='#ff6600', linewidth=1.0, alpha=0.7, 
                 linestyle='--', label='Max Hold')
     
-    # Fill under the curve
-    ax.fill_between(freqs, amps, 0, color=line_color, alpha=0.15)
+    # Fill under the curve (from -40 baseline)
+    ax.fill_between(freqs, amps, -40, color=line_color, alpha=0.15)
     
     # Configure axes
     ax.set_xlabel('Frequency (MHz)', fontsize=11, color=text_color, labelpad=10)
@@ -96,12 +96,9 @@ def generate_utsc_plot(
     # Format x-axis to show MHz
     ax.xaxis.set_major_formatter(FuncFormatter(format_freq_mhz))
     
-    # Set axis limits - Y axis always starts at 0 (no negative values)
-    ax.set_xlim(freqs.min(), freqs.max())
-    y_max = max(amps.max(), 10) + 5  # At least show up to 10 dBmV
-    if max_hold_amplitudes is not None:
-        y_max = max(y_max, np.max(max_hold_amplitudes) + 5)
-    ax.set_ylim(0, y_max)
+    # Set axis limits - Fixed range: X = 0-100 MHz, Y = -40 to 0 dBmV
+    ax.set_xlim(0, 100e6)  # 0-100 MHz
+    ax.set_ylim(-40, 0)    # -40 to 0 dBmV
     
     # Add legend if max hold is shown
     if max_hold_amplitudes is not None:

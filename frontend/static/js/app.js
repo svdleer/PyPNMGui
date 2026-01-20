@@ -64,9 +64,9 @@ createApp({
             },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
-                centerFreqMhz: 30,
-                spanMhz: 80,
-                numBins: 800,
+                centerFreqMhz: 50,
+                spanMhz: 100,
+                numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 0,
                 freerunDurationMs: 1000
@@ -86,7 +86,7 @@ createApp({
             usRxmerChartInstance: null,
             utscLiveMode: false,
             utscLiveInterval: null,
-            utscRefreshRate: 3000,  // 3 seconds between updates
+            utscRefreshRate: 500,  // 0.5 seconds between updates
             
             // Housekeeping
             housekeepingDays: 7,
