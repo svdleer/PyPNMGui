@@ -10,12 +10,6 @@ services:
     networks:
       - pypnm-net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
 
   # GUI Server - LAB Version
   gui-server-lab:
@@ -45,10 +39,8 @@ services:
       - pypnm-net
     restart: unless-stopped
     depends_on:
-      pypnm-api:
-        condition: service_healthy
-      redis-lab:
-        condition: service_started
+      - pypnm-api
+      - redis-lab
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
       interval: 30s
