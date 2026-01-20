@@ -76,8 +76,8 @@ def generate_utsc_plot(
         ax.plot(freqs, max_hold, color='#ff6600', linewidth=1.0, alpha=0.7, 
                 linestyle='--', label='Max Hold')
     
-    # Fill under the curve (from -40 baseline)
-    ax.fill_between(freqs, amps, -40, color=line_color, alpha=0.15)
+    # Fill under the curve (from minimum value)
+    ax.fill_between(freqs, amps, amps.min(), color=line_color, alpha=0.15)
     
     # Configure axes
     ax.set_xlabel('Frequency (MHz)', fontsize=11, color=text_color, labelpad=10)
@@ -96,9 +96,12 @@ def generate_utsc_plot(
     # Format x-axis to show MHz
     ax.xaxis.set_major_formatter(FuncFormatter(format_freq_mhz))
     
-    # Set axis limits - Fixed range: X = 0-100 MHz, Y = -40 to 0 dBmV
+    # Set axis limits - Fixed X range, auto Y based on data
     ax.set_xlim(0, 100e6)  # 0-100 MHz
-    ax.set_ylim(-40, 0)    # -40 to 0 dBmV
+    # Auto-scale Y axis with 5 dBmV padding
+    y_min = max(0, np.floor(amps.min() - 5))
+    y_max = min(70, np.ceil(amps.max() + 5))
+    ax.set_ylim(y_min, y_max)
     
     # Add legend if max hold is shown
     if max_hold_amplitudes is not None:
