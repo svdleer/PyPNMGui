@@ -166,8 +166,8 @@ def init_websocket(app):
                     except Exception as e:
                         logger.error(f"Error processing UTSC file {filepath}: {e}")
                 
-                # Small sleep to prevent CPU spinning
-                time.sleep(0.05)
+                # Small sleep to prevent CPU spinning (1ms)
+                time.sleep(0.001)
                     
         except Exception as e:
             logger.error(f"UTSC WebSocket error: {e}")
