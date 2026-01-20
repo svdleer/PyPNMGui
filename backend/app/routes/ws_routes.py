@@ -70,8 +70,7 @@ def init_websocket(app):
         session_id = f"{mac_clean}_{id(ws)}"
         _utsc_sessions[session_id] = True
         
-        last_file = None
-        last_mtime = 0
+        processed_files = set()  # Track files we've already sent
         tftp_base = '/var/lib/tftpboot'
         heartbeat_interval = 5  # Send heartbeat every 5 seconds
         last_heartbeat = time.time()
@@ -98,27 +97,26 @@ def init_websocket(app):
                 
                 # Check for UTSC files
                 pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-                files = sorted(glob.glob(pattern), reverse=True)
+                files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
                 
-                if files:
-                    latest_file = files[0]
-                    try:
-                        current_mtime = os.path.getmtime(latest_file)
-                    except:
-                        current_mtime = 0
+                # Process ALL new files (not just the latest)
+                for filepath in files:
+                    if filepath in processed_files:
+                        continue  # Already sent this one
                     
-                    # Process if new file or file modified
-                    if (latest_file != last_file or current_mtime != last_mtime) and (current_time - last_send_time > 0.01):
-                        last_file = latest_file
-                        last_mtime = current_mtime
-                        last_send_time = current_time
+                    # Rate limit: don't send too fast
+                    if (current_time - last_send_time < 0.01):
+                        break  # Wait a bit before processing more
+                    
+                    processed_files.add(filepath)
+                    last_send_time = current_time
+                    
+                    try:
+                        # Read and parse the file
+                        with open(filepath, 'rb') as f:
+                            binary_data = f.read()
                         
-                        try:
-                            # Read and parse the file
-                            with open(latest_file, 'rb') as f:
-                                binary_data = f.read()
-                            
-                            if len(binary_data) >= 328:
+                        if len(binary_data) >= 328:
                                 # Parse amplitudes
                                 samples = binary_data[328:]
                                 amplitudes = []
@@ -160,17 +158,17 @@ def init_websocket(app):
                                 
                                 plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
                                 
-                                if plot:
-                                    # Send the plot via websocket
-                                    ws.send(json.dumps({
-                                        'type': 'spectrum',
-                                        'timestamp': current_time,
-                                        'filename': os.path.basename(latest_file),
-                                        'plot': plot
-                                    }))
-                                    
-                        except Exception as e:
-                            logger.error(f"Error processing UTSC file: {e}")
+                            if plot:
+                                # Send the plot via websocket
+                                ws.send(json.dumps({
+                                    'type': 'spectrum',
+                                    'timestamp': current_time,
+                                    'filename': os.path.basename(filepath),
+                                    'plot': plot
+                                }))
+                                
+                    except Exception as e:
+                        logger.error(f"Error processing UTSC file {filepath}: {e}")
                 
                 # Small sleep to prevent CPU spinning
                 time.sleep(0.05)
