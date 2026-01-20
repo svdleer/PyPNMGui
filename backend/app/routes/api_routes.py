@@ -777,7 +777,19 @@ def get_cmts_modems(hostname):
                         enrich_result = agent_manager.wait_for_task(enrich_task_id, timeout=300)
                         
                         if enrich_result and enrich_result.get('result', {}).get('success'):
-                            enriched_modems.extend(enrich_result.get('result', {}).get('modems', []))
+                            batch_enriched = enrich_result.get('result', {}).get('modems', [])
+                            enriched_modems.extend(batch_enriched)
+                            
+                            # Cache RF port info for each modem (24h TTL)
+                            for modem in batch_enriched:
+                                mac = modem.get('mac_address', '')
+                                rf_port_data = modem.get('modem_rf_port')
+                                if mac and rf_port_data and REDIS_AVAILABLE and redis_client:
+                                    try:
+                                        cache_key_rf = f'modem:rf_port:{mac}'
+                                        redis_client.setex(cache_key_rf, 86400, json.dumps(rf_port_data))  # 24h
+                                    except Exception as e:
+                                        pass
                         else:
                             # Keep original batch if enrichment failed
                             enriched_modems.extend(batch)
