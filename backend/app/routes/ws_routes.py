@@ -71,7 +71,11 @@ def init_websocket(app):
         _utsc_sessions[session_id] = True
         
         last_file = None
+        last_mtime = 0
         tftp_base = '/var/lib/tftpboot'
+        heartbeat_interval = 5  # Send heartbeat every 5 seconds
+        last_heartbeat = time.time()
+        last_send_time = 0
         
         try:
             # Send initial connected message
@@ -82,86 +86,94 @@ def init_websocket(app):
             }))
             
             while _utsc_sessions.get(session_id, False):
-                # Check for new UTSC files
+                current_time = time.time()
+                
+                # Send heartbeat to keep connection alive
+                if current_time - last_heartbeat > heartbeat_interval:
+                    ws.send(json.dumps({
+                        'type': 'heartbeat',
+                        'timestamp': current_time
+                    }))
+                    last_heartbeat = current_time
+                
+                # Check for UTSC files
                 pattern = f"{tftp_base}/utsc_{mac_clean}_*"
                 files = sorted(glob.glob(pattern), reverse=True)
                 
-                if files and files[0] != last_file:
+                if files:
                     latest_file = files[0]
-                    last_file = latest_file
-                    
                     try:
-                        # Read and parse the file
-                        with open(latest_file, 'rb') as f:
-                            binary_data = f.read()
+                        current_mtime = os.path.getmtime(latest_file)
+                    except:
+                        current_mtime = 0
+                    
+                    # Process if new file or file modified
+                    if (latest_file != last_file or current_mtime != last_mtime) and (current_time - last_send_time > 0.1):
+                        last_file = latest_file
+                        last_mtime = current_mtime
+                        last_send_time = current_time
                         
-                        if len(binary_data) >= 328:
-                            # Parse amplitudes
-                            samples = binary_data[328:]
-                            amplitudes = []
-                            for i in range(0, len(samples), 2):
-                                if i+1 < len(samples):
-                                    val = struct.unpack('<h', samples[i:i+2])[0]
-                                    amplitudes.append(val / 100.0)
+                        try:
+                            # Read and parse the file
+                            with open(latest_file, 'rb') as f:
+                                binary_data = f.read()
                             
-                            # Get config from Redis for frequency calculation
-                            try:
-                                from app import redis_client
-                                config_json = redis_client.get(f'utsc_config:{mac_address}')
-                                if config_json:
-                                    config = json.loads(config_json)
-                                    span_hz = config.get('span_hz', 100000000)
-                                    center_freq_hz = config.get('center_freq_hz', 50000000)
-                                else:
+                            if len(binary_data) >= 328:
+                                # Parse amplitudes
+                                samples = binary_data[328:]
+                                amplitudes = []
+                                for i in range(0, len(samples), 2):
+                                    if i+1 < len(samples):
+                                        val = struct.unpack('<h', samples[i:i+2])[0]
+                                        amplitudes.append(val / 100.0)
+                                
+                                # Get config from Redis for frequency calculation
+                                try:
+                                    from app import redis_client
+                                    config_json = redis_client.get(f'utsc_config:{mac_address}')
+                                    if config_json:
+                                        config = json.loads(config_json)
+                                        span_hz = config.get('span_hz', 100000000)
+                                        center_freq_hz = config.get('center_freq_hz', 50000000)
+                                    else:
+                                        span_hz = 100000000
+                                        center_freq_hz = 50000000
+                                except:
                                     span_hz = 100000000
                                     center_freq_hz = 50000000
-                            except:
-                                span_hz = 100000000
-                                center_freq_hz = 50000000
-                            
-                            # Generate frequencies
-                            num_bins = len(amplitudes)
-                            freq_start = center_freq_hz - (span_hz / 2)
-                            freq_step = span_hz / num_bins if num_bins > 0 else 1
-                            frequencies = [freq_start + i * freq_step for i in range(num_bins)]
-                            
-                            # Generate plot
-                            from app.core.utsc_plotter import generate_utsc_plot_from_data
-                            spectrum_data = {
-                                'frequencies': frequencies[:3200],
-                                'amplitudes': amplitudes[:3200],
-                                'span_hz': span_hz,
-                                'center_freq_hz': center_freq_hz,
-                                'num_bins': num_bins
-                            }
-                            
-                            plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
-                            
-                            if plot:
-                                # Send the plot via websocket
-                                ws.send(json.dumps({
-                                    'type': 'spectrum',
-                                    'timestamp': time.time(),
-                                    'filename': os.path.basename(latest_file),
-                                    'plot': plot
-                                }))
-                            
-                    except Exception as e:
-                        logger.error(f"Error processing UTSC file: {e}")
-                        ws.send(json.dumps({
-                            'type': 'error',
-                            'message': str(e)
-                        }))
+                                
+                                # Generate frequencies
+                                num_bins = len(amplitudes)
+                                freq_start = center_freq_hz - (span_hz / 2)
+                                freq_step = span_hz / num_bins if num_bins > 0 else 1
+                                frequencies = [freq_start + i * freq_step for i in range(num_bins)]
+                                
+                                # Generate plot
+                                from app.core.utsc_plotter import generate_utsc_plot_from_data
+                                spectrum_data = {
+                                    'frequencies': frequencies[:3200],
+                                    'amplitudes': amplitudes[:3200],
+                                    'span_hz': span_hz,
+                                    'center_freq_hz': center_freq_hz,
+                                    'num_bins': num_bins
+                                }
+                                
+                                plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
+                                
+                                if plot:
+                                    # Send the plot via websocket
+                                    ws.send(json.dumps({
+                                        'type': 'spectrum',
+                                        'timestamp': current_time,
+                                        'filename': os.path.basename(latest_file),
+                                        'plot': plot
+                                    }))
+                                    
+                        except Exception as e:
+                            logger.error(f"Error processing UTSC file: {e}")
                 
                 # Small sleep to prevent CPU spinning
-                time.sleep(0.1)
-                
-                # Check if websocket is still connected
-                try:
-                    # Non-blocking receive to check connection
-                    pass
-                except:
-                    break
+                time.sleep(0.05)
                     
         except Exception as e:
             logger.error(f"UTSC WebSocket error: {e}")
