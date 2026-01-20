@@ -153,15 +153,15 @@ def init_websocket(app):
                                 }
                                 
                                 plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
-                                
-                            if plot:
-                                # Send the plot via websocket
-                                ws.send(json.dumps({
-                                    'type': 'spectrum',
-                                    'timestamp': current_time,
-                                    'filename': os.path.basename(filepath),
-                                    'plot': plot
-                                }))
+
+                                if plot:
+                                    # Send the plot via websocket
+                                    ws.send(json.dumps({
+                                        'type': 'spectrum',
+                                        'timestamp': current_time,
+                                        'filename': os.path.basename(filepath),
+                                        'plot': plot
+                                    }))
                                 
                     except Exception as e:
                         logger.error(f"Error processing UTSC file {filepath}: {e}")
