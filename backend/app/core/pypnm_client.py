@@ -609,7 +609,10 @@ class PyPNMClient:
         num_bins: int = 800,
         filename: str = "utsc_capture",
         cm_mac: Optional[str] = None,
-        logical_ch_ifindex: Optional[int] = None
+        logical_ch_ifindex: Optional[int] = None,
+        repeat_period_ms: int = 3000,
+        freerun_duration_ms: int = 60000,
+        trigger_count: int = 20
     ) -> Dict[str, Any]:
         """
         Trigger CMTS-based Upstream Triggered Spectrum Capture (UTSC).
@@ -631,6 +634,9 @@ class PyPNMClient:
             filename: Output filename (CMTS adds timestamp)
             cm_mac: Cable modem MAC (required if trigger_mode=6)
             logical_ch_ifindex: Logical channel ifIndex (optional for trigger_mode=6)
+            repeat_period_ms: Milliseconds between captures (default: 3000 = 3 seconds)
+            freerun_duration_ms: Total duration for free-running mode (default: 60000 = 60 seconds)
+            trigger_count: Number of captures to take (default: 20)
         
         Returns UTSC spectrum data for upstream channels (5-85 MHz typical).
         Files saved to TFTP with timestamp: {filename}_YYYY-MM-DD_HH.MM.SS.mmm
@@ -654,7 +660,10 @@ class PyPNMClient:
                 "center_freq_hz": center_freq_hz,
                 "span_hz": span_hz,
                 "num_bins": num_bins,
-                "filename": filename
+                "filename": filename,
+                "repeat_period_ms": repeat_period_ms,
+                "freerun_duration_ms": freerun_duration_ms,
+                "trigger_count": trigger_count
             },
             "analysis": {
                 "output_type": output_type
