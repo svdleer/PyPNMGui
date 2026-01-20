@@ -20,7 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     curl \
     netcat-openbsd \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Set timezone
+ENV TZ=Europe/Amsterdam
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Enable MIBs (snmp-mibs-downloader not available in Debian Trixie)
 RUN sed -i 's/^mibs :$/# mibs :/' /etc/snmp/snmp.conf 2>/dev/null || true
