@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import json
+import time
+import glob
+import os
+import struct
+import threading
 from flask import Blueprint, current_app
 
 logger = logging.getLogger(__name__)
@@ -14,6 +20,9 @@ try:
 except ImportError:
     WEBSOCKET_AVAILABLE = False
     logger.warning("flask-sock not installed, WebSocket support disabled")
+
+# Track active UTSC streaming sessions
+_utsc_sessions = {}
 
 
 def init_websocket(app):
@@ -51,5 +60,115 @@ def init_websocket(app):
             agent_manager.remove_agent(ws)
             logger.info("Agent WebSocket connection closed")
     
+    @sock.route('/ws/utsc/<mac_address>')
+    def utsc_websocket(ws, mac_address):
+        """WebSocket endpoint for streaming UTSC spectrum data."""
+        logger.info(f"UTSC WebSocket opened for {mac_address}")
+        
+        # Clean MAC address format
+        mac_clean = mac_address.replace(':', '').replace('-', '').lower()
+        session_id = f"{mac_clean}_{id(ws)}"
+        _utsc_sessions[session_id] = True
+        
+        last_file = None
+        tftp_base = '/var/lib/tftpboot'
+        
+        try:
+            # Send initial connected message
+            ws.send(json.dumps({
+                'type': 'connected',
+                'mac': mac_address,
+                'message': 'UTSC stream connected'
+            }))
+            
+            while _utsc_sessions.get(session_id, False):
+                # Check for new UTSC files
+                pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+                files = sorted(glob.glob(pattern), reverse=True)
+                
+                if files and files[0] != last_file:
+                    latest_file = files[0]
+                    last_file = latest_file
+                    
+                    try:
+                        # Read and parse the file
+                        with open(latest_file, 'rb') as f:
+                            binary_data = f.read()
+                        
+                        if len(binary_data) >= 328:
+                            # Parse amplitudes
+                            samples = binary_data[328:]
+                            amplitudes = []
+                            for i in range(0, len(samples), 2):
+                                if i+1 < len(samples):
+                                    val = struct.unpack('<h', samples[i:i+2])[0]
+                                    amplitudes.append(val / 100.0)
+                            
+                            # Get config from Redis for frequency calculation
+                            try:
+                                from app import redis_client
+                                config_json = redis_client.get(f'utsc_config:{mac_address}')
+                                if config_json:
+                                    config = json.loads(config_json)
+                                    span_hz = config.get('span_hz', 100000000)
+                                    center_freq_hz = config.get('center_freq_hz', 50000000)
+                                else:
+                                    span_hz = 100000000
+                                    center_freq_hz = 50000000
+                            except:
+                                span_hz = 100000000
+                                center_freq_hz = 50000000
+                            
+                            # Generate frequencies
+                            num_bins = len(amplitudes)
+                            freq_start = center_freq_hz - (span_hz / 2)
+                            freq_step = span_hz / num_bins if num_bins > 0 else 1
+                            frequencies = [freq_start + i * freq_step for i in range(num_bins)]
+                            
+                            # Generate plot
+                            from app.core.utsc_plotter import generate_utsc_plot_from_data
+                            spectrum_data = {
+                                'frequencies': frequencies[:3200],
+                                'amplitudes': amplitudes[:3200],
+                                'span_hz': span_hz,
+                                'center_freq_hz': center_freq_hz,
+                                'num_bins': num_bins
+                            }
+                            
+                            plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
+                            
+                            if plot:
+                                # Send the plot via websocket
+                                ws.send(json.dumps({
+                                    'type': 'spectrum',
+                                    'timestamp': time.time(),
+                                    'filename': os.path.basename(latest_file),
+                                    'plot': plot
+                                }))
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing UTSC file: {e}")
+                        ws.send(json.dumps({
+                            'type': 'error',
+                            'message': str(e)
+                        }))
+                
+                # Small sleep to prevent CPU spinning
+                time.sleep(0.1)
+                
+                # Check if websocket is still connected
+                try:
+                    # Non-blocking receive to check connection
+                    pass
+                except:
+                    break
+                    
+        except Exception as e:
+            logger.error(f"UTSC WebSocket error: {e}")
+        finally:
+            _utsc_sessions.pop(session_id, None)
+            logger.info(f"UTSC WebSocket closed for {mac_address}")
+    
     logger.info("WebSocket agent endpoint registered at /ws/agent")
+    logger.info("WebSocket UTSC endpoint registered at /ws/utsc/<mac>")
     return sock

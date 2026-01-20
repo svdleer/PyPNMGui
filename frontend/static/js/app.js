@@ -86,6 +86,7 @@ createApp({
             usRxmerChartInstance: null,
             utscLiveMode: false,
             utscLiveInterval: null,
+            utscWebSocket: null,  // WebSocket for live UTSC streaming
             utscRefreshRate: 500,  // 0.5 seconds between updates
             
             // Housekeeping
@@ -983,14 +984,96 @@ createApp({
             this.utscLiveMode = !this.utscLiveMode;
             
             if (this.utscLiveMode) {
-                this.$toast?.success(`Live monitoring enabled - refreshing every ${this.utscRefreshRate/1000}s`);
-                this.startUtscLiveMonitoring();
+                this.$toast?.success('Live monitoring enabled via WebSocket');
+                this.startUtscWebSocket();
             } else {
                 this.$toast?.info('Live monitoring disabled');
-                this.stopUtscLiveMonitoring();
+                this.stopUtscWebSocket();
             }
         },
         
+        startUtscWebSocket() {
+            if (!this.selectedModem) return;
+            
+            // Close existing connection
+            this.stopUtscWebSocket();
+            
+            const mac = this.selectedModem.mac_address;
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}`;
+            
+            console.log('[UTSC] Connecting WebSocket:', wsUrl);
+            
+            try {
+                this.utscWebSocket = new WebSocket(wsUrl);
+                
+                this.utscWebSocket.onopen = () => {
+                    console.log('[UTSC] WebSocket connected');
+                    this.$toast?.success('UTSC stream connected');
+                };
+                
+                this.utscWebSocket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'spectrum' && data.plot) {
+                            // Update the plot image
+                            this.utscPlotImage = {
+                                data: data.plot.data,
+                                filename: data.plot.filename,
+                                _timestamp: data.timestamp
+                            };
+                            
+                            // Render the chart
+                            this.$nextTick(() => {
+                                this.renderUtscChart();
+                            });
+                        } else if (data.type === 'error') {
+                            console.error('[UTSC] Stream error:', data.message);
+                        } else if (data.type === 'connected') {
+                            console.log('[UTSC]', data.message);
+                        }
+                    } catch (e) {
+                        console.error('[UTSC] Failed to parse message:', e);
+                    }
+                };
+                
+                this.utscWebSocket.onerror = (error) => {
+                    console.error('[UTSC] WebSocket error:', error);
+                    this.$toast?.error('UTSC stream error');
+                };
+                
+                this.utscWebSocket.onclose = () => {
+                    console.log('[UTSC] WebSocket closed');
+                    if (this.utscLiveMode) {
+                        // Try to reconnect after 2 seconds
+                        setTimeout(() => {
+                            if (this.utscLiveMode) {
+                                console.log('[UTSC] Attempting reconnect...');
+                                this.startUtscWebSocket();
+                            }
+                        }, 2000);
+                    }
+                };
+            } catch (e) {
+                console.error('[UTSC] Failed to create WebSocket:', e);
+                this.$toast?.error('Failed to connect UTSC stream');
+            }
+        },
+        
+        stopUtscWebSocket() {
+            if (this.utscWebSocket) {
+                this.utscWebSocket.close();
+                this.utscWebSocket = null;
+            }
+            // Also stop any polling fallback
+            if (this.utscLiveInterval) {
+                clearInterval(this.utscLiveInterval);
+                this.utscLiveInterval = null;
+            }
+        },
+        
+        // Legacy polling methods (kept as fallback)
         startUtscLiveMonitoring() {
             if (this.utscLiveInterval) {
                 clearInterval(this.utscLiveInterval);
