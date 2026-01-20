@@ -6,12 +6,12 @@ services:
     image: pypnm:latest
     container_name: pypnm-api
     ports:
-      - "8081:8080"  # Map internal 8080 to external 8081
+      - "8081:8000"  # Map internal 8000 to external 8081
     networks:
       - pypnm-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -31,7 +31,7 @@ services:
     environment:
       - FLASK_ENV=lab
       - PYPNM_MODE=lab
-      - PYPNM_BASE_URL=http://pypnm-api:8080
+      - PYPNM_BASE_URL=http://pypnm-api:8000
       - REDIS_HOST=eve-li-redis-lab
       - REDIS_PORT=6379
       - AGENT_REQUIRED=false
