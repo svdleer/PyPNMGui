@@ -352,6 +352,11 @@ createApp({
                 // Also load upstream interfaces if CMTS IP is available (for upstream PNM)
                 if (modem.cmts_ip) {
                     promises.push(this.loadUpstreamInterfaces());
+                    // Auto-enable UTSC live mode for upstream monitoring
+                    if (!this.utscLiveMode) {
+                        this.utscLiveMode = true;
+                        this.startUtscWebSocket();
+                    }
                 }
                 
                 await Promise.all(promises);
@@ -801,27 +806,39 @@ createApp({
         
         async stopUtsc() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
+                this.$toast?.warning('No active UTSC session to stop');
                 return;
             }
             
             try {
+                this.$toast?.info('Stopping UTSC capture...');
+                
                 const response = await fetch(`/api/pypnm/upstream/utsc/stop/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
                 });
                 
                 const result = await response.json();
                 this.runningUtsc = false;
+                
                 if (result.success) {
-                    this.$toast?.success('UTSC test stopped');
+                    this.$toast?.success('UTSC capture stopped');
+                    // Stop live monitoring
+                    if (this.utscLiveMode) {
+                        this.utscLiveMode = false;
+                        this.stopUtscWebSocket();
+                    }
+                } else {
+                    this.$toast?.error(result.message || 'Failed to stop UTSC');
                 }
             } catch (error) {
                 console.error('Stop UTSC error:', error);
+                this.$toast?.error('Failed to stop UTSC');
                 this.runningUtsc = false;
             }
         },
