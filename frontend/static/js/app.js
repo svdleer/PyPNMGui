@@ -1071,53 +1071,23 @@ createApp({
                     const blob = new Blob([array], { type: 'image/png' });
                     const blobUrl = URL.createObjectURL(blob);
                     
-                    const imageKey = `utsc-${this.utscPlotImage._timestamp || Date.now()}`;
-                    console.log('[UTSC] Updating image with Blob URL, key:', imageKey);
+                    // Revoke old blob URL
+                    if (this._currentBlobUrl) {
+                        URL.revokeObjectURL(this._currentBlobUrl);
+                    }
+                    this._currentBlobUrl = blobUrl;
                     
-                    // Check if we already have an image - crossfade for smooth transitions
-                    const existingImg = container.querySelector('img');
-                    
-                    if (existingImg && this.utscLiveMode) {
-                        // Create new image for crossfade transition
-                        const newImg = document.createElement('img');
-                        newImg.id = imageKey;
-                        newImg.alt = 'UTSC Spectrum';
-                        newImg.style.cssText = 'width: 100%; height: auto; max-height: 600px; object-fit: contain; position: absolute; top: 0; left: 0; opacity: 0; transition: opacity 0.15s ease-in-out;';
-                        
-                        // Preload new image
-                        newImg.onload = () => {
-                            // Fade in new image
-                            newImg.style.opacity = '1';
-                            existingImg.style.opacity = '0';
-                            
-                            // Clean up old image after transition
-                            setTimeout(() => {
-                                if (this._currentBlobUrl) {
-                                    URL.revokeObjectURL(this._currentBlobUrl);
-                                }
-                                this._currentBlobUrl = blobUrl;
-                                existingImg.remove();
-                                newImg.style.position = 'relative';
-                            }, 160);
-                        };
-                        
-                        // Make container relative for absolute positioning
-                        container.style.position = 'relative';
-                        existingImg.style.cssText = 'width: 100%; height: auto; max-height: 600px; object-fit: contain; transition: opacity 0.15s ease-in-out;';
-                        container.appendChild(newImg);
-                        newImg.src = blobUrl;
+                    // Check if we already have an image element
+                    let img = container.querySelector('img');
+                    if (img) {
+                        // Just update the src - browser handles smooth update
+                        img.src = blobUrl;
                     } else {
-                        // First image or not in live mode - just set it directly
-                        if (this._currentBlobUrl) {
-                            URL.revokeObjectURL(this._currentBlobUrl);
-                        }
-                        this._currentBlobUrl = blobUrl;
-                        
+                        // First time - create the image
                         container.innerHTML = `
-                            <img id="${imageKey}" 
-                                 src="${blobUrl}" 
+                            <img src="${blobUrl}" 
                                  alt="UTSC Spectrum" 
-                                 style="width: 100%; height: auto; max-height: 600px; object-fit: contain; transition: opacity 0.15s ease-in-out;" />
+                                 style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" />
                         `;
                     }
                 } catch (e) {
