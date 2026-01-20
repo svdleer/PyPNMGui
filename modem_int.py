@@ -1,255 +1,309 @@
 #!/usr/bin/env python3
 """
-Lookup a registered cable modem on a CMTS by MAC and print:
-- cmIndex (docsIfCmtsCmPtr)
-- DOCSIS 3.0 ATDMA upstream channels (docsIf3CmtsCmUsStatusTable)
-- DOCSIS 3.1 OFDMA upstream channels (docsIf31CmtsCmUsOfdmaProfileTable)
-- ifDescr for each upstream ifIndex
-
-Requires Net-SNMP CLI tools: snmpget, snmpwalk
+FIXED - Find physical upstream port using docsIfCmtsCmPtr table
 """
 
-import argparse
-import re
 import subprocess
+import re
 import sys
 
-# DOCS-IF-MIB
-DOCSIF_CMTS_CMPTR_OID = "1.3.6.1.2.1.10.127.1.3.7.1.2"  # docsIfCmtsCmPtr (indexed by MAC)
+def run_cmd(cmd):
+    """Run shell command"""
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return result.stdout.strip()
 
-# DOCS-IF3-MIB - DOCSIS 3.0 ATDMA upstream status
-DOCSIF3_CM_US_STATUS_OID = "1.3.6.1.4.1.4491.2.1.20.1.4.1"  # docsIf3CmtsCmUsStatusTable
-
-# DOCS-IF31-MIB - DOCSIS 3.1 OFDMA upstream 
-DOCSIF31_CM_US_OFDMA_OID = "1.3.6.1.4.1.4491.2.1.28.1.5.1.1"  # docsIf31CmtsCmUsOfdmaProfileTotalCodewords
-
-# IF-MIB
-IFDESCR_OID = "1.3.6.1.2.1.2.2.1.2"  # ifDescr.<ifIndex>
-
-MAC_RE = re.compile(r"^([0-9a-fA-F]{2}([:\-]?)){5}[0-9a-fA-F]{2}$")
-
-
-def mac_to_decimal_oid_suffix(mac: str) -> str:
-    mac = mac.strip()
-    if not MAC_RE.match(mac):
-        raise ValueError(f"Invalid MAC address: {mac}")
-
-    mac = mac.replace("-", ":").lower()
-    parts = mac.split(":")
-    if len(parts) != 6:
-        mac_hex = re.sub(r"[^0-9a-fA-F]", "", mac)
-        if len(mac_hex) != 12:
-            raise ValueError(f"Invalid MAC address: {mac}")
-        parts = [mac_hex[i:i+2] for i in range(0, 12, 2)]
-
-    return ".".join(str(int(p, 16)) for p in parts)
-
-
-def run_snmpget(cmts: str, community: str, oid: str, version: str, timeout: int, retries: int) -> str:
-    cmd = [
-        "snmpget",
-        f"-v{version}",
-        "-c", community,
-        "-t", str(timeout),
-        "-r", str(retries),
-        "-Ovq",
-        cmts,
-        oid,
-    ]
-    try:
-        return subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip()
-    except FileNotFoundError:
-        raise RuntimeError("snmpget not found. Install Net-SNMP tools.")
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(e.output.strip() or f"snmpget failed for OID {oid}")
-
-
-def run_snmpwalk(cmts: str, community: str, oid: str, version: str, timeout: int, retries: int) -> str:
-    cmd = [
-        "snmpwalk",
-        f"-v{version}",
-        "-c", community,
-        "-t", str(timeout),
-        "-r", str(retries),
-        cmts,
-        oid,
-    ]
-    try:
-        return subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip()
-    except FileNotFoundError:
-        raise RuntimeError("snmpwalk not found. Install Net-SNMP tools.")
-    except subprocess.CalledProcessError as e:
-        return ""  # Empty result is OK for optional tables
-
-
-def snmpget_cm_index(cmts: str, community: str, mac: str, version: str, timeout: int, retries: int) -> int:
-    mac_suffix = mac_to_decimal_oid_suffix(mac)
-    full_oid = f"{DOCSIF_CMTS_CMPTR_OID}.{mac_suffix}"
-    out = run_snmpget(cmts, community, full_oid, version, timeout, retries)
-    try:
-        return int(out)
-    except ValueError:
-        raise RuntimeError(f"Unexpected cmIndex output: {out}")
-
-
-def get_atdma_channels(cmts: str, community: str, cm_index: int, version: str, timeout: int, retries: int) -> list:
-    """Get DOCSIS 3.0 ATDMA upstream channels for this CM."""
-    output = run_snmpwalk(cmts, community, DOCSIF3_CM_US_STATUS_OID, version, timeout, retries)
+def mac_to_decimal(mac):
+    """Convert MAC address to decimal format for SNMP OID"""
+    # Remove any separators and convert to lowercase
+    clean_mac = mac.replace(':', '').replace('-', '').replace('.', '').lower()
     
-    channels = set()
-    for line in output.split('\n'):
-        if f'.{cm_index}.' in line:
-            # Extract ifIndex from OID: ...docsIf3CmtsCmUsStatusXxx.<cmIndex>.<usIfIndex>
-            try:
-                parts = line.split('=')[0].strip().split('.')
-                for i, p in enumerate(parts):
-                    if p == str(cm_index) and i + 1 < len(parts):
-                        ifindex = int(parts[i + 1])
-                        if ifindex > 0:
-                            channels.add(ifindex)
-                        break
-            except:
-                pass
-    return sorted(channels)
-
-
-def get_ofdma_channels(cmts: str, community: str, cm_index: int, version: str, timeout: int, retries: int) -> list:
-    """Get DOCSIS 3.1 OFDMA upstream channels for this CM."""
-    output = run_snmpwalk(cmts, community, DOCSIF31_CM_US_OFDMA_OID, version, timeout, retries)
+    # Validate MAC length
+    if len(clean_mac) != 12:
+        raise ValueError(f"Invalid MAC address length: {mac}")
     
-    channels = set()
-    for line in output.split('\n'):
-        if f'.{cm_index}.' in line:
-            # Extract ifIndex from OID: ...docsIf31CmtsCmUsOfdmaXxx.<cmIndex>.<ofdmaIfIndex>.<profileId>
-            try:
-                parts = line.split('=')[0].strip().split('.')
-                for i, p in enumerate(parts):
-                    if p == str(cm_index) and i + 1 < len(parts):
-                        ifindex = int(parts[i + 1])
-                        if ifindex > 800000000:  # OFDMA ifindexes are typically > 843M
-                            channels.add(ifindex)
-                        break
-            except:
-                pass
-    return sorted(channels)
+    # Convert each hex pair to decimal
+    decimal_parts = []
+    for i in range(0, 12, 2):
+        hex_pair = clean_mac[i:i+2]
+        try:
+            decimal_parts.append(str(int(hex_pair, 16)))
+        except ValueError:
+            raise ValueError(f"Invalid hex in MAC: {hex_pair}")
+    
+    return '.'.join(decimal_parts)
 
-
-def get_ifdescr(cmts: str, community: str, ifindex: int, version: str, timeout: int, retries: int) -> str:
+def get_cmindex_from_cmptr(cmts, community, mac):
+    """Get cmIndex from docsIfCmtsCmPtr table"""
+    print(f"Getting cmIndex for modem {mac}...")
+    
     try:
-        return run_snmpget(cmts, community, f"{IFDESCR_OID}.{ifindex}", version, timeout, retries)
-    except:
-        return "N/A"
-
-
-def get_us_conn_ports(cmts: str, community: str, version: str, timeout: int, retries: int) -> dict:
-    """Get all us-conn physical ports and their ifIndex."""
-    output = run_snmpwalk(cmts, community, IFDESCR_OID, version, timeout, retries)
+        mac_decimal = mac_to_decimal(mac)
+    except ValueError as e:
+        print(f"✗ MAC address error: {e}")
+        return None
     
-    ports = {}  # blade_id -> [(ifindex, descr), ...]
+    # Query docsIfCmtsCmPtr
+    oid = f".1.3.6.1.2.1.10.127.1.3.7.1.2.{mac_decimal}"
+    cmd = f"snmpget -v2c -c {community} {cmts} {oid}"
+    output = run_cmd(cmd)
+    
+    if 'INTEGER:' in output:
+        # Extract cmIndex
+        cmindex = output.split('INTEGER:')[-1].strip()
+        print(f"✓ cmIndex found: {cmindex}")
+        return cmindex
+    else:
+        print(f"✗ Could not get cmIndex: {output}")
+        return None
+
+def find_upstream_channels(cmts, community, cmindex):
+    """Find upstream channels using cmIndex"""
+    print(f"\nSearching for upstream channels with cmIndex {cmindex}...")
+    
+    upstream_channels = []
+    
+    # 1. Check DOCSIS 3.0 ATDMA channels
+    print("1. Checking DOCSIS 3.0 ATDMA table...")
+    cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.4.1.4491.2.1.20.1.4"
+    output = run_cmd(cmd)
+    
     for line in output.split('\n'):
-        if 'us-conn' in line.lower():
+        if f'.{cmindex}.' in line:
             try:
-                # Parse: IF-MIB::ifDescr.1074339840 = STRING: MNDGT0002RPS01-0 us-conn 0
-                parts = line.split('=', 1)
+                # Extract upstream ifIndex from OID
+                parts = line.split('=')
                 oid_part = parts[0].strip()
-                ifindex = int(oid_part.split('.')[-1])
-                descr = parts[1].split(':', 1)[-1].strip().strip('"')
+                oid_parts = oid_part.split('.')
                 
-                # Extract blade ID (e.g., "RPS01-1" from "MNDGT0002RPS01-1 us-conn 0")
-                match = re.search(r'(RPS\d+-\d+)', descr)
-                if match:
-                    blade_id = match.group(1)
-                    if blade_id not in ports:
-                        ports[blade_id] = []
-                    ports[blade_id].append((ifindex, descr))
+                for i, part in enumerate(oid_parts):
+                    if part == cmindex and i + 1 < len(oid_parts):
+                        upstream = int(oid_parts[i + 1])
+                        if upstream > 0:
+                            upstream_channels.append(upstream)
+                            print(f"   Found ATDMA channel: ifIndex {upstream}")
             except:
                 pass
-    return ports
-
-
-def find_physical_port(channel_descr: str, us_conn_ports: dict) -> tuple:
-    """Find the physical us-conn port for a logical channel.
     
-    channel_descr: e.g., "cable-upstream 1/ofd/4.0" or "cable-upstream 1/scq/20.0"
-    Returns: (ifindex, descr) or None
-    """
-    # Extract slot number from channel description (e.g., "1" from "cable-upstream 1/ofd/4.0")
-    match = re.search(r'cable-upstream\s+(\d+)/', channel_descr)
-    if not match:
-        match = re.search(r'cable-us-ofdma\s+(\d+)/', channel_descr)
+    # 2. Check DOCSIS 3.1 OFDMA channels
+    print("\n2. Checking DOCSIS 3.1 OFDMA table...")
+    cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.4.1.4491.2.1.28.1.5.1"
+    output = run_cmd(cmd)
     
-    if match:
-        slot = int(match.group(1))
-        # Find matching blade (slot 1 = RPS01-1, slot 0 = RPS01-0, etc.)
-        for blade_id, ports in us_conn_ports.items():
-            # Extract blade number from blade_id (e.g., "1" from "RPS01-1")
-            blade_match = re.search(r'RPS\d+-(\d+)', blade_id)
-            if blade_match:
-                blade_slot = int(blade_match.group(1))
-                if blade_slot == slot and ports:
-                    # Return first us-conn on this blade (typically us-conn 0)
-                    return ports[0]
+    for line in output.split('\n'):
+        if f'.{cmindex}.' in line:
+            try:
+                parts = line.split('=')
+                oid_part = parts[0].strip()
+                oid_parts = oid_part.split('.')
+                
+                for i, part in enumerate(oid_parts):
+                    if part == cmindex and i + 1 < len(oid_parts):
+                        upstream = int(oid_parts[i + 1])
+                        if upstream > 800000000:  # OFDMA ifIndexes are large
+                            upstream_channels.append(upstream)
+                            print(f"   Found OFDMA channel: ifIndex {upstream}")
+            except:
+                pass
+    
+    # Remove duplicates and sort
+    return sorted(set(upstream_channels))
+
+def get_interface_info(cmts, community, ifindex):
+    """Get interface description"""
+    cmd = f"snmpget -v2c -c {community} -Ovq {cmts} .1.3.6.1.2.1.2.2.1.2.{ifindex}"
+    return run_cmd(cmd)
+
+def find_physical_port(cmts, community, upstream_ifindex):
+    """Find physical port for upstream channel"""
+    print(f"\nFinding physical port for upstream ifIndex {upstream_ifindex}...")
+    
+    # Get upstream description
+    descr = get_interface_info(cmts, community, upstream_ifindex)
+    print(f"   Upstream description: {descr}")
+    
+    # Try Cisco MIB first
+    cmd = f"snmpget -v2c -c {community} -Ovq {cmts} .1.3.6.1.4.1.9.9.116.1.4.1.1.2.{upstream_ifindex}"
+    physical = run_cmd(cmd)
+    
+    if physical and 'No Such' not in physical and physical.strip().isdigit():
+        phys_descr = get_interface_info(cmts, community, int(physical))
+        print(f"   ✓ Found via Cisco MIB!")
+        print(f"   Physical ifIndex: {physical}")
+        print(f"   Description: {phys_descr}")
+        return {
+            'physical_ifindex': int(physical),
+            'description': phys_descr,
+            'method': 'cisco_mib'
+        }
+    
+    # Try to extract slot from description
+    slot = None
+    patterns = [
+        r'(\d+)/',          # 1/scq/20.0
+        r'slot\s*(\d+)',    # slot 1
+        r'(RPS\d+-\d+)',    # RPS01-1
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, descr, re.IGNORECASE)
+        if match:
+            slot = match.group(1) if match.groups() else match.group(0)
+            break
+    
+    if slot:
+        print(f"   Extracted slot/blade: {slot}")
+        
+        # Find us-conn ports
+        cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.2.1.2.2.1.2"
+        output = run_cmd(cmd)
+        
+        for line in output.split('\n'):
+            if 'us-conn' in line.lower() and slot in line:
+                try:
+                    parts = line.split('=')
+                    oid_part = parts[0].strip()
+                    phys_ifindex = int(oid_part.split('.')[-1])
+                    phys_descr = parts[1].split(':', 1)[-1].strip().strip('"')
+                    
+                    print(f"   ✓ Found matching us-conn port!")
+                    print(f"   Physical ifIndex: {phys_ifindex}")
+                    print(f"   Description: {phys_descr}")
+                    return {
+                        'physical_ifindex': phys_ifindex,
+                        'description': phys_descr,
+                        'method': 'slot_match'
+                    }
+                except:
+                    continue
+    
     return None
 
-
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--cmts", required=True, help="CMTS management IP/hostname")
-    ap.add_argument("--community", required=True, help="SNMP community string")
-    ap.add_argument("--mac", required=True, help="Cable modem MAC (e.g. 00:11:22:AA:BB:CC)")
-    ap.add_argument("--version", default="2c", choices=["1", "2c"], help="SNMP version (default: 2c)")
-    ap.add_argument("--timeout", type=int, default=5, help="SNMP timeout seconds (default: 5)")
-    ap.add_argument("--retries", type=int, default=1, help="SNMP retries (default: 1)")
-    args = ap.parse_args()
-
-    try:
-        cm_index = snmpget_cm_index(args.cmts, args.community, args.mac, args.version, args.timeout, args.retries)
-        print(f"cmIndex: {cm_index}")
+    if len(sys.argv) < 4:
+        print("Usage: python find_physical_final.py <cmts_ip> <community> <mac>")
+        print("Example: python find_physical_final.py 172.16.6.212 public e4:57:40:f7:12:99")
+        sys.exit(1)
+    
+    cmts = sys.argv[1]
+    community = sys.argv[2]
+    mac = sys.argv[3]
+    
+    print("=" * 80)
+    print(f"FINDING PHYSICAL PORT FROM docsIfCmtsCmPtr")
+    print(f"CMTS: {cmts}")
+    print(f"MAC: {mac}")
+    print("=" * 80)
+    
+    # Step 1: Get cmIndex from docsIfCmtsCmPtr
+    cmindex = get_cmindex_from_cmptr(cmts, community, mac)
+    
+    if not cmindex:
+        print("\nTrying alternative: Checking if modem is in status table...")
         
-        # Get all us-conn physical ports
-        us_conn_ports = get_us_conn_ports(args.cmts, args.community, args.version, args.timeout, args.retries)
+        # Try to find in status table directly
+        mac_search = mac.replace(':', '').lower()
+        cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.2.1.10.127.1.3.3.1.2 | grep -i '{mac_search}'"
+        output = run_cmd(cmd)
         
-        physical_ports_found = set()
-        
-        # Get ATDMA channels (DOCSIS 3.0)
-        atdma = get_atdma_channels(args.cmts, args.community, cm_index, args.version, args.timeout, args.retries)
-        if atdma:
-            print(f"\nATDMA Upstream Channels ({len(atdma)}):")
-            for ifidx in atdma:
-                descr = get_ifdescr(args.cmts, args.community, ifidx, args.version, args.timeout, args.retries)
-                print(f"  ifIndex: {ifidx}  -  {descr}")
-                
-                # Find physical port
-                phys = find_physical_port(descr, us_conn_ports)
-                if phys:
-                    physical_ports_found.add(phys)
-        
-        # Get OFDMA channels (DOCSIS 3.1)
-        ofdma = get_ofdma_channels(args.cmts, args.community, cm_index, args.version, args.timeout, args.retries)
-        if ofdma:
-            print(f"\nOFDMA Upstream Channels ({len(ofdma)}):")
-            for ifidx in ofdma:
-                descr = get_ifdescr(args.cmts, args.community, ifidx, args.version, args.timeout, args.retries)
-                print(f"  ifIndex: {ifidx}  -  {descr}")
-                
-                # Find physical port
-                phys = find_physical_port(descr, us_conn_ports)
-                if phys:
-                    physical_ports_found.add(phys)
-        
-        # Print physical ports
-        if physical_ports_found:
-            print(f"\nPhysical RF Ports (us-conn) for UTSC:")
-            for ifidx, descr in sorted(physical_ports_found):
-                print(f"  ifIndex: {ifidx}  -  {descr}")
-        
-        if not atdma and not ofdma:
-            print("\nNo upstream channels found for this CM")
+        if output:
+            print(f"✓ Found in docsIfCmtsCmStatusTable:")
+            print(f"  {output}")
             
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        sys.exit(2)
-
+            # Parse downstream from output
+            lines = output.split('\n')
+            for line in lines:
+                if '=' in line:
+                    parts = line.split('=')
+                    oid_part = parts[0].strip()
+                    oid_parts = oid_part.split('.')
+                    
+                    # Find column 2 position
+                    for i, part in enumerate(oid_parts):
+                        if part == '2' and i + 1 < len(oid_parts):
+                            downstream = oid_parts[i + 1]
+                            print(f"  Downstream ifIndex: {downstream}")
+        else:
+            print("✗ Modem not found in any tables")
+            sys.exit(1)
+    
+    # Step 2: Find upstream channels
+    upstream_channels = find_upstream_channels(cmts, community, cmindex)
+    
+    if not upstream_channels:
+        print(f"\n✗ No upstream channels found for this modem")
+        
+        # Try direct approach: Check all upstreams on CMTS
+        print("\nChecking all upstream interfaces on CMTS...")
+        cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.2.1.2.2.1.2 | grep -i upstream"
+        output = run_cmd(cmd)
+        
+        if output:
+            print(f"Upstream interfaces found:")
+            for line in output.split('\n')[:10]:
+                if line:
+                    print(f"  {line}")
+        
+        sys.exit(1)
+    
+    print(f"\n✓ Found {len(upstream_channels)} upstream channel(s): {upstream_channels}")
+    
+    # Step 3: Find physical ports
+    print("\n" + "=" * 80)
+    print("PHYSICAL PORT DETECTION")
+    print("=" * 80)
+    
+    physical_ports = []
+    
+    for upstream in upstream_channels:
+        print(f"\nProcessing upstream channel ifIndex {upstream}:")
+        
+        port_info = find_physical_port(cmts, community, upstream)
+        
+        if port_info:
+            physical_ports.append({
+                'upstream_ifindex': upstream,
+                **port_info
+            })
+        else:
+            print(f"  ✗ Physical port not found")
+    
+    # Step 4: Results
+    print("\n" + "=" * 80)
+    print("RESULTS")
+    print("=" * 80)
+    
+    if physical_ports:
+        print(f"\n✓ PHYSICAL PORTS FOUND:")
+        for i, port in enumerate(physical_ports, 1):
+            print(f"\n{i}. Logical Upstream:")
+            print(f"   ifIndex: {port['upstream_ifindex']}")
+            
+            print(f"\n   Physical Port:")
+            print(f"   ifIndex: {port['physical_ifindex']}")
+            print(f"   Description: {port['description']}")
+            print(f"   Method: {port['method']}")
+    else:
+        print(f"\n✗ No physical ports identified")
+        
+        # Show all us-conn ports
+        print(f"\nAll us-conn ports on CMTS:")
+        cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.2.1.2.2.1.2 | grep -i us-conn"
+        output = run_cmd(cmd)
+        
+        if output:
+            for line in output.split('\n'):
+                if line:
+                    print(f"  {line}")
+        else:
+            print("  No us-conn ports found")
+            
+            # Try alternative names
+            print(f"\nLooking for any physical upstream ports...")
+            cmd = f"snmpwalk -v2c -c {community} {cmts} .1.3.6.1.2.1.2.2.1.2 | grep -i -E '(rf|port.*[0-9]|connector)'"
+            output = run_cmd(cmd)
+            for line in output.split('\n')[:10]:
+                if line:
+                    print(f"  {line}")
 
 if __name__ == "__main__":
     main()
