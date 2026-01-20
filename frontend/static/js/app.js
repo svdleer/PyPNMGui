@@ -68,9 +68,9 @@ createApp({
                 spanMhz: 100,
                 numBins: 3200,
                 rfPortIfindex: null,
-                repeatPeriodMs: 3000,  // 3 seconds between captures
+                repeatPeriodMs: 1000,  // 1 second between captures (max supported by Casa E6000)
                 freerunDurationMs: 60000,  // 60 seconds total duration
-                triggerCount: 20  // Maximum 20 captures
+                triggerCount: 10  // Maximum 10 captures on Casa E6000 (ignored in FreeRunning mode)
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,

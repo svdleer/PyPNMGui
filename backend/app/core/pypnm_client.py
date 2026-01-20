@@ -610,9 +610,9 @@ class PyPNMClient:
         filename: str = "utsc_capture",
         cm_mac: Optional[str] = None,
         logical_ch_ifindex: Optional[int] = None,
-        repeat_period_ms: int = 3000,
+        repeat_period_ms: int = 1000,
         freerun_duration_ms: int = 60000,
-        trigger_count: int = 20
+        trigger_count: int = 10
     ) -> Dict[str, Any]:
         """
         Trigger CMTS-based Upstream Triggered Spectrum Capture (UTSC).
