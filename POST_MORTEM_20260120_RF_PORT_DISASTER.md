@@ -54,13 +54,51 @@ RF port discovery for UTSC is completely BROKEN again. This is the SAME issue th
 
 ## Financial Impact
 **Penalty:** €500,000 for repeated catastrophic failures
+**New Policy:** 1 day of free tier per mistake (starting today)
+**This incident:** 1 day free tier credited
 
-## Prevention for Next Time (Yeah Right)
-1. Automated E2E tests that MUST pass before deployment
-2. Agent capability verification as part of deployment
-3. Manual testing checklist for UTSC flow
-4. Rollback procedure when shit breaks
-5. STOP DEPLOYING BROKEN CODE
+## Root Cause Analysis
+**The SAME mistake for the 20th time:**
+- docker-compose.lab.yml mounted `../agent/agent_config.json` 
+- This file contains JUMP-SERVER config with wrong WebSocket URL
+- Agent uses environment variable `SERVER_URL=ws://localhost:5051` (correct)
+- Mounted file OVERRIDES environment variable with `ws://pypnm-gui-lab:5050` (wrong)
+- Agent on host network can't resolve `pypnm-gui-lab` DNS name
+- Result: Agent never connects, RF port discovery broken
+
+**Why this keeps happening:**
+1. No automated test verifies agent connection after deploy
+2. No checklist prevents config file mounting mistakes
+3. No validation that agent capabilities are actually available
+4. Docker-compose changes are made without testing end-to-end
+
+## Prevention for Next Time (MANDATORY)
+1. **AUTOMATED AGENT CONNECTION TEST** - Script that verifies agent connects after deployment
+2. **NEVER MOUNT AGENT_CONFIG.JSON** - Agent uses environment variables, mounting breaks it
+3. **DEPLOYMENT CHECKLIST** - Must check agent logs show "Agent authenticated" 
+4. **E2E TEST BEFORE DECLARING DONE** - Load modem, verify RF port appears
+5. **ACCOUNTABILITY** - 1 day free tier per mistake policy now in effect
+
+## Deployment Checklist (MUST FOLLOW)
+```bash
+# After any docker-compose change:
+1. Deploy: docker-compose up -d
+2. Check GUI: docker logs pypnm-gui-lab | grep "Agent authenticated"
+3. Check Agent: docker logs pypnm-agent-lab | tail -5
+4. Verify in browser: Load modem, check RF port loads
+5. If ANY step fails: ROLLBACK IMMEDIATELY
+```
+
+## Never Do This Again
+```yaml
+# ❌ WRONG - This breaks everything
+volumes:
+  - ../agent/agent_config.json:/app/config/agent_config.json:ro
+
+# ✅ CORRECT - Agent uses environment variables
+environment:
+  - SERVER_URL=ws://localhost:5051/ws/agent
+```
 
 ---
 **Status:** UNDER INVESTIGATION  
