@@ -1016,6 +1016,13 @@ createApp({
             }
         },
         
+        restartUtscLiveMonitoring() {
+            // Restart with new refresh rate if live mode is active
+            if (this.utscLiveMode) {
+                this.startUtscLiveMonitoring();
+            }
+        }
+        
         async fetchUsRxmerData() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 return;
@@ -2113,6 +2120,12 @@ createApp({
                 timer: 5000,
                 timerProgressBar: true
             });
+        }
+    },
+    watch: {
+        utscRefreshRate(newRate) {
+            console.log('[UTSC] Refresh rate changed to:', newRate, 'ms');
+            this.restartUtscLiveMonitoring();
         }
     }
 }).mount('#app');

@@ -1058,9 +1058,15 @@
                                                                 <i class="bi me-1" :class="utscLiveMode ? 'bi-broadcast' : 'bi-broadcast-pin'"></i>
                                                                 {{ utscLiveMode ? 'Live Mode ON' : 'Enable Live Mode' }}
                                                             </button>
-                                                            <input v-if="utscLiveMode" type="number" v-model.number="utscRefreshRate" 
-                                                                   class="form-control form-control-sm" style="width: 80px;"
-                                                                   min="1000" max="10000" step="500" title="Refresh interval (ms)">
+                                                        </div>
+                                                        <div class="mt-2">
+                                                            <label class="form-label small mb-1">
+                                                                Refresh Rate: {{ (utscRefreshRate/1000).toFixed(1) }}s
+                                                            </label>
+                                                            <input type="range" v-model.number="utscRefreshRate" 
+                                                                   class="form-range" 
+                                                                   min="500" max="10000" step="500" 
+                                                                   title="Refresh interval">
                                                         </div>
                                                         <div v-if="utscStatus" class="mt-2">
                                                             <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">
