@@ -63,7 +63,7 @@ createApp({
                 modemRfPort: null  // Detected RF port for the modem
             },
             utscConfig: {
-                triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
+                triggerMode: 6,  // 6=CM_MAC (continuous), 2=FreeRunning (limited duration), 5=IdleSID
                 centerFreqMhz: 50,
                 spanMhz: 100,
                 numBins: 3200,
