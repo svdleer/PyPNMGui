@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  # PyPNM API - Built from fork at /home/svdleer/docker/PyPNM
+  pypnm-api:
+    build:
+      context: /home/svdleer/docker/PyPNM
+      dockerfile: Dockerfile
+    image: pypnm:latest
+    container_name: pypnm-api
+    ports:
+      - "8000:8000"
+    networks:
+      - pypnm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs').read()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
   # GUI Server - LAB Version
   gui-server-lab:
     build:
@@ -15,7 +33,7 @@ services:
     environment:
       - FLASK_ENV=lab
       - PYPNM_MODE=lab
-      - PYPNM_BASE_URL=http://host.docker.internal:8000
+      - PYPNM_BASE_URL=http://pypnm-api:8000
       - REDIS_HOST=eve-li-redis-lab
       - REDIS_PORT=6379
       - AGENT_REQUIRED=false
@@ -29,6 +47,7 @@ services:
       - pypnm-net
     restart: unless-stopped
     depends_on:
+      - pypnm-api
       - redis-lab
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
