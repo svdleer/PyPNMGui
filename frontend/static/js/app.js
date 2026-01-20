@@ -948,13 +948,17 @@ createApp({
                 
                 if (result.success && result.data) {
                     this.utscSpectrumData = result.data;
-                    // Force Vue reactivity by creating new object
+                    // Force Vue reactivity by creating new object reference
                     this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
                     if (!this.utscLiveMode) {
                         this.$toast?.success('UTSC spectrum data loaded');
                     }
-                    // Wait for DOM to update, then render chart
-                    this.$nextTick(() => this.renderUtscChart());
+                    // Force immediate render after Vue updates
+                    this.$nextTick(() => {
+                        this.renderUtscChart();
+                        // Force another render after a tick to ensure DOM is updated
+                        setTimeout(() => this.renderUtscChart(), 50);
+                    });
                 } else {
                     this.$toast?.error(result.message || result.error || 'Failed to fetch UTSC data');
                 }
@@ -1042,14 +1046,12 @@ createApp({
             
             // If we have a matplotlib plot, display it as an image
             if (this.utscPlotImage && this.utscPlotImage.data) {
-                // Clear container first to force refresh
-                container.innerHTML = '';
-                // Force reflow
-                container.offsetHeight;
-                // Add new image
-                const timestamp = Date.now();
+                // Use a unique key to force image reload
+                const imageKey = `utsc-${this.utscPlotImage._timestamp || Date.now()}`;
+                // Completely replace container content
                 container.innerHTML = `
-                    <img src="data:image/png;base64,${this.utscPlotImage.data}?t=${timestamp}" 
+                    <img id="${imageKey}" 
+                         src="data:image/png;base64,${this.utscPlotImage.data}" 
                          alt="UTSC Spectrum" 
                          style="width: 100%; height: auto; max-height: 600px; object-fit: contain;" />
                 `;
