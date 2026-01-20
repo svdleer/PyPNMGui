@@ -47,8 +47,8 @@ def generate_utsc_plot(
     freqs = np.array(frequencies)
     amps = np.array(amplitudes)
     
-    # Clamp amplitudes to range -40 to 0 dBmV (typical UTSC range)
-    amps = np.clip(amps, -40, 0)
+    # Typical UTSC upstream range is 20-65 dBmV (cable modem transmit power)
+    # Don't clamp - let the data show actual values
     
     # PyPNM dark theme colors
     bg_color = '#1e1e2e'

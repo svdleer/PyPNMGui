@@ -113,13 +113,13 @@ def init_websocket(app):
                             binary_data = f.read()
                         
                         if len(binary_data) >= 328:
-                                # Parse amplitudes
+                                # Parse amplitudes - UTSC format: big-endian int16, units 0.1 dBmV
                                 samples = binary_data[328:]
                                 amplitudes = []
                                 for i in range(0, len(samples), 2):
                                     if i+1 < len(samples):
-                                        val = struct.unpack('<h', samples[i:i+2])[0]
-                                        amplitudes.append(val / 100.0)
+                                        val = struct.unpack('>h', samples[i:i+2])[0]  # Big-endian
+                                        amplitudes.append(val / 10.0)  # Convert 0.1 dBmV to dBmV
                                 
                                 # Get config from Redis for frequency calculation
                                 try:
