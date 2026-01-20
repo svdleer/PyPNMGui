@@ -29,7 +29,6 @@ services:
       - pypnm-net
     restart: unless-stopped
     depends_on:
-      - pypnm-api
       - redis-lab
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
