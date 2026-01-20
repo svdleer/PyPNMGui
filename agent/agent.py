@@ -1731,15 +1731,21 @@ class PyPNMAgent:
                             
                             # Extract slot from "cable-us-ofdma 1/ofd/4.0" -> slot 1
                             slot_match = re.search(r'cable-us(?:-ofdma)?\s+(\d+)/', ofdma_descr)
+                            if not slot_match:
+                                slot_match = re.search(r'(\d+)/', ofdma_descr)
+                            
                             if slot_match:
-                                slot = int(slot_match.group(1))
+                                slot = slot_match.group(1)
                                 self.logger.info(f"Modem is on slot {slot}")
                                 
-                                # Find us-conn port for this slot
-                                if slot in blade_to_ports and blade_to_ports[slot]:
-                                    port_ifindex, port_descr = blade_to_ports[slot][0]
-                                    modem_rf_port = {'ifindex': port_ifindex, 'description': port_descr}
-                                    self.logger.info(f"Found modem's RF port: {port_descr} ({port_ifindex})")
+                                # Find us-conn port matching this slot in description
+                                # e.g., slot "1" matches "MNDGT0002RPS01-0 us-conn 0" (the "1" in RPS01)
+                                for rf_port in all_rf_ports:
+                                    port_descr = rf_port.get('description', '')
+                                    if slot in port_descr and 'us-conn 0' in port_descr.lower():
+                                        modem_rf_port = rf_port
+                                        self.logger.info(f"Found modem's RF port: {port_descr} ({rf_port['ifindex']})")
+                                        break
                 else:
                     self.logger.warning(f"CM index not found for MAC: {mac_normalized}")
             
