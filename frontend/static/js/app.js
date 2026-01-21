@@ -89,7 +89,7 @@ createApp({
             utscLiveInterval: null,
             utscWebSocket: null,  // WebSocket for live UTSC streaming
             utscRefreshRate: 500,  // 0.5 seconds between updates
-            utscInteractive: false,  // Toggle for SciChart interactive mode
+            utscInteractive: true,  // Always use SciChart interactive mode
             utscSciChart: null,  // SciChart instance
             utscSciChartSeries: null,  // SciChart data series
             utscLastUpdateTime: 0,  // Throttle rapid updates
@@ -1010,18 +1010,17 @@ createApp({
             this.utscLiveMode = !this.utscLiveMode;
             
             if (this.utscLiveMode) {
-                // Initialize SciChart first if interactive mode is enabled
-                if (this.utscInteractive) {
-                    await this.ensureSciChartLoaded();
-                    // Wait for Vue to render the div
-                    await this.$nextTick();
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await this.initUtscSciChart();
-                }
-                this.$toast?.success('Live monitoring enabled via WebSocket');
+                // Always initialize SciChart for live monitoring
+                await this.ensureSciChartLoaded();
+                // Wait for Vue to render the div
+                await this.$nextTick();
+                await new Promise(resolve => setTimeout(resolve, 100));
+                await this.initUtscSciChart();
+                
+                this.$toast?.success('Live monitoring started');
                 this.startUtscWebSocket();
             } else {
-                this.$toast?.info('Live monitoring disabled');
+                this.$toast?.info('Live monitoring stopped');
                 this.stopUtscWebSocket();
             }
         },
@@ -2399,24 +2398,6 @@ createApp({
         utscRefreshRate(newRate) {
             console.log('[UTSC] Refresh rate changed to:', newRate, 'ms');
             this.restartUtscLiveMonitoring();
-        },
-        async utscInteractive(newVal) {
-            console.log('[UTSC] Interactive mode:', newVal);
-            if (newVal) {
-                // Only initialize if live mode is active (div exists)
-                if (this.utscLiveMode) {
-                    await this.ensureSciChartLoaded();
-                    // Wait for Vue to render the div
-                    await this.$nextTick();
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await this.initUtscSciChart();
-                } else {
-                    console.log('[SciChart] Waiting for live mode to be enabled first');
-                }
-            } else {
-                // Cleanup SciChart when switching back to static mode
-                this.destroyUtscSciChart();
-            }
         }
     }
 }).mount('#app');
