@@ -979,20 +979,24 @@ createApp({
                     // Force Vue reactivity by creating new object reference
                     this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
                     console.log('[UTSC] Updated utscPlotImage:', !!this.utscPlotImage, 'timestamp:', this.utscPlotImage?._timestamp);
+                    
+                    // Initialize SciChart immediately when data first loads
+                    if (!this.utscSciChart) {
+                        console.log('[UTSC] First data received, initializing SciChart...');
+                        this.$nextTick(async () => {
+                            await this.ensureSciChartLoaded();
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            await this.initUtscSciChart();
+                            // Display initial data
+                            if (result.data.raw_data) {
+                                this.updateUtscSciChart(result.data.raw_data);
+                            }
+                        });
+                    }
+                    
                     if (!this.utscLiveMode) {
                         this.$toast?.success('UTSC spectrum data loaded');
                     }
-                    // Force immediate render after Vue updates
-                    console.log('[UTSC] Calling $nextTick to render');
-                    this.$nextTick(() => {
-                        console.log('[UTSC] Inside $nextTick, calling renderUtscChart');
-                        this.renderUtscChart();
-                        // Force another render after a tick to ensure DOM is updated
-                        setTimeout(() => {
-                            console.log('[UTSC] Delayed render call');
-                            this.renderUtscChart();
-                        }, 50);
-                    });
                 } else {
                     this.$toast?.error(result.message || result.error || 'Failed to fetch UTSC data');
                 }
@@ -1012,17 +1016,17 @@ createApp({
             if (this.utscLiveMode) {
                 console.log('[UTSC] Starting live mode...');
                 
-                // Always initialize SciChart for live monitoring
-                await this.ensureSciChartLoaded();
+                // Chart should already be initialized from first measurement
+                // If not, initialize it now
+                if (!this.utscSciChart) {
+                    console.log('[UTSC] Chart not initialized yet, initializing...');
+                    await this.ensureSciChartLoaded();
+                    await this.$nextTick();
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    await this.initUtscSciChart();
+                }
                 
-                // Wait for Vue to render the div
-                await this.$nextTick();
-                await new Promise(resolve => setTimeout(resolve, 150));
-                
-                // Initialize SciChart and wait for it to complete
-                await this.initUtscSciChart();
-                
-                // Verify chart is initialized before starting WebSocket
+                // Verify chart is ready
                 if (!this.utscSciChart || !this.utscSciChartSeries) {
                     console.error('[UTSC] SciChart failed to initialize, aborting live mode');
                     this.$toast?.error('Failed to initialize chart');
