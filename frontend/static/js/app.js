@@ -1220,19 +1220,17 @@ createApp({
                     return;
                 }
                 
+                console.log('[SciChart] Updating with', frequencies.length, 'points');
+                
                 // Convert Hz to MHz for display
                 const freqsMhz = frequencies.map(f => f / 1e6);
                 
-                // Update the data series - recreate instead of clear/append
-                const { XyDataSeries } = SciChart;
-                const newSeries = new XyDataSeries(this.utscSciChart.webAssemblyContext2D, {
-                    xValues: freqsMhz,
-                    yValues: amplitudes,
-                    dataSeriesName: "UTSC"
-                });
+                // Get the underlying data series and update it
+                const dataSeries = this.utscSciChartSeries.dataSeries;
+                dataSeries.clear();
+                dataSeries.appendRange(freqsMhz, amplitudes);
                 
-                // Replace the data series
-                this.utscSciChartSeries.dataSeries = newSeries;
+                console.log('[SciChart] Data updated successfully');
                 
             } catch (error) {
                 console.error('[SciChart] Update failed:', error);
