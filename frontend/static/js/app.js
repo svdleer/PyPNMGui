@@ -1010,16 +1010,31 @@ createApp({
             this.utscLiveMode = !this.utscLiveMode;
             
             if (this.utscLiveMode) {
+                console.log('[UTSC] Starting live mode...');
+                
                 // Always initialize SciChart for live monitoring
                 await this.ensureSciChartLoaded();
+                
                 // Wait for Vue to render the div
                 await this.$nextTick();
-                await new Promise(resolve => setTimeout(resolve, 100));
+                await new Promise(resolve => setTimeout(resolve, 150));
+                
+                // Initialize SciChart and wait for it to complete
                 await this.initUtscSciChart();
                 
+                // Verify chart is initialized before starting WebSocket
+                if (!this.utscSciChart || !this.utscSciChartSeries) {
+                    console.error('[UTSC] SciChart failed to initialize, aborting live mode');
+                    this.$toast?.error('Failed to initialize chart');
+                    this.utscLiveMode = false;
+                    return;
+                }
+                
+                console.log('[UTSC] SciChart ready, starting WebSocket...');
                 this.$toast?.success('Live monitoring started');
                 this.startUtscWebSocket();
             } else {
+                console.log('[UTSC] Stopping live mode...');
                 this.$toast?.info('Live monitoring stopped');
                 this.stopUtscWebSocket();
             }
@@ -1148,7 +1163,7 @@ createApp({
         },
         
         async initUtscSciChart() {
-            // Destroy existing chart
+            // Destroy existing chart first
             this.destroyUtscSciChart();
             
             try {
@@ -1158,6 +1173,15 @@ createApp({
                     console.warn('SciChart not loaded, cannot initialize chart');
                     return;
                 }
+                
+                // Check if div exists
+                const chartDiv = document.getElementById('utscSciChart');
+                if (!chartDiv) {
+                    console.error('[SciChart] Chart div not found in DOM');
+                    return;
+                }
+                
+                console.log('[SciChart] Initializing chart...');
                 
                 const { SciChartSurface, NumericAxis, FastLineRenderableSeries, XyDataSeries, EAxisAlignment, NumberRange, ZoomPanModifier, MouseWheelZoomModifier, ZoomExtentsModifier } = SciChart;
                 
