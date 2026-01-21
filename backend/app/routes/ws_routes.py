@@ -162,7 +162,6 @@ def init_websocket(app):
                                 plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
 
                                 if plot:
-                                    # Send both plot AND raw data via websocket for interactive mode
                                     # Limit raw data arrays to prevent WebSocket overflow
                                     raw_frequencies = frequencies[:1000]  # Limit to 1000 points for WebSocket
                                     raw_amplitudes = amplitudes[:1000]
@@ -171,7 +170,8 @@ def init_websocket(app):
                                         'type': 'spectrum',
                                         'timestamp': current_time,
                                         'filename': os.path.basename(filepath),
-                                        'plot': plot,
+                                        # Send plot as None to reduce message size - frontend has raw_data
+                                        'plot': None,  # Don't send PNG, only raw data for interactive mode
                                         'raw_data': {
                                             'frequencies': raw_frequencies,
                                             'amplitudes': raw_amplitudes,
