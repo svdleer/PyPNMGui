@@ -92,6 +92,8 @@ createApp({
             utscInteractive: false,  // Toggle for SciChart interactive mode
             utscSciChart: null,  // SciChart instance
             utscSciChartSeries: null,  // SciChart data series
+            utscLastUpdateTime: 0,  // Throttle rapid updates
+            utscUpdateThrottle: 100,  // Min 100ms between updates
             
             // Housekeeping
             housekeepingDays: 7,
@@ -1041,6 +1043,13 @@ createApp({
                         const data = JSON.parse(event.data);
                         
                         if (data.type === 'spectrum') {
+                            // Throttle updates to prevent browser overload
+                            const now = Date.now();
+                            if (now - this.utscLastUpdateTime < this.utscUpdateThrottle) {
+                                return; // Skip this update
+                            }
+                            this.utscLastUpdateTime = now;
+                            
                             // Handle interactive mode with SciChart
                             if (this.utscInteractive && data.raw_data) {
                                 this.$nextTick(() => {
