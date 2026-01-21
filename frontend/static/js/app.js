@@ -1006,10 +1006,15 @@ createApp({
             }
         },
         
-        toggleUtscLiveMode() {
+        async toggleUtscLiveMode() {
             this.utscLiveMode = !this.utscLiveMode;
             
             if (this.utscLiveMode) {
+                // Initialize SciChart first if interactive mode is enabled
+                if (this.utscInteractive) {
+                    await this.ensureSciChartLoaded();
+                    await this.initUtscSciChart();
+                }
                 this.$toast?.success('Live monitoring enabled via WebSocket');
                 this.startUtscWebSocket();
             } else {
@@ -1119,14 +1124,36 @@ createApp({
             this.destroyUtscSciChart();
         },
         
+        async ensureSciChartLoaded() {
+            // Wait for SciChart library to load (max 10 seconds)
+            const maxWait = 10000;
+            const interval = 100;
+            let waited = 0;
+            
+            while (typeof SciChart === 'undefined' && waited < maxWait) {
+                await new Promise(resolve => setTimeout(resolve, interval));
+                waited += interval;
+            }
+            
+            if (typeof SciChart === 'undefined') {
+                console.error('SciChart failed to load after', maxWait, 'ms');
+                this.$toast?.error('SciChart library failed to load');
+                return false;
+            }
+            
+            console.log('[SciChart] Library loaded successfully');
+            return true;
+        },
+        
         async initUtscSciChart() {
             // Destroy existing chart
             this.destroyUtscSciChart();
             
             try {
-                // Wait for SciChart to load
-                if (typeof SciChart === 'undefined') {
-                    console.warn('SciChart not loaded yet');
+                // Ensure SciChart is loaded
+                const loaded = await this.ensureSciChartLoaded();
+                if (!loaded) {
+                    console.warn('SciChart not loaded, cannot initialize chart');
                     return;
                 }
                 
