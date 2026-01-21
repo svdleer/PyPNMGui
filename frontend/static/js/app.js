@@ -1225,10 +1225,9 @@ createApp({
                 // Convert Hz to MHz for display
                 const freqsMhz = frequencies.map(f => f / 1e6);
                 
-                // Get the underlying data series and update it
-                const dataSeries = this.utscSciChartSeries.dataSeries;
-                dataSeries.clear();
-                dataSeries.appendRange(freqsMhz, amplitudes);
+                // utscSciChartSeries IS the XyDataSeries, update it directly
+                this.utscSciChartSeries.clear();
+                this.utscSciChartSeries.appendRange(freqsMhz, amplitudes);
                 
                 console.log('[SciChart] Data updated successfully');
                 
