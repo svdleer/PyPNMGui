@@ -68,7 +68,7 @@ createApp({
                 spanMhz: 100,
                 numBins: 3200,
                 rfPortIfindex: null,
-                repeatPeriodMs: 500,  // 500ms between captures (E6000 max is 1000ms)
+                repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
                 freerunDurationMs: 55000,  // 55 seconds (E6000 max is 60s for FreeRunning mode)
                 triggerCount: 10  // Max 10 on E6000 (ignored in FreeRunning mode per docs)
             },
@@ -776,7 +776,7 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
                         tftp_ip: this.selectedModem.tftp_ip,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 500,
+                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
                         freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000,  // 55s max for E6000
                         trigger_count: this.utscConfig.triggerCount || 10  // Max 10 on E6000
                     }),
