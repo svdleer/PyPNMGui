@@ -75,6 +75,7 @@ def init_websocket(app):
         heartbeat_interval = 5  # Send heartbeat every 5 seconds
         last_heartbeat = time.time()
         last_send_time = 0
+        connection_start_time = time.time()  # Track when WebSocket connected
         
         try:
             # Send initial connected message
@@ -83,6 +84,12 @@ def init_websocket(app):
                 'mac': mac_address,
                 'message': 'UTSC stream connected'
             }))
+            
+            # Pre-populate processed_files with existing files to avoid sending old data
+            pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+            existing_files = glob.glob(pattern)
+            processed_files.update(existing_files)
+            logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files for {mac_address}")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
@@ -99,7 +106,7 @@ def init_websocket(app):
                 pattern = f"{tftp_base}/utsc_{mac_clean}_*"
                 files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
                 
-                # Process ALL new files (not just the latest)
+                # Process only NEW files (created after connection)
                 for filepath in files:
                     if filepath in processed_files:
                         continue  # Already sent this one
