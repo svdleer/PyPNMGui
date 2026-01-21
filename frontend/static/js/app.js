@@ -1013,6 +1013,9 @@ createApp({
                 // Initialize SciChart first if interactive mode is enabled
                 if (this.utscInteractive) {
                     await this.ensureSciChartLoaded();
+                    // Wait for Vue to render the div
+                    await this.$nextTick();
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     await this.initUtscSciChart();
                 }
                 this.$toast?.success('Live monitoring enabled via WebSocket');
@@ -1205,22 +1208,31 @@ createApp({
         
         updateUtscSciChart(rawData) {
             if (!this.utscSciChart || !this.utscSciChartSeries) {
-                // Initialize if not already done
-                this.initUtscSciChart().then(() => {
-                    if (rawData) this.updateUtscSciChart(rawData);
-                });
+                console.warn('[SciChart] Chart not initialized, skipping update');
                 return;
             }
             
             try {
                 const { frequencies, amplitudes } = rawData;
                 
+                if (!frequencies || !amplitudes || frequencies.length === 0) {
+                    console.warn('[SciChart] No data to update');
+                    return;
+                }
+                
                 // Convert Hz to MHz for display
                 const freqsMhz = frequencies.map(f => f / 1e6);
                 
-                // Update the data series
-                this.utscSciChartSeries.clear();
-                this.utscSciChartSeries.appendRange(freqsMhz, amplitudes);
+                // Update the data series - recreate instead of clear/append
+                const { XyDataSeries } = SciChart;
+                const newSeries = new XyDataSeries(this.utscSciChart.webAssemblyContext2D, {
+                    xValues: freqsMhz,
+                    yValues: amplitudes,
+                    dataSeriesName: "UTSC"
+                });
+                
+                // Replace the data series
+                this.utscSciChartSeries.dataSeries = newSeries;
                 
             } catch (error) {
                 console.error('[SciChart] Update failed:', error);
