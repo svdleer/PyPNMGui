@@ -69,8 +69,8 @@ createApp({
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 500,  // 500ms between captures (E6000 max is 1000ms)
-                freerunDurationMs: 3600000,  // 1 hour - effectively continuous until Stop is pressed
-                triggerCount: 100  // Number of spectrum captures (not used in FreeRunning mode)
+                freerunDurationMs: 55000,  // 55 seconds (E6000 max is 60s for FreeRunning mode)
+                triggerCount: 10  // Max 10 on E6000 (ignored in FreeRunning mode per docs)
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,
@@ -776,9 +776,9 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
                         tftp_ip: this.selectedModem.tftp_ip,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
-                        freerun_duration_ms: this.utscConfig.freerunDurationMs || 3600000,  // Default 1 hour
-                        trigger_count: this.utscConfig.triggerCount || 100
+                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 500,
+                        freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000,  // 55s max for E6000
+                        trigger_count: this.utscConfig.triggerCount || 10  // Max 10 on E6000
                     }),
                     signal: controller.signal
                 });
@@ -1035,12 +1035,27 @@ createApp({
                 }
                 
                 console.log('[UTSC] SciChart ready, starting WebSocket...');
-                this.$toast?.success('Live monitoring started');
+                this.$toast?.success('Live monitoring started (auto-restarts every 50s)');
                 this.startUtscWebSocket();
+                
+                // Auto-restart UTSC measurement every 50 seconds (E6000 max is 60s)
+                this.utscAutoRestartInterval = setInterval(async () => {
+                    if (this.utscLiveMode && !this.runningUtsc) {
+                        console.log('[UTSC] Auto-restarting measurement for continuous monitoring...');
+                        await this.startUtsc();
+                    }
+                }, 50000);  // Restart every 50 seconds
+                
             } else {
                 console.log('[UTSC] Stopping live mode...');
                 this.$toast?.info('Live monitoring stopped');
                 this.stopUtscWebSocket();
+                
+                // Clear auto-restart interval
+                if (this.utscAutoRestartInterval) {
+                    clearInterval(this.utscAutoRestartInterval);
+                    this.utscAutoRestartInterval = null;
+                }
             }
         },
         
