@@ -776,9 +776,9 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
                         tftp_ip: this.selectedModem.tftp_ip,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 3000,
-                        freerun_duration_ms: this.utscConfig.freerunDurationMs || 60000,
-                        trigger_count: this.utscConfig.triggerCount || 20
+                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
+                        freerun_duration_ms: this.utscConfig.freerunDurationMs || 3600000,  // Default 1 hour
+                        trigger_count: this.utscConfig.triggerCount || 100
                     }),
                     signal: controller.signal
                 });
