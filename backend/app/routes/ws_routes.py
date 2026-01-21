@@ -163,18 +163,28 @@ def init_websocket(app):
 
                                 if plot:
                                     # Send both plot AND raw data via websocket for interactive mode
-                                    ws.send(json.dumps({
+                                    # Limit raw data arrays to prevent WebSocket overflow
+                                    raw_frequencies = frequencies[:1000]  # Limit to 1000 points for WebSocket
+                                    raw_amplitudes = amplitudes[:1000]
+                                    
+                                    message = {
                                         'type': 'spectrum',
                                         'timestamp': current_time,
                                         'filename': os.path.basename(filepath),
                                         'plot': plot,
                                         'raw_data': {
-                                            'frequencies': frequencies[:3200],
-                                            'amplitudes': amplitudes[:3200],
+                                            'frequencies': raw_frequencies,
+                                            'amplitudes': raw_amplitudes,
                                             'span_hz': span_hz,
                                             'center_freq_hz': center_freq_hz
                                         }
-                                    }))
+                                    }
+                                    
+                                    try:
+                                        ws.send(json.dumps(message))
+                                    except Exception as send_err:
+                                        logger.error(f"Failed to send UTSC data: {send_err}")
+                                        raise  # Re-raise to close connection
                                 
                     except Exception as e:
                         logger.error(f"Error processing UTSC file {filepath}: {e}")
