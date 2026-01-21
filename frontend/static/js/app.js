@@ -68,9 +68,9 @@ createApp({
                 spanMhz: 100,
                 numBins: 3200,
                 rfPortIfindex: null,
-                repeatPeriodMs: 1000,  // 1 second between captures (max supported by CommScope E6000)
+                repeatPeriodMs: 500,  // 500ms between captures (E6000 max is 1000ms)
                 freerunDurationMs: 3600000,  // 1 hour - effectively continuous until Stop is pressed
-                triggerCount: 100  // Number of spectrum captures (100 samples = ~1.5 minutes at 1000ms repeat)
+                triggerCount: 100  // Number of spectrum captures (not used in FreeRunning mode)
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,
