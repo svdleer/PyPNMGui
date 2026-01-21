@@ -91,6 +91,21 @@ def init_websocket(app):
             processed_files.update(existing_files)
             logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files for {mac_address}")
             
+            # Auto-cleanup old UTSC files (older than 5 minutes)
+            cleanup_age = 300  # 5 minutes
+            cleanup_count = 0
+            for filepath in existing_files:
+                try:
+                    file_age = current_time - os.path.getmtime(filepath)
+                    if file_age > cleanup_age:
+                        os.remove(filepath)
+                        cleanup_count += 1
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to cleanup {filepath}: {cleanup_err}")
+            
+            if cleanup_count > 0:
+                logger.info(f"UTSC WebSocket: Cleaned up {cleanup_count} old files for {mac_address}")
+            
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
                 
