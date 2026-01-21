@@ -995,7 +995,7 @@ def configure_utsc(mac_address):
             cm_mac=cm_mac,
             logical_ch_ifindex=data.get('logical_ch_ifindex'),
             repeat_period_ms=data.get('repeat_period_ms', 3000),
-            freerun_duration_ms=data.get('freerun_duration_ms', 60000),
+            freerun_duration_ms=data.get('freerun_duration_ms', 300000),  # Default 5 minutes
             trigger_count=data.get('trigger_count', 20)
         )
         logger.info(f"UTSC API full response: {result}")

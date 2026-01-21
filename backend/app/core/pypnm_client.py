@@ -611,7 +611,7 @@ class PyPNMClient:
         cm_mac: Optional[str] = None,
         logical_ch_ifindex: Optional[int] = None,
         repeat_period_ms: int = 1000,
-        freerun_duration_ms: int = 60000,
+        freerun_duration_ms: int = 300000,  # Default 5 minutes
         trigger_count: int = 10
     ) -> Dict[str, Any]:
         """
@@ -635,7 +635,7 @@ class PyPNMClient:
             cm_mac: Cable modem MAC (required if trigger_mode=6)
             logical_ch_ifindex: Logical channel ifIndex (optional for trigger_mode=6)
             repeat_period_ms: Milliseconds between captures (default: 3000 = 3 seconds)
-            freerun_duration_ms: Total duration for free-running mode (default: 60000 = 60 seconds)
+            freerun_duration_ms: Total duration for free-running mode (default: 300000 = 5 minutes)
             trigger_count: Number of captures to take (default: 20)
         
         Returns UTSC spectrum data for upstream channels (5-85 MHz typical).
