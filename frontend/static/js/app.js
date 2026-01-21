@@ -1225,9 +1225,17 @@ createApp({
                 // Convert Hz to MHz for display
                 const freqsMhz = frequencies.map(f => f / 1e6);
                 
-                // utscSciChartSeries IS the XyDataSeries, update it directly
-                this.utscSciChartSeries.clear();
-                this.utscSciChartSeries.appendRange(freqsMhz, amplitudes);
+                // Create a new data series instead of clearing (avoids WebAssembly binding issues)
+                const { XyDataSeries } = SciChart;
+                const newDataSeries = new XyDataSeries(this.utscSciChart.webAssemblyContext2D);
+                newDataSeries.appendRange(freqsMhz, amplitudes);
+                
+                // Replace the old data series in the renderable series
+                const renderableSeries = this.utscSciChart.renderableSeries.get(0);
+                renderableSeries.dataSeries = newDataSeries;
+                
+                // Update reference
+                this.utscSciChartSeries = newDataSeries;
                 
                 console.log('[SciChart] Data updated successfully');
                 
