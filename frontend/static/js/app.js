@@ -1162,6 +1162,9 @@ createApp({
                 
                 const { SciChartSurface, NumericAxis, FastLineRenderableSeries, XyDataSeries, EAxisAlignment, NumberRange, ZoomPanModifier, MouseWheelZoomModifier, ZoomExtentsModifier } = SciChart;
                 
+                // Use community license to avoid license server checks
+                SciChartSurface.UseCommunityLicense();
+                
                 // Create the chart surface
                 const { sciChartSurface, wasmContext } = await SciChartSurface.create('utscSciChart');
                 
