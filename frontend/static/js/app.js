@@ -866,18 +866,7 @@ createApp({
                 return;
             }
             
-            // Now start the UTSC measurement (configure + start)
-            await this.startUtsc();
-            
             this.$toast?.success('Live monitoring started - buffering data...');
-            
-            // Auto-restart UTSC measurement every 50 seconds
-            this.utscAutoRestartInterval = setInterval(async () => {
-                if (this.utscLiveMode && !this.runningUtsc) {
-                    console.log('[UTSC] Auto-restarting measurement...');
-                    await this.startUtsc();
-                }
-            }, 50000);
         },
         
         stopUtscLive() {
@@ -890,12 +879,6 @@ createApp({
             // Also stop UTSC on CMTS (don't wait for result)
             if (this.selectedModem && this.selectedModem.cmts_ip && this.utscConfig.rfPortIfindex) {
                 this.stopUtsc();
-            }
-            
-            // Clear auto-restart interval
-            if (this.utscAutoRestartInterval) {
-                clearInterval(this.utscAutoRestartInterval);
-                this.utscAutoRestartInterval = null;
             }
             
             // Reset buffer size display
@@ -1194,16 +1177,11 @@ createApp({
                 }
                 
                 console.log('[UTSC] SciChart ready, starting WebSocket...');
-                this.$toast?.success('Live monitoring started (auto-restarts every 50s)');
+                this.$toast?.success('Live monitoring started - continuous streaming');
                 this.startUtscWebSocket();
                 
-                // Auto-restart UTSC measurement every 50 seconds (E6000 max is 60s)
-                this.utscAutoRestartInterval = setInterval(async () => {
-                    if (this.utscLiveMode && !this.runningUtsc) {
-                        console.log('[UTSC] Auto-restarting measurement for continuous monitoring...');
-                        await this.startUtsc();
-                    }
-                }, 50000);  // Restart every 50 seconds
+                // WebSocket backend automatically maintains continuous streaming
+                // by re-triggering UTSC when buffer gets low (no frontend timer needed)
                 
             } else {
                 console.log('[UTSC] Stopping live mode...');
