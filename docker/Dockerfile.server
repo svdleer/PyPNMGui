@@ -10,6 +10,7 @@ LABEL description="PyPNM Web GUI Server with WebSocket agent support"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tzdata \
+    snmp \
     && rm -rf /var/lib/apt/lists/*
 
 # Set timezone
