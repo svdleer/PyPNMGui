@@ -65,7 +65,7 @@ createApp({
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning (timed captures), 6=CM_MAC (per-transmission), 5=IdleSID
                 centerFreqMhz: 50,
-                spanMhz: 100,
+                spanMhz: 80,
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
@@ -2530,12 +2530,6 @@ createApp({
                 timer: 5000,
                 timerProgressBar: true
             });
-        }
-    },
-    watch: {
-        utscRefreshRate(newRate) {
-            console.log('[UTSC] Refresh rate changed to:', newRate, 'ms');
-            this.restartUtscLiveMonitoring();
         }
     }
 }).mount('#app');
