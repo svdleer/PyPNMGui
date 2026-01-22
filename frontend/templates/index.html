@@ -1014,10 +1014,10 @@
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">Span (MHz)</label>
                                                                 <select v-model.number="utscConfig.spanMhz" class="form-select form-select-sm">
-                                                                    <option :value="40">40 MHz</option>
+                                                                    <option :value="40">40 MHz (NB)</option>
                                                                     <option :value="80">80 MHz</option>
-                                                                    <option :value="100">100 MHz</option>
                                                                     <option :value="160">160 MHz</option>
+                                                                    <option :value="320">320 MHz (WB)</option>
                                                                 </select>
                                                             </div>
                                                         </div>
@@ -1034,6 +1034,8 @@
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">Bins</label>
                                                                 <select v-model.number="utscConfig.numBins" class="form-select form-select-sm">
+                                                                    <option :value="200">200</option>
+                                                                    <option :value="400">400</option>
                                                                     <option :value="800">800</option>
                                                                     <option :value="1600">1600</option>
                                                                     <option :value="3200">3200</option>
