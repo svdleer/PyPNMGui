@@ -40,7 +40,12 @@ response = requests.post(url, json=payload, timeout=10)
 print(f"   API Response: {response.status_code}")
 if response.status_code == 200:
     result = response.json()
-    print(f"   Success: {result.get('success')}")
+    print(f"   Result: {json.dumps(result, indent=2)}")
+    if not result.get('success'):
+        print(f"   ⚠️  API returned success=False")
+        if 'message' in result:
+            print(f"   Message: {result['message']}")
+        exit(1)
 else:
     print(f"   Error: {response.text}")
     exit(1)

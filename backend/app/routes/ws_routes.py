@@ -290,12 +290,15 @@ def init_websocket(app):
                         logger.error(f"Failed to send UTSC data: {send_err}")
                         raise
                 
-                # Re-trigger via SNMP when buffer gets low to maintain buffer (E6000 does 10 captures per trigger)
-                # Trigger early (at 15 files) to give CMTS time to generate new files before buffer runs dry
+                # Re-trigger via SNMP when buffer gets low to maintain buffer
+                # E6000 generates 10 files per burst in ~11 seconds
+                # At 1 file/sec stream rate, we need to trigger before consuming all 10
+                # Trigger at 5 files remaining = 5 seconds before empty = enough time for CMTS
                 time_since_trigger = current_time - last_trigger_time
-                buffer_low = len(file_buffer) < 15  # Trigger when below 15 to maintain buffer
-                if rf_port and cmts_ip and time_since_trigger >= 1.0 and (buffer_low or can_trigger):
-                    logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, target=15)")
+                buffer_low = len(file_buffer) <= 5  # Trigger when 5 or fewer files remain
+                time_ok = time_since_trigger >= 2.0  # Minimum 2s between triggers
+                if rf_port and cmts_ip and time_ok and (buffer_low or can_trigger):
+                    logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, next batch in ~11s)")
                     trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time
                     can_trigger = False
