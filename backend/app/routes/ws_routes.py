@@ -198,12 +198,8 @@ def init_websocket(app):
             processed_files.update(existing_files)
             logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files")
             
-            # Initial SNMP trigger if we have the parameters
-            if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Initial trigger on {cmts_ip} port {rf_port}")
-                trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
-                last_trigger_time = time.time()
-                can_trigger = False
+            # Don't trigger here - let the frontend start API configure UTSC first
+            # This prevents double-triggering and overlapping batches
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
@@ -276,11 +272,12 @@ def init_websocket(app):
                     except Exception as e:
                         logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
-                # Wait for initial buffer to fill before starting stream
+                # Wait for initial buffer to fill before starting stream (must be exactly target or more)
                 if not streaming_started:
-                    if len(file_buffer) >= initial_buffer_target:
+                    current_buffer_size = len(file_buffer)
+                    if current_buffer_size >= initial_buffer_target:
                         streaming_started = True
-                        logger.info(f"UTSC WebSocket: Initial buffer of {len(file_buffer)} files ready, starting stream")
+                        logger.info(f"UTSC WebSocket: Initial buffer of {current_buffer_size} files ready (target was {initial_buffer_target}), starting stream")
                         ws.send(json.dumps({
                             'type': 'buffering_complete',
                             'message': f'Buffered {len(file_buffer)} samples, starting stream',
@@ -336,11 +333,11 @@ def init_websocket(app):
                 # E6000 generates 10 files per burst in ~11 seconds
                 # At 1 file/sec stream rate, we consume 10 files in 10 seconds
                 # Must trigger BEFORE buffer runs out to give CMTS time (11s) to generate next batch
-                # Trigger at 10 files = when we start consuming the current batch = CMTS generates next batch in parallel
+                # Trigger at 12 files = gives extra margin before we run out
                 time_since_trigger = current_time - last_trigger_time
-                buffer_low = len(file_buffer) <= 10  # Trigger when 10 or fewer files remain
+                buffer_low = len(file_buffer) <= 12  # Trigger when 12 or fewer files remain (extra margin)
                 time_ok = time_since_trigger >= 2.0  # Minimum 2s between triggers
-                if rf_port and cmts_ip and time_ok and (buffer_low or can_trigger):
+                if rf_port and cmts_ip and time_ok and streaming_started and (buffer_low or can_trigger):
                     logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, next batch in ~11s)")
                     trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time

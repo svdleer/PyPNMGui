@@ -772,21 +772,27 @@ createApp({
             // Set utscLiveMode first so the chart div becomes visible in DOM
             this.utscLiveMode = true;
             
-            // Now wait for Vue to render the chart div
+            // Now wait for Vue to render the chart div ONCE
             console.log('[UTSC] Starting live mode...');
             await this.ensureSciChartLoaded();
             await this.$nextTick();
             await new Promise(resolve => setTimeout(resolve, 300));
             
+            // Initialize chart only if not already initialized
             if (!this.utscSciChart) {
+                console.log('[UTSC] Initializing SciChart for live mode...');
                 await this.initUtscSciChart();
-            }
-            
-            if (!this.utscSciChart || !this.utscSciChartSeries) {
-                console.error('[UTSC] SciChart failed to initialize');
-                this.$toast?.error('Failed to initialize chart');
-                this.utscLiveMode = false;
-                return;
+                
+                if (!this.utscSciChart || !this.utscSciChartSeries) {
+                    console.error('[UTSC] SciChart failed to initialize');
+                    this.$toast?.error('Failed to initialize chart');
+                    this.utscLiveMode = false;
+                    return;
+                }
+            } else {
+                console.log('[UTSC] Reusing existing SciChart instance');
+                // Clear existing data
+                this.utscSciChartSeries.clear();
             }
             
             // Configure and start UTSC on CMTS first
