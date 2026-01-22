@@ -137,6 +137,8 @@ def init_websocket(app):
         last_trigger_time = 0
         can_trigger = True
         last_status = None
+        initial_buffer_target = 20  # Wait for 20 files before starting stream
+        streaming_started = False
         
         try:
             # Send initial connected message
@@ -232,8 +234,29 @@ def init_websocket(app):
                     except Exception as e:
                         logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
-                # Stream from buffer at configured rate
-                if file_buffer and (current_time - last_stream_time) >= stream_interval:
+                # Wait for initial buffer to fill before starting stream
+                if not streaming_started:
+                    if len(file_buffer) >= initial_buffer_target:
+                        streaming_started = True
+                        logger.info(f"UTSC WebSocket: Initial buffer of {len(file_buffer)} files ready, starting stream")
+                        ws.send(json.dumps({
+                            'type': 'buffering_complete',
+                            'message': f'Buffered {len(file_buffer)} samples, starting stream',
+                            'buffer_size': len(file_buffer)
+                        }))
+                    else:
+                        # Send buffering status
+                        if current_time - last_heartbeat > 2:
+                            ws.send(json.dumps({
+                                'type': 'buffering',
+                                'message': f'Buffering... {len(file_buffer)}/{initial_buffer_target} samples',
+                                'buffer_size': len(file_buffer),
+                                'target': initial_buffer_target
+                            }))
+                            last_heartbeat = current_time
+                
+                # Stream from buffer at configured rate (only after initial buffering)
+                if streaming_started and file_buffer and (current_time - last_stream_time) >= stream_interval:
                     item = file_buffer.popleft()
                     last_stream_time = current_time
                     
@@ -267,12 +290,14 @@ def init_websocket(app):
                         logger.error(f"Failed to send UTSC data: {send_err}")
                         raise
                 
-                # Re-trigger via SNMP every 1 second (E6000 does 10 captures per trigger)
+                # Re-trigger via SNMP when buffer gets low to maintain ~10 files (E6000 does 10 captures per trigger)
                 time_since_trigger = current_time - last_trigger_time
-                if rf_port and cmts_ip and time_since_trigger >= 1.0:
-                    logger.debug(f"UTSC WebSocket: Re-triggering (every 1s), buffer={len(file_buffer)}")
+                buffer_low = len(file_buffer) < 10  # Trigger when below 10 to maintain buffer
+                if rf_port and cmts_ip and time_since_trigger >= 1.0 and (buffer_low or can_trigger):
+                    logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, target=10)")
                     trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time
+                    can_trigger = False
                 
                 # Send heartbeat
                 if current_time - last_heartbeat > heartbeat_interval:
