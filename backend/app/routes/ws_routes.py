@@ -158,14 +158,30 @@ def init_websocket(app):
         streaming_started = False
         
         try:
-            # Stop any existing UTSC session first (cleanup)
+            # ONLY stop existing UTSC if there are leftover files from old sessions
+            # Don't stop if files are fresh (from current session trying to reconnect)
             if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Stopping any existing UTSC on {cmts_ip} port {rf_port}")
-                try:
-                    stop_utsc_via_snmp(cmts_ip, int(rf_port), community)
-                    time.sleep(1)  # Wait for stop to complete
-                except Exception as e:
-                    logger.warning(f"UTSC stop failed (may not be running): {e}")
+                # Check age of existing files
+                pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+                existing_files = glob.glob(pattern)
+                should_stop = False
+                
+                if existing_files:
+                    # Get newest file timestamp
+                    newest_time = max(os.path.getmtime(f) for f in existing_files)
+                    age_seconds = time.time() - newest_time
+                    # Only stop if files are old (>60s = from previous session)
+                    should_stop = age_seconds > 60
+                
+                if should_stop:
+                    logger.info(f"UTSC WebSocket: Stopping old UTSC session on {cmts_ip} port {rf_port}")
+                    try:
+                        stop_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                        time.sleep(1)
+                    except Exception as e:
+                        logger.warning(f"UTSC stop failed: {e}")
+                else:
+                    logger.info(f"UTSC WebSocket: Reusing existing UTSC session (fresh files)")
             
             # Send initial connected message
             ws.send(json.dumps({

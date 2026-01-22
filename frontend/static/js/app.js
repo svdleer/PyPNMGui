@@ -765,6 +765,10 @@ createApp({
             // Show buffering message
             this.$toast?.info('Initializing UTSC live stream...');
             
+            // Clear any cached plot data from previous static captures
+            this.utscPlotImage = null;
+            this.utscSpectrumData = null;
+            
             // Set utscLiveMode first so the chart div becomes visible in DOM
             this.utscLiveMode = true;
             
