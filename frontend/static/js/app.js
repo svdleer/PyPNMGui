@@ -762,10 +762,17 @@ createApp({
             }
             
             // Initialize chart first
+            // Show buffering message
+            this.$toast?.info('Initializing chart... please wait');
+            
+            // Set utscLiveMode first so the chart div becomes visible in DOM
+            this.utscLiveMode = true;
+            
+            // Now wait for Vue to render the chart div
             console.log('[UTSC] Starting live mode...');
             await this.ensureSciChartLoaded();
             await this.$nextTick();
-            await new Promise(resolve => setTimeout(resolve, 150));
+            await new Promise(resolve => setTimeout(resolve, 300));
             
             if (!this.utscSciChart) {
                 await this.initUtscSciChart();
@@ -774,13 +781,11 @@ createApp({
             if (!this.utscSciChart || !this.utscSciChartSeries) {
                 console.error('[UTSC] SciChart failed to initialize');
                 this.$toast?.error('Failed to initialize chart');
+                this.utscLiveMode = false;
                 return;
             }
             
-            // Show buffering message
-            this.$toast?.info('Initializing... please wait for data to buffer');
-            
-            // Start WebSocket first and wait for connection
+            // Start WebSocket and wait for connection
             console.log('[UTSC] SciChart ready, starting WebSocket...');
             this.startUtscWebSocket();
             
@@ -803,11 +808,11 @@ createApp({
                 console.error('[UTSC] WebSocket failed to connect');
                 this.$toast?.error('Failed to connect WebSocket');
                 this.stopUtscWebSocket();
+                this.utscLiveMode = false;
                 return;
             }
             
             // Now start the UTSC measurement (configure + start)
-            this.utscLiveMode = true;
             await this.startUtsc();
             
             this.$toast?.success('Live monitoring started - buffering data...');

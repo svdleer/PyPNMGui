@@ -1134,9 +1134,9 @@
                                         </div>
                                         
                                         <!-- Spectrum Charts Row -->
-                                        <div class="row mt-4" v-if="utscSpectrumData || usRxmerSpectrumData">
+                                        <div class="row mt-4" v-if="utscSpectrumData || usRxmerSpectrumData || utscLiveMode">
                                             <!-- UTSC Spectrum Chart -->
-                                            <div class="col-12" v-if="utscSpectrumData">
+                                            <div class="col-12" v-if="utscSpectrumData || utscLiveMode">
                                                 <div class="card mb-3">
                                                     <div class="card-header bg-primary bg-opacity-10 d-flex justify-content-between align-items-center">
                                                         <h6 class="mb-0">
