@@ -44,6 +44,23 @@ def trigger_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
         return False
 
 
+def stop_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
+    """Stop UTSC test directly via SNMP."""
+    try:
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+        cmd = ['snmpset', '-v2c', '-c', community, cmts_ip, oid, 'i', '3']  # 3 = stop
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            logger.debug(f"UTSC stopped via SNMP on port {rf_port_ifindex}")
+            return True
+        else:
+            logger.warning(f"SNMP stop failed: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"SNMP stop error: {e}")
+        return False
+
+
 def get_utsc_status(cmts_ip, rf_port_ifindex, community):
     """Get UTSC measurement status via SNMP."""
     try:
@@ -141,6 +158,15 @@ def init_websocket(app):
         streaming_started = False
         
         try:
+            # Stop any existing UTSC session first (cleanup)
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Stopping any existing UTSC on {cmts_ip} port {rf_port}")
+                try:
+                    stop_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                    time.sleep(1)  # Wait for stop to complete
+                except Exception as e:
+                    logger.warning(f"UTSC stop failed (may not be running): {e}")
+            
             # Send initial connected message
             ws.send(json.dumps({
                 'type': 'connected',
@@ -318,6 +344,14 @@ def init_websocket(app):
         except Exception as e:
             logger.error(f"UTSC WebSocket error: {e}")
         finally:
+            # Stop UTSC on cleanup
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Stopping UTSC on {cmts_ip} port {rf_port}")
+                try:
+                    stop_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                except Exception as e:
+                    logger.warning(f"UTSC stop failed on cleanup: {e}")
+            
             _utsc_sessions.pop(session_id, None)
             logger.info(f"UTSC WebSocket closed for {mac_address}")
     
