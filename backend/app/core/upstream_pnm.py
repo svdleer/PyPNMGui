@@ -134,7 +134,7 @@ class UtscConfig:
     logical_ch_ifindex: Optional[int] = None  # For IdleSID/CM_MAC modes
     center_freq_hz: int = 30000000  # 30 MHz default
     span_hz: int = 80000000  # 80 MHz span
-    num_bins: int = 800
+    num_bins: int = 4096
     output_format: UtscOutputFormat = UtscOutputFormat.FFT_POWER
     window: UtscWindow = UtscWindow.HANN
     filename: str = "utsc_capture"

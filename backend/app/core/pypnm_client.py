@@ -606,7 +606,7 @@ class PyPNMClient:
         trigger_mode: int = 2,
         center_freq_hz: int = 30000000,
         span_hz: int = 80000000,
-        num_bins: int = 800,
+        num_bins: int = 4096,
         filename: str = "utsc_capture",
         cm_mac: Optional[str] = None,
         logical_ch_ifindex: Optional[int] = None,
@@ -630,7 +630,7 @@ class PyPNMClient:
             trigger_mode: 2=FreeRunning, 6=CM MAC trigger
             center_freq_hz: Center frequency in Hz (default: 30 MHz)
             span_hz: Frequency span in Hz (default: 80 MHz)
-            num_bins: Number of FFT bins (default: 800)
+            num_bins: Number of FFT bins (default: 4096)
             filename: Output filename (CMTS adds timestamp)
             cm_mac: Cable modem MAC (required if trigger_mode=6)
             logical_ch_ifindex: Logical channel ifIndex (optional for trigger_mode=6)

@@ -1800,7 +1800,7 @@ class PyPNMAgent:
                 self.logger.warning(f"Failed to set span: {result.get('error')}")
             
             # Set number of bins
-            num_bins = params.get('num_bins', 800)
+            num_bins = params.get('num_bins', 4096)
             result = self._set_cmts_direct(cmts_ip, f"{base}.10{idx}", str(num_bins), 'u', community)
             if not result.get('success'):
                 self.logger.warning(f"Failed to set num_bins: {result.get('error')}")

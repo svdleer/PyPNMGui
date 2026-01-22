@@ -110,7 +110,7 @@ def pnm_measurement(measurement_type, mac_address):
             trigger_mode = data.get('trigger_mode', 2)  # 2=FreeRunning
             center_freq_hz = data.get('center_freq_hz', 30000000)  # 30 MHz
             span_hz = data.get('span_hz', 80000000)  # 80 MHz
-            num_bins = data.get('num_bins', 800)
+            num_bins = data.get('num_bins', 4096)
             filename = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
             cm_mac = data.get('cm_mac') if trigger_mode == 6 else None
             logical_ch_ifindex = data.get('logical_ch_ifindex')
@@ -947,7 +947,7 @@ def configure_utsc(mac_address):
         "trigger_mode": 2,  // 2=FreeRunning, 6=CM_MAC
         "center_freq_hz": 30000000,
         "span_hz": 80000000,
-        "num_bins": 800,
+        "num_bins": 4096,
         "filename": "utsc_capture",
         "logical_ch_ifindex": null,  // For CM_MAC trigger
         "community": "optional",
@@ -990,7 +990,7 @@ def configure_utsc(mac_address):
             trigger_mode=trigger_mode,
             center_freq_hz=data.get('center_freq_hz', 30000000),
             span_hz=data.get('span_hz', 80000000),
-            num_bins=data.get('num_bins', 800),
+            num_bins=data.get('num_bins', 4096),
             filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
             cm_mac=cm_mac,
             logical_ch_ifindex=data.get('logical_ch_ifindex'),
