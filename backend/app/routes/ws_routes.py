@@ -229,9 +229,11 @@ def init_websocket(app):
                 deleted = delete_tftp_files(tftp_ip, filenames)
                 logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} old files via TFTP")
             
-            # Mark existing files as already processed
+            # Re-check what files remain after deletion attempt
+            remaining_files = glob.glob(pattern)
+            processed_files.update(remaining_files)  # Only mark files that still exist
             stream_start_time = time.time()
-            processed_files.update(existing_files)
+            logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} files remain after cleanup")
             
             # Don't trigger here - let the frontend start API configure UTSC first
             # This prevents double-triggering and overlapping batches
