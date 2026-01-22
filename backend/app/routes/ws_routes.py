@@ -127,7 +127,7 @@ def init_websocket(app):
         _utsc_sessions[session_id] = True
         
         processed_files = set()  # Track files we've already processed
-        file_buffer = deque(maxlen=100)  # Buffer for smooth streaming (max 100 samples)
+        file_buffer = deque(maxlen=500)  # Buffer for smooth streaming (max 500 samples)
         tftp_base = '/var/lib/tftpboot'
         heartbeat_interval = 5
         last_heartbeat = time.time()
