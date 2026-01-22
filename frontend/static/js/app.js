@@ -782,14 +782,40 @@ createApp({
                 return;
             }
             
-            // Start the UTSC measurement (configure + start)
+            // Show buffering message
+            this.$toast?.info('Initializing... please wait for data to buffer');
+            
+            // Start WebSocket first and wait for connection
+            console.log('[UTSC] SciChart ready, starting WebSocket...');
+            this.startUtscWebSocket();
+            
+            // Wait for WebSocket to connect (max 5 seconds)
+            const wsReady = await new Promise(resolve => {
+                let attempts = 0;
+                const checkWs = setInterval(() => {
+                    attempts++;
+                    if (this.utscWebSocket && this.utscWebSocket.readyState === WebSocket.OPEN) {
+                        clearInterval(checkWs);
+                        resolve(true);
+                    } else if (attempts > 50) {  // 5 seconds
+                        clearInterval(checkWs);
+                        resolve(false);
+                    }
+                }, 100);
+            });
+            
+            if (!wsReady) {
+                console.error('[UTSC] WebSocket failed to connect');
+                this.$toast?.error('Failed to connect WebSocket');
+                this.stopUtscWebSocket();
+                return;
+            }
+            
+            // Now start the UTSC measurement (configure + start)
+            this.utscLiveMode = true;
             await this.startUtsc();
             
-            // Start WebSocket and live mode
-            this.utscLiveMode = true;
-            console.log('[UTSC] SciChart ready, starting WebSocket...');
-            this.$toast?.success('Live monitoring started');
-            this.startUtscWebSocket();
+            this.$toast?.success('Live monitoring started - buffering data...');
             
             // Auto-restart UTSC measurement every 50 seconds
             this.utscAutoRestartInterval = setInterval(async () => {
