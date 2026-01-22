@@ -698,46 +698,12 @@ createApp({
                 } else {
                     console.error('[UTSC] RF port discovery failed:', result.error);
                     this.$toast?.warning(result.error || 'RF port discovery failed');
-                    
-                    // Fallback to old method if fast discovery fails
-                    await this.loadUpstreamInterfacesFallback();
                 }
             } catch (error) {
-                console.error('[UTSC] Fast discovery error:', error);
-                // Fallback to old method
-                await this.loadUpstreamInterfacesFallback();
+                console.error('[UTSC] Discovery error:', error);
+                this.$toast?.error('RF port discovery failed: ' + error.message);
             } finally {
                 this.upstreamInterfaces.loading = false;
-            }
-        },
-        
-        async loadUpstreamInterfacesFallback() {
-            // Fallback to the old agent-based discovery
-            console.log('[UTSC] Falling back to agent-based discovery...');
-            try {
-                const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip
-                    })
-                });
-                
-                const result = await response.json();
-                if (result.success) {
-                    this.upstreamInterfaces.rfPorts = result.rf_ports || [];
-                    this.upstreamInterfaces.allRfPorts = result.all_rf_ports || [];
-                    this.upstreamInterfaces.modemRfPort = result.modem_rf_port;
-                    
-                    if (result.modem_rf_port) {
-                        this.utscConfig.rfPortIfindex = result.modem_rf_port.ifindex;
-                    } else if (this.upstreamInterfaces.rfPorts.length > 0) {
-                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.rfPorts[0].ifindex;
-                    }
-                    console.log('[UTSC] Fallback loaded RF ports:', this.upstreamInterfaces.rfPorts);
-                }
-            } catch (error) {
-                console.error('[UTSC] Fallback discovery failed:', error);
             }
         },
         
