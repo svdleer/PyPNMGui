@@ -23,8 +23,35 @@ except ImportError:
     WEBSOCKET_AVAILABLE = False
     logger.warning("flask-sock not installed, WebSocket support disabled")
 
+try:
+    import tftpy
+    TFTP_AVAILABLE = True
+except ImportError:
+    TFTP_AVAILABLE = False
+    logger.warning("tftpy not installed, TFTP delete support disabled")
+
 # Track active UTSC streaming sessions
 _utsc_sessions = {}
+
+
+def delete_tftp_files(tftp_ip, filenames):
+    """Delete files via TFTP."""
+    if not TFTP_AVAILABLE:
+        logger.warning("TFTP not available, cannot delete files")
+        return 0
+    
+    deleted = 0
+    for filename in filenames:
+        try:
+            # TFTP uses WRQ (write request) with 0 bytes to delete
+            client = tftpy.TftpClient(tftp_ip, 69)
+            # Send empty file to "delete" it (standard TFTP behavior)
+            client.upload(filename, None, timeout=2)
+            deleted += 1
+        except Exception as e:
+            logger.debug(f"TFTP delete {filename} failed: {e}")
+    
+    return deleted
 
 
 def trigger_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
@@ -192,13 +219,19 @@ def init_websocket(app):
                 'duration_s': duration_s
             }))
             
-            # Mark existing files as already processed (don't delete - permission issues)
-            # Only stream NEW files created AFTER this timestamp
+            # Delete old UTSC files via TFTP (required due to permission issues)
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
-            processed_files.update(existing_files)  # Mark as already processed
-            stream_start_time = time.time()  # Only process files created after this
-            logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files, streaming new files only")
+            if existing_files:
+                tftp_ip = current_app.config.get('TFTP_SERVER_IP', '127.0.0.1')
+                # Extract just filenames for TFTP delete
+                filenames = [os.path.basename(f) for f in existing_files]
+                deleted = delete_tftp_files(tftp_ip, filenames)
+                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} old files via TFTP")
+            
+            # Mark existing files as already processed
+            stream_start_time = time.time()
+            processed_files.update(existing_files)
             
             # Don't trigger here - let the frontend start API configure UTSC first
             # This prevents double-triggering and overlapping batches
