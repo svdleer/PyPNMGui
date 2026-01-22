@@ -48,7 +48,7 @@ def stop_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
     """Stop UTSC test directly via SNMP."""
     try:
         oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
-        cmd = ['snmpset', '-v2c', '-c', community, cmts_ip, oid, 'i', '3']  # 3 = stop
+        cmd = ['snmpset', '-v2c', '-c', community, cmts_ip, oid, 'i', '2']  # 2 = abort
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             logger.debug(f"UTSC stopped via SNMP on port {rf_port_ifindex}")
