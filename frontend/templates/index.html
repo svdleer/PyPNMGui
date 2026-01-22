@@ -1043,24 +1043,15 @@
                                                             </div>
                                                         </div>
                                                         <div class="d-flex gap-2 mb-2">
-                                                            <button @click="configureUtsc" class="btn btn-sm btn-outline-secondary flex-grow-1" :disabled="runningUtsc">
+                                                            <button @click="configureUtsc" class="btn btn-sm btn-outline-secondary flex-grow-1" :disabled="runningUtsc || utscLiveMode">
                                                                 <i class="bi bi-gear me-1"></i>Configure
                                                             </button>
-                                                            <button @click="startUtsc" class="btn btn-sm btn-success flex-grow-1" :disabled="runningUtsc || !utscConfig.rfPortIfindex">
-                                                                <span v-if="runningUtsc"><i class="bi bi-arrow-repeat spin me-1"></i>Running</span>
+                                                            <button @click="startUtscLive" class="btn btn-sm flex-grow-1" 
+                                                                    :class="utscLiveMode ? 'btn-danger' : 'btn-success'" 
+                                                                    :disabled="!utscConfig.rfPortIfindex">
+                                                                <span v-if="runningUtsc"><i class="bi bi-arrow-repeat spin me-1"></i>Starting...</span>
+                                                                <span v-else-if="utscLiveMode"><i class="bi bi-stop-fill me-1"></i>Stop</span>
                                                                 <span v-else><i class="bi bi-play-fill me-1"></i>Start</span>
-                                                            </button>
-                                                            <button @click="stopUtsc" class="btn btn-sm btn-danger" :disabled="!runningUtsc">
-                                                                <i class="bi bi-stop-fill"></i>
-                                                            </button>
-                                                        </div>
-                                                        <div class="d-flex gap-2 align-items-center">
-                                                            <button @click="toggleUtscLiveMode" 
-                                                                    class="btn btn-sm flex-grow-1"
-                                                                    :class="utscLiveMode ? 'btn-danger' : 'btn-primary'"
-                                                                    :disabled="!utscSpectrumData">
-                                                                <i class="bi me-1" :class="utscLiveMode ? 'bi-stop-circle' : 'bi-play-circle'"></i>
-                                                                {{ utscLiveMode ? 'Stop Live Monitoring' : 'Start Live Monitoring' }}
                                                             </button>
                                                         </div>
                                                         <div class="mt-2">
@@ -1081,9 +1072,10 @@
                                                                    min="30" max="300" step="30" 
                                                                    title="Test duration in seconds">
                                                         </div>
-                                                        <div v-if="utscBufferSize > 0" class="mt-1">
+                                                        <div v-if="utscLiveMode" class="mt-1">
                                                             <small class="text-muted">
-                                                                <i class="bi bi-layers me-1"></i>Buffer: {{ utscBufferSize }} files
+                                                                <i class="bi bi-layers me-1"></i>Buffer: {{ utscBufferSize || 0 }} files
+                                                                <span v-if="utscBufferSize === 0" class="text-warning ms-1">(waiting for data)</span>
                                                             </small>
                                                         </div>
                                                         <div v-if="utscStatus" class="mt-2">

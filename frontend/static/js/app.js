@@ -748,6 +748,74 @@ createApp({
             }
         },
         
+        // Unified Start/Stop for UTSC live monitoring
+        async startUtscLive() {
+            if (this.utscLiveMode) {
+                // Stop mode
+                this.stopUtscLive();
+                return;
+            }
+            
+            // Start mode
+            if (!this.selectedModem) {
+                this.$toast?.warning('Please select a modem first');
+                return;
+            }
+            if (!this.utscConfig.rfPortIfindex) {
+                this.$toast?.warning('Please select an RF Port');
+                return;
+            }
+            
+            // Initialize chart first
+            console.log('[UTSC] Starting live mode...');
+            await this.ensureSciChartLoaded();
+            await this.$nextTick();
+            await new Promise(resolve => setTimeout(resolve, 150));
+            
+            if (!this.utscSciChart) {
+                await this.initUtscSciChart();
+            }
+            
+            if (!this.utscSciChart || !this.utscSciChartSeries) {
+                console.error('[UTSC] SciChart failed to initialize');
+                this.$toast?.error('Failed to initialize chart');
+                return;
+            }
+            
+            // Start the UTSC measurement (configure + start)
+            await this.startUtsc();
+            
+            // Start WebSocket and live mode
+            this.utscLiveMode = true;
+            console.log('[UTSC] SciChart ready, starting WebSocket...');
+            this.$toast?.success('Live monitoring started');
+            this.startUtscWebSocket();
+            
+            // Auto-restart UTSC measurement every 50 seconds
+            this.utscAutoRestartInterval = setInterval(async () => {
+                if (this.utscLiveMode && !this.runningUtsc) {
+                    console.log('[UTSC] Auto-restarting measurement...');
+                    await this.startUtsc();
+                }
+            }, 50000);
+        },
+        
+        stopUtscLive() {
+            console.log('[UTSC] Stopping live mode...');
+            this.utscLiveMode = false;
+            this.$toast?.info('Live monitoring stopped');
+            this.stopUtscWebSocket();
+            
+            // Also stop UTSC on CMTS
+            this.stopUtsc();
+            
+            // Clear auto-restart interval
+            if (this.utscAutoRestartInterval) {
+                clearInterval(this.utscAutoRestartInterval);
+                this.utscAutoRestartInterval = null;
+            }
+        },
+        
         async startUtsc() {
             if (!this.selectedModem) {
                 this.$toast?.warning('Please select a modem first');
@@ -1130,6 +1198,11 @@ createApp({
                                         this.renderUtscChart();
                                     });
                                 }
+                            }
+                        } else if (data.type === 'heartbeat') {
+                            // Update buffer size from heartbeat
+                            if (data.buffer_size !== undefined) {
+                                this.utscBufferSize = data.buffer_size;
                             }
                         } else if (data.type === 'error') {
                             console.error('[UTSC] Stream error:', data.message);
