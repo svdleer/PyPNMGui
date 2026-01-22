@@ -17,7 +17,8 @@ API_TIMEOUT = 60
 
 def get_pypnm_api_url():
     """Get PyPNM API URL from environment or default."""
-    return os.environ.get('PYPNM_API_URL', 'http://pypnm-api:5000')
+    # Try PYPNM_API_URL first, then PYPNM_BASE_URL
+    return os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://pypnm-api:8000'))
 
 
 def discover_rf_port_for_modem(cmts_ip, community, mac_address):
