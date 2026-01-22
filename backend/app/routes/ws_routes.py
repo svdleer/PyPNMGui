@@ -8,6 +8,7 @@ import glob
 import os
 import struct
 import threading
+import subprocess
 from flask import Blueprint, current_app
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,23 @@ except ImportError:
 
 # Track active UTSC streaming sessions
 _utsc_sessions = {}
+
+
+def trigger_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
+    """Trigger UTSC test directly via SNMP (fast, bypasses PyPNM API)."""
+    try:
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+        cmd = ['snmpset', '-v2c', '-c', community, cmts_ip, oid, 'i', '1']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            logger.debug(f"UTSC re-triggered via SNMP on port {rf_port_ifindex}")
+            return True
+        else:
+            logger.warning(f"SNMP trigger failed: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"SNMP trigger error: {e}")
+        return False
 
 
 def init_websocket(app):
