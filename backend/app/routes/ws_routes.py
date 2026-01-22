@@ -192,15 +192,13 @@ def init_websocket(app):
                 'duration_s': duration_s
             }))
             
-            # Clean up old UTSC files before starting
+            # Mark existing files as already processed (don't delete - permission issues)
+            # Only stream NEW files created AFTER this timestamp
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
-            for old_file in existing_files:
-                try:
-                    os.remove(old_file)
-                except Exception as e:
-                    logger.warning(f"Failed to delete old file {old_file}: {e}")
-            logger.info(f"UTSC WebSocket: Deleted {len(existing_files)} old files")
+            processed_files.update(existing_files)  # Mark as already processed
+            stream_start_time = time.time()  # Only process files created after this
+            logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files, streaming new files only")
             
             # Don't trigger here - let the frontend start API configure UTSC first
             # This prevents double-triggering and overlapping batches
@@ -229,10 +227,13 @@ def init_websocket(app):
                         elif status in [STATUS_SAMPLE_READY, STATUS_INACTIVE]:
                             can_trigger = True
                 
-                # Collect new files into buffer
+                # Collect new files into buffer (only files created AFTER stream started)
                 pattern = f"{tftp_base}/utsc_{mac_clean}_*"
                 files = glob.glob(pattern)
-                new_files = [f for f in files if f not in processed_files]
+                # Filter: not processed AND created after stream start
+                new_files = [f for f in files 
+                            if f not in processed_files 
+                            and os.path.getmtime(f) >= stream_start_time]
                 
                 for filepath in sorted(new_files, key=os.path.getmtime):
                     processed_files.add(filepath)
