@@ -185,31 +185,6 @@ def init_websocket(app):
         streaming_started = False
         
         try:
-            # ONLY stop existing UTSC if there are leftover files from old sessions
-            # Don't stop if files are fresh (from current session trying to reconnect)
-            if rf_port and cmts_ip:
-                # Check age of existing files
-                pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-                existing_files = glob.glob(pattern)
-                should_stop = False
-                
-                if existing_files:
-                    # Get newest file timestamp
-                    newest_time = max(os.path.getmtime(f) for f in existing_files)
-                    age_seconds = time.time() - newest_time
-                    # Only stop if files are old (>60s = from previous session)
-                    should_stop = age_seconds > 60
-                
-                if should_stop:
-                    logger.info(f"UTSC WebSocket: Stopping old UTSC session on {cmts_ip} port {rf_port}")
-                    try:
-                        stop_utsc_via_snmp(cmts_ip, int(rf_port), community)
-                        time.sleep(1)
-                    except Exception as e:
-                        logger.warning(f"UTSC stop failed: {e}")
-                else:
-                    logger.info(f"UTSC WebSocket: Reusing existing UTSC session (fresh files)")
-            
             # Send initial connected message
             ws.send(json.dumps({
                 'type': 'connected',
@@ -219,19 +194,20 @@ def init_websocket(app):
                 'duration_s': duration_s
             }))
             
-            # Delete old UTSC files via TFTP (required due to permission issues)
+            # ALWAYS delete old UTSC files via TFTP before starting (permission issues prevent direct deletion)
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
             if existing_files:
+                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files, deleting via TFTP...")
                 tftp_ip = current_app.config.get('TFTP_SERVER_IP', '127.0.0.1')
-                # Extract just filenames for TFTP delete
                 filenames = [os.path.basename(f) for f in existing_files]
                 deleted = delete_tftp_files(tftp_ip, filenames)
-                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} old files via TFTP")
+                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via TFTP")
+                time.sleep(0.5)  # Give TFTP time to process deletions
             
-            # Re-check what files remain after deletion attempt
+            # Re-check what files remain after deletion
             remaining_files = glob.glob(pattern)
-            processed_files.update(remaining_files)  # Only mark files that still exist
+            processed_files.update(remaining_files)
             stream_start_time = time.time()
             logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} files remain after cleanup")
             
