@@ -66,7 +66,7 @@ createApp({
                 triggerMode: 2,  // 2=FreeRunning (timed captures), 6=CM_MAC (per-transmission), 5=IdleSID
                 centerFreqMhz: 50,
                 spanMhz: 100,
-                numBins: 4096,
+                numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
                 freerunDurationMs: 55000,  // 55 seconds (E6000 max is 60s for FreeRunning mode)
