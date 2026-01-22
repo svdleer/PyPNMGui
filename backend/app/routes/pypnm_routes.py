@@ -1333,10 +1333,13 @@ def get_utsc_data(mac_address):
         files = sorted(glob.glob(pattern), reverse=True)
         
         if not files:
+            # No files yet - return empty result (not an error)
+            logger.info(f"No UTSC files found yet for {filename_base}")
             return jsonify({
-                "success": False,
-                "message": f"No UTSC files found matching {filename_base}_*"
-            }), 404
+                "success": True,
+                "message": "No UTSC data available yet. Start a measurement to begin.",
+                "data": None
+            }), 200
         
         # Get the most recent file
         latest_file = files[0]
