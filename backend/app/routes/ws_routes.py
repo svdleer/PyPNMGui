@@ -266,13 +266,12 @@ def init_websocket(app):
                         logger.error(f"Failed to send UTSC data: {send_err}")
                         raise
                 
-                # Re-trigger via SNMP when buffer is low
+                # Re-trigger via SNMP every 1 second (E6000 does 10 captures per trigger)
                 time_since_trigger = current_time - last_trigger_time
-                if rf_port and cmts_ip and can_trigger and time_since_trigger > 0.5 and len(file_buffer) < 5:
-                    logger.debug(f"UTSC WebSocket: Buffer low ({len(file_buffer)}), re-triggering")
+                if rf_port and cmts_ip and time_since_trigger >= 1.0:
+                    logger.debug(f"UTSC WebSocket: Re-triggering (every 1s), buffer={len(file_buffer)}")
                     trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time
-                    can_trigger = False
                 
                 # Send heartbeat
                 if current_time - last_heartbeat > heartbeat_interval:
