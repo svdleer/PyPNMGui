@@ -1079,8 +1079,8 @@ createApp({
             const durationS = this.utscDuration;
             const rfPort = this.utscConfig.rfPortIfindex;
             const cmtsIp = this.selectedModem.cmts_ip;
-            const community = this.utscConfig.community || 'public';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${community}`;
+            const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
             
             console.log('[UTSC] Connecting WebSocket:', wsUrl);
             
