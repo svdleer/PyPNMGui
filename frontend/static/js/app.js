@@ -803,17 +803,23 @@ createApp({
         stopUtscLive() {
             console.log('[UTSC] Stopping live mode...');
             this.utscLiveMode = false;
+            this.runningUtsc = false;
             this.$toast?.info('Live monitoring stopped');
             this.stopUtscWebSocket();
             
-            // Also stop UTSC on CMTS
-            this.stopUtsc();
+            // Also stop UTSC on CMTS (don't wait for result)
+            if (this.selectedModem && this.selectedModem.cmts_ip && this.utscConfig.rfPortIfindex) {
+                this.stopUtsc();
+            }
             
             // Clear auto-restart interval
             if (this.utscAutoRestartInterval) {
                 clearInterval(this.utscAutoRestartInterval);
                 this.utscAutoRestartInterval = null;
             }
+            
+            // Reset buffer size display
+            this.utscBufferSize = 0;
         },
         
         async startUtsc() {
@@ -869,10 +875,8 @@ createApp({
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     await this.fetchUtscData();
                     
-                    // Suggest enabling live mode
-                    if (!this.utscLiveMode) {
-                        this.$toast?.info('💡 Tip: Enable Live Mode to continuously monitor the spectrum', { duration: 5000 });
-                    }
+                    // Measurement started successfully, reset runningUtsc so we can start again
+                    this.runningUtsc = false;
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
                     this.runningUtsc = false;
