@@ -43,6 +43,34 @@ def trigger_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
         return False
 
 
+def get_utsc_status(cmts_ip, rf_port_ifindex, community):
+    """Get UTSC measurement status via SNMP."""
+    try:
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.4.1.1.{rf_port_ifindex}.1"
+        cmd = ['snmpget', '-v2c', '-c', community, cmts_ip, oid]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        if result.returncode == 0:
+            # Parse "INTEGER: sampleReady(4)" -> 4
+            output = result.stdout.strip()
+            if 'INTEGER:' in output:
+                match = output.split('(')[-1].rstrip(')')
+                try:
+                    return int(match)
+                except:
+                    pass
+        return None
+    except Exception as e:
+        logger.debug(f"SNMP status error: {e}")
+        return None
+
+
+# UTSC Status values
+STATUS_INACTIVE = 2
+STATUS_BUSY = 3
+STATUS_SAMPLE_READY = 4
+STATUS_ERROR = 5
+
+
 def init_websocket(app):
     """Initialize WebSocket support."""
     if not WEBSOCKET_AVAILABLE:
@@ -80,150 +108,183 @@ def init_websocket(app):
     
     @sock.route('/ws/utsc/<mac_address>')
     def utsc_websocket(ws, mac_address):
-        """WebSocket endpoint for streaming UTSC spectrum data."""
-        logger.info(f"UTSC WebSocket opened for {mac_address}")
+        """WebSocket endpoint for streaming UTSC spectrum data with buffering."""
+        from flask import request
+        
+        # Parse query parameters
+        refresh_ms = int(request.args.get('refresh', 500))  # Refresh rate in ms
+        duration_s = int(request.args.get('duration', 60))  # Duration in seconds
+        rf_port = request.args.get('rf_port')
+        cmts_ip = request.args.get('cmts_ip')
+        community = request.args.get('community', 'public')
+        
+        logger.info(f"UTSC WebSocket opened for {mac_address}: refresh={refresh_ms}ms, duration={duration_s}s")
         
         # Clean MAC address format
         mac_clean = mac_address.replace(':', '').replace('-', '').lower()
         session_id = f"{mac_clean}_{id(ws)}"
         _utsc_sessions[session_id] = True
         
-        processed_files = set()  # Track files we've already sent
+        processed_files = set()  # Track files we've already processed
+        file_buffer = []  # Buffer for smooth streaming
         tftp_base = '/var/lib/tftpboot'
-        heartbeat_interval = 5  # Send heartbeat every 5 seconds
+        heartbeat_interval = 5
         last_heartbeat = time.time()
-        last_send_time = 0
-        connection_start_time = time.time()  # Track when WebSocket connected
+        last_stream_time = 0
+        stream_interval = refresh_ms / 1000.0  # Convert to seconds
+        connection_start_time = time.time()
+        last_trigger_time = 0
+        can_trigger = True
+        last_status = None
         
         try:
             # Send initial connected message
             ws.send(json.dumps({
                 'type': 'connected',
                 'mac': mac_address,
-                'message': 'UTSC stream connected'
+                'message': f'UTSC stream connected: {stream_interval:.1f}s refresh, {duration_s}s duration',
+                'refresh_ms': refresh_ms,
+                'duration_s': duration_s
             }))
             
-            # Pre-populate processed_files with existing files to avoid sending old data
+            # Pre-populate processed_files with existing files
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
             processed_files.update(existing_files)
-            logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files for {mac_address}")
+            logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files")
             
-            # Auto-cleanup old UTSC files (older than 5 minutes)
-            cleanup_age = 300  # 5 minutes
-            cleanup_count = 0
-            for filepath in existing_files:
-                try:
-                    file_age = current_time - os.path.getmtime(filepath)
-                    if file_age > cleanup_age:
-                        os.remove(filepath)
-                        cleanup_count += 1
-                except Exception as cleanup_err:
-                    logger.warning(f"Failed to cleanup {filepath}: {cleanup_err}")
-            
-            if cleanup_count > 0:
-                logger.info(f"UTSC WebSocket: Cleaned up {cleanup_count} old files for {mac_address}")
+            # Initial SNMP trigger if we have the parameters
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Initial trigger on {cmts_ip} port {rf_port}")
+                trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                last_trigger_time = time.time()
+                can_trigger = False
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
+                elapsed = current_time - connection_start_time
                 
-                # Send heartbeat to keep connection alive
-                if current_time - last_heartbeat > heartbeat_interval:
+                # Check duration limit
+                if elapsed > duration_s:
+                    logger.info(f"UTSC WebSocket: Duration {duration_s}s reached, closing")
                     ws.send(json.dumps({
-                        'type': 'heartbeat',
-                        'timestamp': current_time
+                        'type': 'complete',
+                        'message': f'Duration {duration_s}s reached',
+                        'files_streamed': len(processed_files) - len(existing_files)
                     }))
-                    last_heartbeat = current_time
+                    break
                 
-                # Check for UTSC files
+                # Poll UTSC status via SNMP (if we have params)
+                if rf_port and cmts_ip:
+                    status = get_utsc_status(cmts_ip, int(rf_port), community)
+                    if status != last_status:
+                        last_status = status
+                        if status == STATUS_BUSY:
+                            can_trigger = False
+                        elif status in [STATUS_SAMPLE_READY, STATUS_INACTIVE]:
+                            can_trigger = True
+                
+                # Collect new files into buffer
                 pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-                files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+                files = glob.glob(pattern)
+                new_files = [f for f in files if f not in processed_files]
                 
-                # Process only NEW files (created after connection)
-                for filepath in files:
-                    if filepath in processed_files:
-                        continue  # Already sent this one
-                    
+                for filepath in sorted(new_files, key=os.path.getmtime):
                     processed_files.add(filepath)
-                    last_send_time = current_time
                     
                     try:
-                        # Read and parse the file
                         with open(filepath, 'rb') as f:
                             binary_data = f.read()
                         
                         if len(binary_data) >= 328:
-                                # Parse amplitudes - UTSC format: big-endian int16, units 0.1 dBmV
-                                samples = binary_data[328:]
-                                amplitudes = []
-                                for i in range(0, len(samples), 2):
-                                    if i+1 < len(samples):
-                                        val = struct.unpack('>h', samples[i:i+2])[0]  # Big-endian
-                                        amplitudes.append(val / 10.0)  # Convert 0.1 dBmV to dBmV
-                                
-                                # Get config from Redis for frequency calculation
-                                try:
-                                    from app import redis_client
-                                    config_json = redis_client.get(f'utsc_config:{mac_address}')
-                                    if config_json:
-                                        config = json.loads(config_json)
-                                        span_hz = config.get('span_hz', 100000000)
-                                        center_freq_hz = config.get('center_freq_hz', 50000000)
-                                    else:
-                                        span_hz = 100000000
-                                        center_freq_hz = 50000000
-                                except:
+                            # Parse amplitudes
+                            samples = binary_data[328:]
+                            amplitudes = []
+                            for i in range(0, len(samples), 2):
+                                if i+1 < len(samples):
+                                    val = struct.unpack('>h', samples[i:i+2])[0]
+                                    amplitudes.append(val / 10.0)
+                            
+                            # Get config from Redis
+                            try:
+                                from app import redis_client
+                                config_json = redis_client.get(f'utsc_config:{mac_address}')
+                                if config_json:
+                                    config = json.loads(config_json)
+                                    span_hz = config.get('span_hz', 100000000)
+                                    center_freq_hz = config.get('center_freq_hz', 50000000)
+                                else:
                                     span_hz = 100000000
                                     center_freq_hz = 50000000
-                                
-                                # Generate frequencies
-                                num_bins = len(amplitudes)
-                                freq_start = center_freq_hz - (span_hz / 2)
-                                freq_step = span_hz / num_bins if num_bins > 0 else 1
-                                frequencies = [freq_start + i * freq_step for i in range(num_bins)]
-                                
-                                # Generate plot
-                                from app.core.utsc_plotter import generate_utsc_plot_from_data
-                                spectrum_data = {
-                                    'frequencies': frequencies[:3200],
-                                    'amplitudes': amplitudes[:3200],
-                                    'span_hz': span_hz,
-                                    'center_freq_hz': center_freq_hz,
-                                    'num_bins': num_bins
-                                }
-                                
-                                plot = generate_utsc_plot_from_data(spectrum_data, mac_address, '')
-
-                                if plot:
-                                    # Limit raw data arrays to prevent WebSocket overflow
-                                    raw_frequencies = frequencies[:1000]  # Limit to 1000 points for WebSocket
-                                    raw_amplitudes = amplitudes[:1000]
-                                    
-                                    message = {
-                                        'type': 'spectrum',
-                                        'timestamp': current_time,
-                                        'filename': os.path.basename(filepath),
-                                        # Send plot as None to reduce message size - frontend has raw_data
-                                        'plot': None,  # Don't send PNG, only raw data for interactive mode
-                                        'raw_data': {
-                                            'frequencies': raw_frequencies,
-                                            'amplitudes': raw_amplitudes,
-                                            'span_hz': span_hz,
-                                            'center_freq_hz': center_freq_hz
-                                        }
-                                    }
-                                    
-                                    try:
-                                        ws.send(json.dumps(message))
-                                    except Exception as send_err:
-                                        logger.error(f"Failed to send UTSC data: {send_err}")
-                                        raise  # Re-raise to close connection
-                                
+                            except:
+                                span_hz = 100000000
+                                center_freq_hz = 50000000
+                            
+                            # Add to buffer
+                            file_buffer.append({
+                                'filepath': filepath,
+                                'amplitudes': amplitudes,
+                                'span_hz': span_hz,
+                                'center_freq_hz': center_freq_hz,
+                                'collected_at': current_time
+                            })
                     except Exception as e:
-                        logger.error(f"Error processing UTSC file {filepath}: {e}")
+                        logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
-                # Small sleep to prevent CPU spinning (1ms)
-                time.sleep(0.001)
+                # Stream from buffer at configured rate
+                if file_buffer and (current_time - last_stream_time) >= stream_interval:
+                    item = file_buffer.pop(0)
+                    last_stream_time = current_time
+                    
+                    amplitudes = item['amplitudes']
+                    num_bins = len(amplitudes)
+                    freq_start = item['center_freq_hz'] - (item['span_hz'] / 2)
+                    freq_step = item['span_hz'] / num_bins if num_bins > 0 else 1
+                    frequencies = [freq_start + i * freq_step for i in range(num_bins)]
+                    
+                    # Limit to 1600 points for WebSocket
+                    raw_frequencies = frequencies[:1600]
+                    raw_amplitudes = amplitudes[:1600]
+                    
+                    message = {
+                        'type': 'spectrum',
+                        'timestamp': current_time,
+                        'filename': os.path.basename(item['filepath']),
+                        'buffer_size': len(file_buffer),
+                        'plot': None,
+                        'raw_data': {
+                            'frequencies': raw_frequencies,
+                            'amplitudes': raw_amplitudes,
+                            'span_hz': item['span_hz'],
+                            'center_freq_hz': item['center_freq_hz']
+                        }
+                    }
+                    
+                    try:
+                        ws.send(json.dumps(message))
+                    except Exception as send_err:
+                        logger.error(f"Failed to send UTSC data: {send_err}")
+                        raise
+                
+                # Re-trigger via SNMP when buffer is low
+                time_since_trigger = current_time - last_trigger_time
+                if rf_port and cmts_ip and can_trigger and time_since_trigger > 0.5 and len(file_buffer) < 5:
+                    logger.debug(f"UTSC WebSocket: Buffer low ({len(file_buffer)}), re-triggering")
+                    trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                    last_trigger_time = current_time
+                    can_trigger = False
+                
+                # Send heartbeat
+                if current_time - last_heartbeat > heartbeat_interval:
+                    ws.send(json.dumps({
+                        'type': 'heartbeat',
+                        'timestamp': current_time,
+                        'buffer_size': len(file_buffer),
+                        'elapsed': elapsed
+                    }))
+                    last_heartbeat = current_time
+                
+                time.sleep(0.05)  # 50ms polling
                     
         except Exception as e:
             logger.error(f"UTSC WebSocket error: {e}")

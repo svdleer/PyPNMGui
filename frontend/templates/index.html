@@ -1069,8 +1069,22 @@
                                                             </label>
                                                             <input type="range" v-model.number="utscRefreshRate" 
                                                                    class="form-range" 
-                                                                   min="500" max="10000" step="500" 
-                                                                   title="Refresh interval">
+                                                                   min="200" max="5000" step="100" 
+                                                                   title="Stream refresh interval">
+                                                        </div>
+                                                        <div class="mt-2">
+                                                            <label class="form-label small mb-1">
+                                                                Duration: {{ utscDuration }}s
+                                                            </label>
+                                                            <input type="range" v-model.number="utscDuration" 
+                                                                   class="form-range" 
+                                                                   min="30" max="300" step="30" 
+                                                                   title="Test duration in seconds">
+                                                        </div>
+                                                        <div v-if="utscBufferSize > 0" class="mt-1">
+                                                            <small class="text-muted">
+                                                                <i class="bi bi-layers me-1"></i>Buffer: {{ utscBufferSize }} files
+                                                            </small>
                                                         </div>
                                                         <div v-if="utscStatus" class="mt-2">
                                                             <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">

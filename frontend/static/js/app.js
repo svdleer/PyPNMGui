@@ -88,7 +88,9 @@ createApp({
             utscLiveMode: false,
             utscLiveInterval: null,
             utscWebSocket: null,  // WebSocket for live UTSC streaming
-            utscRefreshRate: 500,  // 0.5 seconds between updates
+            utscRefreshRate: 500,  // 0.5 seconds between updates (streaming rate)
+            utscDuration: 60,  // Duration in seconds
+            utscBufferSize: 0,  // Current buffer size from backend
             utscInteractive: true,  // Always use SciChart interactive mode
             utscSciChart: null,  // SciChart instance
             utscSciChartSeries: null,  // SciChart data series
@@ -1067,7 +1069,13 @@ createApp({
             
             const mac = this.selectedModem.mac_address;
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}`;
+            // Pass refresh rate (ms) and duration (s) as query params
+            const refreshMs = this.utscRefreshRate;
+            const durationS = this.utscDuration;
+            const rfPort = this.utscConfig.rfPortIfindex;
+            const cmtsIp = this.selectedModem.cmts_ip;
+            const community = this.utscConfig.community || 'public';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${community}`;
             
             console.log('[UTSC] Connecting WebSocket:', wsUrl);
             
@@ -1076,7 +1084,7 @@ createApp({
                 
                 this.utscWebSocket.onopen = () => {
                     console.log('[UTSC] WebSocket connected');
-                    this.$toast?.success('UTSC stream connected');
+                    this.$toast?.success(`UTSC stream: ${(refreshMs/1000).toFixed(1)}s refresh, ${durationS}s duration`);
                 };
                 
                 this.utscWebSocket.onmessage = (event) => {
@@ -1084,6 +1092,11 @@ createApp({
                         const data = JSON.parse(event.data);
                         
                         if (data.type === 'spectrum') {
+                            // Update buffer size display
+                            if (data.buffer_size !== undefined) {
+                                this.utscBufferSize = data.buffer_size;
+                            }
+                            
                             // Throttle updates to prevent browser overload
                             const now = Date.now();
                             if (now - this.utscLastUpdateTime < this.utscUpdateThrottle) {
