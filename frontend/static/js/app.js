@@ -359,11 +359,6 @@ createApp({
                 // Also load upstream interfaces if CMTS IP is available (for upstream PNM)
                 if (modem.cmts_ip) {
                     promises.push(this.loadUpstreamInterfaces());
-                    // Auto-enable UTSC live mode for upstream monitoring
-                    if (!this.utscLiveMode) {
-                        this.utscLiveMode = true;
-                        this.startUtscWebSocket();
-                    }
                 }
                 
                 await Promise.all(promises);
