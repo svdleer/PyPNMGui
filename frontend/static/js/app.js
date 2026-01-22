@@ -765,12 +765,12 @@ createApp({
             // Show buffering message
             this.$toast?.info('Initializing UTSC live stream...');
             
-            // Clear any cached plot data from previous static captures
+            // Set utscLiveMode FIRST to ensure chart div stays visible in DOM
+            this.utscLiveMode = true;
+            
+            // Clear any cached plot data from previous static captures (do this AFTER setting live mode)
             this.utscPlotImage = null;
             this.utscSpectrumData = null;
-            
-            // Set utscLiveMode first so the chart div becomes visible in DOM
-            this.utscLiveMode = true;
             
             // Now wait for Vue to render the chart div ONCE
             console.log('[UTSC] Starting live mode...');
@@ -1369,7 +1369,13 @@ createApp({
         },
         
         async initUtscSciChart() {
-            // Destroy existing chart first
+            // Don't destroy if chart already exists and is valid
+            if (this.utscSciChart && this.utscSciChartSeries) {
+                console.log('[SciChart] Chart already initialized, reusing existing instance');
+                return;
+            }
+            
+            // Clean up any partial initialization
             this.destroyUtscSciChart();
             
             try {
