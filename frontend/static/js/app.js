@@ -1273,6 +1273,18 @@ createApp({
                                     });
                                 }
                             }
+                        } else if (data.type === 'buffering') {
+                            // Show buffering progress
+                            if (data.buffer_size !== undefined) {
+                                this.utscBufferSize = data.buffer_size;
+                            }
+                            if (data.message) {
+                                console.log('[UTSC]', data.message);
+                            }
+                        } else if (data.type === 'buffering_complete') {
+                            // Buffering complete, stream starting
+                            console.log('[UTSC]', data.message);
+                            this.$toast?.success(data.message);
                         } else if (data.type === 'heartbeat') {
                             // Update buffer size from heartbeat
                             if (data.buffer_size !== undefined) {

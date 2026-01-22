@@ -1074,9 +1074,12 @@
                                                         </div>
                                                         <div v-if="utscLiveMode" class="mt-1">
                                                             <small class="text-muted">
-                                                                <i class="bi bi-layers me-1"></i>Buffer: {{ utscBufferSize || 0 }} files
-                                                                <span v-if="utscBufferSize === 0" class="text-warning ms-1">
-                                                                    <i class="bi bi-hourglass-split me-1"></i>Buffering... graph will start soon
+                                                                <i class="bi bi-layers me-1"></i>Buffer: {{ utscBufferSize || 0 }}/20 files
+                                                                <span v-if="utscBufferSize < 20" class="text-warning ms-1">
+                                                                    <i class="bi bi-hourglass-split me-1"></i>Buffering... {{ Math.round((utscBufferSize / 20) * 100) }}%
+                                                                </span>
+                                                                <span v-else-if="utscBufferSize <= 10" class="text-info ms-1">
+                                                                    <i class="bi bi-arrow-repeat me-1"></i>Refilling...
                                                                 </span>
                                                             </small>
                                                         </div>
