@@ -192,11 +192,15 @@ def init_websocket(app):
                 'duration_s': duration_s
             }))
             
-            # Pre-populate processed_files with existing files
+            # Clean up old UTSC files before starting
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
-            processed_files.update(existing_files)
-            logger.info(f"UTSC WebSocket: Skipping {len(existing_files)} existing files")
+            for old_file in existing_files:
+                try:
+                    os.remove(old_file)
+                except Exception as e:
+                    logger.warning(f"Failed to delete old file {old_file}: {e}")
+            logger.info(f"UTSC WebSocket: Deleted {len(existing_files)} old files")
             
             # Don't trigger here - let the frontend start API configure UTSC first
             # This prevents double-triggering and overlapping batches
