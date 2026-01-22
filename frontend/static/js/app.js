@@ -663,6 +663,57 @@ createApp({
             }
             
             this.upstreamInterfaces.loading = true;
+            console.log('[UTSC] Starting fast RF port discovery...');
+            
+            try {
+                // Use the new fast discovery endpoint
+                const response = await fetch(`/api/pypnm/upstream/discover-rf-port/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    // Set the discovered RF port
+                    this.utscConfig.rfPortIfindex = result.rf_port_ifindex;
+                    
+                    // Store in upstreamInterfaces for UI display
+                    this.upstreamInterfaces.rfPorts = [{
+                        ifindex: result.rf_port_ifindex,
+                        description: result.rf_port_description,
+                        name: result.rf_port_description
+                    }];
+                    this.upstreamInterfaces.modemRfPort = {
+                        ifindex: result.rf_port_ifindex,
+                        description: result.rf_port_description
+                    };
+                    
+                    console.log(`[UTSC] Discovered RF port: ${result.rf_port_ifindex} (${result.rf_port_description})`);
+                    console.log(`[UTSC] CM Index: ${result.cm_index}, US Channels: ${result.us_channels?.length || 0}`);
+                    
+                    this.$toast?.success(`RF port discovered: ${result.rf_port_description}`);
+                } else {
+                    console.error('[UTSC] RF port discovery failed:', result.error);
+                    this.$toast?.warning(result.error || 'RF port discovery failed');
+                    
+                    // Fallback to old method if fast discovery fails
+                    await this.loadUpstreamInterfacesFallback();
+                }
+            } catch (error) {
+                console.error('[UTSC] Fast discovery error:', error);
+                // Fallback to old method
+                await this.loadUpstreamInterfacesFallback();
+            } finally {
+                this.upstreamInterfaces.loading = false;
+            }
+        },
+        
+        async loadUpstreamInterfacesFallback() {
+            // Fallback to the old agent-based discovery
+            console.log('[UTSC] Falling back to agent-based discovery...');
             try {
                 const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
                     method: 'POST',
@@ -674,31 +725,19 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    // Use modem's specific RF port if detected, otherwise show all ports
                     this.upstreamInterfaces.rfPorts = result.rf_ports || [];
                     this.upstreamInterfaces.allRfPorts = result.all_rf_ports || [];
                     this.upstreamInterfaces.modemRfPort = result.modem_rf_port;
                     
-                    // Auto-select modem's RF port for UTSC
                     if (result.modem_rf_port) {
                         this.utscConfig.rfPortIfindex = result.modem_rf_port.ifindex;
-                        console.log('Auto-selected modem RF port:', result.modem_rf_port);
                     } else if (this.upstreamInterfaces.rfPorts.length > 0) {
                         this.utscConfig.rfPortIfindex = this.upstreamInterfaces.rfPorts[0].ifindex;
-                        console.log('Auto-selected first RF port:', this.utscConfig.rfPortIfindex);
                     }
-                    
-                    console.log('Loaded RF ports:', this.upstreamInterfaces.rfPorts);
-                    if (result.cm_index) {
-                        console.log('CM Index:', result.cm_index);
-                    }
-                } else {
-                    console.error('Failed to load upstream interfaces:', result.error);
+                    console.log('[UTSC] Fallback loaded RF ports:', this.upstreamInterfaces.rfPorts);
                 }
             } catch (error) {
-                console.error('Failed to load upstream interfaces:', error);
-            } finally {
-                this.upstreamInterfaces.loading = false;
+                console.error('[UTSC] Fallback discovery failed:', error);
             }
         },
         

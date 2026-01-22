@@ -866,6 +866,51 @@ def get_plots(mac_address):
 
 # ============== Upstream PNM Routes ==============
 
+@pypnm_bp.route('/upstream/discover-rf-port/<mac_address>', methods=['POST'])
+def discover_rf_port(mac_address):
+    """
+    Fast discovery of the correct UTSC RF port for a modem.
+    Uses direct SNMP to find the RF port in seconds instead of minutes.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "community": "optional"  // Defaults to CMTS write community
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "rf_port_ifindex": 1078534144,
+        "rf_port_description": "MND-GT02-1 us-conn 0",
+        "cm_index": 3,
+        "us_channels": [843071811, 843071813, ...]
+    }
+    """
+    from app.core.utsc_discovery import discover_rf_port_for_modem
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    community = data.get('community', 'Z1gg0Sp3c1@l')  # Default write community
+    
+    if not cmts_ip:
+        return jsonify({"success": False, "error": "cmts_ip required"}), 400
+    
+    logger.info(f"Fast RF port discovery for {mac_address} on CMTS {cmts_ip}")
+    
+    try:
+        result = discover_rf_port_for_modem(cmts_ip, community, mac_address)
+        
+        if result["success"]:
+            return jsonify(result)
+        else:
+            return jsonify(result), 404
+            
+    except Exception as e:
+        logger.error(f"RF port discovery failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @pypnm_bp.route('/upstream/interfaces/<mac_address>', methods=['POST'])
 def get_upstream_interfaces(mac_address):
     """
