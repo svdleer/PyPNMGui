@@ -9,6 +9,7 @@ import os
 import struct
 import threading
 import subprocess
+from collections import deque
 from flask import Blueprint, current_app
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ def init_websocket(app):
         _utsc_sessions[session_id] = True
         
         processed_files = set()  # Track files we've already processed
-        file_buffer = []  # Buffer for smooth streaming
+        file_buffer = deque(maxlen=100)  # Buffer for smooth streaming (max 100 samples)
         tftp_base = '/var/lib/tftpboot'
         heartbeat_interval = 5
         last_heartbeat = time.time()
@@ -233,7 +234,7 @@ def init_websocket(app):
                 
                 # Stream from buffer at configured rate
                 if file_buffer and (current_time - last_stream_time) >= stream_interval:
-                    item = file_buffer.pop(0)
+                    item = file_buffer.popleft()
                     last_stream_time = current_time
                     
                     amplitudes = item['amplitudes']
