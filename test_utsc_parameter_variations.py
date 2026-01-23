@@ -22,7 +22,7 @@ BACKEND_URL = "http://localhost:8000"
 # OID base for UTSC config
 BASE_OID = "1.3.6.1.4.1.4491.2.1.27.1.3.10.2.1"
 
-# Test scenarios
+# Test scenarios - Updated with E6000 limits: repeat_period max 1000ms (1 second)
 TEST_SCENARIOS = [
     {
         "name": "Baseline: 1s repeat, 10s freerun, trigger_count=10",
@@ -41,19 +41,19 @@ TEST_SCENARIOS = [
         "wait_time": 22
     },
     {
-        "name": "Test B: 3s repeat, 60s freerun, trigger_count=20",
-        "repeat_period_ms": 3000,
+        "name": "Test B: 1s repeat, 60s freerun, trigger_count=20",
+        "repeat_period_ms": 1000,
         "freerun_duration_ms": 60000,
         "trigger_count": 20,
-        "expected_files": "20 if count ignored, 10 if count enforced",
+        "expected_files": "60 if count ignored, 10/20 if count enforced",
         "wait_time": 65
     },
     {
-        "name": "Test C: 2s repeat, 30s freerun, trigger_count=50",
-        "repeat_period_ms": 2000,
+        "name": "Test C: 1s repeat, 30s freerun, trigger_count=50",
+        "repeat_period_ms": 1000,
         "freerun_duration_ms": 30000,
         "trigger_count": 50,
-        "expected_files": "15 if count ignored, 10 if count enforced",
+        "expected_files": "30 if count ignored, 10 if count enforced",
         "wait_time": 32
     },
     {
