@@ -57,4 +57,5 @@ services:
 
 networks:
   pypnm-net:
+    name: docker_pypnm-net
     external: true
