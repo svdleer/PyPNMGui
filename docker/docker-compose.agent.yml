@@ -48,7 +48,7 @@ services:
     
     # Join the lab network to communicate with GUI
     networks:
-      - pypnm-lab-network
+      - pypnm-net
     
     # Extra hosts (if needed for DNS resolution)
     # extra_hosts:
@@ -56,5 +56,5 @@ services:
     #   - "cm-proxy.internal:10.0.0.50"
 
 networks:
-  pypnm-lab-network:
+  pypnm-net:
     external: true

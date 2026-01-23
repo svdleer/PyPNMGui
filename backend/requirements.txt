@@ -17,6 +17,9 @@ flask-sock>=0.7.0
 matplotlib>=3.8.0
 numpy>=1.26.0
 
+# TFTP client for deleting UTSC files
+tftpy>=0.8.0
+
 # Optional: For agent WebSocket support (SocketIO - more complex)
 # flask-socketio>=5.3.0
 # python-socketio>=5.10.0
