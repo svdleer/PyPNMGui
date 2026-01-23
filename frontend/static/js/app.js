@@ -910,6 +910,9 @@ createApp({
             this.$toast?.info('Live monitoring stopped');
             this.stopUtscWebSocket();
             
+            // Clean up SciChart when user explicitly stops
+            this.destroyUtscSciChart();
+            
             // Also stop UTSC on CMTS (don't wait for result)
             if (this.selectedModem && this.selectedModem.cmts_ip && this.utscConfig.rfPortIfindex) {
                 this.stopUtsc();
@@ -1355,8 +1358,8 @@ createApp({
                 clearInterval(this.utscLiveInterval);
                 this.utscLiveInterval = null;
             }
-            // Clean up SciChart
-            this.destroyUtscSciChart();
+            // Don't destroy SciChart - let it persist for reuse
+            // Chart will be destroyed in stopUtscLiveMode() when user explicitly stops
         },
         
         async ensureSciChartLoaded() {
@@ -1387,8 +1390,11 @@ createApp({
                 return;
             }
             
-            // Clean up any partial initialization
-            this.destroyUtscSciChart();
+            // Only destroy if chart is partially initialized (not if it's fully working)
+            if (this.utscSciChart && !this.utscSciChartSeries) {
+                console.log('[SciChart] Cleaning up partial initialization');
+                this.destroyUtscSciChart();
+            }
             
             try {
                 // Ensure SciChart is loaded
