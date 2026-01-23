@@ -123,8 +123,13 @@ def trigger_utsc(scenario):
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
             result = response.json()
-            return result.get('success', False)
-        return False
+            success = result.get('success', False)
+            if not success:
+                print(f"      ⚠️  API returned success=False: {result.get('message', result.get('error', 'Unknown'))}")
+            return success
+        else:
+            print(f"      ❌ HTTP {response.status_code}: {response.text[:200]}")
+            return False
     except Exception as e:
         print(f"      ❌ API Error: {e}")
         return False
