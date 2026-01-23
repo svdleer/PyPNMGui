@@ -135,31 +135,10 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
 
 
 def get_utsc_status(cmts_ip, rf_port_ifindex, community):
-    """Get UTSC measurement status via pysnmp."""
-    if not PYSNMP_AVAILABLE:
-        logger.error("pypnm not available, cannot get UTSC status")
-        return None
-    
-    snmp = None
-    try:
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.4.1.1.{rf_port_ifindex}.1"
-        snmp = Snmp_v2c(cmts_ip, community)
-        result = snmp.get(oid)
-        if result:
-            # Extract integer value from pysnmp result
-            status_value = snmp.snmp_get_result_value(result)
-            if status_value is not None:
-                return int(status_value)
-        return None
-    except Exception as e:
-        logger.debug(f"UTSC status error: {e}")
-        return None
-    finally:
-        if snmp:
-            try:
-                snmp.close()
-            except:
-                pass
+    """Get UTSC measurement status via agent (not implemented yet)."""
+    # TODO: Implement via agent if needed
+    logger.debug("UTSC status check not implemented, skipping")
+    return None
 
 
 # UTSC Status values
