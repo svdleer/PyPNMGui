@@ -45,7 +45,8 @@ try:
         Integer,
         OctetString,
         get_cmd,
-        set_cmd
+        set_cmd,
+        bulk_cmd
     )
     PYSNMP_AVAILABLE = True
 except ImportError:
@@ -404,9 +405,109 @@ class SNMPExecutor:
             else:
                 return {'success': False, 'error': 'Invalid snmpset format'}
         
-        # For other commands (walk, bulkget) - fallback to subprocess if needed
+        # For snmpbulkwalk and snmpwalk
+        elif command in ('snmpbulkwalk', 'snmpwalk'):
+            return self.execute_snmp_bulk_walk(target_ip, oid, community, timeout)
+        
+        # For other commands
         else:
             return {'success': False, 'error': f'Command not implemented in pysnmp: {command}'}
+    
+    def execute_snmp_bulk_walk(self,
+                              target_ip: str,
+                              oid: str,
+                              community: str = 'private',
+                              timeout: int = 30) -> dict:
+        """Execute SNMP BULK WALK using pysnmp."""
+        if not PYSNMP_AVAILABLE:
+            return {'success': False, 'error': 'pysnmp not available'}
+        
+        try:
+            # Run async operation in sync context
+            result = asyncio.run(self._async_snmp_bulk_walk(target_ip, oid, community, timeout))
+            return result
+        except Exception as e:
+            self.logger.error(f"SNMP BULK WALK error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _async_snmp_bulk_walk(self, target_ip: str, oid: str, community: str, timeout: int) -> dict:
+        """Async SNMP BULK WALK implementation."""
+        snmpDispatcher = SnmpDispatcher()
+        output_lines = []
+        base_oid = oid
+        
+        try:
+            transport = await UdpTransportTarget.create((target_ip, 161), timeout=timeout)
+            
+            # BULK WALK loop
+            while True:
+                errorIndication, errorStatus, errorIndex, varBinds = await bulk_cmd(
+                    snmpDispatcher,
+                    CommunityData(community),
+                    transport,
+                    0, 50,  # nonRepeaters, maxRepetitions
+                    ObjectType(ObjectIdentity(oid))
+                )
+                
+                if errorIndication:
+                    if len(output_lines) > 0:
+                        # Got some results before error
+                        break
+                    return {'success': False, 'error': str(errorIndication)}
+                elif errorStatus:
+                    if len(output_lines) > 0:
+                        break
+                    return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+                else:
+                    for varBind in varBinds:
+                        oid_str = str(varBind[0])
+                        value = varBind[1]
+                        
+                        # Check if we're still in the subtree
+                        if not oid_str.startswith(base_oid):
+                            # Finished walking this subtree
+                            break
+                        
+                        # Format output similar to net-snmp tools
+                        value_str = str(value)
+                        type_name = type(value).__name__
+                        
+                        if 'OctetString' in type_name:
+                            # Check if printable
+                            try:
+                                raw_bytes = bytes(value)
+                                if all(32 <= b < 127 or b in (9, 10, 13) for b in raw_bytes):
+                                    output_lines.append(f"{oid_str} = STRING: {value_str}")
+                                else:
+                                    hex_str = ' '.join(f'{b:02X}' for b in raw_bytes)
+                                    output_lines.append(f"{oid_str} = Hex-STRING: {hex_str}")
+                            except:
+                                output_lines.append(f"{oid_str} = STRING: {value_str}")
+                        elif 'Integer' in type_name:
+                            output_lines.append(f"{oid_str} = INTEGER: {value_str}")
+                        elif 'IpAddress' in type_name:
+                            output_lines.append(f"{oid_str} = IpAddress: {value_str}")
+                        elif 'Counter' in type_name or 'Gauge' in type_name:
+                            output_lines.append(f"{oid_str} = {type_name}: {value_str}")
+                        else:
+                            output_lines.append(f"{oid_str} = {value_str}")
+                        
+                        # Update OID for next iteration
+                        oid = oid_str
+                    else:
+                        # Continue loop if we got results
+                        continue
+                    # Break if we exited the for loop early (out of subtree)
+                    break
+            
+            return {
+                'success': True,
+                'output': '\n'.join(output_lines),
+                'count': len(output_lines),
+                'command': 'snmpbulkwalk'
+            }
+        finally:
+            snmpDispatcher.transport_dispatcher.close_dispatcher()
 
 
 class TFTPExecutor:
