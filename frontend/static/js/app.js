@@ -784,7 +784,6 @@ createApp({
             
             // Configure and start UTSC on CMTS first
             console.log('[UTSC] Chart ready, configuring UTSC on CMTS...');
-            this.$toast?.info('Configuring UTSC measurement on CMTS...');
             
             const cmtsIp = this.selectedModem.cmts_ip;
             if (!cmtsIp) {
@@ -794,6 +793,37 @@ createApp({
             }
             
             try {
+                // Step 1: Stop any existing UTSC session
+                this.$toast?.info('Stopping any existing UTSC session...');
+                const stopResponse = await fetch(`/api/pypnm/upstream/utsc/stop/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: cmtsIp,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
+                    })
+                });
+                
+                const stopResult = await stopResponse.json();
+                console.log('[UTSC] Stop result:', stopResult);
+                
+                // Wait for CMTS to clear the session
+                if (stopResult.success) {
+                    console.log('[UTSC] Waiting 2s for CMTS to clear session...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } else {
+                    console.warn('[UTSC] Stop failed or session was not active:', stopResult.error);
+                    // If stop failed due to timeout, wait longer before starting
+                    if (stopResult.error && stopResult.error.includes('timeout')) {
+                        console.log('[UTSC] Previous session timed out, waiting 5s before retry...');
+                        this.$toast?.warning('Previous session timed out, waiting before retry...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
+                }
+                
+                // Step 2: Start new UTSC session
+                this.$toast?.info('Starting new UTSC measurement...');
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -810,7 +840,9 @@ createApp({
                 
                 const result = await response.json();
                 if (!result.success) {
-                    this.$toast?.error(result.error || 'Failed to configure UTSC');
+                    const errorMsg = result.error || 'Failed to configure UTSC';
+                    console.error('[UTSC] Start failed:', errorMsg);
+                    this.$toast?.error(`UTSC configuration failed: ${errorMsg}`);
                     this.utscLiveMode = false;
                     return;
                 }
