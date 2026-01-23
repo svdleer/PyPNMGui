@@ -246,10 +246,11 @@ def init_websocket(app):
         stream_interval = refresh_ms / 1000.0  # Convert to seconds
         connection_start_time = time.time()
         last_trigger_time = 0
-        can_trigger = True
         last_status = None
         initial_buffer_target = 10  # Wait for 10 files before starting stream
         streaming_started = False
+        buffer_low_threshold = 8  # Trigger re-capture when buffer drops to this level
+        min_trigger_interval = 8.0  # Minimum seconds between triggers (E6000 burst ~11s)
         
         try:
             # Send initial connected message
@@ -277,11 +278,15 @@ def init_websocket(app):
             # Re-check what files remain after deletion
             remaining_files = glob.glob(pattern)
             processed_files.update(remaining_files)
-            stream_start_time = time.time()
+            stream_start_time = time.time() - 1.0  # Allow 1s clock skew tolerance
             logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} files remain after cleanup")
             
-            # Don't trigger here - let the frontend start API configure UTSC first
-            # This prevents double-triggering and overlapping batches
+            # Trigger initial capture - frontend API may also trigger, but that's OK
+            # Better to double-trigger than miss initial data
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Initial trigger on startup")
+                trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
+                last_trigger_time = time.time()
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
@@ -404,19 +409,18 @@ def init_websocket(app):
                         logger.error(f"Failed to send UTSC data: {send_err}")
                         raise
                 
-                # Re-trigger via SNMP when buffer gets low to maintain buffer
+                # Re-trigger via SNMP when buffer gets low to maintain continuous stream
                 # E6000 generates 10 files per burst in ~11 seconds
                 # At 1 file/sec stream rate, we consume 10 files in 10 seconds
-                # Must trigger BEFORE buffer runs out to give CMTS time (11s) to generate next batch
-                # Trigger at 12 files = gives extra margin before we run out
+                # Trigger early enough so new batch arrives before buffer empties
                 time_since_trigger = current_time - last_trigger_time
-                buffer_low = len(file_buffer) <= 12  # Trigger when 12 or fewer files remain (extra margin)
-                time_ok = time_since_trigger >= 2.0  # Minimum 2s between triggers
-                if rf_port and cmts_ip and time_ok and streaming_started and (buffer_low or can_trigger):
-                    logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, next batch in ~11s)")
+                buffer_low = len(file_buffer) <= buffer_low_threshold
+                time_ok = time_since_trigger >= min_trigger_interval  # Respect minimum interval
+                
+                if rf_port and cmts_ip and streaming_started and buffer_low and time_ok:
+                    logger.info(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, last trigger {time_since_trigger:.1f}s ago)")
                     trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time
-                    can_trigger = False
                 
                 # Send heartbeat
                 if current_time - last_heartbeat > heartbeat_interval:
