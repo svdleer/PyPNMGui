@@ -37,6 +37,13 @@ except ImportError:
     FTP_AVAILABLE = False
     logger.warning("ftplib not available, FTP delete support disabled")
 
+try:
+    from pypnm.snmp import Snmp_v2c
+    PYSNMP_AVAILABLE = True
+except ImportError:
+    PYSNMP_AVAILABLE = False
+    logger.warning("pysnmp not available, UTSC status checks disabled")
+
 # Track active UTSC streaming sessions
 _utsc_sessions = {}
 
