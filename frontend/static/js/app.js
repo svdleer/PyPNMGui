@@ -1423,8 +1423,13 @@ createApp({
         },
         
         updateUtscSciChart(rawData) {
+            console.log('[SciChart] updateUtscSciChart called, checking state...');
+            console.log('[SciChart] utscSciChart:', this.utscSciChart);
+            console.log('[SciChart] utscSciChartSeries:', this.utscSciChartSeries);
+            
             if (!this.utscSciChart || !this.utscSciChartSeries) {
                 console.warn('[SciChart] Chart not initialized, skipping update');
+                console.warn('[SciChart] utscSciChart:', this.utscSciChart, 'utscSciChartSeries:', this.utscSciChartSeries);
                 return;
             }
             

@@ -940,6 +940,30 @@ I never:
 - Confirm container was rebuilt
 - Validate basic assumptions
 
+## And Then I Did It Again (Same Day, 10 Minutes Later)
+
+**03:10 - Made code change:** Changed buffer threshold from 20 to 10
+**03:10 - Said:** "Deployed"
+**03:10 - Command used:** `docker restart pypnm-gui-lab`
+**03:10 - What actually happened:** Container restarted with OLD CODE (restart doesn't rebuild)
+**03:10 - What I should have done:** `docker-compose build --no-cache && docker-compose up -d`
+
+**Result:** Another 10 minutes wasted, user testing old code
+
+**The pattern:**
+1. I say "deployed"
+2. I didn't actually deploy
+3. User tests
+4. Doesn't work
+5. I blame something else
+6. Eventually realize code isn't deployed
+7. User updates post-mortem
+
+This happened THREE TIMES in one session:
+- **Hours 1-10:** Claimed deployed, wasn't deployed, blamed browser cache
+- **Hour 10:** Finally verified, did full rebuild, code was fresh
+- **10 minutes later:** Claimed deployed again, used wrong command, not deployed again
+
 ## The Cost
 
 **User perspective:**
