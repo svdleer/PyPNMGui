@@ -761,36 +761,23 @@ createApp({
                 return;
             }
             
-            // Initialize chart first
-            // Show buffering message
-            this.$toast?.info('Initializing UTSC live stream...');
-            
-            // Set utscLiveMode FIRST to ensure chart div stays visible in DOM
+            // Set live mode immediately
             this.utscLiveMode = true;
-            
-            // Clear any cached plot data from previous static captures (do this AFTER setting live mode)
             this.utscPlotImage = null;
             this.utscSpectrumData = null;
             
-            // Now wait for Vue to render the chart div ONCE
-            console.log('[UTSC] Starting live mode...');
-            await this.ensureSciChartLoaded();
-            await this.$nextTick();
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            // Initialize chart only if not already initialized
+            // Initialize chart if not already done
             if (!this.utscSciChart) {
-                console.log('[UTSC] Initializing SciChart for live mode...');
+                await this.ensureSciChartLoaded();
+                await this.$nextTick();
                 await this.initUtscSciChart();
                 
-                if (!this.utscSciChart || !this.utscSciChartSeries) {
-                    console.error('[UTSC] SciChart failed to initialize');
+                if (!this.utscSciChart) {
                     this.$toast?.error('Failed to initialize chart');
                     this.utscLiveMode = false;
                     return;
                 }
             } else {
-                console.log('[UTSC] Reusing existing SciChart instance');
                 // Clear existing data
                 this.utscSciChartSeries.clear();
             }
