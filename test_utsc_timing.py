@@ -25,7 +25,7 @@ print("="*80)
 
 # Trigger UTSC
 print("\n1. Triggering UTSC...")
-url = f"http://localhost:5051/api/pypnm/upstream/utsc/start/{MAC}"
+url = f"http://localhost:8000/api/pypnm/upstream/utsc/start/{MAC}"
 payload = {
     "cmts_ip": CMTS_IP,
     "rf_port_ifindex": RF_PORT,

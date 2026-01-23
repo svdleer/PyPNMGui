@@ -245,12 +245,10 @@ def init_websocket(app):
         last_stream_time = 0
         stream_interval = refresh_ms / 1000.0  # Convert to seconds
         connection_start_time = time.time()
-        last_trigger_time = 0
         last_status = None
-        initial_buffer_target = 20  # Wait for 20 files before starting stream (2 batches)
+        initial_buffer_target = 10  # Wait for 10 files (1 CMTS burst) before starting stream
         streaming_started = False
-        buffer_low_threshold = 15  # Trigger re-capture when buffer drops to this level (15s margin while waiting 11s for next batch)
-        min_trigger_interval = 10.0  # Minimum seconds between triggers (E6000 burst ~11s)
+        # NO manual re-triggering - CMTS auto-repeats every 3s with repeat_period configured
         
         try:
             # Send initial connected message
