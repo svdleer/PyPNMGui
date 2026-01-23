@@ -10,6 +10,8 @@ services:
     container_name: pypnm-api
     ports:
       - "8000:8000"
+    environment:
+      - PYSNMP_NOMIBS=1
     networks:
       - pypnm-net
     restart: unless-stopped
