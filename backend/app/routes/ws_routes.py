@@ -135,10 +135,31 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
 
 
 def get_utsc_status(cmts_ip, rf_port_ifindex, community):
-    """Get UTSC measurement status via agent (not implemented yet)."""
-    # TODO: Implement via agent if needed
-    logger.debug("UTSC status check not implemented, skipping")
-    return None
+    """Get UTSC measurement status via pysnmp."""
+    if not PYSNMP_AVAILABLE:
+        logger.error("pypnm not available, cannot get UTSC status")
+        return None
+    
+    snmp = None
+    try:
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.4.1.1.{rf_port_ifindex}.1"
+        snmp = Snmp_v2c(cmts_ip, community)
+        result = snmp.get(oid)
+        if result:
+            # Extract integer value from pysnmp result
+            status_value = snmp.snmp_get_result_value(result)
+            if status_value is not None:
+                return int(status_value)
+        return None
+    except Exception as e:
+        logger.debug(f"UTSC status error: {e}")
+        return None
+    finally:
+        if snmp:
+            try:
+                snmp.close()
+            except:
+                pass
 
 
 # UTSC Status values
@@ -226,20 +247,16 @@ def init_websocket(app):
                 'duration_s': duration_s
             }))
             
-            # Delete old UTSC files before starting
+            # ALWAYS delete old UTSC files via TFTP before starting (permission issues prevent direct deletion)
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
             if existing_files:
-                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files, deleting...")
-                deleted = 0
-                for filepath in existing_files:
-                    try:
-                        os.remove(filepath)
-                        deleted += 1
-                    except Exception as e:
-                        logger.debug(f"Failed to delete {filepath}: {e}")
-                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files")
-                time.sleep(0.1)  # Brief pause after deletion
+                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files, deleting via TFTP...")
+                tftp_ip = current_app.config.get('TFTP_SERVER_IP', '127.0.0.1')
+                filenames = [os.path.basename(f) for f in existing_files]
+                deleted = delete_tftp_files(tftp_ip, filenames)
+                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via TFTP")
+                time.sleep(0.5)  # Give TFTP time to process deletions
             
             # Re-check what files remain after deletion
             remaining_files = glob.glob(pattern)
