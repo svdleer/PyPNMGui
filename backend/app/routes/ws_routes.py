@@ -8,9 +8,16 @@ import glob
 import os
 import struct
 import threading
-import subprocess
 from collections import deque
 from flask import Blueprint, current_app
+
+try:
+    from pypnm.snmp.snmp_v2c import Snmp_v2c
+    PYSNMP_AVAILABLE = True
+except ImportError:
+    PYSNMP_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("pypnm not installed, falling back to subprocess snmpset")
 
 logger = logging.getLogger(__name__)
 
@@ -55,58 +62,87 @@ def delete_tftp_files(tftp_ip, filenames):
 
 
 def trigger_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
-    """Trigger UTSC test directly via SNMP (fast, bypasses PyPNM API)."""
+    """Trigger UTSC test directly via pysnmp."""
+    if not PYSNMP_AVAILABLE:
+        logger.error("pypnm not available, cannot trigger UTSC")
+        return False
+    
+    snmp = None
     try:
         oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
-        cmd = ['snmpset', '-v2c', '-c', community, cmts_ip, oid, 'i', '1']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            logger.debug(f"UTSC re-triggered via SNMP on port {rf_port_ifindex}")
+        snmp = Snmp_v2c(cmts_ip, community)
+        result = snmp.set(oid, 1, rfc1902_integer=True)  # 1 = start
+        if result:
+            logger.debug(f"UTSC triggered via pysnmp on port {rf_port_ifindex}")
             return True
         else:
-            logger.warning(f"SNMP trigger failed: {result.stderr}")
+            logger.warning(f"UTSC trigger failed via pysnmp")
             return False
     except Exception as e:
-        logger.error(f"SNMP trigger error: {e}")
+        logger.error(f"UTSC trigger error: {e}")
         return False
+    finally:
+        if snmp:
+            try:
+                snmp.close()
+            except:
+                pass
 
 
 def stop_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
-    """Stop UTSC test directly via SNMP."""
+    """Stop UTSC test directly via pysnmp."""
+    if not PYSNMP_AVAILABLE:
+        logger.error("pypnm not available, cannot stop UTSC")
+        return False
+    
+    snmp = None
     try:
         oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
-        cmd = ['snmpset', '-v2c', '-c', community, cmts_ip, oid, 'i', '2']  # 2 = abort
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            logger.debug(f"UTSC stopped via SNMP on port {rf_port_ifindex}")
+        snmp = Snmp_v2c(cmts_ip, community)
+        result = snmp.set(oid, 2, rfc1902_integer=True)  # 2 = abort
+        if result:
+            logger.debug(f"UTSC stopped via pysnmp on port {rf_port_ifindex}")
             return True
         else:
-            logger.warning(f"SNMP stop failed: {result.stderr}")
+            logger.warning(f"UTSC stop failed via pysnmp")
             return False
     except Exception as e:
-        logger.error(f"SNMP stop error: {e}")
+        logger.error(f"UTSC stop error: {e}")
         return False
+    finally:
+        if snmp:
+            try:
+                snmp.close()
+            except:
+                pass
 
 
 def get_utsc_status(cmts_ip, rf_port_ifindex, community):
-    """Get UTSC measurement status via SNMP."""
+    """Get UTSC measurement status via pysnmp."""
+    if not PYSNMP_AVAILABLE:
+        logger.error("pypnm not available, cannot get UTSC status")
+        return None
+    
+    snmp = None
     try:
         oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.4.1.1.{rf_port_ifindex}.1"
-        cmd = ['snmpget', '-v2c', '-c', community, cmts_ip, oid]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-        if result.returncode == 0:
-            # Parse "INTEGER: sampleReady(4)" -> 4
-            output = result.stdout.strip()
-            if 'INTEGER:' in output:
-                match = output.split('(')[-1].rstrip(')')
-                try:
-                    return int(match)
-                except:
-                    pass
+        snmp = Snmp_v2c(cmts_ip, community)
+        result = snmp.get(oid)
+        if result:
+            # Extract integer value from pysnmp result
+            status_value = snmp.snmp_get_result_value(result)
+            if status_value is not None:
+                return int(status_value)
         return None
     except Exception as e:
-        logger.debug(f"SNMP status error: {e}")
+        logger.debug(f"UTSC status error: {e}")
         return None
+    finally:
+        if snmp:
+            try:
+                snmp.close()
+            except:
+                pass
 
 
 # UTSC Status values
