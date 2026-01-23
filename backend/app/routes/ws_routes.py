@@ -37,13 +37,6 @@ except ImportError:
     FTP_AVAILABLE = False
     logger.warning("ftplib not available, FTP delete support disabled")
 
-try:
-    from pypnm.snmp import Snmp_v2c
-    PYSNMP_AVAILABLE = True
-except ImportError:
-    PYSNMP_AVAILABLE = False
-    logger.warning("pysnmp not available, UTSC status checks disabled")
-
 # Track active UTSC streaming sessions
 _utsc_sessions = {}
 
@@ -182,39 +175,12 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
         return False
 
 
-def get_utsc_status(cmts_ip, rf_port_ifindex, community):
-    """Get UTSC measurement status via pysnmp."""
-    if not PYSNMP_AVAILABLE:
-        logger.error("pypnm not available, cannot get UTSC status")
-        return None
-    
-    snmp = None
-    try:
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.4.1.1.{rf_port_ifindex}.1"
-        snmp = Snmp_v2c(cmts_ip, community)
-        result = snmp.get(oid)
-        if result:
-            # Extract integer value from pysnmp result
-            status_value = snmp.snmp_get_result_value(result)
-            if status_value is not None:
-                return int(status_value)
-        return None
-    except Exception as e:
-        logger.debug(f"UTSC status error: {e}")
-        return None
-    finally:
-        if snmp:
-            try:
-                snmp.close()
-            except:
-                pass
-
-
-# UTSC Status values
+# UTSC Status values (from CMTS MIB)
 STATUS_INACTIVE = 2
 STATUS_BUSY = 3
 STATUS_SAMPLE_READY = 4
 STATUS_ERROR = 5
+
 
 
 def init_websocket(app):
@@ -330,16 +296,6 @@ def init_websocket(app):
                         'files_streamed': len(processed_files) - len(existing_files)
                     }))
                     break
-                
-                # Poll UTSC status via SNMP (if we have params)
-                if rf_port and cmts_ip:
-                    status = get_utsc_status(cmts_ip, int(rf_port), community)
-                    if status != last_status:
-                        last_status = status
-                        if status == STATUS_BUSY:
-                            can_trigger = False
-                        elif status in [STATUS_SAMPLE_READY, STATUS_INACTIVE]:
-                            can_trigger = True
                 
                 # Collect new files into buffer (only files created AFTER stream started)
                 pattern = f"{tftp_base}/utsc_{mac_clean}_*"
