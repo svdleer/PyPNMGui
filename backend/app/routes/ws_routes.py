@@ -247,10 +247,10 @@ def init_websocket(app):
         connection_start_time = time.time()
         last_trigger_time = 0
         last_status = None
-        initial_buffer_target = 10  # Wait for 10 files before starting stream
+        initial_buffer_target = 20  # Wait for 20 files before starting stream (2 batches)
         streaming_started = False
-        buffer_low_threshold = 8  # Trigger re-capture when buffer drops to this level
-        min_trigger_interval = 8.0  # Minimum seconds between triggers (E6000 burst ~11s)
+        buffer_low_threshold = 15  # Trigger re-capture when buffer drops to this level (15s margin while waiting 11s for next batch)
+        min_trigger_interval = 10.0  # Minimum seconds between triggers (E6000 burst ~11s)
         
         try:
             # Send initial connected message
@@ -281,10 +281,12 @@ def init_websocket(app):
             stream_start_time = time.time() - 1.0  # Allow 1s clock skew tolerance
             logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} files remain after cleanup")
             
-            # Trigger initial capture - frontend API may also trigger, but that's OK
-            # Better to double-trigger than miss initial data
+            # Trigger TWO initial captures to build up buffer faster
+            # Each trigger produces ~10 files, we want 20+ before starting stream
             if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Initial trigger on startup")
+                logger.info(f"UTSC WebSocket: Initial double-trigger on startup")
+                trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
+                time.sleep(0.5)  # Brief pause between triggers
                 trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
                 last_trigger_time = time.time()
             
