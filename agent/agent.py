@@ -4,6 +4,7 @@
 # This agent runs on the Jump Server and connects OUT to the GUI Server
 # via WebSocket. It executes SNMP/SSH commands and returns results.
 
+import asyncio
 import json
 import logging
 import os
@@ -33,6 +34,23 @@ try:
 except ImportError:
     redis = None
     print("INFO: redis not installed. Caching disabled. Run: pip install redis")
+
+try:
+    from pysnmp.hlapi.v1arch.asyncio import (
+        SnmpDispatcher,
+        CommunityData,
+        UdpTransportTarget,
+        ObjectType,
+        ObjectIdentity,
+        Integer,
+        OctetString,
+        get_cmd,
+        set_cmd
+    )
+    PYSNMP_AVAILABLE = True
+except ImportError:
+    PYSNMP_AVAILABLE = False
+    print("WARNING: pysnmp not installed. SNMP operations will fail.")
 
 
 # Configure logging
@@ -261,34 +279,59 @@ class SSHProxyExecutor:
 
 
 class SNMPExecutor:
-    """Executes SNMP commands using subprocess net-snmp CLI."""
+    """Executes SNMP commands using pysnmp library."""
     
     def __init__(self, ssh_proxy: Optional[SSHProxyExecutor] = None):
         self.ssh_proxy = ssh_proxy
         self.logger = logging.getLogger(f'{__name__}.SNMP')
-        self.logger.info("SNMP Executor: using net-snmp CLI with numeric OIDs (-On flag)")
+        
+        if PYSNMP_AVAILABLE:
+            self.logger.info("SNMP Executor: using pysnmp v7 async API")
+        else:
+            self.logger.warning("SNMP Executor: pysnmp not available, SNMP operations will fail")
     
     def execute_snmp_get(self,
                         target_ip: str,
                         oid: str,
                         community: str = 'private',
                         timeout: int = 5) -> dict:
-        """Execute SNMP GET using net-snmp CLI."""
+        """Execute SNMP GET using pysnmp."""
+        if not PYSNMP_AVAILABLE:
+            return {'success': False, 'error': 'pysnmp not available'}
+        
         try:
-            cmd = ['snmpget', '-On', '-v2c', '-c', community, '-t', str(timeout), target_ip, oid]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout+2)
-            
-            if result.returncode == 0:
-                return {
-                    'success': True,
-                    'output': result.stdout.strip(),
-                    'oid': oid,
-                    'command': 'snmpget'
-                }
-            else:
-                return {'success': False, 'error': result.stderr.strip() or result.stdout.strip()}
+            # Run async operation in sync context
+            result = asyncio.run(self._async_snmp_get(target_ip, oid, community, timeout))
+            return result
         except Exception as e:
+            self.logger.error(f"SNMP GET error: {e}")
             return {'success': False, 'error': str(e)}
+    
+    async def _async_snmp_get(self, target_ip: str, oid: str, community: str, timeout: int) -> dict:
+        """Async SNMP GET implementation."""
+        snmpDispatcher = SnmpDispatcher()
+        try:
+            errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
+                snmpDispatcher,
+                CommunityData(community),
+                await UdpTransportTarget.create((target_ip, 161), timeout=timeout),
+                ObjectType(ObjectIdentity(oid))
+            )
+            
+            if errorIndication:
+                return {'success': False, 'error': str(errorIndication)}
+            elif errorStatus:
+                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            else:
+                for varBind in varBinds:
+                    return {
+                        'success': True,
+                        'output': str(varBind[1]),
+                        'oid': str(varBind[0]),
+                        'command': 'snmpget'
+                    }
+        finally:
+            snmpDispatcher.transport_dispatcher.close_dispatcher()
     
     def execute_snmp_set(self,
                         target_ip: str,
@@ -296,23 +339,44 @@ class SNMPExecutor:
                         value: int,
                         community: str = 'private',
                         timeout: int = 5) -> dict:
-        """Execute SNMP SET using net-snmp CLI."""
+        """Execute SNMP SET using pysnmp."""
+        if not PYSNMP_AVAILABLE:
+            return {'success': False, 'error': 'pysnmp not available'}
+        
         try:
-            cmd = ['snmpset', '-On', '-v2c', '-c', community, '-t', str(timeout), target_ip, oid, 'i', str(value)]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout+2)
-            
-            if result.returncode == 0:
-                return {
-                    'success': True,
-                    'output': result.stdout.strip(),
-                    'oid': oid,
-                    'value': str(value),
-                    'command': 'snmpset'
-                }
-            else:
-                return {'success': False, 'error': result.stderr.strip() or result.stdout.strip()}
+            # Run async operation in sync context
+            result = asyncio.run(self._async_snmp_set(target_ip, oid, value, community, timeout))
+            return result
         except Exception as e:
+            self.logger.error(f"SNMP SET error: {e}")
             return {'success': False, 'error': str(e)}
+    
+    async def _async_snmp_set(self, target_ip: str, oid: str, value: int, community: str, timeout: int) -> dict:
+        """Async SNMP SET implementation."""
+        snmpDispatcher = SnmpDispatcher()
+        try:
+            errorIndication, errorStatus, errorIndex, varBinds = await set_cmd(
+                snmpDispatcher,
+                CommunityData(community),
+                await UdpTransportTarget.create((target_ip, 161), timeout=timeout),
+                ObjectType(ObjectIdentity(oid), Integer(value))
+            )
+            
+            if errorIndication:
+                return {'success': False, 'error': str(errorIndication)}
+            elif errorStatus:
+                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            else:
+                for varBind in varBinds:
+                    return {
+                        'success': True,
+                        'output': f'Set {varBind[0]} = {varBind[1]}',
+                        'oid': str(varBind[0]),
+                        'value': str(varBind[1]),
+                        'command': 'snmpset'
+                    }
+        finally:
+            snmpDispatcher.transport_dispatcher.close_dispatcher()
     
     def execute_snmp(self, 
                      command: str,
