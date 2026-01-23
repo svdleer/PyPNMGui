@@ -181,7 +181,7 @@ def init_websocket(app):
         last_trigger_time = 0
         can_trigger = True
         last_status = None
-        initial_buffer_target = 20  # Wait for 20 files before starting stream
+        initial_buffer_target = 10  # Wait for 10 files before starting stream
         streaming_started = False
         
         try:
