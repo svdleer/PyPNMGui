@@ -261,16 +261,103 @@ class SSHProxyExecutor:
 
 
 class SNMPExecutor:
-    """Executes SNMP commands, optionally through SSH proxy."""
-    
-    # Allowed SNMP commands (whitelist for security)
-    ALLOWED_COMMANDS = {
-        'snmpget', 'snmpwalk', 'snmpbulkget', 'snmpbulkwalk', 'snmpset'
-    }
+    """Executes SNMP commands using pysnmp library."""
     
     def __init__(self, ssh_proxy: Optional[SSHProxyExecutor] = None):
         self.ssh_proxy = ssh_proxy
         self.logger = logging.getLogger(f'{__name__}.SNMP')
+        
+        # Import pysnmp
+        try:
+            from pysnmp.hlapi import (
+                SnmpEngine, CommunityData, UdpTransportTarget,
+                ContextData, ObjectType, ObjectIdentity, getCmd, setCmd, Integer
+            )
+            self.pysnmp_available = True
+            self.SnmpEngine = SnmpEngine
+            self.CommunityData = CommunityData
+            self.UdpTransportTarget = UdpTransportTarget
+            self.ContextData = ContextData
+            self.ObjectType = ObjectType
+            self.ObjectIdentity = ObjectIdentity
+            self.getCmd = getCmd
+            self.setCmd = setCmd
+            self.Integer = Integer
+        except ImportError:
+            self.pysnmp_available = False
+            self.logger.warning("pysnmp not available, falling back to subprocess")
+    
+    def execute_snmp_get(self,
+                        target_ip: str,
+                        oid: str,
+                        community: str = 'private',
+                        timeout: int = 5) -> dict:
+        """Execute SNMP GET using pysnmp."""
+        if not self.pysnmp_available:
+            return {'success': False, 'error': 'pysnmp not available'}
+        
+        try:
+            iterator = self.getCmd(
+                self.SnmpEngine(),
+                self.CommunityData(community),
+                self.UdpTransportTarget((target_ip, 161), timeout=timeout),
+                self.ContextData(),
+                self.ObjectType(self.ObjectIdentity(oid))
+            )
+            
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            
+            if errorIndication:
+                return {'success': False, 'error': str(errorIndication)}
+            elif errorStatus:
+                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            else:
+                for varBind in varBinds:
+                    return {
+                        'success': True,
+                        'output': str(varBind[1]),
+                        'oid': str(varBind[0]),
+                        'command': 'snmpget'
+                    }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def execute_snmp_set(self,
+                        target_ip: str,
+                        oid: str,
+                        value: int,
+                        community: str = 'private',
+                        timeout: int = 5) -> dict:
+        """Execute SNMP SET using pysnmp."""
+        if not self.pysnmp_available:
+            return {'success': False, 'error': 'pysnmp not available'}
+        
+        try:
+            iterator = self.setCmd(
+                self.SnmpEngine(),
+                self.CommunityData(community),
+                self.UdpTransportTarget((target_ip, 161), timeout=timeout),
+                self.ContextData(),
+                self.ObjectType(self.ObjectIdentity(oid), self.Integer(value))
+            )
+            
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            
+            if errorIndication:
+                return {'success': False, 'error': str(errorIndication)}
+            elif errorStatus:
+                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            else:
+                for varBind in varBinds:
+                    return {
+                        'success': True,
+                        'output': f'Set {varBind[0]} = {varBind[1]}',
+                        'oid': str(varBind[0]),
+                        'value': str(varBind[1]),
+                        'command': 'snmpset'
+                    }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
     
     def execute_snmp(self, 
                      command: str,
@@ -280,52 +367,27 @@ class SNMPExecutor:
                      version: str = '2c',
                      timeout: int = 5,
                      retries: int = 1) -> dict:
-        """Execute SNMP command."""
+        """Execute SNMP command (backward compatibility wrapper)."""
         
-        # Validate command
-        if command not in self.ALLOWED_COMMANDS:
-            return {
-                'success': False,
-                'error': f'Command not allowed: {command}'
-            }
+        # For snmpget
+        if command == 'snmpget':
+            return self.execute_snmp_get(target_ip, oid, community, timeout)
         
-        # Build SNMP command
-        snmp_cmd = f"{command} -v{version} -c {community} -t {timeout} -r {retries} {target_ip} {oid}"
+        # For snmpset (parse oid with type and value)
+        elif command == 'snmpset':
+            # Parse "oid type value" format
+            parts = oid.split()
+            if len(parts) >= 3:
+                oid_only = parts[0]
+                value_type = parts[1]  # 'i' for integer, etc
+                value = int(parts[2])  # Assuming integer for now
+                return self.execute_snmp_set(target_ip, oid_only, value, community, timeout)
+            else:
+                return {'success': False, 'error': 'Invalid snmpset format'}
         
-        self.logger.info(f"Executing: {snmp_cmd}")
-        
-        if self.ssh_proxy:
-            # Execute through SSH proxy
-            exit_code, stdout, stderr = self.ssh_proxy.execute(snmp_cmd)
+        # For other commands (walk, bulkget) - fallback to subprocess if needed
         else:
-            # Execute locally
-            try:
-                result = subprocess.run(
-                    snmp_cmd.split(),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout + 5
-                )
-                exit_code = result.returncode
-                stdout = result.stdout
-                stderr = result.stderr
-            except subprocess.TimeoutExpired:
-                return {'success': False, 'error': 'Command timeout'}
-            except FileNotFoundError:
-                return {'success': False, 'error': f'{command} not found'}
-        
-        if exit_code == 0:
-            return {
-                'success': True,
-                'output': stdout.strip(),
-                'command': command
-            }
-        else:
-            return {
-                'success': False,
-                'error': stderr.strip() or f'Exit code: {exit_code}',
-                'output': stdout.strip()
-            }
+            return {'success': False, 'error': f'Command not implemented in pysnmp: {command}'}
 
 
 class TFTPExecutor:
