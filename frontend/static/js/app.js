@@ -766,18 +766,33 @@ createApp({
             this.utscPlotImage = null;
             this.utscSpectrumData = null;
             
+            console.log('[UTSC] Live mode active, checking chart...');
+            console.log('[UTSC] utscSciChart:', this.utscSciChart);
+            
+            // Wait for DOM to render
+            await this.$nextTick();
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Check if chart div exists
+            const chartDiv = document.getElementById('utscSciChart');
+            console.log('[UTSC] Chart div element:', chartDiv, 'exists:', !!chartDiv);
+            
             // Initialize chart if not already done
             if (!this.utscSciChart) {
+                console.log('[UTSC] Initializing chart (first time)...');
                 await this.ensureSciChartLoaded();
                 await this.$nextTick();
                 await this.initUtscSciChart();
                 
                 if (!this.utscSciChart) {
+                    console.error('[UTSC] Chart initialization FAILED!');
                     this.$toast?.error('Failed to initialize chart');
                     this.utscLiveMode = false;
                     return;
                 }
+                console.log('[UTSC] Chart initialized successfully!');
             } else {
+                console.log('[UTSC] Reusing existing chart');
                 // Clear existing data
                 this.utscSciChartSeries.clear();
             }

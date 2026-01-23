@@ -54,50 +54,80 @@ def delete_tftp_files(tftp_ip, filenames):
     return deleted
 
 
-def trigger_utsc_via_api(cmts_ip, rf_port_ifindex, community, pypnm_url="http://pypnm-api:8000"):
-    """Trigger UTSC test via PyPNM API."""
+def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
+    """Trigger UTSC test via agent's snmp_set capability."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
     try:
-        # Use PyPNM's SNMP set endpoint
-        payload = {
-            "cmts": {
-                "ip": cmts_ip,
-                "community": community
+        agent_manager = get_simple_agent_manager()
+        if not agent_manager:
+            logger.error("Agent manager not available")
+            return False
+        
+        agent = agent_manager.get_agent_for_capability('snmp_set')
+        if not agent:
+            logger.error("No agent with snmp_set capability")
+            return False
+        
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_set',
+            params={
+                'target_ip': cmts_ip,
+                'oid': oid,
+                'value': 1,  # 1 = start
+                'type': 'i',
+                'community': community
             },
-            "oid": f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1",
-            "value": 1,  # 1 = start
-            "value_type": "integer"
-        }
-        response = requests.post(f"{pypnm_url}/snmp/set", json=payload, timeout=5)
-        if response.status_code == 200:
-            logger.debug(f"UTSC triggered via API on port {rf_port_ifindex}")
+            timeout=5
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=5)
+        if result and result.get('status') == 'success':
+            logger.debug(f"UTSC triggered via agent on port {rf_port_ifindex}")
             return True
         else:
-            logger.warning(f"UTSC trigger failed: {response.status_code}")
+            logger.warning(f"UTSC trigger failed: {result}")
             return False
     except Exception as e:
         logger.error(f"UTSC trigger error: {e}")
         return False
 
 
-def stop_utsc_via_api(cmts_ip, rf_port_ifindex, community, pypnm_url="http://pypnm-api:8000"):
-    """Stop UTSC test via PyPNM API."""
+def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
+    """Stop UTSC test via agent's snmp_set capability."""
+    from app.core.simple_ws import get_simple_agent_manager
+    
     try:
-        # Use PyPNM's SNMP set endpoint
-        payload = {
-            "cmts": {
-                "ip": cmts_ip,
-                "community": community
+        agent_manager = get_simple_agent_manager()
+        if not agent_manager:
+            logger.error("Agent manager not available")
+            return False
+        
+        agent = agent_manager.get_agent_for_capability('snmp_set')
+        if not agent:
+            logger.error("No agent with snmp_set capability")
+            return False
+        
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='snmp_set',
+            params={
+                'target_ip': cmts_ip,
+                'oid': oid,
+                'value': 2,  # 2 = abort
+                'type': 'i',
+                'community': community
             },
-            "oid": f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1",
-            "value": 2,  # 2 = abort
-            "value_type": "integer"
-        }
-        response = requests.post(f"{pypnm_url}/snmp/set", json=payload, timeout=5)
-        if response.status_code == 200:
-            logger.debug(f"UTSC stopped via API on port {rf_port_ifindex}")
+            timeout=5
+        )
+        result = agent_manager.wait_for_task(task_id, timeout=5)
+        if result and result.get('status') == 'success':
+            logger.debug(f"UTSC stopped via agent on port {rf_port_ifindex}")
             return True
         else:
-            logger.warning(f"UTSC stop failed: {response.status_code}")
+            logger.warning(f"UTSC stop failed: {result}")
             return False
     except Exception as e:
         logger.error(f"UTSC stop error: {e}")
@@ -378,7 +408,7 @@ def init_websocket(app):
                 time_ok = time_since_trigger >= 2.0  # Minimum 2s between triggers
                 if rf_port and cmts_ip and time_ok and streaming_started and (buffer_low or can_trigger):
                     logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, next batch in ~11s)")
-                    trigger_utsc_via_api(cmts_ip, int(rf_port), community)
+                    trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time
                     can_trigger = False
                 
@@ -401,7 +431,7 @@ def init_websocket(app):
             if rf_port and cmts_ip:
                 logger.info(f"UTSC WebSocket: Stopping UTSC on {cmts_ip} port {rf_port}")
                 try:
-                    stop_utsc_via_api(cmts_ip, int(rf_port), community)
+                    stop_utsc_via_agent(cmts_ip, int(rf_port), community)
                 except Exception as e:
                     logger.warning(f"UTSC stop failed on cleanup: {e}")
             
