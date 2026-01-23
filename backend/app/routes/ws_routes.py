@@ -8,16 +8,9 @@ import glob
 import os
 import struct
 import threading
+import requests
 from collections import deque
 from flask import Blueprint, current_app
-
-try:
-    from pypnm.snmp.snmp_v2c import Snmp_v2c
-    PYSNMP_AVAILABLE = True
-except ImportError:
-    PYSNMP_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("pypnm not installed, falling back to subprocess snmpset")
 
 logger = logging.getLogger(__name__)
 
@@ -61,60 +54,54 @@ def delete_tftp_files(tftp_ip, filenames):
     return deleted
 
 
-def trigger_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
-    """Trigger UTSC test directly via pysnmp."""
-    if not PYSNMP_AVAILABLE:
-        logger.error("pypnm not available, cannot trigger UTSC")
-        return False
-    
-    snmp = None
+def trigger_utsc_via_api(cmts_ip, rf_port_ifindex, community, pypnm_url="http://pypnm-api:8000"):
+    """Trigger UTSC test via PyPNM API."""
     try:
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
-        snmp = Snmp_v2c(cmts_ip, community)
-        result = snmp.set(oid, 1, rfc1902_integer=True)  # 1 = start
-        if result:
-            logger.debug(f"UTSC triggered via pysnmp on port {rf_port_ifindex}")
+        # Use PyPNM's SNMP set endpoint
+        payload = {
+            "cmts": {
+                "ip": cmts_ip,
+                "community": community
+            },
+            "oid": f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1",
+            "value": 1,  # 1 = start
+            "value_type": "integer"
+        }
+        response = requests.post(f"{pypnm_url}/snmp/set", json=payload, timeout=5)
+        if response.status_code == 200:
+            logger.debug(f"UTSC triggered via API on port {rf_port_ifindex}")
             return True
         else:
-            logger.warning(f"UTSC trigger failed via pysnmp")
+            logger.warning(f"UTSC trigger failed: {response.status_code}")
             return False
     except Exception as e:
         logger.error(f"UTSC trigger error: {e}")
         return False
-    finally:
-        if snmp:
-            try:
-                snmp.close()
-            except:
-                pass
 
 
-def stop_utsc_via_snmp(cmts_ip, rf_port_ifindex, community):
-    """Stop UTSC test directly via pysnmp."""
-    if not PYSNMP_AVAILABLE:
-        logger.error("pypnm not available, cannot stop UTSC")
-        return False
-    
-    snmp = None
+def stop_utsc_via_api(cmts_ip, rf_port_ifindex, community, pypnm_url="http://pypnm-api:8000"):
+    """Stop UTSC test via PyPNM API."""
     try:
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
-        snmp = Snmp_v2c(cmts_ip, community)
-        result = snmp.set(oid, 2, rfc1902_integer=True)  # 2 = abort
-        if result:
-            logger.debug(f"UTSC stopped via pysnmp on port {rf_port_ifindex}")
+        # Use PyPNM's SNMP set endpoint
+        payload = {
+            "cmts": {
+                "ip": cmts_ip,
+                "community": community
+            },
+            "oid": f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1",
+            "value": 2,  # 2 = abort
+            "value_type": "integer"
+        }
+        response = requests.post(f"{pypnm_url}/snmp/set", json=payload, timeout=5)
+        if response.status_code == 200:
+            logger.debug(f"UTSC stopped via API on port {rf_port_ifindex}")
             return True
         else:
-            logger.warning(f"UTSC stop failed via pysnmp")
+            logger.warning(f"UTSC stop failed: {response.status_code}")
             return False
     except Exception as e:
         logger.error(f"UTSC stop error: {e}")
         return False
-    finally:
-        if snmp:
-            try:
-                snmp.close()
-            except:
-                pass
 
 
 def get_utsc_status(cmts_ip, rf_port_ifindex, community):
@@ -391,7 +378,7 @@ def init_websocket(app):
                 time_ok = time_since_trigger >= 2.0  # Minimum 2s between triggers
                 if rf_port and cmts_ip and time_ok and streaming_started and (buffer_low or can_trigger):
                     logger.debug(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, next batch in ~11s)")
-                    trigger_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                    trigger_utsc_via_api(cmts_ip, int(rf_port), community)
                     last_trigger_time = current_time
                     can_trigger = False
                 
@@ -414,7 +401,7 @@ def init_websocket(app):
             if rf_port and cmts_ip:
                 logger.info(f"UTSC WebSocket: Stopping UTSC on {cmts_ip} port {rf_port}")
                 try:
-                    stop_utsc_via_snmp(cmts_ip, int(rf_port), community)
+                    stop_utsc_via_api(cmts_ip, int(rf_port), community)
                 except Exception as e:
                     logger.warning(f"UTSC stop failed on cleanup: {e}")
             
