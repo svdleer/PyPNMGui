@@ -107,7 +107,7 @@ def query_cmts_oids(scenario_name):
 
 def trigger_utsc(scenario):
     """Trigger UTSC with specific parameters"""
-    url = f"{BACKEND_URL}/api/pypnm/upstream/spectrum-capture/{MAC}"
+    url = f"{BACKEND_URL}/api/pypnm/upstream/utsc/start/{MAC}"
     payload = {
         "cmts_ip": CMTS_IP,
         "rf_port_ifindex": RF_PORT,
