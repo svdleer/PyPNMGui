@@ -486,7 +486,16 @@ class SNMPExecutor:
                         elif 'Integer' in type_name:
                             output_lines.append(f"{oid_str} = INTEGER: {value_str}")
                         elif 'IpAddress' in type_name:
-                            output_lines.append(f"{oid_str} = IpAddress: {value_str}")
+                            # Format IpAddress as dotted decimal
+                            try:
+                                raw_bytes = bytes(value)
+                                if len(raw_bytes) == 4:
+                                    ip_str = '.'.join(str(b) for b in raw_bytes)
+                                    output_lines.append(f"{oid_str} = IpAddress: {ip_str}")
+                                else:
+                                    output_lines.append(f"{oid_str} = IpAddress: {value_str}")
+                            except:
+                                output_lines.append(f"{oid_str} = IpAddress: {value_str}")
                         elif 'Counter' in type_name or 'Gauge' in type_name:
                             output_lines.append(f"{oid_str} = {type_name}: {value_str}")
                         else:
