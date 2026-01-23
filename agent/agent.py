@@ -1687,25 +1687,27 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _set_cmts_direct(self, cmts_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
-        """Set SNMP value on CMTS directly."""
+        """Set SNMP value on CMTS directly using pysnmp."""
         try:
-            full_cmd = f"snmpset -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid} {value_type} {value}"
-            
             self.logger.info(f"CMTS SNMP SET: {cmts_ip} {oid} = {value}")
-            result = subprocess.run(
-                full_cmd.split(),
-                capture_output=True,
-                text=True,
-                timeout=30
+            
+            # Convert value to integer (assuming 'i' type for now)
+            int_value = int(value)
+            
+            # Use SNMPExecutor's pysnmp implementation
+            result = self.snmp_executor.execute_snmp_set(
+                target_ip=cmts_ip,
+                oid=oid,
+                value=int_value,
+                community=community,
+                timeout=10
             )
             
-            if result.returncode != 0:
-                return {'success': False, 'error': result.stderr or 'SNMP set failed'}
-            
-            return {'success': True, 'output': result.stdout}
-        except subprocess.TimeoutExpired:
-            return {'success': False, 'error': 'SNMP timeout'}
+            return result
+        except ValueError as e:
+            return {'success': False, 'error': f'Invalid integer value: {value}'}
         except Exception as e:
+            self.logger.error(f"CMTS SNMP SET error: {e}")
             return {'success': False, 'error': str(e)}
     
     def _handle_pnm_us_get_interfaces(self, params: dict) -> dict:
