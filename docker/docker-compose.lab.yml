@@ -11,11 +11,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Pysnmp MIB configuration - MIB resolution enabled by default
-      # Uncomment PYSNMP_NOMIBS=1 to disable MIB resolution (faster, numeric OIDs only)
-      # - PYSNMP_NOMIBS=1
+      # Pysnmp MIB configuration - Use numeric OIDs (no MIB compilation needed)
+      - PYSNMP_NOMIBS=1
       - PYSNMP_MIB_DIRS=/usr/share/snmp/mibs:/home/pypnm/.pysnmp/mibs
-      # Net-SNMP CLI tools configuration
+      # Net-SNMP CLI tools configuration (for snmpwalk, snmpget commands)
       - MIBDIRS=/usr/share/snmp/mibs:/usr/share/snmp/mibs/iana:/usr/share/snmp/mibs/ietf
       - MIBS=ALL
     networks:
