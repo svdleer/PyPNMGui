@@ -261,64 +261,32 @@ class SSHProxyExecutor:
 
 
 class SNMPExecutor:
-    """Executes SNMP commands using pysnmp library."""
+    """Executes SNMP commands using subprocess net-snmp CLI."""
     
     def __init__(self, ssh_proxy: Optional[SSHProxyExecutor] = None):
         self.ssh_proxy = ssh_proxy
         self.logger = logging.getLogger(f'{__name__}.SNMP')
-        
-        # Import pysnmp
-        try:
-            from pysnmp.hlapi import (
-                SnmpEngine, CommunityData, UdpTransportTarget,
-                ContextData, ObjectType, ObjectIdentity, getCmd, setCmd, Integer
-            )
-            self.pysnmp_available = True
-            self.SnmpEngine = SnmpEngine
-            self.CommunityData = CommunityData
-            self.UdpTransportTarget = UdpTransportTarget
-            self.ContextData = ContextData
-            self.ObjectType = ObjectType
-            self.ObjectIdentity = ObjectIdentity
-            self.getCmd = getCmd
-            self.setCmd = setCmd
-            self.Integer = Integer
-        except ImportError:
-            self.pysnmp_available = False
-            self.logger.warning("pysnmp not available, falling back to subprocess")
+        self.logger.info("SNMP Executor: using net-snmp CLI with numeric OIDs (-On flag)")
     
     def execute_snmp_get(self,
                         target_ip: str,
                         oid: str,
                         community: str = 'private',
                         timeout: int = 5) -> dict:
-        """Execute SNMP GET using pysnmp."""
-        if not self.pysnmp_available:
-            return {'success': False, 'error': 'pysnmp not available'}
-        
+        """Execute SNMP GET using net-snmp CLI."""
         try:
-            iterator = self.getCmd(
-                self.SnmpEngine(),
-                self.CommunityData(community),
-                self.UdpTransportTarget((target_ip, 161), timeout=timeout),
-                self.ContextData(),
-                self.ObjectType(self.ObjectIdentity(oid))
-            )
+            cmd = ['snmpget', '-On', '-v2c', '-c', community, '-t', str(timeout), target_ip, oid]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout+2)
             
-            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
-            
-            if errorIndication:
-                return {'success': False, 'error': str(errorIndication)}
-            elif errorStatus:
-                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            if result.returncode == 0:
+                return {
+                    'success': True,
+                    'output': result.stdout.strip(),
+                    'oid': oid,
+                    'command': 'snmpget'
+                }
             else:
-                for varBind in varBinds:
-                    return {
-                        'success': True,
-                        'output': str(varBind[1]),
-                        'oid': str(varBind[0]),
-                        'command': 'snmpget'
-                    }
+                return {'success': False, 'error': result.stderr.strip() or result.stdout.strip()}
         except Exception as e:
             return {'success': False, 'error': str(e)}
     
@@ -328,34 +296,21 @@ class SNMPExecutor:
                         value: int,
                         community: str = 'private',
                         timeout: int = 5) -> dict:
-        """Execute SNMP SET using pysnmp."""
-        if not self.pysnmp_available:
-            return {'success': False, 'error': 'pysnmp not available'}
-        
+        """Execute SNMP SET using net-snmp CLI."""
         try:
-            iterator = self.setCmd(
-                self.SnmpEngine(),
-                self.CommunityData(community),
-                self.UdpTransportTarget((target_ip, 161), timeout=timeout),
-                self.ContextData(),
-                self.ObjectType(self.ObjectIdentity(oid), self.Integer(value))
-            )
+            cmd = ['snmpset', '-On', '-v2c', '-c', community, '-t', str(timeout), target_ip, oid, 'i', str(value)]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout+2)
             
-            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
-            
-            if errorIndication:
-                return {'success': False, 'error': str(errorIndication)}
-            elif errorStatus:
-                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            if result.returncode == 0:
+                return {
+                    'success': True,
+                    'output': result.stdout.strip(),
+                    'oid': oid,
+                    'value': str(value),
+                    'command': 'snmpset'
+                }
             else:
-                for varBind in varBinds:
-                    return {
-                        'success': True,
-                        'output': f'Set {varBind[0]} = {varBind[1]}',
-                        'oid': str(varBind[0]),
-                        'value': str(varBind[1]),
-                        'command': 'snmpset'
-                    }
+                return {'success': False, 'error': result.stderr.strip() or result.stdout.strip()}
         except Exception as e:
             return {'success': False, 'error': str(e)}
     
