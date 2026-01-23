@@ -11,7 +11,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - PYSNMP_NOMIBS=1
+      # Uncomment to disable MIB resolution (faster but less readable debug logs)
+      # - PYSNMP_NOMIBS=1
+      - MIBDIRS=/usr/share/snmp/mibs:/usr/share/snmp/mibs/iana:/usr/share/snmp/mibs/ietf
+      - MIBS=ALL
     networks:
       - pypnm-net
     restart: unless-stopped
