@@ -11,9 +11,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Pysnmp MIB configuration - MIBs pre-compiled during Docker build
+      # Pysnmp MIB configuration - Include pysnmp-mibs package directory
       # Both named MIBs and numeric OIDs work
-      - PYSNMP_MIB_DIRS=/usr/share/snmp/mibs:/home/pypnm/.pysnmp/mibs
+      - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs:/usr/share/snmp/mibs:/home/pypnm/.pysnmp/mibs
       # Net-SNMP CLI tools configuration (for snmpwalk, snmpget commands)
       - MIBDIRS=/usr/share/snmp/mibs:/usr/share/snmp/mibs/iana:/usr/share/snmp/mibs/ietf
       - MIBS=ALL
