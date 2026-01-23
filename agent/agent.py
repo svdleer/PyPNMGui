@@ -1943,8 +1943,11 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
         
         try:
-            # docsPnmCmtsUtscCtrlInitiateTest
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.2.1.1.{rf_port_ifindex}.1"
+            # docsPnmCmtsUtscCtrlInitiateTest - Use correct OID branch
+            # Different vendors use different table structures:
+            # - Arris E6000: .3.10.3.1.1.{rfPort}.1
+            # - Commscope: .3.10.3.1.1.{rfPort}.1  
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
             
             result = self._set_cmts_direct(cmts_ip, oid, '1', 'i', community)  # 1 = true
             
@@ -1971,8 +1974,9 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
         
         try:
-            # docsPnmCmtsUtscCtrlInitiateTest
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.2.1.1.{rf_port_ifindex}.1"
+            # docsPnmCmtsUtscCtrlInitiateTest (1=true/start, 2=false/stop)
+            # Use same OID as start, but with value 2
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
             
             result = self._set_cmts_direct(cmts_ip, oid, '2', 'i', community)  # 2 = false
             
