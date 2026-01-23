@@ -30,6 +30,13 @@ except ImportError:
     TFTP_AVAILABLE = False
     logger.warning("tftpy not installed, TFTP delete support disabled")
 
+try:
+    from ftplib import FTP
+    FTP_AVAILABLE = True
+except ImportError:
+    FTP_AVAILABLE = False
+    logger.warning("ftplib not available, FTP delete support disabled")
+
 # Track active UTSC streaming sessions
 _utsc_sessions = {}
 
@@ -50,6 +57,40 @@ def delete_tftp_files(tftp_ip, filenames):
             deleted += 1
         except Exception as e:
             logger.debug(f"TFTP delete {filename} failed: {e}")
+    
+    return deleted
+
+
+def delete_utsc_files_via_ftp(ftp_server, ftp_user, ftp_pass, filenames):
+    """Delete UTSC files via FTP."""
+    if not FTP_AVAILABLE:
+        logger.warning("FTP not available, cannot delete files")
+        return 0
+    
+    deleted = 0
+    try:
+        ftp = FTP()
+        ftp.connect(ftp_server, 21, timeout=10)
+        ftp.login(ftp_user, ftp_pass)
+        
+        # Navigate to tftpboot directory
+        try:
+            ftp.cwd('/var/lib/tftpboot')
+        except Exception as e:
+            logger.warning(f"FTP: Could not change to /var/lib/tftpboot: {e}")
+            ftp.quit()
+            return 0
+        
+        for filename in filenames:
+            try:
+                ftp.delete(filename)
+                deleted += 1
+            except Exception as e:
+                logger.debug(f"FTP delete {filename} failed: {e}")
+        
+        ftp.quit()
+    except Exception as e:
+        logger.error(f"FTP connection failed: {e}")
     
     return deleted
 
@@ -247,16 +288,18 @@ def init_websocket(app):
                 'duration_s': duration_s
             }))
             
-            # ALWAYS delete old UTSC files via TFTP before starting (permission issues prevent direct deletion)
+            # Delete old UTSC files via FTP before starting (read-only filesystem prevents direct deletion)
             pattern = f"{tftp_base}/utsc_{mac_clean}_*"
             existing_files = glob.glob(pattern)
             if existing_files:
-                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files, deleting via TFTP...")
-                tftp_ip = current_app.config.get('TFTP_SERVER_IP', '127.0.0.1')
+                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files, deleting via FTP...")
+                ftp_server = current_app.config.get('FTP_SERVER_IP', '127.0.0.1')
+                ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
+                ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
                 filenames = [os.path.basename(f) for f in existing_files]
-                deleted = delete_tftp_files(tftp_ip, filenames)
-                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via TFTP")
-                time.sleep(0.5)  # Give TFTP time to process deletions
+                deleted = delete_utsc_files_via_ftp(ftp_server, ftp_user, ftp_pass, filenames)
+                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via FTP")
+                time.sleep(0.2)  # Brief pause after deletion
             
             # Re-check what files remain after deletion
             remaining_files = glob.glob(pattern)
