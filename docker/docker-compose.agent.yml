@@ -46,9 +46,9 @@ services:
     # Network mode: Use host network if agent needs direct SNMP access
     # network_mode: host
     
-    # Or use bridge network (default)
+    # Join the lab network to communicate with GUI
     networks:
-      - agent-net
+      - pypnm-lab-network
     
     # Extra hosts (if needed for DNS resolution)
     # extra_hosts:
@@ -56,5 +56,5 @@ services:
     #   - "cm-proxy.internal:10.0.0.50"
 
 networks:
-  agent-net:
-    driver: bridge
+  pypnm-lab-network:
+    external: true
