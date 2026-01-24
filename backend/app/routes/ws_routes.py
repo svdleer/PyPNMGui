@@ -360,17 +360,18 @@ def init_websocket(app):
                                     center_freq_hz = 50000000
                                     num_bins = 1600
                                 
-                                # Each measurement: 328 byte header + num_bins * 2 bytes data
-                                bytes_per_measurement = 328 + (num_bins * 2)
+                                # File format: 328-byte header + multiple measurements
+                                # Each measurement is num_bins * 2 bytes (16-bit signed integers)
+                                bytes_per_measurement = num_bins * 2
+                                samples_data = binary_data[328:]  # Skip the single file header
                                 
-                                # Split file into individual measurements (each with its own header)
-                                offset = 0
-                                measurement_idx = 0
-                                while offset + bytes_per_measurement <= len(binary_data):
-                                    # Skip the 328-byte header for this measurement
-                                    data_start = offset + 328
-                                    data_end = offset + bytes_per_measurement
-                                    measurement_bytes = binary_data[data_start:data_end]
+                                # Split into individual measurements
+                                num_measurements = len(samples_data) // bytes_per_measurement
+                                
+                                for measurement_idx in range(num_measurements):
+                                    start = measurement_idx * bytes_per_measurement
+                                    end = start + bytes_per_measurement
+                                    measurement_bytes = samples_data[start:end]
                                     
                                     # Parse amplitudes for this measurement
                                     amplitudes = []
@@ -387,9 +388,6 @@ def init_websocket(app):
                                         'center_freq_hz': center_freq_hz,
                                         'collected_at': current_time
                                     })
-                                    
-                                    offset += bytes_per_measurement
-                                    measurement_idx += 1
                         except Exception as e:
                             logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
