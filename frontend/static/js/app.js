@@ -69,7 +69,7 @@ createApp({
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
-                freerunDurationMs: 55000  // 55 seconds (E6000 max is 60s for FreeRunning mode)
+                freerunDurationMs: 60000  // 60 seconds - full duration for maximum file generation
                 // triggerCount removed - notWritable on E6000 in FreeRunning mode
             },
             usRxmerConfig: {
@@ -847,8 +847,12 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
                         tftp_ip: this.selectedModem.tftp_ip,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
-                        freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000
+                        trigger_mode: this.utscConfig.triggerMode,
+                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
+                        span_hz: this.utscConfig.spanMhz * 1000000,
+                        num_bins: this.utscConfig.numBins,
+                        repeat_period_ms: this.utscConfig.repeatPeriodMs,
+                        freerun_duration_ms: this.utscConfig.freerunDurationMs
                         // Note: trigger_count omitted for freerun mode - E6000 bug limits files when present
                     })
                 });
