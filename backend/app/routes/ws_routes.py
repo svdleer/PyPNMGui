@@ -246,9 +246,9 @@ def init_websocket(app):
         stream_interval = refresh_ms / 1000.0  # Convert to seconds
         connection_start_time = time.time()
         last_status = None
-        initial_buffer_target = 10  # Wait for 10 files (1 CMTS burst) before starting stream
+        initial_buffer_target = 20  # Wait for 20 files before starting stream to scigraph
         streaming_started = False
-        # NO manual re-triggering - CMTS auto-repeats every 3s with repeat_period configured
+        # Single trigger only - no re-triggering, let freerun complete naturally
         
         try:
             # Send initial connected message
@@ -279,12 +279,9 @@ def init_websocket(app):
             stream_start_time = time.time() - 1.0  # Allow 1s clock skew tolerance
             logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} files remain after cleanup")
             
-            # Trigger TWO initial captures to build up buffer faster
-            # Each trigger produces ~10 files, we want 20+ before starting stream
+            # Single trigger only - let freerun complete naturally, no re-triggering
             if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Initial double-trigger on startup")
-                trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
-                time.sleep(0.5)  # Brief pause between triggers
+                logger.info(f"UTSC WebSocket: Single trigger on startup, freerun will handle the rest")
                 trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
                 last_trigger_time = time.time()
             

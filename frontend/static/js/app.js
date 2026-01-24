@@ -69,8 +69,8 @@ createApp({
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
-                freerunDurationMs: 55000,  // 55 seconds (E6000 max is 60s for FreeRunning mode)
-                triggerCount: 10  // Max 10 on E6000 (ignored in FreeRunning mode per docs)
+                freerunDurationMs: 55000  // 55 seconds (E6000 max is 60s for FreeRunning mode)
+                // triggerCount removed - notWritable on E6000 in FreeRunning mode
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,
