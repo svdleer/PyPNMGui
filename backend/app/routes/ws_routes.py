@@ -342,15 +342,7 @@ def init_websocket(app):
                                 binary_data = f.read()
                             
                             if len(binary_data) >= 328:
-                                # Parse amplitudes
-                                samples = binary_data[328:]
-                                amplitudes = []
-                                for i in range(0, len(samples), 2):
-                                    if i+1 < len(samples):
-                                        val = struct.unpack('>h', samples[i:i+2])[0]
-                                        amplitudes.append(val / 10.0)
-                                
-                                # Get config from Redis
+                                # Get config from Redis to determine num_bins
                                 try:
                                     from app import redis_client
                                     config_json = redis_client.get(f'utsc_config:{mac_address}')
@@ -358,21 +350,43 @@ def init_websocket(app):
                                         config = json.loads(config_json)
                                         span_hz = config.get('span_hz', 100000000)
                                         center_freq_hz = config.get('center_freq_hz', 50000000)
+                                        num_bins = config.get('num_bins', 1600)
                                     else:
                                         span_hz = 100000000
                                         center_freq_hz = 50000000
+                                        num_bins = 1600
                                 except:
                                     span_hz = 100000000
                                     center_freq_hz = 50000000
+                                    num_bins = 1600
                                 
-                                # Add to buffer
-                                file_buffer.append({
-                                    'filepath': filepath,
-                                    'amplitudes': amplitudes,
-                                    'span_hz': span_hz,
-                                    'center_freq_hz': center_freq_hz,
-                                    'collected_at': current_time
-                                })
+                                # Each measurement is num_bins * 2 bytes
+                                bytes_per_measurement = num_bins * 2
+                                samples_data = binary_data[328:]  # Skip header
+                                
+                                # Split into individual measurements
+                                num_measurements = len(samples_data) // bytes_per_measurement
+                                
+                                for measurement_idx in range(num_measurements):
+                                    start = measurement_idx * bytes_per_measurement
+                                    end = start + bytes_per_measurement
+                                    measurement_bytes = samples_data[start:end]
+                                    
+                                    # Parse amplitudes for this measurement
+                                    amplitudes = []
+                                    for i in range(0, len(measurement_bytes), 2):
+                                        if i+1 < len(measurement_bytes):
+                                            val = struct.unpack('>h', measurement_bytes[i:i+2])[0]
+                                            amplitudes.append(val / 10.0)
+                                    
+                                    # Add each measurement to buffer
+                                    file_buffer.append({
+                                        'filepath': f"{filepath}#{measurement_idx}",
+                                        'amplitudes': amplitudes,
+                                        'span_hz': span_hz,
+                                        'center_freq_hz': center_freq_hz,
+                                        'collected_at': current_time
+                                    })
                         except Exception as e:
                             logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
