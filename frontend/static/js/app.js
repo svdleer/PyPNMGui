@@ -64,8 +64,8 @@ createApp({
             },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning (timed captures), 6=CM_MAC (per-transmission), 5=IdleSID
-                centerFreqMhz: 110,  // 20-200 MHz range: center = (20+200)/2
-                spanMhz: 180,  // 20-200 MHz range: span = 200-20
+                centerFreqMhz: 45,  // 5-85 MHz range: center = (5+85)/2
+                spanMhz: 80,  // 5-85 MHz range: span = 85-5 (DOCSIS 3.0 upstream)
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
