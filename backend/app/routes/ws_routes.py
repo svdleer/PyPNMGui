@@ -443,16 +443,17 @@ def init_websocket(app):
         except Exception as e:
             logger.error(f"UTSC WebSocket error: {e}")
         finally:
-            # Stop UTSC on cleanup
-            if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Stopping UTSC on {cmts_ip} port {rf_port}")
-                try:
-                    stop_utsc_via_agent(cmts_ip, int(rf_port), community)
-                except Exception as e:
-                    logger.warning(f"UTSC stop failed on cleanup: {e}")
+            # Don't auto-stop UTSC - let freerun complete naturally
+            # User can manually stop via /upstream/utsc/stop endpoint if needed
+            # if rf_port and cmts_ip:
+            #     logger.info(f"UTSC WebSocket: Stopping UTSC on {cmts_ip} port {rf_port}")
+            #     try:
+            #         stop_utsc_via_agent(cmts_ip, int(rf_port), community)
+            #     except Exception as e:
+            #         logger.warning(f"UTSC stop failed on cleanup: {e}")
             
             _utsc_sessions.pop(session_id, None)
-            logger.info(f"UTSC WebSocket closed for {mac_address}")
+            logger.info(f"UTSC WebSocket closed for {mac_address} (UTSC continues running)")
     
     logger.info("WebSocket agent endpoint registered at /ws/agent")
     logger.info("WebSocket UTSC endpoint registered at /ws/utsc/<mac>")

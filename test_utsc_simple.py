@@ -170,8 +170,8 @@ def watch_files(duration=60, min_buffer_size=20):
             status_names = {2: 'inactive', 3: 'busy', 4: 'sampleReady', 5: 'error'}
             print(f"  [{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] Status: {status_names.get(status, status)}")
             last_status = status
-            
-            if status == STATUS_BUSY:
+        
+        # Check for new files
         files = glob.glob(pattern)
         new_files = [f for f in files if f not in processed]
         
@@ -196,14 +196,19 @@ def watch_files(duration=60, min_buffer_size=20):
             item = file_buffer.pop(0)
             file_count += 1
             last_stream_time = current_time
-          Check if we've reached minimum buffer size to start streaming
+        # Check if we've reached minimum buffer size to start streaming
         if not streaming_started and len(file_buffer) >= min_buffer_size:
             streaming_started = True
             print(f"\n  ✅ Buffer threshold reached ({len(file_buffer)} files) - Starting stream to scigraph!")
             print()
         
-        # Stream from buffer at steady rate (only after buffer threshold reached)
-        if streaming_started and  amplitudes = item['amplitudes']
+        # Stream from buffer at steady rate
+        if streaming_started and file_buffer and (current_time - last_stream_time) >= stream_interval:
+            item = file_buffer.pop(0)
+            file_count += 1
+            last_stream_time = current_time
+            
+            amplitudes = item['amplitudes']
             min_amp = min(amplitudes)
             max_amp = max(amplitudes)
             avg_amp = sum(amplitudes) / len(amplitudes)
@@ -213,8 +218,6 @@ def watch_files(duration=60, min_buffer_size=20):
             print(f"  [STREAM #{file_count:3d}] {filename[-23:]}: "
                   f"{len(amplitudes):4d} bins, {min_amp:6.1f}/{avg_amp:6.1f}/{max_amp:5.1f} dBmV "
                   f"(buffer: {len(file_buffer)}, latency: {latency:.1f}s)")
-        NO RE-TRIGGERING - Single trigger only, let freerun complet= current_time
-            can_trigger = False
         
         time.sleep(0.05)  # 50ms polling
     
@@ -239,10 +242,9 @@ def main():
     # Configure once
     configure_utsc()
     
-    # Watch and re-trigger
-    watch_files(duration=60, retrigger_interval=1)
+    # Watch files - single trigger, buffer to 20, then stream
+    watch_files(duration=60, min_buffer_size=20)
 
 
 if __name__ == "__main__":
-    main()files - single trigger, buffer to 20, then stream
-    watch_files(duration=60, min_buffer_size=20
+    main()
