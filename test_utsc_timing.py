@@ -30,10 +30,10 @@ payload = {
     "cmts_ip": CMTS_IP,
     "rf_port_ifindex": RF_PORT,
     "community": COMMUNITY,
-    "tftp_ip": "172.16.6.101",
+    "tftp_ip": "172.16.6.101",q:q
     "repeat_period_ms": 3000,
     "freerun_duration_ms": 60000,
-    "trigger_count": 20
+    "trigger_count": 10  # Max supported by E6000 CMTS
 }
 
 response = requests.post(url, json=payload, timeout=10)
@@ -75,9 +75,9 @@ if result.returncode == 0 and result.stdout.strip():
             print(f"\n3. Validation:")
             print(f"   RepeatPeriod: {repeat_val} microseconds (expected: 3,000,000)")
             print(f"   FreeRunDuration: {freerun_val} milliseconds (expected: 60,000)")
-            print(f"   TriggerCount: {trigger_val} (expected: 20)")
+            print(f"   TriggerCount: {trigger_val} (expected: 10)")
             
-            if repeat_val == '3000000' and freerun_val == '60000' and trigger_val == '20':
+            if repeat_val == '3000000' and freerun_val == '60000' and trigger_val == '10':
                 print(f"\n   ✅ ALL PARAMETERS SET CORRECTLY!")
             else:
                 print(f"\n   ⚠️  MISMATCH DETECTED!")

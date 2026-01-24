@@ -124,7 +124,8 @@ def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
             timeout=5
         )
         result = agent_manager.wait_for_task(task_id, timeout=5)
-        if result and result.get('status') == 'success':
+        # Agent returns: {'type': 'response', 'result': {'success': True, ...}}
+        if result and result.get('result', {}).get('success'):
             logger.debug(f"UTSC triggered via agent on port {rf_port_ifindex}")
             return True
         else:
@@ -164,7 +165,8 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
             timeout=5
         )
         result = agent_manager.wait_for_task(task_id, timeout=5)
-        if result and result.get('status') == 'success':
+        # Agent returns: {'type': 'response', 'result': {'success': True, ...}}
+        if result and result.get('result', {}).get('success'):
             logger.debug(f"UTSC stopped via agent on port {rf_port_ifindex}")
             return True
         else:
