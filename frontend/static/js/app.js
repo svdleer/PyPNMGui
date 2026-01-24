@@ -842,7 +842,7 @@ createApp({
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    const payload = {
+                    body: JSON.stringify({
                         cmts_ip: cmtsIp,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
@@ -850,9 +850,7 @@ createApp({
                         repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
                         freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000
                         // Note: trigger_count omitted for freerun mode - E6000 bug limits files when present
-                    };
-                    
-                    body: JSON.stringify(payload)
+                    })
                 });
                 
                 const result = await response.json();
