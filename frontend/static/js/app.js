@@ -1439,7 +1439,7 @@ createApp({
                     axisAlignment: EAxisAlignment.Left,
                     axisTitle: 'Power (dBmV)',
                     labelPrecision: 1,
-                    autoRange: 'Always'
+                    visibleRange: new NumberRange(-25, 15)
                 }));
                 
                 // Create data series
