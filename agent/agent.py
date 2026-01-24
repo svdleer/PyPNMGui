@@ -36,6 +36,14 @@ except ImportError:
     print("INFO: redis not installed. Caching disabled. Run: pip install redis")
 
 try:
+    from pypnm.lib.inet_utils import InetGenerate
+    PYPNM_INET_AVAILABLE = True
+except ImportError:
+    InetGenerate = None
+    PYPNM_INET_AVAILABLE = False
+    print("INFO: pypnm not installed. Using manual IP conversion.")
+
+try:
     from pysnmp.hlapi.v1arch.asyncio import (
         SnmpDispatcher,
         CommunityData,
@@ -486,10 +494,18 @@ class SNMPExecutor:
                         elif 'Integer' in type_name:
                             output_lines.append(f"{oid_str} = INTEGER: {value_str}")
                         elif 'IpAddress' in type_name:
-                            # Format IpAddress as dotted decimal
+                            # Format IpAddress as dotted decimal using PyPNM utilities
                             try:
                                 raw_bytes = bytes(value)
-                                if len(raw_bytes) == 4:
+                                if PYPNM_INET_AVAILABLE:
+                                    # Use PyPNM's built-in IP conversion
+                                    ip_str = InetGenerate.binary_to_inet(raw_bytes)
+                                    if ip_str:
+                                        output_lines.append(f"{oid_str} = IpAddress: {ip_str}")
+                                    else:
+                                        output_lines.append(f"{oid_str} = IpAddress: {value_str}")
+                                elif len(raw_bytes) == 4:
+                                    # Fallback: manual conversion for IPv4
                                     ip_str = '.'.join(str(b) for b in raw_bytes)
                                     output_lines.append(f"{oid_str} = IpAddress: {ip_str}")
                                 else:
