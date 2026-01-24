@@ -1540,6 +1540,11 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Application JS -->
-    <script src="/static/js/app.js?v=20260123-1"></script>
+    <script>
+        // Cache busting - append timestamp to ensure fresh JS load
+        const script = document.createElement('script');
+        script.src = '/static/js/app.js?v=' + Date.now();
+        document.body.appendChild(script);
+    </script>
 </body>
 </html>
