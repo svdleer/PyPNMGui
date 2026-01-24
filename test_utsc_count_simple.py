@@ -19,8 +19,8 @@ UTSC_CFG = "1.3.6.1.4.1.4491.2.1.27.1.3.10.2.1"
 UTSC_CTRL = "1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1"
 
 def snmp_set(oid, type_flag, value):
-    """Set SNMP value via SSH to agent container"""
-    cmd = f'ssh -p 65001 access-engineering.nl "docker exec pypnm-agent-lab snmpset -v2c -c \'{COMMUNITY}\' {CMTS_IP} {oid} {type_flag} {value}"'
+    """Set SNMP value"""
+    cmd = f'docker exec pypnm-agent-lab snmpset -v2c -c \'{COMMUNITY}\' {CMTS_IP} {oid} {type_flag} {value}'
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
     return result.returncode == 0
 
@@ -31,7 +31,7 @@ def trigger_utsc():
 
 def count_files():
     """Count UTSC files on TFTP server"""
-    cmd = f'ssh -p 65001 access-engineering.nl "docker exec pypnm-agent-lab ls -1 {TFTP_PATH}/{FILENAME_PREFIX}_* 2>/dev/null | wc -l"'
+    cmd = f'docker exec pypnm-agent-lab ls -1 {TFTP_PATH}/{FILENAME_PREFIX}_* 2>/dev/null | wc -l'
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
     if result.returncode == 0:
         return int(result.stdout.strip())
@@ -39,7 +39,7 @@ def count_files():
 
 def clear_files():
     """Remove old test files"""
-    cmd = f'ssh -p 65001 access-engineering.nl "docker exec pypnm-agent-lab rm -f {TFTP_PATH}/{FILENAME_PREFIX}_* 2>/dev/null"'
+    cmd = f'docker exec pypnm-agent-lab rm -f {TFTP_PATH}/{FILENAME_PREFIX}_* 2>/dev/null'
     subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
     time.sleep(1)
 
