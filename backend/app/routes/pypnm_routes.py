@@ -980,6 +980,70 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@pypnm_bp.route('/upstream/utsc/limits', methods=['GET'])
+def get_utsc_limits():
+    """
+    Get E6000 UTSC parameter limits and supported values.
+    
+    Returns validation constraints for:
+    - Frequency range (center_freq_hz, span_hz)
+    - Number of bins (num_bins)
+    - Timing parameters (repeat_period_ms, freerun_duration_ms)
+    - Trigger parameters (trigger_count)
+    """
+    try:
+        from app.core.utsc_validation import get_limits_summary
+        limits = get_limits_summary()
+        return jsonify(limits), 200
+    except Exception as e:
+        logger.error(f"Failed to get UTSC limits: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/validate', methods=['POST'])
+def validate_utsc_parameters():
+    """
+    Validate UTSC parameters before configuration.
+    
+    POST body:
+    {
+        "center_freq_hz": 30000000,
+        "span_hz": 80000000,
+        "num_bins": 800,
+        "trigger_mode": 2,
+        "repeat_period_ms": 1000,
+        "freerun_duration_ms": 60000,
+        "trigger_count": 10
+    }
+    
+    Returns:
+    {
+        "is_valid": true/false,
+        "errors": ["error1", "error2"],
+        "warnings": ["warning1"],
+        "parameters": {...}
+    }
+    """
+    try:
+        from app.core.utsc_validation import validate_all_parameters
+        
+        data = request.json
+        result = validate_all_parameters(
+            center_freq_hz=data.get('center_freq_hz', 30000000),
+            span_hz=data.get('span_hz', 80000000),
+            num_bins=data.get('num_bins', 800),
+            trigger_mode=data.get('trigger_mode', 2),
+            repeat_period_ms=data.get('repeat_period_ms', 1000),
+            freerun_duration_ms=data.get('freerun_duration_ms', 60000),
+            trigger_count=data.get('trigger_count', 10)
+        )
+        
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Parameter validation failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @pypnm_bp.route('/upstream/utsc/configure/<mac_address>', methods=['POST'])
 def configure_utsc(mac_address):
     """
