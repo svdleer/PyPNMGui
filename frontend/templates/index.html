@@ -1006,6 +1006,15 @@
                                                                 <option :value="6">CM MAC (This Modem)</option>
                                                             </select>
                                                         </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label form-label-sm">Frequency Range Preset</label>
+                                                            <select @change="applyFreqPreset($event)" class="form-select form-select-sm">
+                                                                <option value="20-200">20-200 MHz (Full Range - Default)</option>
+                                                                <option value="18-65">18-65 MHz (Low Band)</option>
+                                                                <option value="60-200">60-200 MHz (High Band)</option>
+                                                                <option value="custom">Custom</option>
+                                                            </select>
+                                                        </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">Center Freq (MHz)</label>
@@ -1017,6 +1026,7 @@
                                                                     <option :value="40">40 MHz (NB)</option>
                                                                     <option :value="80">80 MHz</option>
                                                                     <option :value="160">160 MHz</option>
+                                                                    <option :value="180">180 MHz</option>
                                                                     <option :value="320">320 MHz (WB)</option>
                                                                 </select>
                                                             </div>

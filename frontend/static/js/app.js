@@ -64,8 +64,8 @@ createApp({
             },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning (timed captures), 6=CM_MAC (per-transmission), 5=IdleSID
-                centerFreqMhz: 109,  // 18-200 MHz range: center = (18+200)/2
-                spanMhz: 182,  // 18-200 MHz range: span = 200-18
+                centerFreqMhz: 110,  // 20-200 MHz range: center = (20+200)/2
+                spanMhz: 180,  // 20-200 MHz range: span = 200-20
                 numBins: 3200,
                 rfPortIfindex: null,
                 repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
@@ -700,6 +700,21 @@ createApp({
             } finally {
                 this.upstreamInterfaces.loading = false;
             }
+        },
+        
+        applyFreqPreset(event) {
+            const preset = event.target.value;
+            const presets = {
+                '20-200': { center: 110, span: 180 },  // (20+200)/2 = 110, 200-20 = 180
+                '18-65': { center: 41.5, span: 47 },   // (18+65)/2 = 41.5, 65-18 = 47
+                '60-200': { center: 130, span: 140 }   // (60+200)/2 = 130, 200-60 = 140
+            };
+            
+            if (presets[preset]) {
+                this.utscConfig.centerFreqMhz = presets[preset].center;
+                this.utscConfig.spanMhz = presets[preset].span;
+            }
+            // For 'custom', do nothing - let user manually adjust
         },
         
         async configureUtsc() {
