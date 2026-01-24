@@ -306,68 +306,75 @@ def init_websocket(app):
                 current_time = time.time()
                 elapsed = current_time - connection_start_time
                 
-                # Check duration limit
-                if elapsed > duration_s:
-                    logger.info(f"UTSC WebSocket: Duration {duration_s}s reached, closing")
+                # Check duration limit - but continue to drain buffer
+                duration_reached = elapsed > duration_s
+                if duration_reached and len(file_buffer) == 0:
+                    logger.info(f"UTSC WebSocket: Duration {duration_s}s reached and buffer drained, closing")
                     ws.send(json.dumps({
                         'type': 'complete',
                         'message': f'Duration {duration_s}s reached',
                         'files_streamed': len(processed_files) - len(existing_files)
                     }))
                     break
+                elif duration_reached:
+                    logger.info(f"UTSC WebSocket: Duration reached, draining {len(file_buffer)} buffered samples...")
+                    # Stop collecting new files, just drain the buffer
+                    pass
                 
                 # Collect new files into buffer (only files created AFTER stream started)
-                pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-                files = glob.glob(pattern)
-                # Filter: not processed AND created after stream start
-                new_files = [f for f in files 
-                            if f not in processed_files 
-                            and os.path.getmtime(f) >= stream_start_time]
-                
-                if len(new_files) > 0:
-                    logger.info(f"UTSC WebSocket: Found {len(new_files)} new files to process")
-                
-                for filepath in sorted(new_files, key=os.path.getmtime):
-                    processed_files.add(filepath)
+                # Skip if duration reached - just drain existing buffer
+                if not duration_reached:
+                    pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+                    files = glob.glob(pattern)
+                    # Filter: not processed AND created after stream start
+                    new_files = [f for f in files 
+                                if f not in processed_files 
+                                and os.path.getmtime(f) >= stream_start_time]
                     
-                    try:
-                        with open(filepath, 'rb') as f:
-                            binary_data = f.read()
+                    if len(new_files) > 0:
+                        logger.info(f"UTSC WebSocket: Found {len(new_files)} new files to process")
+                    
+                    for filepath in sorted(new_files, key=os.path.getmtime):
+                        processed_files.add(filepath)
                         
-                        if len(binary_data) >= 328:
-                            # Parse amplitudes
-                            samples = binary_data[328:]
-                            amplitudes = []
-                            for i in range(0, len(samples), 2):
-                                if i+1 < len(samples):
-                                    val = struct.unpack('>h', samples[i:i+2])[0]
-                                    amplitudes.append(val / 10.0)
+                        try:
+                            with open(filepath, 'rb') as f:
+                                binary_data = f.read()
                             
-                            # Get config from Redis
-                            try:
-                                from app import redis_client
-                                config_json = redis_client.get(f'utsc_config:{mac_address}')
-                                if config_json:
-                                    config = json.loads(config_json)
-                                    span_hz = config.get('span_hz', 100000000)
-                                    center_freq_hz = config.get('center_freq_hz', 50000000)
-                                else:
+                            if len(binary_data) >= 328:
+                                # Parse amplitudes
+                                samples = binary_data[328:]
+                                amplitudes = []
+                                for i in range(0, len(samples), 2):
+                                    if i+1 < len(samples):
+                                        val = struct.unpack('>h', samples[i:i+2])[0]
+                                        amplitudes.append(val / 10.0)
+                                
+                                # Get config from Redis
+                                try:
+                                    from app import redis_client
+                                    config_json = redis_client.get(f'utsc_config:{mac_address}')
+                                    if config_json:
+                                        config = json.loads(config_json)
+                                        span_hz = config.get('span_hz', 100000000)
+                                        center_freq_hz = config.get('center_freq_hz', 50000000)
+                                    else:
+                                        span_hz = 100000000
+                                        center_freq_hz = 50000000
+                                except:
                                     span_hz = 100000000
                                     center_freq_hz = 50000000
-                            except:
-                                span_hz = 100000000
-                                center_freq_hz = 50000000
-                            
-                            # Add to buffer
-                            file_buffer.append({
-                                'filepath': filepath,
-                                'amplitudes': amplitudes,
-                                'span_hz': span_hz,
-                                'center_freq_hz': center_freq_hz,
-                                'collected_at': current_time
-                            })
-                    except Exception as e:
-                        logger.error(f"Error parsing UTSC file {filepath}: {e}")
+                                
+                                # Add to buffer
+                                file_buffer.append({
+                                    'filepath': filepath,
+                                    'amplitudes': amplitudes,
+                                    'span_hz': span_hz,
+                                    'center_freq_hz': center_freq_hz,
+                                    'collected_at': current_time
+                                })
+                        except Exception as e:
+                            logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
                 # Wait for initial buffer to fill before starting stream (must be exactly target or more)
                 if not streaming_started:
