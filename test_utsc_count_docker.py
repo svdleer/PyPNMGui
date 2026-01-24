@@ -12,7 +12,7 @@ MAC = "e4:57:40:f0:3a:14"
 CMTS_IP = "172.16.6.212"
 RF_PORT = 1074339840
 COMMUNITY = "Z1gg0Sp3c1@l"
-TFTP_PATH = "/app/data/tftp"  # Mounted TFTP directory inside GUI container
+TFTP_PATH = "/app/data"  # Data directory inside GUI container where PNM files are saved
 FILENAME_PREFIX = "utsc_count_test"
 API_URL = "http://localhost:8000"  # API inside same container
 
@@ -142,10 +142,11 @@ print("="*80)
 
 # Check if TFTP path exists
 if not os.path.exists(TFTP_PATH):
-    print(f"\n❌ ERROR: TFTP path {TFTP_PATH} does not exist!")
+    print(f"\n❌ ERROR: Data path {TFTP_PATH} does not exist!")
     print(f"   This script must be run inside pypnm-gui-lab container")
-    print(f"   with TFTP directory mounted at {TFTP_PATH}")
     exit(1)
+else:
+    print(f"✅ Data directory exists: {TFTP_PATH}")
 
 results = []
 
