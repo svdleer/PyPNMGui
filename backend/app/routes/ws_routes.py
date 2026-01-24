@@ -311,6 +311,9 @@ def init_websocket(app):
                             if f not in processed_files 
                             and os.path.getmtime(f) >= stream_start_time]
                 
+                if len(new_files) > 0:
+                    logger.info(f"UTSC WebSocket: Found {len(new_files)} new files to process")
+                
                 for filepath in sorted(new_files, key=os.path.getmtime):
                     processed_files.add(filepath)
                     
