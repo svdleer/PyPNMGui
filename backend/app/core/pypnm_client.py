@@ -612,7 +612,7 @@ class PyPNMClient:
         logical_ch_ifindex: Optional[int] = None,
         repeat_period_ms: int = 1000,
         freerun_duration_ms: int = 300000,  # Default 5 minutes
-        trigger_count: int = 10
+        trigger_count: Optional[int] = None  # None = omit from payload, fixes E6000 freerun bug
     ) -> Dict[str, Any]:
         """
         Trigger CMTS-based Upstream Triggered Spectrum Capture (UTSC).
@@ -663,7 +663,7 @@ class PyPNMClient:
                 "filename": filename,
                 "repeat_period_ms": repeat_period_ms,
                 "freerun_duration_ms": freerun_duration_ms,
-                "trigger_count": trigger_count
+                **({} if trigger_count is None else {"trigger_count": trigger_count})  # Omit if None - E6000 bug workaround
             },
             "analysis": {
                 "output_type": output_type
