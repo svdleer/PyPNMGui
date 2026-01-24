@@ -263,14 +263,15 @@ def init_websocket(app):
             }))
             
             # Delete old UTSC files via FTP before starting (but only if no active session exists)
-            pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+            # Clean up ALL UTSC files, not just current MAC - prevents disk buildup
+            pattern = f"{tftp_base}/utsc_*"
             existing_files = glob.glob(pattern)
             
-            # Check if there's already an active UTSC session for this MAC
-            existing_session = next((s for s in _utsc_sessions.values() if s.get('mac_address') == mac_address), None)
+            # Check if there are ANY active UTSC sessions (any MAC)
+            existing_session = len(_utsc_sessions) > 0
             
             if existing_files and not existing_session:
-                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files, deleting via FTP...")
+                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files from all MACs, deleting via FTP...")
                 ftp_server = current_app.config.get('FTP_SERVER_IP', '127.0.0.1')
                 ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
                 ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
