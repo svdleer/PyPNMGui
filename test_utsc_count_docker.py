@@ -14,7 +14,7 @@ RF_PORT = 1074339840
 COMMUNITY = "Z1gg0Sp3c1@l"
 TFTP_PATH = "/app/data"  # Data directory inside GUI container where PNM files are saved
 FILENAME_PREFIX = "utsc_count_test"
-API_URL = "http://localhost:8000"  # API inside same container
+API_URL = "http://172.17.0.1:8000"  # API on docker host bridge network
 
 def count_files():
     """Count UTSC files in mounted TFTP directory"""
