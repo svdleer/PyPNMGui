@@ -11,7 +11,7 @@ MAC = "e4:57:40:f0:3a:14"
 CMTS_IP = "172.16.6.212"
 RF_PORT = "1074339840"
 COMMUNITY = "Z1gg0Sp3c1@l"
-TFTP_PATH = "/var/lib/tftpboot"
+TFTP_PATH = "/app/data/tftp"  # GUI container's TFTP mount point
 FILENAME_PREFIX = "utsc_count_test"
 
 # OID bases
@@ -19,7 +19,7 @@ UTSC_CFG = "1.3.6.1.4.1.4491.2.1.27.1.3.10.2.1"
 UTSC_CTRL = "1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1"
 
 def snmp_set(oid, type_flag, value):
-    """Set SNMP value"""
+    """Set SNMP value via agent container"""
     cmd = f'docker exec pypnm-agent-lab snmpset -v2c -c \'{COMMUNITY}\' {CMTS_IP} {oid} {type_flag} {value}'
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
     return result.returncode == 0
@@ -30,16 +30,33 @@ def trigger_utsc():
     return snmp_set(oid, 'i', '1')
 
 def count_files():
-    """Count UTSC files on TFTP server"""
-    cmd = f'docker exec pypnm-agent-lab ls -1 {TFTP_PATH}/{FILENAME_PREFIX}_* 2>/dev/null | wc -l'
+    """Count UTSC files - check both possible locations"""
+    # Try GUI container's TFTP mount
+    try:
+        files = [f for f in os.listdir(TFTP_PATH) if f.startswith(FILENAME_PREFIX)]
+        return len(files)
+    except:
+        pass
+    
+    # Fallback: check agent container
+    cmd = f'docker exec pypnm-agent-lab ls -1 /var/lib/tftpboot/{FILENAME_PREFIX}_* 2>/dev/null | wc -l'
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
     if result.returncode == 0:
         return int(result.stdout.strip())
     return 0
 
 def clear_files():
-    """Remove old test files"""
-    cmd = f'docker exec pypnm-agent-lab rm -f {TFTP_PATH}/{FILENAME_PREFIX}_* 2>/dev/null'
+    """Remove old test files from both locations"""
+    # Clear from GUI container's mount
+    try:
+        for f in os.listdir(TFTP_PATH):
+            if f.startswith(FILENAME_PREFIX):
+                os.remove(os.path.join(TFTP_PATH, f))
+    except:
+        pass
+    
+    # Also clear from agent container
+    cmd = f'docker exec pypnm-agent-lab rm -f /var/lib/tftpboot/{FILENAME_PREFIX}_* 2>/dev/null'
     subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
     time.sleep(1)
 
