@@ -98,9 +98,9 @@ def configure_utsc():
     print("  Setting FreeRunDuration=60s")
     snmp_set(f"{UTSC_CFG}.19.{idx}", 'u', 60000)
     
-    # TriggerCount = 1 (testing with minimal count)
-    print("  Setting TriggerCount=1")
-    snmp_set(f"{UTSC_CFG}.26.{idx}", 'u', 1)
+    # TriggerCount - NOT SETTING (notWritable on E6000 in FreeRunning mode)
+    # print("  Setting TriggerCount=1")
+    # snmp_set(f"{UTSC_CFG}.26.{idx}", 'u', 1)
     
     # DestinationIndex = 1 (use pre-configured TFTP)
     print("  Setting DestinationIndex=1")
@@ -138,10 +138,10 @@ def parse_utsc_file(filepath):
         return None
 
 
-def watch_files(duration=60, retrigger_interval=1):
-    """Watch for UTSC files, buffer bursts, and stream evenly."""
+def watch_files(duration=60, min_buffer_size=20):
+    """Watch for UTSC files, buffer until threshold, then stream evenly."""
     print(f"\nWatching for files (duration={duration}s)...")
-    print("Buffering bursts for smooth streaming")
+    print(f"Buffering until {min_buffer_size} files collected before streaming")
     
     pattern = f"{TFTP_PATH}/{FILENAME_PREFIX}_*"
     processed = set()
@@ -149,19 +149,17 @@ def watch_files(duration=60, retrigger_interval=1):
     file_count = 0
     burst_count = 0
     last_status = None
-    can_trigger = True
-    last_trigger_time = 0
     
     # Buffer for smooth streaming
     file_buffer = []
     last_stream_time = 0
     stream_interval = 1.0  # Stream 1 file per second
+    streaming_started = False
     
-    # Initial trigger
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Initial trigger...")
+    # Initial trigger - SINGLE TRIGGER ONLY
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Triggering UTSC (single trigger, no retrigger)...")
     trigger_utsc()
-    last_trigger_time = time.time()
-    can_trigger = False
+    print("  Waiting for freerun to complete and files to arrive...")
     
     while time.time() - start_time < duration:
         current_time = time.time()
@@ -174,11 +172,6 @@ def watch_files(duration=60, retrigger_interval=1):
             last_status = status
             
             if status == STATUS_BUSY:
-                can_trigger = False
-            elif status in [STATUS_SAMPLE_READY, STATUS_INACTIVE]:
-                can_trigger = True
-        
-        # Collect new files into buffer
         files = glob.glob(pattern)
         new_files = [f for f in files if f not in processed]
         
@@ -203,8 +196,14 @@ def watch_files(duration=60, retrigger_interval=1):
             item = file_buffer.pop(0)
             file_count += 1
             last_stream_time = current_time
-            
-            amplitudes = item['amplitudes']
+          Check if we've reached minimum buffer size to start streaming
+        if not streaming_started and len(file_buffer) >= min_buffer_size:
+            streaming_started = True
+            print(f"\n  ✅ Buffer threshold reached ({len(file_buffer)} files) - Starting stream to scigraph!")
+            print()
+        
+        # Stream from buffer at steady rate (only after buffer threshold reached)
+        if streaming_started and  amplitudes = item['amplitudes']
             min_amp = min(amplitudes)
             max_amp = max(amplitudes)
             avg_amp = sum(amplitudes) / len(amplitudes)
@@ -214,13 +213,7 @@ def watch_files(duration=60, retrigger_interval=1):
             print(f"  [STREAM #{file_count:3d}] {filename[-23:]}: "
                   f"{len(amplitudes):4d} bins, {min_amp:6.1f}/{avg_amp:6.1f}/{max_amp:5.1f} dBmV "
                   f"(buffer: {len(file_buffer)}, latency: {latency:.1f}s)")
-        
-        # Re-trigger when sampleReady and buffer is getting low
-        time_since_trigger = current_time - last_trigger_time
-        if can_trigger and time_since_trigger > 0.5 and len(file_buffer) < 5:
-            print(f"  [TRIGGER] Buffer low ({len(file_buffer)}) - re-triggering...")
-            trigger_utsc()
-            last_trigger_time = current_time
+        NO RE-TRIGGERING - Single trigger only, let freerun complet= current_time
             can_trigger = False
         
         time.sleep(0.05)  # 50ms polling
@@ -251,4 +244,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()files - single trigger, buffer to 20, then stream
+    watch_files(duration=60, min_buffer_size=20
