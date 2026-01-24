@@ -248,7 +248,7 @@ def init_websocket(app):
         stream_interval = refresh_ms / 1000.0  # Convert to seconds
         connection_start_time = time.time()
         last_status = None
-        initial_buffer_target = 20  # Wait for 20 files before starting stream to scigraph
+        initial_buffer_target = 10  # Wait for 10 files before starting stream (freerun generates 10)
         streaming_started = False
         # Single trigger only - no re-triggering, let freerun complete naturally
         
