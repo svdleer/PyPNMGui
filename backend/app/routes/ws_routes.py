@@ -267,22 +267,22 @@ def init_websocket(app):
             pattern = f"{tftp_base}/utsc_*"
             existing_files = glob.glob(pattern)
             
+            # Always define FTP credentials for later use
+            ftp_server = current_app.config.get('FTP_SERVER_IP', '127.0.0.1')
+            ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
+            ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
+            
             # Check if there are ANY active UTSC sessions (any MAC)
             existing_session = len(_utsc_sessions) > 0
             
             if existing_files and not existing_session:
                 logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files from all MACs, deleting via FTP...")
-                ftp_server = current_app.config.get('FTP_SERVER_IP', '127.0.0.1')
-                ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
-                ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
                 filenames = [os.path.basename(f) for f in existing_files]
                 deleted = delete_utsc_files_via_ftp(ftp_server, ftp_user, ftp_pass, filenames)
                 logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via FTP")
                 time.sleep(0.2)  # Brief pause after deletion
             elif existing_session:
                 logger.info(f"UTSC WebSocket: Active session exists, skipping file deletion ({len(existing_files)} files preserved)")
-                ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
-                ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
                 filenames = [os.path.basename(f) for f in existing_files]
                 deleted = delete_utsc_files_via_ftp(ftp_server, ftp_user, ftp_pass, filenames)
                 logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via FTP")
