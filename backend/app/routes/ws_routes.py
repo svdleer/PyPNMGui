@@ -413,10 +413,10 @@ def init_websocket(app):
                             last_heartbeat = current_time
                 
                 # Stream from buffer at configured rate (only after initial buffering)
-                # Speed up streaming when buffer is large or when draining after duration reached
+                # Only speed up when draining after duration reached, not during normal operation
                 active_interval = stream_interval
-                if duration_reached or len(file_buffer) > 5:
-                    active_interval = min(stream_interval, 0.1)  # Drain faster when buffer full or duration reached
+                if duration_reached and len(file_buffer) > 0:
+                    active_interval = 0.1  # Drain faster only when time's up
                 
                 if streaming_started and file_buffer and (current_time - last_stream_time) >= active_interval:
                     item = file_buffer.popleft()
