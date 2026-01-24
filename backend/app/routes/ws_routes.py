@@ -380,6 +380,10 @@ def init_websocket(app):
                                             val = struct.unpack('>h', measurement_bytes[i:i+2])[0]
                                             amplitudes.append(val / 10.0)
                                     
+                                    # Debug: log first few amplitudes
+                                    if measurement_idx == 0 and len(amplitudes) > 0:
+                                        logger.info(f"First file amplitudes sample: {amplitudes[:10]}, num_bins={num_bins}, file_size={len(binary_data)}")
+                                    
                                     # Add each measurement to buffer
                                     file_buffer.append({
                                         'filepath': f"{filepath}#{measurement_idx}",
