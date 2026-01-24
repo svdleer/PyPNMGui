@@ -294,13 +294,11 @@ def init_websocket(app):
             processed_files.update(remaining_files)
             logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} old files marked as processed")
             
-            # Single trigger only - let freerun complete naturally, no re-triggering
-            # Set stream_start_time BEFORE trigger so new files are captured
+            # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
+            # Sending trigger here would RESTART the capture and interrupt the 60-second freerun
+            # Just wait for files to arrive from the already-running UTSC session
             stream_start_time = time.time() - 2.0  # Allow 2s clock skew tolerance
-            if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Single trigger on startup, freerun will handle the rest")
-                trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
-                last_trigger_time = time.time()
+            logger.info(f"UTSC WebSocket: Waiting for files from PyPNM-triggered freerun session (NO GUI trigger)")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
