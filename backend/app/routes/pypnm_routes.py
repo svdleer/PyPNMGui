@@ -1041,7 +1041,7 @@ def configure_utsc(mac_address):
             logical_ch_ifindex=data.get('logical_ch_ifindex'),
             repeat_period_ms=data.get('repeat_period_ms', 3000),
             freerun_duration_ms=data.get('freerun_duration_ms', 300000),  # Default 5 minutes
-            trigger_count=data.get('trigger_count', 20)
+            trigger_count=data.get('trigger_count') if 'trigger_count' in data else None  # Only set if explicitly provided
         )
         logger.info(f"UTSC API full response: {result}")
         return jsonify({
