@@ -1247,7 +1247,9 @@ createApp({
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             // Pass refresh rate (ms) and duration (s) as query params
             const refreshMs = this.utscRefreshRate;
-            const durationS = this.utscDuration;
+            // WebSocket duration needs to be longer than UTSC freerun to allow all files to stream
+            // Add 60s buffer for trigger delay + file arrival + streaming after UTSC completes
+            const durationS = this.utscDuration + 60;
             const rfPort = this.utscConfig.rfPortIfindex;
             const cmtsIp = this.selectedModem.cmts_ip;
             const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
