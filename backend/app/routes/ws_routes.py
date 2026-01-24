@@ -277,11 +277,13 @@ def init_websocket(app):
             
             # Re-check what files remain after deletion
             remaining_files = glob.glob(pattern)
+            # Mark remaining old files as processed (they're old/undeletable, ignore them)
             processed_files.update(remaining_files)
-            stream_start_time = time.time() - 1.0  # Allow 1s clock skew tolerance
-            logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} files remain after cleanup")
+            logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} old files marked as processed")
             
             # Single trigger only - let freerun complete naturally, no re-triggering
+            # Set stream_start_time BEFORE trigger so new files are captured
+            stream_start_time = time.time() - 2.0  # Allow 2s clock skew tolerance
             if rf_port and cmts_ip:
                 logger.info(f"UTSC WebSocket: Single trigger on startup, freerun will handle the rest")
                 trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
