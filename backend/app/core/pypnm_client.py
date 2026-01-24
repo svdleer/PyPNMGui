@@ -669,6 +669,7 @@ class PyPNMClient:
                 "output_type": output_type
             }
         }
+        logger.info(f"UTSC payload trigger_count={'OMITTED' if trigger_count is None else trigger_count}: {payload}")
         return self._post("/docs/pnm/us/spectrumAnalyzer/getCapture", payload)
     def health_check(self) -> bool:
         """Check if PyPNM server is reachable."""
