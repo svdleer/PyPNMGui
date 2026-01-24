@@ -341,44 +341,24 @@ def init_websocket(app):
                             with open(filepath, 'rb') as f:
                                 binary_data = f.read()
                             
-                            # UTSC file format: 328-byte header + SNMP spectrum format
-                            # After 328 bytes, data is in SNMP format: multiple groups of [20-byte header + amplitudes]
-                            # Each 20-byte header: ch_center_freq(4), freq_span(4), num_bins(4), bin_spacing(4), res_bw(4)
+                            # UTSC file format: 328-byte header + amplitude data
+                            # After 328 bytes: signed 16-bit big-endian integers in 0.1 dBmV units
                             
                             if len(binary_data) < 328:
                                 continue
                             
-                            offset = 328  # Skip UTSC file header
-                            all_amplitudes = []
+                            # Parse amplitude data after 328-byte header
+                            amp_data = binary_data[328:]
+                            num_samples = len(amp_data) // 2
                             
-                            # Parse SNMP spectrum groups
-                            while offset + 20 <= len(binary_data):
-                                # Parse 20-byte group header (big-endian unsigned ints)
-                                header = binary_data[offset:offset + 20]
+                            all_amplitudes = []
+                            if num_samples > 0:
                                 try:
-                                    ch_center_freq, freq_span, num_bins, bin_spacing, res_bw = struct.unpack('>5I', header)
-                                except struct.error:
-                                    break
-                                
-                                if num_bins == 0:
-                                    break
-                                
-                                # Parse amplitude data for this group
-                                amp_len = num_bins * 2
-                                amp_end = offset + 20 + amp_len
-                                if amp_end > len(binary_data):
-                                    break
-                                
-                                amp_bytes = binary_data[offset + 20:amp_end]
-                                try:
-                                    # PyPNM format: signed 16-bit big-endian, divided by 100.0 for dBmV
-                                    amplitudes = struct.unpack(f'>{num_bins}h', amp_bytes)
-                                    amplitudes_dbmv = [a / 100.0 for a in amplitudes]
-                                    all_amplitudes.extend(amplitudes_dbmv)
-                                except struct.error:
-                                    break
-                                
-                                offset = amp_end
+                                    # UTSC format: signed 16-bit big-endian, divided by 10.0 for dBmV (0.1 dBmV units)
+                                    amplitudes = struct.unpack(f'>{num_samples}h', amp_data[:num_samples * 2])
+                                    all_amplitudes = [a / 10.0 for a in amplitudes]
+                                except struct.error as e:
+                                    logger.error(f"Error unpacking amplitude data: {e}")
                             
                             if all_amplitudes:
                                 # Get center freq and span from Redis or use defaults

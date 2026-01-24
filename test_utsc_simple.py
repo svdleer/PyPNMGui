@@ -138,10 +138,11 @@ def parse_utsc_file(filepath):
         return None
 
 
-def watch_files(duration=60, min_buffer_size=20):
+def watch_files(duration=60, min_buffer_size=10):
     """Watch for UTSC files, buffer until threshold, then stream evenly."""
     print(f"\nWatching for files (duration={duration}s)...")
     print(f"Buffering until {min_buffer_size} files collected before streaming")
+    print(f"⚠️  E6000 generates exactly 10 files per trigger - will auto-retrigger every 10s")
     
     pattern = f"{TFTP_PATH}/{FILENAME_PREFIX}_*"
     processed = set()
@@ -149,6 +150,9 @@ def watch_files(duration=60, min_buffer_size=20):
     file_count = 0
     burst_count = 0
     last_status = None
+    last_trigger_time = 0
+    trigger_interval = 10  # Retrigger every 10 seconds
+    trigger_count = 0
     
     # Buffer for smooth streaming
     file_buffer = []
@@ -156,13 +160,22 @@ def watch_files(duration=60, min_buffer_size=20):
     stream_interval = 1.0  # Stream 1 file per second
     streaming_started = False
     
-    # Initial trigger - SINGLE TRIGGER ONLY
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Triggering UTSC (single trigger, no retrigger)...")
+    # Initial trigger
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Trigger #1...")
     trigger_utsc()
-    print("  Waiting for freerun to complete and files to arrive...")
+    last_trigger_time = time.time()
+    trigger_count = 1
+    print("  Waiting for files...")
     
     while time.time() - start_time < duration:
         current_time = time.time()
+        
+        # Auto-retrigger every trigger_interval seconds
+        if current_time - last_trigger_time >= trigger_interval:
+            trigger_count += 1
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Trigger #{trigger_count} (auto-retrigger)...")
+            trigger_utsc()
+            last_trigger_time = current_time
         
         # Poll status
         status = get_utsc_status()
