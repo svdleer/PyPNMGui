@@ -341,8 +341,47 @@ def init_websocket(app):
                             with open(filepath, 'rb') as f:
                                 binary_data = f.read()
                             
-                            if len(binary_data) >= 328:
-                                # Get config from Redis to determine num_bins
+                            # UTSC file format: 328-byte header + SNMP spectrum format
+                            # After 328 bytes, data is in SNMP format: multiple groups of [20-byte header + amplitudes]
+                            # Each 20-byte header: ch_center_freq(4), freq_span(4), num_bins(4), bin_spacing(4), res_bw(4)
+                            
+                            if len(binary_data) < 328:
+                                continue
+                            
+                            offset = 328  # Skip UTSC file header
+                            all_amplitudes = []
+                            
+                            # Parse SNMP spectrum groups
+                            while offset + 20 <= len(binary_data):
+                                # Parse 20-byte group header (big-endian unsigned ints)
+                                header = binary_data[offset:offset + 20]
+                                try:
+                                    ch_center_freq, freq_span, num_bins, bin_spacing, res_bw = struct.unpack('>5I', header)
+                                except struct.error:
+                                    break
+                                
+                                if num_bins == 0:
+                                    break
+                                
+                                # Parse amplitude data for this group
+                                amp_len = num_bins * 2
+                                amp_end = offset + 20 + amp_len
+                                if amp_end > len(binary_data):
+                                    break
+                                
+                                amp_bytes = binary_data[offset + 20:amp_end]
+                                try:
+                                    # PyPNM format: signed 16-bit big-endian, divided by 100.0 for dBmV
+                                    amplitudes = struct.unpack(f'>{num_bins}h', amp_bytes)
+                                    amplitudes_dbmv = [a / 100.0 for a in amplitudes]
+                                    all_amplitudes.extend(amplitudes_dbmv)
+                                except struct.error:
+                                    break
+                                
+                                offset = amp_end
+                            
+                            if all_amplitudes:
+                                # Get center freq and span from Redis or use defaults
                                 try:
                                     from app import redis_client
                                     config_json = redis_client.get(f'utsc_config:{mac_address}')
@@ -350,48 +389,22 @@ def init_websocket(app):
                                         config = json.loads(config_json)
                                         span_hz = config.get('span_hz', 100000000)
                                         center_freq_hz = config.get('center_freq_hz', 50000000)
-                                        num_bins = config.get('num_bins', 1600)
                                     else:
                                         span_hz = 100000000
                                         center_freq_hz = 50000000
-                                        num_bins = 1600
                                 except:
                                     span_hz = 100000000
                                     center_freq_hz = 50000000
-                                    num_bins = 1600
                                 
-                                # File format: 328-byte header + multiple measurements
-                                # Each measurement is num_bins * 2 bytes (16-bit signed integers)
-                                bytes_per_measurement = num_bins * 2
-                                samples_data = binary_data[328:]  # Skip the single file header
-                                
-                                # Split into individual measurements
-                                num_measurements = len(samples_data) // bytes_per_measurement
-                                
-                                for measurement_idx in range(num_measurements):
-                                    start = measurement_idx * bytes_per_measurement
-                                    end = start + bytes_per_measurement
-                                    measurement_bytes = samples_data[start:end]
-                                    
-                                    # Parse amplitudes for this measurement
-                                    amplitudes = []
-                                    for i in range(0, len(measurement_bytes), 2):
-                                        if i+1 < len(measurement_bytes):
-                                            val = struct.unpack('>h', measurement_bytes[i:i+2])[0]
-                                            amplitudes.append(val / 10.0)
-                                    
-                                    # Debug: log first few amplitudes
-                                    if measurement_idx == 0 and len(amplitudes) > 0:
-                                        logger.info(f"First file amplitudes sample: {amplitudes[:10]}, num_bins={num_bins}, file_size={len(binary_data)}")
-                                    
-                                    # Add each measurement to buffer
-                                    file_buffer.append({
-                                        'filepath': f"{filepath}#{measurement_idx}",
-                                        'amplitudes': amplitudes,
-                                        'span_hz': span_hz,
-                                        'center_freq_hz': center_freq_hz,
-                                        'collected_at': current_time
-                                    })
+                                # Add to buffer
+                                file_buffer.append({
+                                    'filepath': filepath,
+                                    'amplitudes': all_amplitudes,
+                                    'span_hz': span_hz,
+                                    'center_freq_hz': center_freq_hz,
+                                    'collected_at': current_time
+                                })
+                                logger.info(f"Parsed {len(all_amplitudes)} amplitude samples from {os.path.basename(filepath)}")
                         except Exception as e:
                             logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
