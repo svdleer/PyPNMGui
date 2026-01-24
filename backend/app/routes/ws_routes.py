@@ -406,18 +406,7 @@ def init_websocket(app):
                         logger.error(f"Failed to send UTSC data: {send_err}")
                         raise
                 
-                # Re-trigger via SNMP when buffer gets low to maintain continuous stream
-                # E6000 generates 10 files per burst in ~11 seconds
-                # At 1 file/sec stream rate, we consume 10 files in 10 seconds
-                # Trigger early enough so new batch arrives before buffer empties
-                time_since_trigger = current_time - last_trigger_time
-                buffer_low = len(file_buffer) <= buffer_low_threshold
-                time_ok = time_since_trigger >= min_trigger_interval  # Respect minimum interval
-                
-                if rf_port and cmts_ip and streaming_started and buffer_low and time_ok:
-                    logger.info(f"UTSC WebSocket: Re-triggering (buffer={len(file_buffer)}, last trigger {time_since_trigger:.1f}s ago)")
-                    trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
-                    last_trigger_time = current_time
+                # NO RE-TRIGGERING - Single trigger, let freerun complete naturally
                 
                 # Send heartbeat
                 if current_time - last_heartbeat > heartbeat_interval:
