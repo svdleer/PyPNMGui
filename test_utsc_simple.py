@@ -98,9 +98,9 @@ def configure_utsc():
     print("  Setting FreeRunDuration=60s")
     snmp_set(f"{UTSC_CFG}.19.{idx}", 'u', 60000)
     
-    # TriggerCount - NOT SETTING (notWritable on E6000)
-    # print("  Setting TriggerCount=10")
-    # snmp_set(f"{UTSC_CFG}.26.{idx}", 'u', 10)
+    # TriggerCount = 1 (testing with minimal count)
+    print("  Setting TriggerCount=1")
+    snmp_set(f"{UTSC_CFG}.26.{idx}", 'u', 1)
     
     # DestinationIndex = 1 (use pre-configured TFTP)
     print("  Setting DestinationIndex=1")
