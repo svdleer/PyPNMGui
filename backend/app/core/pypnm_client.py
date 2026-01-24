@@ -648,8 +648,8 @@ class PyPNMClient:
                 "community": community
             },
             "tftp": {
-                "ipv4": tftp_ipv4 if tftp_ipv4 else "",
-                "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"  # PyPNM requires ipv6 field
+                "ipv4": tftp_ipv4 if tftp_ipv4 else None,
+                "ipv6": tftp_ipv6 if tftp_ipv6 else None
             },
             "trigger": {
                 "cm_mac": cm_mac,
