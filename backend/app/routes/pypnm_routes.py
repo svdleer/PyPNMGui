@@ -121,6 +121,14 @@ def pnm_measurement(measurement_type, mac_address):
                     "message": "cmts_ip and rf_port_ifindex required for UTSC"
                 }), 400
             
+            # Stop any existing UTSC measurement before starting a new one
+            try:
+                logger.info(f"Stopping any existing UTSC on {cmts_ip} port {rf_port_ifindex}")
+                client.stop_utsc(cmts_ip, rf_port_ifindex, community)
+                time.sleep(0.5)  # Brief delay to ensure stop completes
+            except Exception as e:
+                logger.warning(f"Failed to stop existing UTSC (may not be running): {e}")
+            
             result = client.get_upstream_spectrum_capture(
                 cmts_ip=cmts_ip,
                 rf_port_ifindex=rf_port_ifindex,
