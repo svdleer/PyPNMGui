@@ -291,32 +291,15 @@ def init_websocket(app):
                 logger.info(f"UTSC WebSocket: No recent files found - waiting for new captures")
             
             # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
-            # Allow looking back 60s to use existing recent files from just-started UTSC
-            stream_start_time = time.time() - 60.0
-            logger.info(f"UTSC WebSocket: Streaming files from last 60s (API-triggered freerun)")
+            # Start collecting files from NOW - E6000 generates continuously for 60s
+            stream_start_time = time.time()
+            logger.info(f"UTSC WebSocket: Streaming files from NOW (API-triggered freerun runs for 60s)")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
                 elapsed = current_time - connection_start_time
                 
-                # Check duration limit - but continue to drain buffer
-                duration_reached = elapsed > duration_s
-                if duration_reached and len(file_buffer) == 0:
-                    logger.info(f"UTSC WebSocket: Duration {duration_s}s reached and buffer drained, closing")
-                    ws.send(json.dumps({
-                        'type': 'complete',
-                        'message': f'Duration {duration_s}s reached',
-                        'files_streamed': len(processed_files)
-                    }))
-                    break
-                elif duration_reached:
-                    logger.info(f"UTSC WebSocket: Duration reached, draining {len(file_buffer)} buffered samples...")
-                    # Stop collecting new files, just drain the buffer
-                    pass
-                
-                # Collect new files into buffer (only files created AFTER stream started)
-                # Skip if duration reached - just drain existing buffer
-                if not duration_reached:
+                # Collect new files continuously - no time limit
                     pattern = f"{tftp_base}/utsc_{mac_clean}_*"
                     files = glob.glob(pattern)
                     # Filter: not processed AND created after stream start
@@ -404,12 +387,7 @@ def init_websocket(app):
                             last_heartbeat = current_time
                 
                 # Stream from buffer at configured rate (only after initial buffering)
-                # Only speed up when draining after duration reached, not during normal operation
-                active_interval = stream_interval
-                if duration_reached and len(file_buffer) > 0:
-                    active_interval = 0.1  # Drain faster only when time's up
-                
-                if streaming_started and file_buffer and (current_time - last_stream_time) >= active_interval:
+                if streaming_started and file_buffer and (current_time - last_stream_time) >= stream_interval:
                     item = file_buffer.popleft()
                     last_stream_time = current_time
                     
