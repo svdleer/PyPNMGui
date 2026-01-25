@@ -842,60 +842,9 @@ createApp({
                 this.utscSciChartSeries.clear();
             }
             
-            // Configure and start UTSC on CMTS first
-            console.log('[UTSC] Chart ready, starting UTSC (NO STOP - just start)...');
-            
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!cmtsIp) {
-                this.$toast?.error('CMTS IP not available');
-                this.utscLiveMode = false;
-                return;
-            }
-            
-            try {
-                // Start UTSC directly - no stop needed (PyPNM API handles it)
-                this.$toast?.info('Starting UTSC measurement...');
-                const freerunDurationMs = this.utscDuration * 1000;
-                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip: cmtsIp,
-                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
-                        tftp_ip: this.selectedModem.tftp_ip || '172.16.6.101',
-                        trigger_mode: this.utscConfig.triggerMode,
-                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
-                        span_hz: this.utscConfig.spanMhz * 1000000,
-                        num_bins: this.utscConfig.numBins,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs,
-                        freerun_duration_ms: freerunDurationMs
-                    })
-                });
-                
-                const result = await response.json();
-                if (!result.success) {
-                    const errorMsg = result.error || 'Failed to start UTSC';
-                    console.error('[UTSC] Start failed:', errorMsg);
-                    this.$toast?.error(`UTSC failed: ${errorMsg}`);
-                    this.utscLiveMode = false;
-                    return;
-                }
-                
-                console.log('[UTSC] UTSC started, WebSocket will stream files...');
-                this.$toast?.success('UTSC started - files generating');
-                
-                // Wait for initial files to be generated
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Now start WebSocket streaming
-                this.startUtscWebSocket();
-            } catch (error) {
-                console.error('[UTSC] Failed to configure UTSC:', error);
-                this.$toast?.error('Failed to configure UTSC: ' + error.message);
-                this.utscLiveMode = false;
-                return;
-            }
+            // Use new flow: WebSocket FIRST, then API trigger
+            console.log('[UTSC] Chart ready, using WebSocket-first flow...');
+            await this.startUtscWebSocketAndTrigger();
             
             // Wait for WebSocket to connect (max 5 seconds)
             const wsReady = await new Promise(resolve => {
