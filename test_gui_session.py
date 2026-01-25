@@ -32,21 +32,27 @@ async def test_utsc_live_session():
             await page.wait_for_load_state("domcontentloaded")
             print("✅ GUI loaded")
             
-            # Wait for Vue app to initialize
-            await asyncio.sleep(2)
+            # Wait for Vue app to initialize - look for Vue root element
+            print("⏳ Waiting for Vue app to initialize...")
+            await page.wait_for_selector("#app", timeout=30000)
+            await asyncio.sleep(3)  # Extra wait for Vue mounting
             
             # Step 2: Select CMTS
             print("🔍 Looking for CMTS dropdown...")
-            cmts_select = page.locator("#cmts-select")
+            # Try multiple possible selectors
+            cmts_select = page.locator("select[name='cmts'], #cmts-select, select:has-text('Select CMTS')").first
             await expect(cmts_select).to_be_visible(timeout=10000)
             
             # Get CMTS list
             await cmts_select.click()
             await asyncio.sleep(1)
-            cmts_options = await page.locator("#cmts-select option").all()
+            cmts_options = await page.locator("select[name='cmts'] option, #cmts-select option, select:has-text('Select CMTS') option").first.locator("xpath=ancestor::select//option").all()
             
             if len(cmts_options) <= 1:  # Only "Select CMTS" option
                 print("❌ No CMTS systems available")
+                # Take screenshot for debugging
+                await page.screenshot(path="test_no_cmts.png")
+                print("📸 Screenshot saved: test_no_cmts.png")
                 return False
             
             # Select first CMTS (skip the placeholder)
@@ -221,12 +227,21 @@ async def test_quick_cmts_check():
         
         try:
             await page.goto(GUI_URL, wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(2)
             
-            cmts_select = page.locator("#cmts-select")
+            # Wait for Vue app
+            print("⏳ Waiting for Vue app...")
+            await page.wait_for_selector("#app", timeout=15000)
+            await asyncio.sleep(3)
+            
+            # Take screenshot for debugging
+            await page.screenshot(path="test_quick_check.png")
+            print("📸 Screenshot saved: test_quick_check.png")
+            
+            # Look for CMTS select
+            cmts_select = page.locator("select[name='cmts'], #cmts-select, select").first
             await expect(cmts_select).to_be_visible(timeout=10000)
             
-            options_count = await page.locator("#cmts-select option").count()
+            options_count = await cmts_select.locator("option").count()
             
             if options_count > 1:
                 print(f"✅ CMTS list loaded: {options_count - 1} systems")
