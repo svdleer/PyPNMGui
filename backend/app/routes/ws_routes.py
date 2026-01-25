@@ -297,7 +297,8 @@ def init_websocket(app):
             # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
             # Sending trigger here would RESTART the capture and interrupt the 60-second freerun
             # Just wait for files to arrive from the already-running UTSC session
-            stream_start_time = time.time() - 2.0  # Allow 2s clock skew tolerance
+            # Allow looking back 10s to catch files created between API start and WebSocket connect
+            stream_start_time = time.time() - 10.0  # Look back 10s to catch recently started files
             logger.info(f"UTSC WebSocket: Waiting for files from PyPNM-triggered freerun session (NO GUI trigger)")
             
             while _utsc_sessions.get(session_id, False):
