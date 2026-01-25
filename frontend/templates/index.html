@@ -319,6 +319,11 @@
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="upstream-pnm-tab" data-bs-toggle="tab" data-bs-target="#upstream-pnm" type="button" @click="onUpstreamPnmTabClick">
+                            <i class="bi bi-graph-up-arrow me-2"></i>Upstream PNM
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
                         <button class="nav-link" id="pnm-tab" data-bs-toggle="tab" data-bs-target="#pnm" type="button">
                             <i class="bi bi-graph-up me-2"></i>PNM Measurements
                         </button>
@@ -896,6 +901,51 @@
                                     <div class="card-body text-center py-5" v-else>
                                         <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
                                         <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upstream PNM Tab -->
+                    <div class="tab-pane fade" id="upstream-pnm" role="tabpanel">
+                        <div class="row">
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-activity me-2"></i>UTSC Spectrum Analyzer</h5>
+                                        <div>
+                                            <span class="badge me-2" :class="utscWsStatus === 'connected' ? 'bg-success' : 'bg-secondary'">
+                                                <i class="bi" :class="utscWsStatus === 'connected' ? 'bi-wifi' : 'bi-wifi-off'"></i>
+                                                {{ utscWsStatus }}
+                                            </span>
+                                            <button @click="startUtscStream" 
+                                                    class="btn btn-sm btn-success" 
+                                                    :disabled="!selectedModem || utscStreaming">
+                                                <i class="bi bi-play-fill"></i> Start (60s)
+                                            </button>
+                                            <button @click="stopUtscStream" 
+                                                    class="btn btn-sm btn-danger ms-2" 
+                                                    :disabled="!utscStreaming">
+                                                <i class="bi bi-stop-fill"></i> Stop
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="utsc-chart" style="width: 100%; height: 500px; background: #000;"></div>
+                                        <div class="mt-2 text-center small">
+                                            <span v-if="utscStreaming" class="text-success">
+                                                <i class="bi bi-broadcast"></i> Streaming... 
+                                                <span class="badge bg-secondary ms-2">{{ utscDataCount }} samples</span>
+                                                <span class="badge bg-info ms-2">{{ utscTimeRemaining }}s left</span>
+                                            </span>
+                                            <span v-else-if="utscWsStatus === 'connected'" class="text-muted">
+                                                WebSocket ready - Click Start to begin
+                                            </span>
+                                            <span v-else class="text-muted">
+                                                Connecting...
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

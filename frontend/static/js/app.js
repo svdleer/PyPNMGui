@@ -98,6 +98,14 @@ createApp({
             utscUpdateThrottle: 100,  // Min 100ms between updates
             
             // Housekeeping
+            // Upstream PNM persistent WebSocket
+            utscWs: null,  // Persistent WebSocket connection
+            utscWsStatus: 'disconnected',  // disconnected, connecting, connected
+            utscStreaming: false,  // Currently streaming data
+            utscDataCount: 0,  // Number of spectrum samples received
+            utscStartTime: null,  // Stream start timestamp
+            utscTimeRemaining: 60,  // Seconds remaining in freerun
+            utscDurationTimer: null,  // Interval timer for countdown
             housekeepingDays: 7,
             housekeepingDryRun: true,
             housekeepingResult: null,
@@ -2755,6 +2763,202 @@ createApp({
                 timer: 5000,
                 timerProgressBar: true
             });
+        },
+        
+        // Upstream PNM Tab - Persistent WebSocket Control Channel
+        onUpstreamPnmTabClick() {
+            // Connect persistent WebSocket when tab is opened
+            if (!this.utscWs || this.utscWsStatus !== 'connected') {
+                this.connectUtscWebSocket();
+            }
+            // Initialize chart if needed
+            if (!this.utscChartInstance && window.Plotly) {
+                this.$nextTick(() => this.initUtscChart());
+            }
+        },
+        
+        connectUtscWebSocket() {
+            if (!this.selectedModem) {
+                console.warn('No modem selected');
+                return;
+            }
+            
+            if (this.utscWs && this.utscWsStatus === 'connected') {
+                console.log('WebSocket already connected');
+                return;
+            }
+            
+            const macAddress = this.selectedModem.mac_address;
+            const rfPort = this.utscConfig.rfPortIfindex || this.upstreamInterfaces.modemRfPort;
+            const cmtsIp = this.selectedCmts;
+            
+            if (!rfPort) {
+                this.showError('Config Error', 'RF port not configured');
+                return;
+            }
+            
+            this.utscWsStatus = 'connecting';
+            const wsUrl = `ws://${window.location.host}/ws/utsc/${macAddress}?refresh_ms=500&duration_s=60&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(this.snmpCommunityRW)}`;
+            
+            console.log(`[UTSC] Connecting persistent WebSocket: ${wsUrl}`);
+            this.utscWs = new WebSocket(wsUrl);
+            
+            this.utscWs.onopen = () => {
+                console.log('[UTSC] WebSocket connected');
+                this.utscWsStatus = 'connected';
+                this.showSuccess('WebSocket Connected', 'Control channel ready');
+            };
+            
+            this.utscWs.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this.handleUtscWebSocketMessage(data);
+                } catch (error) {
+                    console.error('[UTSC] Parse error:', error);
+                }
+            };
+            
+            this.utscWs.onerror = (error) => {
+                console.error('[UTSC] WebSocket error:', error);
+                this.utscWsStatus = 'error';
+                this.showError('WebSocket Error', 'Connection failed');
+            };
+            
+            this.utscWs.onclose = () => {
+                console.log('[UTSC] WebSocket closed');
+                this.utscWsStatus = 'disconnected';
+                // Auto-reconnect after 3 seconds
+                setTimeout(() => {
+                    if (this.utscWsStatus === 'disconnected') {
+                        console.log('[UTSC] Auto-reconnecting...');
+                        this.connectUtscWebSocket();
+                    }
+                }, 3000);
+            };
+        },
+        
+        handleUtscWebSocketMessage(data) {
+            const msgType = data.type;
+            
+            if (msgType === 'connected') {
+                console.log('[UTSC] Stream connected');
+            } else if (msgType === 'buffering') {
+                console.log(`[UTSC] Buffering: ${data.buffer_size}/${data.target}`);
+            } else if (msgType === 'buffering_complete') {
+                console.log(`[UTSC] Buffering complete: ${data.buffer_size} samples`);
+            } else if (msgType === 'spectrum_data' || msgType === 'spectrum') {
+                this.utscDataCount++;
+                this.updateUtscChart(data);
+            } else if (msgType === 'status') {
+                console.log(`[UTSC] Status: ${data.message}`);
+            }
+        },
+        
+        async startUtscStream() {
+            if (!this.selectedModem || this.utscStreaming) {
+                return;
+            }
+            
+            const macAddress = this.selectedModem.mac_address;
+            const payload = {
+                cmts_ip: this.selectedCmts,
+                rf_port_ifindex: this.utscConfig.rfPortIfindex || this.upstreamInterfaces.modemRfPort,
+                community: this.snmpCommunityRW,
+                tftp_ip: '172.16.6.101',
+                repeat_period_ms: this.utscConfig.repeatPeriodMs,
+                freerun_duration_ms: this.utscConfig.freerunDurationMs
+            };
+            
+            console.log('[UTSC] Starting 60s freerun stream:', payload);
+            this.utscStreaming = true;
+            this.utscDataCount = 0;
+            this.utscStartTime = Date.now();
+            this.utscTimeRemaining = 60;
+            
+            // Start countdown timer
+            this.utscDurationTimer = setInterval(() => {
+                const elapsed = (Date.now() - this.utscStartTime) / 1000;
+                this.utscTimeRemaining = Math.max(0, Math.floor(60 - elapsed));
+                
+                if (this.utscTimeRemaining === 0) {
+                    this.stopUtscStream();
+                }
+            }, 1000);
+            
+            try {
+                const response = await fetch(`/api/pypnm/upstream/utsc/start/${macAddress}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    this.showSuccess('UTSC Started', '60 second freerun capture initiated');
+                } else {
+                    this.showError('UTSC Failed', result.error || 'Unknown error');
+                    this.stopUtscStream();
+                }
+            } catch (error) {
+                console.error('[UTSC] Start failed:', error);
+                this.showError('UTSC Failed', error.message);
+                this.stopUtscStream();
+            }
+        },
+        
+        stopUtscStream() {
+            console.log('[UTSC] Stopping stream');
+            this.utscStreaming = false;
+            
+            if (this.utscDurationTimer) {
+                clearInterval(this.utscDurationTimer);
+                this.utscDurationTimer = null;
+            }
+            
+            this.showSuccess('UTSC Stopped', `Captured ${this.utscDataCount} samples`);
+        },
+        
+        initUtscChart() {
+            const chartDiv = document.getElementById('utsc-chart');
+            if (!chartDiv) return;
+            
+            const layout = {
+                title: 'UTSC Spectrum',
+                xaxis: { title: 'Frequency (MHz)', color: '#fff' },
+                yaxis: { title: 'Amplitude (dBmV)', color: '#fff' },
+                paper_bgcolor: '#000',
+                plot_bgcolor: '#000',
+                font: { color: '#fff' }
+            };
+            
+            const trace = {
+                x: [],
+                y: [],
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#00ff00', width: 2 }
+            };
+            
+            Plotly.newPlot(chartDiv, [trace], layout, { responsive: true });
+            this.utscChartInstance = chartDiv;
+        },
+        
+        updateUtscChart(data) {
+            if (!this.utscChartInstance) {
+                this.initUtscChart();
+            }
+            
+            if (!data.amplitudes || !data.frequencies_hz) return;
+            
+            const freqsMhz = data.frequencies_hz.map(f => f / 1e6);
+            
+            Plotly.react(this.utscChartInstance, [{
+                x: freqsMhz,
+                y: data.amplitudes,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#00ff00', width: 2 }
+            }], this.utscChartInstance.layout);
         }
     }
 }).mount('#app');
