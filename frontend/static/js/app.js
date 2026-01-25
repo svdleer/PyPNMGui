@@ -356,10 +356,8 @@ createApp({
                     this.loadChannelStats()
                 ];
                 
-                // Also load upstream interfaces if CMTS IP is available (for upstream PNM)
-                if (modem.cmts_ip) {
-                    promises.push(this.loadUpstreamInterfaces());
-                }
+                // Always try to load upstream interfaces - getCmtsIpForModem() handles fallback
+                promises.push(this.loadUpstreamInterfaces());
                 
                 await Promise.all(promises);
             } catch (error) {
@@ -652,8 +650,27 @@ createApp({
         
         // ============== Upstream PNM Methods (CMTS-side) ==============
         
+        getCmtsIpForModem() {
+            // First try to get from modem object (set by getLiveModems)
+            if (this.selectedModem?.cmts_ip) {
+                return this.selectedModem.cmts_ip;
+            }
+            
+            // Fallback: look up CMTS IP from selectedCmts hostname
+            if (this.selectedCmts && this.cmtsListFull) {
+                const cmts = this.cmtsListFull.find(c => c.name === this.selectedCmts);
+                if (cmts?.ip) {
+                    return cmts.ip;
+                }
+            }
+            
+            return null;
+        },
+        
         async loadUpstreamInterfaces() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!this.selectedModem || !cmtsIp) {
+                console.log('[UTSC] Cannot discover RF port: no CMTS IP available');
                 return;
             }
             
@@ -666,12 +683,15 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip
+                        cmts_ip: cmtsIp
                     })
                 });
                 
                 const result = await response.json();
                 if (result.success) {
+                    // Store the CMTS IP on the modem for later use
+                    this.selectedModem.cmts_ip = cmtsIp;
+                    
                     // Set the discovered RF port
                     this.utscConfig.rfPortIfindex = result.rf_port_ifindex;
                     
@@ -718,7 +738,8 @@ createApp({
         },
         
         async configureUtsc() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!this.selectedModem || !cmtsIp) {
                 this.$toast?.error('No CMTS IP available for this modem');
                 return;
             }
@@ -733,7 +754,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         trigger_mode: this.utscConfig.triggerMode,
                         center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
@@ -815,7 +836,7 @@ createApp({
             // Configure and start UTSC on CMTS first
             console.log('[UTSC] Chart ready, configuring UTSC on CMTS...');
             
-            const cmtsIp = this.selectedModem.cmts_ip;
+            const cmtsIp = this.getCmtsIpForModem();
             if (!cmtsIp) {
                 this.$toast?.error('CMTS IP not available');
                 this.utscLiveMode = false;
@@ -933,7 +954,8 @@ createApp({
             this.destroyUtscSciChart();
             
             // Also stop UTSC on CMTS (don't wait for result)
-            if (this.selectedModem && this.selectedModem.cmts_ip && this.utscConfig.rfPortIfindex) {
+            const cmtsIpForStop = this.getCmtsIpForModem();
+            if (this.selectedModem && cmtsIpForStop && this.utscConfig.rfPortIfindex) {
                 this.stopUtsc();
             }
             
@@ -951,8 +973,8 @@ createApp({
                 return;
             }
             
-            // Get CMTS IP from modem or fallback to selectedCmts
-            const cmtsIp = this.selectedModem.cmts_ip || this.selectedCmts;
+            // Get CMTS IP using helper
+            const cmtsIp = this.getCmtsIpForModem();
             if (!cmtsIp) {
                 this.$toast?.error('CMTS IP not available');
                 return;
@@ -968,18 +990,29 @@ createApp({
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
                 
+                // Build request body - omit trigger_count for FreeRunning mode (E6000 firmware limitation)
+                const requestBody = {
+                    cmts_ip: cmtsIp,
+                    rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                    community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
+                    tftp_ip: this.selectedModem.tftp_ip,
+                    trigger_mode: this.utscConfig.triggerMode,
+                    center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
+                    span_hz: this.utscConfig.spanMhz * 1000000,
+                    num_bins: this.utscConfig.numBins,
+                    repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
+                    freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000  // 55s max for E6000
+                };
+                
+                // Only include trigger_count for non-FreeRunning modes (E6000 rejects it in FreeRunning mode)
+                if (this.utscConfig.triggerMode !== 2) {
+                    requestBody.trigger_count = this.utscConfig.triggerCount || 10;
+                }
+                
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip: cmtsIp,
-                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
-                        tftp_ip: this.selectedModem.tftp_ip,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
-                        freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000,  // 55s max for E6000
-                        trigger_count: this.utscConfig.triggerCount || 10  // Max 10 on E6000
-                    }),
+                    body: JSON.stringify(requestBody),
                     signal: controller.signal
                 });
                 
@@ -1008,7 +1041,8 @@ createApp({
         },
         
         async stopUtsc() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!this.selectedModem || !cmtsIp || !this.utscConfig.rfPortIfindex) {
                 this.$toast?.warning('No active UTSC session to stop');
                 return;
             }
@@ -1020,7 +1054,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
@@ -1049,12 +1083,13 @@ createApp({
         async pollUtscStatus() {
             if (!this.runningUtsc) return;
             
+            const cmtsIp = this.getCmtsIpForModem();
             try {
                 const response = await fetch(`/api/pypnm/upstream/utsc/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
@@ -1082,7 +1117,8 @@ createApp({
         },
         
         async startUsRxmer() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.usRxmerConfig.ofdmaIfindex) {
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!this.selectedModem || !cmtsIp || !this.usRxmerConfig.ofdmaIfindex) {
                 this.$toast?.error('CMTS IP and OFDMA ifIndex required');
                 return;
             }
@@ -1095,7 +1131,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
                         pre_eq: this.usRxmerConfig.preEq,
                         community: this.selectedModem.cmts_community || 'Z1gg0@LL'
@@ -1120,12 +1156,13 @@ createApp({
         async pollUsRxmerStatus() {
             if (!this.runningUsRxmer) return;
             
+            const cmtsIp = this.getCmtsIpForModem();
             try {
                 const response = await fetch(`/api/pypnm/upstream/rxmer/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
@@ -1152,7 +1189,8 @@ createApp({
         },
         
         async fetchUtscData() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!this.selectedModem || !cmtsIp) {
                 this.runningUtsc = false;
                 return;
             }
@@ -1162,7 +1200,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
@@ -1266,7 +1304,7 @@ createApp({
             // Add 60s buffer for trigger delay + file arrival + streaming after UTSC completes
             const durationS = this.utscDuration + 60;
             const rfPort = this.utscConfig.rfPortIfindex;
-            const cmtsIp = this.selectedModem.cmts_ip;
+            const cmtsIp = this.getCmtsIpForModem();
             const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
             const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
             
@@ -1572,7 +1610,8 @@ createApp({
         },
         
         async fetchUsRxmerData() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!this.selectedModem || !cmtsIp) {
                 return;
             }
             
@@ -1581,7 +1620,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_ip: cmtsIp,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
