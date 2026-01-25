@@ -1252,7 +1252,8 @@ createApp({
                 
                 console.log('[UTSC] SciChart ready, starting WebSocket...');
                 this.$toast?.success('Live monitoring started - continuous streaming');
-                this.startUtscWebSocket();
+                // Connect WebSocket FIRST, then trigger UTSC API after WS opens
+                await this.startUtscWebSocketAndTrigger();
                 
                 // WebSocket backend automatically maintains continuous streaming
                 // by re-triggering UTSC when buffer gets low (no frontend timer needed)
@@ -1426,6 +1427,109 @@ createApp({
                 this.$toast?.error('Failed to restart UTSC');
                 this.utscLiveMode = false;
             }
+        },
+        
+        async startUtscWebSocketAndTrigger() {
+            // Connect WebSocket FIRST, wait for it to open, THEN trigger UTSC API
+            // This ensures WebSocket is ready to receive files as they're generated
+            return new Promise((resolve, reject) => {
+                const mac = this.selectedModem.mac_address;
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const refreshMs = this.utscRefreshRate;
+                const durationS = this.utscDuration;
+                const rfPort = this.utscConfig.rfPortIfindex;
+                const cmtsIp = this.getCmtsIpForModem();
+                const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
+                const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
+                
+                console.log('[UTSC] Connecting WebSocket FIRST before API trigger:', wsUrl);
+                this.stopUtscWebSocket(); // Close any existing connection
+                
+                try {
+                    this.utscWebSocket = new WebSocket(wsUrl);
+                    
+                    this.utscWebSocket.onopen = async () => {
+                        console.log('[UTSC] WebSocket connected! Now triggering API...');
+                        
+                        // Now that WebSocket is ready, trigger the UTSC API
+                        try {
+                            const response = await fetch(`/api/pypnm/upstream/utsc/start/${mac}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    cmts_ip: cmtsIp,
+                                    rf_port_ifindex: rfPort,
+                                    community: community,
+                                    tftp_ip: this.selectedModem.tftp_ip,
+                                    trigger_mode: this.utscConfig.triggerMode,
+                                    center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
+                                    span_hz: this.utscConfig.spanMhz * 1000000,
+                                    num_bins: this.utscConfig.numBins,
+                                    repeat_period_ms: this.utscConfig.repeatPeriodMs,
+                                    freerun_duration_ms: this.utscConfig.freerunDurationMs
+                                })
+                            });
+                            
+                            const result = await response.json();
+                            if (result.success) {
+                                console.log('[UTSC] API triggered successfully, WebSocket will receive files');
+                                resolve();
+                            } else {
+                                console.error('[UTSC] API trigger failed:', result.error);
+                                this.$toast?.error(result.error || 'Failed to start UTSC');
+                                this.stopUtscWebSocket();
+                                reject(new Error(result.error));
+                            }
+                        } catch (error) {
+                            console.error('[UTSC] API trigger error:', error);
+                            this.$toast?.error('Failed to trigger UTSC');
+                            this.stopUtscWebSocket();
+                            reject(error);
+                        }
+                    };
+                    
+                    this.utscWebSocket.onerror = (error) => {
+                        console.error('[UTSC] WebSocket error:', error);
+                        this.$toast?.error('WebSocket connection failed');
+                        reject(error);
+                    };
+                    
+                    this.utscWebSocket.onclose = () => {
+                        console.log('[UTSC] WebSocket closed');
+                    };
+                    
+                    this.utscWebSocket.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            console.log('[UTSC] Received:', data.type, data);
+                            
+                            if (data.type === 'connected') {
+                                console.log('[UTSC]', data.message);
+                            } else if (data.type === 'spectrum') {
+                                // Update chart with live spectrum data
+                                if (data.frequencies && data.amplitude) {
+                                    this.updateUtscSciChart({ frequencies: data.frequencies, amplitude: data.amplitude });
+                                }
+                            } else if (data.type === 'buffering') {
+                                console.log('[UTSC]', data.message);
+                            } else if (data.type === 'complete') {
+                                console.log('[UTSC] Stream complete');
+                                this.$toast?.success('UTSC live stream complete');
+                                this.utscLiveMode = false;
+                                this.stopUtscWebSocket();
+                            } else if (data.type === 'error') {
+                                console.error('[UTSC] Error:', data.message);
+                                this.$toast?.error(data.message);
+                            }
+                        } catch (error) {
+                            console.error('[UTSC] Message parse error:', error);
+                        }
+                    };
+                } catch (error) {
+                    console.error('[UTSC] WebSocket creation error:', error);
+                    reject(error);
+                }
+            });
         },
         
         stopUtscWebSocket() {
