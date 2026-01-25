@@ -306,7 +306,7 @@ def init_websocket(app):
                     ws.send(json.dumps({
                         'type': 'complete',
                         'message': f'Duration {duration_s}s reached',
-                        'files_streamed': len(processed_files) - len(existing_files)
+                        'files_streamed': len(processed_files)
                     }))
                     break
                 elif duration_reached:
