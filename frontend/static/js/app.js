@@ -94,6 +94,7 @@ createApp({
             utscInteractive: true,  // Always use SciChart interactive mode
             utscSciChart: null,  // SciChart instance
             utscSciChartSeries: null,  // SciChart data series
+            utscFallbackChart: null,  // Chart.js fallback if SciChart fails
             utscLastUpdateTime: 0,  // Throttle rapid updates
             utscUpdateThrottle: 100,  // Min 100ms between updates
             
@@ -1267,7 +1268,13 @@ createApp({
                             // Handle interactive mode with SciChart (only if throttle allows)
                             if (shouldUpdateChart && this.utscInteractive && data.raw_data) {
                                 this.$nextTick(() => {
-                                    this.updateUtscSciChart(data.raw_data);
+                                    // Try SciChart first, fall back to Chart.js if not available
+                                    if (this.utscSciChart && this.utscSciChartSeries) {
+                                        this.updateUtscSciChart(data.raw_data);
+                                    } else {
+                                        console.log('[Chart] Using fallback chart (SciChart not available)');
+                                        this.updateUtscFallbackChart(data.raw_data);
+                                    }
                                 });
                             }
                             
@@ -1595,6 +1602,76 @@ createApp({
             }
         },
         
+        updateUtscFallbackChart(rawData) {
+            try {
+                if (!rawData || !rawData.frequencies || !rawData.amplitudes) {
+                    return;
+                }
+                
+                // Create canvas if needed
+                let canvas = document.getElementById('utscFallbackCanvas');
+                if (!canvas) {
+                    const chartDiv = document.getElementById('utscSciChart');
+                    if (!chartDiv) return;
+                    
+                    canvas = document.createElement('canvas');
+                    canvas.id = 'utscFallbackCanvas';
+                    canvas.width = chartDiv.offsetWidth;
+                    canvas.height = chartDiv.offsetHeight;
+                    chartDiv.innerHTML = '';
+                    chartDiv.appendChild(canvas);
+                }
+                
+                // Convert frequencies to MHz
+                const freqMHz = rawData.frequencies.map(f => f / 1e6);
+                
+                // Destroy old chart if exists
+                if (this.utscFallbackChart) {
+                    this.utscFallbackChart.destroy();
+                }
+                
+                // Create new Chart.js chart
+                const ctx = canvas.getContext('2d');
+                this.utscFallbackChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: freqMHz,
+                        datasets: [{
+                            label: 'UTSC Spectrum',
+                            data: rawData.amplitudes,
+                            borderColor: '#00aaff',
+                            backgroundColor: 'rgba(0, 170, 255, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Frequency (MHz)' },
+                                ticks: { maxTicksLimit: 10 }
+                            },
+                            y: {
+                                title: { display: true, text: 'Power (dBmV)' }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: false }
+                        }
+                    }
+                });
+                
+                console.log('[Chart] Fallback chart updated with', freqMHz.length, 'points');
+            } catch (error) {
+                console.error('[Chart] Fallback chart failed:', error);
+            }
+        },
+        
         updateUtscSciChart(rawData) {
             console.log('[SciChart] updateUtscSciChart called, checking state...');
             console.log('[SciChart] utscSciChart:', this.utscSciChart);
@@ -1647,6 +1724,15 @@ createApp({
                 }
                 this.utscSciChart = null;
                 this.utscSciChartSeries = null;
+            }
+            
+            if (this.utscFallbackChart) {
+                try {
+                    this.utscFallbackChart.destroy();
+                } catch (e) {
+                    console.error('[Chart] Fallback destroy error:', e);
+                }
+                this.utscFallbackChart = null;
             }
         },
         
