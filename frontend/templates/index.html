@@ -319,11 +319,6 @@
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="upstream-pnm-tab" data-bs-toggle="tab" data-bs-target="#upstream-pnm" type="button">
-                            <i class="bi bi-graph-up-arrow me-2"></i>Upstream PNM
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
                         <button class="nav-link" id="pnm-tab" data-bs-toggle="tab" data-bs-target="#pnm" type="button">
                             <i class="bi bi-graph-up me-2"></i>PNM Measurements
                         </button>
@@ -901,63 +896,6 @@
                                     <div class="card-body text-center py-5" v-else>
                                         <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
                                         <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Upstream PNM Tab -->
-                    <div class="tab-pane fade" id="upstream-pnm" role="tabpanel">
-                        <div class="row">
-                            <!-- UTSC Spectrum Analyzer -->
-                            <div class="col-12 mb-4">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0"><i class="bi bi-activity me-2"></i>UTSC Spectrum Analyzer</h5>
-                                        <button @click="toggleUtscLiveMode" 
-                                                class="btn btn-sm" 
-                                                :class="utscLiveMode ? 'btn-danger' : 'btn-success'"
-                                                :disabled="!selectedModem || !utscConfig.rfPortIfindex">
-                                            <i class="bi" :class="utscLiveMode ? 'bi-stop-fill' : 'bi-play-fill'"></i>
-                                            {{ utscLiveMode ? 'Stop' : 'Start' }} Live Stream
-                                        </button>
-                                    </div>
-                                    <div class="card-body">
-                                        <div id="utsc-chart" style="width: 100%; height: 500px; background: #000;"></div>
-                                        <div class="text-center mt-2 text-muted small">
-                                            <span v-if="utscLiveMode">
-                                                <i class="bi bi-broadcast text-success"></i> Streaming... 
-                                                <span class="badge bg-secondary ms-2">Buffer: {{ utscBufferSize }}</span>
-                                            </span>
-                                            <span v-else>Click Start to begin live spectrum monitoring</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- RxMER (Future) -->
-                            <div class="col-12 mb-4">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>RxMER Analysis</h5>
-                                    </div>
-                                    <div class="card-body text-center py-5">
-                                        <i class="bi bi-tools text-muted" style="font-size: 2rem;"></i>
-                                        <p class="text-muted mt-2">Coming soon...</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Pre-EQ (Future) -->
-                            <div class="col-12 mb-4">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Pre-Equalization</h5>
-                                    </div>
-                                    <div class="card-body text-center py-5">
-                                        <i class="bi bi-tools text-muted" style="font-size: 2rem;"></i>
-                                        <p class="text-muted mt-2">Coming soon...</p>
                                     </div>
                                 </div>
                             </div>

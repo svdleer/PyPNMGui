@@ -284,47 +284,16 @@ def init_websocket(app):
                 logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(old_files)} old files")
                 time.sleep(0.2)
             
-            # Check if we need to trigger UTSC
-            if not recent_files:
-                logger.info(f"UTSC WebSocket: No recent files found - auto-triggering new UTSC")
-                # Trigger UTSC via PyPNM API (using localhost since containers are on host network)
-                try:
-                    pypnm_url = 'http://localhost:5000'
-                    payload = {
-                        'cmts_ip': cmts_ip,
-                        'rf_port_ifindex': int(rf_port),
-                        'community': community,
-                        'tftp_ip': current_app.config.get('TFTP_SERVER_IP', '172.16.6.101'),
-                        'trigger_mode': 2,
-                        'center_freq_hz': 50000000,
-                        'span_hz': 80000000,
-                        'num_bins': 800,
-                        'filename': f'utsc_{mac_clean}',
-                        'repeat_period_ms': 100,
-                        'freerun_duration_ms': duration_s * 1000
-                    }
-                    
-                    response = requests.post(
-                        f'{pypnm_url}/api/pnm/upstream/utsc/start/{mac_address}',
-                        json=payload,
-                        timeout=10
-                    )
-                    result = response.json()
-                    
-                    if result.get('success'):
-                        logger.info(f"UTSC WebSocket: Auto-triggered UTSC successfully")
-                        time.sleep(2)  # Wait for first files to arrive
-                    else:
-                        logger.error(f"UTSC WebSocket: Failed to auto-trigger UTSC: {result.get('error')}")
-                except Exception as e:
-                    logger.error(f"UTSC WebSocket: Auto-trigger exception: {e}")
-                    
-                stream_start_time = time.time() - 2.0  # Just started
-            else:
+            # Mark recent files as ready to stream
+            if recent_files:
                 logger.info(f"UTSC WebSocket: Found {len(recent_files)} recent files (<60s old) - will stream these")
-                stream_start_time = time.time() - 60.0  # Use all recent files
+            else:
+                logger.info(f"UTSC WebSocket: No recent files found - waiting for new captures")
             
-            logger.info(f"UTSC WebSocket: Streaming files from {60 if recent_files else 2}s lookback")
+            # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
+            # Allow looking back 60s to use existing recent files from just-started UTSC
+            stream_start_time = time.time() - 60.0
+            logger.info(f"UTSC WebSocket: Streaming files from last 60s (API-triggered freerun)")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
