@@ -96,7 +96,11 @@ def validate_center_frequency(center_freq_hz: int) -> Tuple[bool, Optional[str]]
 
 def validate_span(span_hz: int, center_freq_hz: Optional[int] = None) -> Tuple[bool, Optional[str]]:
     """
-    Validate frequency span parameter.
+    Validate frequency span parameter against E6000 CER supported values.
+    
+    E6000 CER supports specific span values for UTSC:
+    - Narrowband FFT: 40 MHz, 80 MHz, 160 MHz
+    - Wideband FFT: 80 MHz, 160 MHz, 320 MHz
     
     Args:
         span_hz: Frequency span in Hz
@@ -105,11 +109,17 @@ def validate_span(span_hz: int, center_freq_hz: Optional[int] = None) -> Tuple[b
     Returns:
         (is_valid, error_message)
     """
-    if span_hz < LIMITS.MIN_SPAN_HZ:
-        return False, f"Span {span_hz/1e6:.1f} MHz is below minimum {LIMITS.MIN_SPAN_HZ/1e6:.1f} MHz"
+    # E6000 CER supported span values (Hz)
+    SUPPORTED_SPANS_HZ = [
+        40_000_000,   # 40 MHz (Narrowband)
+        80_000_000,   # 80 MHz (Both)
+        160_000_000,  # 160 MHz (Both)
+        320_000_000   # 320 MHz (Wideband)
+    ]
     
-    if span_hz > LIMITS.MAX_SPAN_HZ:
-        return False, f"Span {span_hz/1e6:.1f} MHz exceeds maximum {LIMITS.MAX_SPAN_HZ/1e6:.1f} MHz"
+    if span_hz not in SUPPORTED_SPANS_HZ:
+        supported_mhz = [s/1e6 for s in SUPPORTED_SPANS_HZ]
+        return False, f"Span {span_hz/1e6:.1f} MHz not supported by E6000. Supported values: {supported_mhz} MHz"
     
     # Check if span + center frequency stays within valid range
     if center_freq_hz is not None:
@@ -119,15 +129,19 @@ def validate_span(span_hz: int, center_freq_hz: Optional[int] = None) -> Tuple[b
         if freq_start < 0:
             return False, f"Span extends below 0 Hz (start: {freq_start/1e6:.1f} MHz)"
         
-        if freq_end > LIMITS.MAX_CENTER_FREQ_HZ:
-            return False, f"Span extends above {LIMITS.MAX_CENTER_FREQ_HZ/1e6:.1f} MHz (end: {freq_end/1e6:.1f} MHz)"
+        # E6000 narrowband max center: 102 MHz, wideband max center: 204 MHz
+        max_center = 204_000_000 if span_hz in [80_000_000, 160_000_000, 320_000_000] else 102_000_000
+        if center_freq_hz > max_center:
+            return False, f"Center frequency {center_freq_hz/1e6:.1f} MHz exceeds max {max_center/1e6:.1f} MHz for {span_hz/1e6:.1f} MHz span"
     
     return True, None
 
 
 def validate_num_bins(num_bins: int) -> Tuple[bool, Optional[str]]:
     """
-    Validate number of FFT bins.
+    Validate number of FFT bins against E6000 CER supported values.
+    
+    E6000 CER supports: 200, 400, 800, 1600, 3200 bins
     
     Args:
         num_bins: Number of FFT bins
@@ -135,11 +149,11 @@ def validate_num_bins(num_bins: int) -> Tuple[bool, Optional[str]]:
     Returns:
         (is_valid, error_message)
     """
-    if num_bins < LIMITS.MIN_NUM_BINS:
-        return False, f"Number of bins {num_bins} is below minimum {LIMITS.MIN_NUM_BINS}"
+    # E6000 CER supported num_bins values
+    SUPPORTED_NUM_BINS = [200, 400, 800, 1600, 3200]
     
-    if num_bins > LIMITS.MAX_NUM_BINS:
-        return False, f"Number of bins {num_bins} exceeds maximum {LIMITS.MAX_NUM_BINS}"
+    if num_bins not in SUPPORTED_NUM_BINS:
+        return False, f"Number of bins {num_bins} not supported by E6000. Supported values: {SUPPORTED_NUM_BINS}"
     
     # Warn if not a common value
     if num_bins not in LIMITS.SUPPORTED_BIN_COUNTS:
