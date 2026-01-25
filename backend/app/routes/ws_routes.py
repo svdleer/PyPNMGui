@@ -300,69 +300,69 @@ def init_websocket(app):
                 elapsed = current_time - connection_start_time
                 
                 # Collect new files continuously - no time limit
-                    pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-                    files = glob.glob(pattern)
-                    # Filter: not processed AND created after stream start
-                    new_files = [f for f in files 
-                                if f not in processed_files 
-                                and os.path.getmtime(f) >= stream_start_time]
+                pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+                files = glob.glob(pattern)
+                # Filter: not processed AND created after stream start
+                new_files = [f for f in files 
+                            if f not in processed_files 
+                            and os.path.getmtime(f) >= stream_start_time]
+                
+                if len(new_files) > 0:
+                    logger.info(f"UTSC WebSocket: Found {len(new_files)} new files to process")
+                
+                for filepath in sorted(new_files, key=os.path.getmtime):
+                    processed_files.add(filepath)
                     
-                    if len(new_files) > 0:
-                        logger.info(f"UTSC WebSocket: Found {len(new_files)} new files to process")
-                    
-                    for filepath in sorted(new_files, key=os.path.getmtime):
-                        processed_files.add(filepath)
+                    try:
+                        with open(filepath, 'rb') as f:
+                            binary_data = f.read()
                         
-                        try:
-                            with open(filepath, 'rb') as f:
-                                binary_data = f.read()
-                            
-                            # UTSC file format: 328-byte header + amplitude data
-                            # After 328 bytes: signed 16-bit big-endian integers in 0.1 dBmV units
-                            
-                            if len(binary_data) < 328:
-                                continue
-                            
-                            # Parse amplitude data after 328-byte header
-                            amp_data = binary_data[328:]
-                            num_samples = len(amp_data) // 2
-                            
-                            all_amplitudes = []
-                            if num_samples > 0:
-                                try:
-                                    # UTSC format: signed 16-bit big-endian, divided by 10.0 for dBmV (0.1 dBmV units)
-                                    amplitudes = struct.unpack(f'>{num_samples}h', amp_data[:num_samples * 2])
-                                    all_amplitudes = [a / 10.0 for a in amplitudes]
-                                except struct.error as e:
-                                    logger.error(f"Error unpacking amplitude data: {e}")
-                            
-                            if all_amplitudes:
-                                # Get center freq and span from Redis or use defaults
-                                try:
-                                    from app import redis_client
-                                    config_json = redis_client.get(f'utsc_config:{mac_address}')
-                                    if config_json:
-                                        config = json.loads(config_json)
-                                        span_hz = config.get('span_hz', 100000000)
-                                        center_freq_hz = config.get('center_freq_hz', 50000000)
-                                    else:
-                                        span_hz = 100000000
-                                        center_freq_hz = 50000000
-                                except:
+                        # UTSC file format: 328-byte header + amplitude data
+                        # After 328 bytes: signed 16-bit big-endian integers in 0.1 dBmV units
+                        
+                        if len(binary_data) < 328:
+                            continue
+                        
+                        # Parse amplitude data after 328-byte header
+                        amp_data = binary_data[328:]
+                        num_samples = len(amp_data) // 2
+                        
+                        all_amplitudes = []
+                        if num_samples > 0:
+                            try:
+                                # UTSC format: signed 16-bit big-endian, divided by 10.0 for dBmV (0.1 dBmV units)
+                                amplitudes = struct.unpack(f'>{num_samples}h', amp_data[:num_samples * 2])
+                                all_amplitudes = [a / 10.0 for a in amplitudes]
+                            except struct.error as e:
+                                logger.error(f"Error unpacking amplitude data: {e}")
+                        
+                        if all_amplitudes:
+                            # Get center freq and span from Redis or use defaults
+                            try:
+                                from app import redis_client
+                                config_json = redis_client.get(f'utsc_config:{mac_address}')
+                                if config_json:
+                                    config = json.loads(config_json)
+                                    span_hz = config.get('span_hz', 100000000)
+                                    center_freq_hz = config.get('center_freq_hz', 50000000)
+                                else:
                                     span_hz = 100000000
                                     center_freq_hz = 50000000
-                                
-                                # Add to buffer
-                                file_buffer.append({
-                                    'filepath': filepath,
-                                    'amplitudes': all_amplitudes,
-                                    'span_hz': span_hz,
-                                    'center_freq_hz': center_freq_hz,
-                                    'collected_at': current_time
-                                })
-                                logger.info(f"Parsed {len(all_amplitudes)} amplitude samples from {os.path.basename(filepath)}")
-                        except Exception as e:
-                            logger.error(f"Error parsing UTSC file {filepath}: {e}")
+                            except:
+                                span_hz = 100000000
+                                center_freq_hz = 50000000
+                            
+                            # Add to buffer
+                            file_buffer.append({
+                                'filepath': filepath,
+                                'amplitudes': all_amplitudes,
+                                'span_hz': span_hz,
+                                'center_freq_hz': center_freq_hz,
+                                'collected_at': current_time
+                            })
+                            logger.info(f"Parsed {len(all_amplitudes)} amplitude samples from {os.path.basename(filepath)}")
+                    except Exception as e:
+                        logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
                 # Wait for initial buffer to fill before starting stream (must be exactly target or more)
                 if not streaming_started:
