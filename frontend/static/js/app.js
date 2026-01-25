@@ -64,11 +64,11 @@ createApp({
             },
             utscConfig: {
                 triggerMode: 2,  // 2=FreeRunning (timed captures), 6=CM_MAC (per-transmission), 5=IdleSID
-                centerFreqMhz: 42.5,  // 0-85 MHz range: center = 42.5 MHz
-                spanMhz: 85,  // 0-85 MHz range: full DOCSIS 3.0 upstream
-                numBins: 3200,
+                centerFreqMhz: 50,  // Center for 80 MHz span: 10-90 MHz = center 50
+                spanMhz: 80,  // E6000 valid spans: 40, 80, 160, 320 MHz (non-TimeIQ)
+                numBins: 800,  // E6000 valid bins: 200, 400, 800, 1600, 3200 (non-TimeIQ)
                 rfPortIfindex: null,
-                repeatPeriodMs: 1000,  // 1000ms (1 second) - max on E6000, slower but more reliable
+                repeatPeriodMs: 100,  // 100ms - fast capture rate, E6000 supports 50-1000ms
                 freerunDurationMs: 60000  // 60 seconds - full duration for maximum file generation
                 // triggerCount removed - notWritable on E6000 in FreeRunning mode
             },
@@ -724,10 +724,11 @@ createApp({
         
         applyFreqPreset(event) {
             const preset = event.target.value;
+            // E6000 valid spans: 40, 80, 160, 320 MHz (non-TimeIQ) or 102.4, 204.8 MHz (TimeIQ)
             const presets = {
-                '20-200': { center: 110, span: 180 },  // (20+200)/2 = 110, 200-20 = 180
-                '18-65': { center: 41.5, span: 47 },   // (18+65)/2 = 41.5, 65-18 = 47
-                '60-200': { center: 130, span: 140 }   // (60+200)/2 = 130, 200-60 = 140
+                'docsis30': { center: 50, span: 80 },     // DOCSIS 3.0: 10-90 MHz covered with 80 MHz span
+                'docsis31-low': { center: 100, span: 160 },  // DOCSIS 3.1 low: 20-180 MHz with 160 MHz span
+                'docsis31-full': { center: 160, span: 320 }  // DOCSIS 3.1 full: 0-320 MHz with 320 MHz span
             };
             
             if (presets[preset]) {
