@@ -874,44 +874,11 @@ createApp({
                     }
                 }
                 
-                // Step 2: Start new UTSC session
-                this.$toast?.info('Starting new UTSC measurement...');
-                // Use WebSocket duration for freerun (in ms)
-                const freerunDurationMs = this.utscDuration * 1000;
-                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip: cmtsIp,
-                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
-                        tftp_ip: this.selectedModem.tftp_ip,
-                        trigger_mode: this.utscConfig.triggerMode,
-                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
-                        span_hz: this.utscConfig.spanMhz * 1000000,
-                        num_bins: this.utscConfig.numBins,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs,
-                        freerun_duration_ms: freerunDurationMs
-                        // Note: trigger_count omitted for freerun mode - E6000 bug limits files when present
-                    })
-                });
+                // WebSocket will auto-trigger UTSC if needed
+                console.log('[UTSC] Starting WebSocket stream (will auto-trigger UTSC if needed)...');
+                this.$toast?.info('Starting live UTSC stream...');
                 
-                const result = await response.json();
-                if (!result.success) {
-                    const errorMsg = result.error || 'Failed to configure UTSC';
-                    console.error('[UTSC] Start failed:', errorMsg);
-                    this.$toast?.error(`UTSC configuration failed: ${errorMsg}`);
-                    this.utscLiveMode = false;
-                    return;
-                }
-                
-                console.log('[UTSC] UTSC configured, starting WebSocket stream...');
-                this.$toast?.info('UTSC configured, starting live stream...');
-                
-                // Wait for initial files to be generated
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Now start WebSocket streaming
+                // Start WebSocket streaming immediately
                 this.startUtscWebSocket();
             } catch (error) {
                 console.error('[UTSC] Failed to configure UTSC:', error);
