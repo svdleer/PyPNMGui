@@ -2041,11 +2041,20 @@ class PyPNMAgent:
             
             # For FreeRunning mode, set repeat period and duration
             if trigger_mode == 2:
-                repeat_period = params.get('repeat_period_ms', 0)
-                result = self._set_cmts_direct(cmts_ip, f"{base}.18{idx}", str(repeat_period), 'u', community)
+                # Convert ms to microseconds for RepeatPeriod (OID expects microseconds)
+                repeat_period_ms = params.get('repeat_period_ms', 0)
+                repeat_period_us = repeat_period_ms * 1000
+                self.logger.info(f"Setting RepeatPeriod={repeat_period_ms}ms ({repeat_period_us}us)")
+                result = self._set_cmts_direct(cmts_ip, f"{base}.18{idx}", str(repeat_period_us), 'u', community)
                 
+                # FreeRunDuration is in milliseconds
                 freerun_duration = params.get('freerun_duration_ms', 1000)
+                self.logger.info(f"Agent received freerun_duration_ms={freerun_duration} from params, sending to CMTS")
                 result = self._set_cmts_direct(cmts_ip, f"{base}.19{idx}", str(freerun_duration), 'u', community)
+                if result.get('success'):
+                    self.logger.info(f"Successfully set FreeRunDuration={freerun_duration}ms on CMTS")
+                else:
+                    self.logger.error(f"Failed to set FreeRunDuration: {result.get('error')}")
             
             return {
                 'success': True,
