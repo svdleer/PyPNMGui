@@ -1393,18 +1393,65 @@ createApp({
                 this.utscWebSocket.onclose = () => {
                     console.log('[UTSC] WebSocket closed');
                     if (this.utscLiveMode) {
-                        // Try to reconnect after 2 seconds
+                        // Restart the full UTSC session (including API start call)
+                        // The freerun duration is 60s but WebSocket is 120s, so we need to restart
+                        console.log('[UTSC] Session ended, restarting full UTSC session in 3s...');
                         setTimeout(() => {
                             if (this.utscLiveMode) {
-                                console.log('[UTSC] Attempting reconnect...');
-                                this.startUtscWebSocket();
+                                console.log('[UTSC] Restarting UTSC session...');
+                                this.restartUtscSession();
                             }
-                        }, 2000);
+                        }, 3000);
                     }
                 };
             } catch (e) {
                 console.error('[UTSC] Failed to create WebSocket:', e);
                 this.$toast?.error('Failed to connect UTSC stream');
+            }
+        },
+        
+        async restartUtscSession() {
+            // Restart UTSC session by calling start API then reconnecting WebSocket
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!cmtsIp || !this.selectedModem || !this.utscConfig.rfPortIfindex) {
+                console.error('[UTSC] Cannot restart: missing config');
+                this.utscLiveMode = false;
+                return;
+            }
+            
+            try {
+                console.log('[UTSC] Starting new UTSC session...');
+                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: cmtsIp,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
+                        tftp_ip: this.selectedModem.tftp_ip,
+                        trigger_mode: this.utscConfig.triggerMode,
+                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
+                        span_hz: this.utscConfig.spanMhz * 1000000,
+                        num_bins: this.utscConfig.numBins,
+                        repeat_period_ms: this.utscConfig.repeatPeriodMs,
+                        freerun_duration_ms: this.utscConfig.freerunDurationMs
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    console.log('[UTSC] UTSC restarted, waiting for files...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    this.startUtscWebSocket();
+                } else {
+                    console.error('[UTSC] Restart failed:', result.error);
+                    this.$toast?.error('Failed to restart UTSC session');
+                    this.utscLiveMode = false;
+                }
+            } catch (error) {
+                console.error('[UTSC] Restart error:', error);
+                this.$toast?.error('Failed to restart UTSC');
+                this.utscLiveMode = false;
             }
         },
         
