@@ -284,16 +284,25 @@ def init_websocket(app):
                 logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(old_files)} old files")
                 time.sleep(0.2)
             
-            # Mark recent files as ready to stream
-            if recent_files:
-                logger.info(f"UTSC WebSocket: Found {len(recent_files)} recent files (<60s old) - will stream these")
+            # Check if we need to trigger UTSC
+            if not recent_files:
+                logger.info(f"UTSC WebSocket: No recent files found - auto-triggering new UTSC")
+                # Trigger UTSC via internal API call
+                from app.routes.pypnm_routes import start_utsc
+                from flask import current_app as app
+                with app.test_request_context():
+                    result = start_utsc(mac_address)
+                    if result.get('success'):
+                        logger.info(f"UTSC WebSocket: Auto-triggered UTSC successfully")
+                        time.sleep(1)  # Brief wait for first files
+                    else:
+                        logger.error(f"UTSC WebSocket: Failed to auto-trigger UTSC: {result.get('error')}")
+                stream_start_time = time.time() - 2.0  # Just started
             else:
-                logger.info(f"UTSC WebSocket: No recent files found - waiting for new captures")
+                logger.info(f"UTSC WebSocket: Found {len(recent_files)} recent files (<60s old) - will stream these")
+                stream_start_time = time.time() - 60.0  # Use all recent files
             
-            # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
-            # Allow looking back 60s to use existing recent files from just-started UTSC
-            stream_start_time = time.time() - 60.0
-            logger.info(f"UTSC WebSocket: Streaming files from last 60s (API-triggered freerun)")
+            logger.info(f"UTSC WebSocket: Streaming files from {60 if recent_files else 2}s lookback")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
