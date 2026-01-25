@@ -876,6 +876,8 @@ createApp({
                 
                 // Step 2: Start new UTSC session
                 this.$toast?.info('Starting new UTSC measurement...');
+                // Use WebSocket duration for freerun (in ms)
+                const freerunDurationMs = this.utscDuration * 1000;
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -889,7 +891,7 @@ createApp({
                         span_hz: this.utscConfig.spanMhz * 1000000,
                         num_bins: this.utscConfig.numBins,
                         repeat_period_ms: this.utscConfig.repeatPeriodMs,
-                        freerun_duration_ms: this.utscConfig.freerunDurationMs
+                        freerun_duration_ms: freerunDurationMs
                         // Note: trigger_count omitted for freerun mode - E6000 bug limits files when present
                     })
                 });
@@ -1301,9 +1303,8 @@ createApp({
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             // Pass refresh rate (ms) and duration (s) as query params
             const refreshMs = this.utscRefreshRate;
-            // WebSocket duration needs to be longer than UTSC freerun to allow all files to stream
-            // Add 60s buffer for trigger delay + file arrival + streaming after UTSC completes
-            const durationS = this.utscDuration + 60;
+            // WebSocket duration matches UTSC freerun duration
+            const durationS = this.utscDuration;
             const rfPort = this.utscConfig.rfPortIfindex;
             const cmtsIp = this.getCmtsIpForModem();
             const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
@@ -1391,17 +1392,12 @@ createApp({
                 };
                 
                 this.utscWebSocket.onclose = () => {
-                    console.log('[UTSC] WebSocket closed');
+                    console.log('[UTSC] WebSocket closed - session complete');
+                    // Don't auto-reconnect - session duration has completed
+                    // User needs to manually restart if they want to continue
                     if (this.utscLiveMode) {
-                        // Restart the full UTSC session (including API start call)
-                        // The freerun duration is 60s but WebSocket is 120s, so we need to restart
-                        console.log('[UTSC] Session ended, restarting full UTSC session in 3s...');
-                        setTimeout(() => {
-                            if (this.utscLiveMode) {
-                                console.log('[UTSC] Restarting UTSC session...');
-                                this.restartUtscSession();
-                            }
-                        }, 3000);
+                        this.utscLiveMode = false;
+                        this.$toast?.info('UTSC session complete');
                     }
                 };
             } catch (e) {
