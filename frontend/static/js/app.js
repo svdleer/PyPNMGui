@@ -1338,22 +1338,22 @@ createApp({
                                 this.utscBufferSize = data.buffer_size;
                             }
                             
-                            // Throttle updates to prevent browser overload
+                            // Throttle chart updates only, not data processing
                             const now = Date.now();
-                            if (now - this.utscLastUpdateTime < this.utscUpdateThrottle) {
-                                return; // Skip this update
+                            const shouldUpdateChart = (now - this.utscLastUpdateTime) >= this.utscUpdateThrottle;
+                            if (shouldUpdateChart) {
+                                this.utscLastUpdateTime = now;
                             }
-                            this.utscLastUpdateTime = now;
                             
-                            // Handle interactive mode with SciChart
-                            if (this.utscInteractive && data.raw_data) {
+                            // Handle interactive mode with SciChart (only if throttle allows)
+                            if (shouldUpdateChart && this.utscInteractive && data.raw_data) {
                                 this.$nextTick(() => {
                                     this.updateUtscSciChart(data.raw_data);
                                 });
                             }
                             
-                            // Always update plot for fallback/static mode
-                            if (data.plot) {
+                            // Always update plot for fallback/static mode (only if throttle allows)
+                            if (shouldUpdateChart && data.plot) {
                                 this.utscPlotImage = {
                                     data: data.plot.data,
                                     filename: data.plot.filename,

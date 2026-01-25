@@ -142,7 +142,7 @@ def watch_files(duration=60, min_buffer_size=10):
     """Watch for UTSC files, buffer until threshold, then stream evenly."""
     print(f"\nWatching for files (duration={duration}s)...")
     print(f"Buffering until {min_buffer_size} files collected before streaming")
-    print(f"⚠️  E6000 generates exactly 10 files per trigger - will auto-retrigger every 10s")
+    print(f"⚠️  E6000 FreeRunning mode generates continuously for {duration}s")
     
     pattern = f"{TFTP_PATH}/{FILENAME_PREFIX}_*"
     processed = set()
@@ -150,9 +150,6 @@ def watch_files(duration=60, min_buffer_size=10):
     file_count = 0
     burst_count = 0
     last_status = None
-    last_trigger_time = 0
-    trigger_interval = 10  # Retrigger every 10 seconds
-    trigger_count = 0
     
     # Buffer for smooth streaming
     file_buffer = []
@@ -160,22 +157,13 @@ def watch_files(duration=60, min_buffer_size=10):
     stream_interval = 1.0  # Stream 1 file per second
     streaming_started = False
     
-    # Initial trigger
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Trigger #1...")
+    # Single trigger for FreeRunning mode
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting FreeRunning capture...")
     trigger_utsc()
-    last_trigger_time = time.time()
-    trigger_count = 1
     print("  Waiting for files...")
     
     while time.time() - start_time < duration:
         current_time = time.time()
-        
-        # Auto-retrigger every trigger_interval seconds
-        if current_time - last_trigger_time >= trigger_interval:
-            trigger_count += 1
-            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Trigger #{trigger_count} (auto-retrigger)...")
-            trigger_utsc()
-            last_trigger_time = current_time
         
         # Poll status
         status = get_utsc_status()
@@ -204,11 +192,6 @@ def watch_files(duration=60, min_buffer_size=10):
                 burst_count += 1
                 print(f"  [BUFFER] Collected {len(new_files)} files (buffer: {len(file_buffer)})")
         
-        # Stream from buffer at steady rate
-        if file_buffer and (current_time - last_stream_time) >= stream_interval:
-            item = file_buffer.pop(0)
-            file_count += 1
-            last_stream_time = current_time
         # Check if we've reached minimum buffer size to start streaming
         if not streaming_started and len(file_buffer) >= min_buffer_size:
             streaming_started = True
