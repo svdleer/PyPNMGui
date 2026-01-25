@@ -337,19 +337,19 @@ def init_websocket(app):
                                 logger.error(f"Error unpacking amplitude data: {e}")
                         
                         if all_amplitudes:
-                            # Get center freq and span from Redis or use defaults
+                            # Get center freq and span from Redis or use defaults (80 MHz is E6000-supported)
                             try:
                                 from app import redis_client
                                 config_json = redis_client.get(f'utsc_config:{mac_address}')
                                 if config_json:
                                     config = json.loads(config_json)
-                                    span_hz = config.get('span_hz', 100000000)
+                                    span_hz = config.get('span_hz', 80000000)
                                     center_freq_hz = config.get('center_freq_hz', 50000000)
                                 else:
-                                    span_hz = 100000000
+                                    span_hz = 80000000
                                     center_freq_hz = 50000000
                             except:
-                                span_hz = 100000000
+                                span_hz = 80000000
                                 center_freq_hz = 50000000
                             
                             # Add to buffer
