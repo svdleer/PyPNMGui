@@ -289,6 +289,7 @@ def init_websocket(app):
                 logger.info(f"UTSC WebSocket: No recent files found - auto-triggering new UTSC")
                 # Trigger UTSC via PyPNM API
                 try:
+                    pypnm_url = current_app.config.get('PYPNM_API_URL', 'http://pypnm-api:5000')
                     payload = {
                         'cmts_ip': cmts_ip,
                         'rf_port_ifindex': int(rf_port),
@@ -303,7 +304,13 @@ def init_websocket(app):
                         'freerun_duration_ms': duration_s * 1000
                     }
                     
-                    result = pypnm_client.start_utsc_capture(mac_address, payload)
+                    response = requests.post(
+                        f'{pypnm_url}/api/pnm/upstream/utsc/start/{mac_address}',
+                        json=payload,
+                        timeout=10
+                    )
+                    result = response.json()
+                    
                     if result.get('success'):
                         logger.info(f"UTSC WebSocket: Auto-triggered UTSC successfully")
                         time.sleep(2)  # Wait for first files to arrive
