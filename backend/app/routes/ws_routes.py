@@ -287,9 +287,9 @@ def init_websocket(app):
             # Check if we need to trigger UTSC
             if not recent_files:
                 logger.info(f"UTSC WebSocket: No recent files found - auto-triggering new UTSC")
-                # Trigger UTSC via PyPNM API
+                # Trigger UTSC via PyPNM API (using localhost since containers are on host network)
                 try:
-                    pypnm_url = current_app.config.get('PYPNM_API_URL', 'http://pypnm-api:5000')
+                    pypnm_url = 'http://localhost:5000'
                     payload = {
                         'cmts_ip': cmts_ip,
                         'rf_port_ifindex': int(rf_port),
