@@ -287,16 +287,31 @@ def init_websocket(app):
             # Check if we need to trigger UTSC
             if not recent_files:
                 logger.info(f"UTSC WebSocket: No recent files found - auto-triggering new UTSC")
-                # Trigger UTSC via internal API call
-                from app.routes.pypnm_routes import start_utsc
-                from flask import current_app as app
-                with app.test_request_context():
-                    result = start_utsc(mac_address)
+                # Trigger UTSC via PyPNM API
+                try:
+                    payload = {
+                        'cmts_ip': cmts_ip,
+                        'rf_port_ifindex': int(rf_port),
+                        'community': community,
+                        'tftp_ip': current_app.config.get('TFTP_SERVER_IP', '172.16.6.101'),
+                        'trigger_mode': 2,
+                        'center_freq_hz': 50000000,
+                        'span_hz': 80000000,
+                        'num_bins': 800,
+                        'filename': f'utsc_{mac_clean}',
+                        'repeat_period_ms': 100,
+                        'freerun_duration_ms': duration_s * 1000
+                    }
+                    
+                    result = pypnm_client.start_utsc_capture(mac_address, payload)
                     if result.get('success'):
                         logger.info(f"UTSC WebSocket: Auto-triggered UTSC successfully")
-                        time.sleep(1)  # Brief wait for first files
+                        time.sleep(2)  # Wait for first files to arrive
                     else:
                         logger.error(f"UTSC WebSocket: Failed to auto-trigger UTSC: {result.get('error')}")
+                except Exception as e:
+                    logger.error(f"UTSC WebSocket: Auto-trigger exception: {e}")
+                    
                 stream_start_time = time.time() - 2.0  # Just started
             else:
                 logger.info(f"UTSC WebSocket: Found {len(recent_files)} recent files (<60s old) - will stream these")
