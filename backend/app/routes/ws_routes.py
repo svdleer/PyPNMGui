@@ -250,7 +250,11 @@ def init_websocket(app):
         last_status = None
         initial_buffer_target = 3  # Start streaming quickly after few files
         streaming_started = False
-        # Single trigger only - no re-triggering, let freerun complete naturally
+        
+        # Continuous streaming: re-trigger UTSC every 10 seconds (E6000 gives ~10 captures per run)
+        last_trigger_time = 0
+        trigger_interval = 10  # Seconds between UTSC re-triggers (matches E6000's practical window)
+        run_counter = 0
         
         try:
             # Send initial connected message
@@ -290,10 +294,22 @@ def init_websocket(app):
             else:
                 logger.info(f"UTSC WebSocket: No recent files found - waiting for new captures")
             
-            # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
-            # Start collecting files from NOW - E6000 generates continuously for 60s
+            # CONTINUOUS STREAMING MODE: Trigger first run immediately
             stream_start_time = time.time()
-            logger.info(f"UTSC WebSocket: Streaming files from NOW (API-triggered freerun runs for 60s)")
+            
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Starting continuous streaming mode (re-trigger every {trigger_interval}s)")
+                logger.info(f"UTSC WebSocket: Triggering initial UTSC run #{run_counter}")
+                try:
+                    trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
+                    last_trigger_time = stream_start_time
+                    run_counter += 1
+                except Exception as e:
+                    logger.error(f"UTSC initial trigger failed: {e}")
+                    ws.send(json.dumps({'type': 'error', 'message': f'Failed to start UTSC: {e}'}))
+                    return
+            else:
+                logger.info(f"UTSC WebSocket: Passive mode - streaming pre-existing files only")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
@@ -409,7 +425,27 @@ def init_websocket(app):
                         'plot': None,
                         'raw_data': {
                             'frequencies': raw_frequencies,
-                            'amplitudes': raw_amplitudes,
+                  CONTINUOUS RE-TRIGGERING: Check if buffer is getting low and trigger new run
+                if rf_port and cmts_ip and (current_time - last_trigger_time) >= trigger_interval:
+                    # Time to trigger next run
+                    buffer_size = len(file_buffer)
+                    logger.info(f"UTSC WebSocket: Triggering run #{run_counter} (buffer has {buffer_size} samples, elapsed {elapsed:.1f}s)")
+                    
+                    try:
+                        trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
+                        last_trigger_time = current_time
+                        run_counter += 1
+                        
+                        # Send re-trigger notification
+                        ws.send(json.dumps({
+                            'type': 'retrigger',
+                            'run': run_counter - 1,
+                            'buffer_size': buffer_size,
+                            'elapsed': elapsed,
+                            'message': f'Started run #{run_counter - 1} (buffer: {buffer_size} samples)'
+                        }))
+                    except Exception as e:
+                        logger.error(f"UTSC re-trigger failed: {e}")
                             'span_hz': item['span_hz'],
                             'center_freq_hz': item['center_freq_hz']
                         }
@@ -418,17 +454,16 @@ def init_websocket(app):
                     try:
                         ws.send(json.dumps(message))
                     except Exception as send_err:
-                        logger.error(f"Failed to send UTSC data: {send_err}")
-                        raise
-                
-                # NO RE-TRIGGERING - Single trigger, let freerun complete naturally
-                
-                # Send heartbeat
-                if current_time - last_heartbeat > heartbeat_interval:
-                    ws.send(json.dumps({
-                        'type': 'heartbeat',
-                        'timestamp': current_time,
-                        'buffer_size': len(file_buffer),
+              Stop UTSC on WebSocket disconnect (clean shutdown)
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Stopping continuous UTSC on {cmts_ip} port {rf_port} (completed {run_counter} runs)")
+                try:
+                    stop_utsc_via_agent(cmts_ip, int(rf_port), community)
+                except Exception as e:
+                    logger.warning(f"UTSC stop failed on cleanup: {e}")
+            
+            _utsc_sessions.pop(session_id, None)
+            logger.info(f"UTSC WebSocket closed for {mac_address} after {run_counter} runs
                         'elapsed': elapsed
                     }))
                     last_heartbeat = current_time
