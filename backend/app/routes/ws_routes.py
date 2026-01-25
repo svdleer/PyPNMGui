@@ -264,42 +264,36 @@ def init_websocket(app):
             
             # Delete old UTSC files via FTP before starting (but only if no active session exists)
             # Clean up ALL UTSC files, not just current MAC - prevents disk buildup
-            pattern = f"{tftp_base}/utsc_*"
-            existing_files = glob.glob(pattern)
-            
-            # Always define FTP credentials for later use
+            # Always define FTP credentials
             ftp_server = current_app.config.get('FTP_SERVER_IP', '127.0.0.1')
             ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
             ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
             
-            # Check if there are ANY active UTSC sessions (any MAC)
-            existing_session = len(_utsc_sessions) > 0
+            # Look for recent files from this MAC (last 60 seconds)
+            pattern = f"{tftp_base}/utsc_{mac_clean}_*"
+            all_files = glob.glob(pattern)
+            current_time = time.time()
+            recent_files = [f for f in all_files if (current_time - os.path.getmtime(f)) < 60]
+            old_files = [f for f in all_files if f not in recent_files]
             
-            if existing_files and not existing_session:
-                logger.info(f"UTSC WebSocket: Found {len(existing_files)} existing files from all MACs, deleting via FTP...")
-                filenames = [os.path.basename(f) for f in existing_files]
+            # Delete only OLD files (>60s), keep recent ones
+            if old_files:
+                logger.info(f"UTSC WebSocket: Deleting {len(old_files)} old files (>60s)")
+                filenames = [os.path.basename(f) for f in old_files]
                 deleted = delete_utsc_files_via_ftp(ftp_server, ftp_user, ftp_pass, filenames)
-                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via FTP")
-                time.sleep(0.2)  # Brief pause after deletion
-            elif existing_session:
-                logger.info(f"UTSC WebSocket: Active session exists, skipping file deletion ({len(existing_files)} files preserved)")
-                filenames = [os.path.basename(f) for f in existing_files]
-                deleted = delete_utsc_files_via_ftp(ftp_server, ftp_user, ftp_pass, filenames)
-                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(existing_files)} files via FTP")
-                time.sleep(0.2)  # Brief pause after deletion
+                logger.info(f"UTSC WebSocket: Deleted {deleted}/{len(old_files)} old files")
+                time.sleep(0.2)
             
-            # Re-check what files remain after deletion
-            remaining_files = glob.glob(pattern)
-            # Mark remaining old files as processed (they're old/undeletable, ignore them)
-            processed_files.update(remaining_files)
-            logger.info(f"UTSC WebSocket: Starting stream, {len(remaining_files)} old files marked as processed")
+            # Mark recent files as ready to stream
+            if recent_files:
+                logger.info(f"UTSC WebSocket: Found {len(recent_files)} recent files (<60s old) - will stream these")
+            else:
+                logger.info(f"UTSC WebSocket: No recent files found - waiting for new captures")
             
             # DO NOT TRIGGER! PyPNM API already triggered UTSC in FreeRunning mode
-            # Sending trigger here would RESTART the capture and interrupt the 60-second freerun
-            # Just wait for files to arrive from the already-running UTSC session
-            # Allow looking back 10s to catch files created between API start and WebSocket connect
-            stream_start_time = time.time() - 10.0  # Look back 10s to catch recently started files
-            logger.info(f"UTSC WebSocket: Waiting for files from PyPNM-triggered freerun session (NO GUI trigger)")
+            # Allow looking back 60s to use existing recent files from just-started UTSC
+            stream_start_time = time.time() - 60.0
+            logger.info(f"UTSC WebSocket: Streaming files from last 60s (API-triggered freerun)")
             
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
