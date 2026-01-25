@@ -58,4 +58,13 @@ def create_app():
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(pypnm_bp)
     
+    # Initialize UTSC streaming WebSocket
+    if app.config.get('ENABLE_AGENT_WEBSOCKET', True):
+        try:
+            from app.routes.ws_utsc_stream import init_utsc_stream
+            init_utsc_stream(app)
+            app.logger.info("UTSC streaming WebSocket initialized at /ws/utsc/stream")
+        except Exception as e:
+            app.logger.warning(f"UTSC streaming WebSocket not available: {e}")
+    
     return app

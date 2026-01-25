@@ -791,6 +791,91 @@ createApp({
         // Unified Start/Stop for UTSC live monitoring
         async startUtscLive() {
             if (this.utscLiveMode) {
+                this.stopUtscLive();
+                return;
+            }
+
+            if (!this.selectedModem || !this.utscConfig.rfPortIfindex) {
+                this.$toast?.error('Select modem and RF port first');
+                return;
+            }
+
+            const cmtsIp = this.getCmtsIpForModem();
+            if (!cmtsIp) {
+                this.$toast?.error('CMTS IP not available');
+                return;
+            }
+
+            try {
+                this.utscLiveMode = true;
+                this.utscStreamData = [];
+                
+                // Connect WebSocket
+                const wsUrl = `ws://${window.location.host}/ws/utsc/stream`;
+                this.utscStreamWs = new WebSocket(wsUrl);
+                
+                this.utscStreamWs.onopen = () => {
+                    console.log('[UTSC Stream] Connected');
+                    
+                    // Send configuration
+                    const config = {
+                        cmts_ip: cmtsIp,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
+                        mac_address: this.selectedModem.mac_address,
+                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
+                        span_hz: this.utscConfig.spanMhz * 1000000,
+                        num_bins: this.utscConfig.numBins,
+                        duration_sec: this.utscStreamConfig.duration,
+                        refresh_hz: this.utscStreamConfig.refreshHz
+                    };
+                    
+                    this.utscStreamWs.send(JSON.stringify(config));
+                    this.$toast?.success(`Starting ${config.duration}s UTSC stream...`);
+                };
+                
+                this.utscStreamWs.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    
+                    if (msg.type === 'config') {
+                        console.log('[UTSC Stream] Config:', msg);
+                        this.$toast?.info(`Stream configured: ${msg.runs} runs, ${msg.total_captures} captures`);
+                    }
+                    else if (msg.type === 'spectrum') {
+                        // Update chart with new spectrum data
+                        this.updateUtscStreamChart(msg.power);
+                    }
+                    else if (msg.type === 'progress') {
+                        console.log(`[UTSC Stream] Progress: ${msg.percent}% (run ${msg.run}/${msg.total_runs})`);
+                    }
+                    else if (msg.type === 'complete') {
+                        this.$toast?.success(msg.message);
+                        this.stopUtscLive();
+                    }
+                    else if (msg.type === 'error') {
+                        this.$toast?.error(`Stream error: ${msg.message}`);
+                        this.stopUtscLive();
+                    }
+                };
+                
+                this.utscStreamWs.onerror = (error) => {
+                    console.error('[UTSC Stream] Error:', error);
+                    this.$toast?.error('WebSocket error');
+                    this.stopUtscLive();
+                };
+                
+                this.utscStreamWs.onclose = () => {
+                    console.log('[UTSC Stream] Disconnected');
+                    this.utscLiveMode = false;
+                };
+                
+            } catch (error) {
+                console.error('[UTSC Stream] Failed to start:', error);
+                this.$toast?.error('Failed to start UTSC stream');
+                this.utscLiveMode = false;
+            }
+        },
+            if (this.utscLiveMode) {
                 // Stop mode
                 this.stopUtscLive();
                 return;
@@ -873,6 +958,77 @@ createApp({
         },
         
         stopUtscLive() {
+            if (this.utscStreamWs) {
+                this.utscStreamWs.close();
+                this.utscStreamWs = null;
+            }
+            this.utscLiveMode = false;
+            this.$toast?.info('UTSC stream stopped');
+        },
+        
+        updateUtscStreamChart(powerData) {
+            // Keep last 10 frames for averaging/display
+            this.utscStreamData.push(powerData);
+            if (this.utscStreamData.length > 10) {
+                this.utscStreamData.shift();
+            }
+            
+            // Calculate frequency bins
+            const centerFreq = this.utscConfig.centerFreqMhz;
+            const span = this.utscConfig.spanMhz;
+            const numBins = powerData.length;
+            
+            const startFreq = centerFreq - span / 2;
+            const freqStep = span / numBins;
+            const frequencies = Array.from({length: numBins}, (_, i) => 
+                (startFreq + i * freqStep).toFixed(2)
+            );
+            
+            // Update or create chart
+            if (!this.utscStreamChart) {
+                const ctx = document.getElementById('utscStreamChart');
+                if (!ctx) return;
+                
+                this.utscStreamChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: frequencies,
+                        datasets: [{
+                            label: 'Power (dBmV)',
+                            data: powerData,
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,  // Disable for real-time
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Frequency (MHz)' },
+                                ticks: { maxTicksLimit: 20 }
+                            },
+                            y: {
+                                title: { display: true, text: 'Power (dBmV)' },
+                                beginAtZero: false
+                            }
+                        },
+                        plugins: {
+                            legend: { display: true },
+                            tooltip: { enabled: true }
+                        }
+                    }
+                });
+            } else {
+                // Update existing chart
+                this.utscStreamChart.data.datasets[0].data = powerData;
+                this.utscStreamChart.update('none');  // No animation
+            }
+        },
             console.log('[UTSC] Stopping live mode...');
             this.utscLiveMode = false;
             this.runningUtsc = false;

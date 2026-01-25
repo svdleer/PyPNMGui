@@ -1060,11 +1060,23 @@
                                                                     :class="utscLiveMode ? 'btn-danger' : 'btn-success'" 
                                                                     :disabled="!utscConfig.rfPortIfindex">
                                                                 <span v-if="runningUtsc"><i class="bi bi-arrow-repeat spin me-1"></i>Starting...</span>
-                                                                <span v-else-if="utscLiveMode"><i class="bi bi-stop-fill me-1"></i>Stop</span>
-                                                                <span v-else><i class="bi bi-play-fill me-1"></i>Start</span>
+                                                                <span v-else-if="utscLiveMode"><i class="bi bi-stop-circle me-1"></i>Stop Stream</span>
+                                                                <span v-else><i class="bi bi-broadcast me-1"></i>Start Live Stream</span>
                                                             </button>
                                                         </div>
-                                                        <div class="mt-2">
+                                                        
+                                                        <!-- Stream Duration Config -->
+                                                        <div class="mb-2" v-if="!utscLiveMode">
+                                                            <label class="form-label form-label-sm">Stream Duration (seconds)</label>
+                                                            <input v-model.number="utscStreamConfig.duration" type="number" class="form-control form-control-sm" min="10" max="300" step="10" placeholder="120">
+                                                        </div>
+                                                        
+                                                        <!-- Live Stream Chart -->
+                                                        <div v-if="utscLiveMode" class="mt-3 border rounded p-2 bg-dark" style="height: 350px;">
+                                                            <canvas id="utscStreamChart"></canvas>
+                                                        </div>
+                                                        
+                                                        <div class="mt-2" v-if="!utscLiveMode">
                                                             <label class="form-label small mb-1">
                                                                 Refresh Rate: {{ (utscRefreshRate/1000).toFixed(1) }}s
                                                             </label>
