@@ -425,9 +425,20 @@ def init_websocket(app):
                         'plot': None,
                         'raw_data': {
                             'frequencies': raw_frequencies,
-                  CONTINUOUS RE-TRIGGERING: Check if buffer is getting low and trigger new run
+                            'amplitudes': raw_amplitudes,
+                            'span_hz': item['span_hz'],
+                            'center_freq_hz': item['center_freq_hz']
+                        }
+                    }
+                    
+                    try:
+                        ws.send(json.dumps(message))
+                    except Exception as send_err:
+                        logger.error(f"Failed to send UTSC data: {send_err}")
+                        raise
+                
+                # Continuous streaming: re-trigger UTSC every 10 seconds (E6000 gives ~10 captures per run)
                 if rf_port and cmts_ip and (current_time - last_trigger_time) >= trigger_interval:
-                    # Time to trigger next run
                     buffer_size = len(file_buffer)
                     logger.info(f"UTSC WebSocket: Triggering run #{run_counter} (buffer has {buffer_size} samples, elapsed {elapsed:.1f}s)")
                     
@@ -446,24 +457,13 @@ def init_websocket(app):
                         }))
                     except Exception as e:
                         logger.error(f"UTSC re-trigger failed: {e}")
-                            'span_hz': item['span_hz'],
-                            'center_freq_hz': item['center_freq_hz']
-                        }
-                    }
-                    
-                    try:
-                        ws.send(json.dumps(message))
-                    except Exception as send_err:
-              Stop UTSC on WebSocket disconnect (clean shutdown)
-            if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Stopping continuous UTSC on {cmts_ip} port {rf_port} (completed {run_counter} runs)")
-                try:
-                    stop_utsc_via_agent(cmts_ip, int(rf_port), community)
-                except Exception as e:
-                    logger.warning(f"UTSC stop failed on cleanup: {e}")
-            
-            _utsc_sessions.pop(session_id, None)
-            logger.info(f"UTSC WebSocket closed for {mac_address} after {run_counter} runs
+                
+                # Send heartbeat
+                if current_time - last_heartbeat > heartbeat_interval:
+                    ws.send(json.dumps({
+                        'type': 'heartbeat',
+                        'timestamp': current_time,
+                        'buffer_size': len(file_buffer),
                         'elapsed': elapsed
                     }))
                     last_heartbeat = current_time
@@ -473,17 +473,16 @@ def init_websocket(app):
         except Exception as e:
             logger.error(f"UTSC WebSocket error: {e}")
         finally:
-            # Don't auto-stop UTSC - let freerun complete naturally
-            # User can manually stop via /upstream/utsc/stop endpoint if needed
-            # if rf_port and cmts_ip:
-            #     logger.info(f"UTSC WebSocket: Stopping UTSC on {cmts_ip} port {rf_port}")
-            #     try:
-            #         stop_utsc_via_agent(cmts_ip, int(rf_port), community)
-            #     except Exception as e:
-            #         logger.warning(f"UTSC stop failed on cleanup: {e}")
+            # Stop UTSC on WebSocket disconnect (clean shutdown)
+            if rf_port and cmts_ip:
+                logger.info(f"UTSC WebSocket: Stopping continuous UTSC on {cmts_ip} port {rf_port} (completed {run_counter} runs)")
+                try:
+                    stop_utsc_via_agent(cmts_ip, int(rf_port), community)
+                except Exception as e:
+                    logger.warning(f"UTSC stop failed on cleanup: {e}")
             
             _utsc_sessions.pop(session_id, None)
-            logger.info(f"UTSC WebSocket closed for {mac_address} (UTSC continues running)")
+            logger.info(f"UTSC WebSocket closed for {mac_address} after {run_counter} runs")
     
     logger.info("WebSocket agent endpoint registered at /ws/agent")
     logger.info("WebSocket UTSC endpoint registered at /ws/utsc/<mac>")
