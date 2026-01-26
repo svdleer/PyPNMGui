@@ -1253,6 +1253,16 @@ createApp({
                         const data = JSON.parse(event.data);
                         
                         if (data.type === 'spectrum') {
+                            // Debug: Log full message structure
+                            console.log('[UTSC] Received: spectrum', data);
+                            console.log('[UTSC] Interactive mode:', this.utscInteractive);
+                            console.log('[UTSC] Has raw_data:', !!data.raw_data);
+                            if (data.raw_data) {
+                                console.log('[UTSC] raw_data keys:', Object.keys(data.raw_data));
+                                console.log('[UTSC] frequencies length:', data.raw_data.frequencies?.length);
+                                console.log('[UTSC] amplitudes length:', data.raw_data.amplitudes?.length);
+                            }
+                            
                             // Update buffer size display
                             if (data.buffer_size !== undefined) {
                                 this.utscBufferSize = data.buffer_size;
@@ -1264,6 +1274,10 @@ createApp({
                             if (shouldUpdateChart) {
                                 this.utscLastUpdateTime = now;
                             }
+                            
+                            console.log('[UTSC] Should update chart:', shouldUpdateChart, 
+                                'interactive:', this.utscInteractive, 
+                                'has raw_data:', !!data.raw_data);
                             
                             // Handle interactive mode with SciChart (only if throttle allows)
                             if (shouldUpdateChart && this.utscInteractive && data.raw_data) {

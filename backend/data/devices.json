@@ -1,0 +1,13 @@
+[
+  {
+    "mac_address": "fc:01:7c:bf:73:e3",
+    "ip_address": "10.155.36.22",
+    "hostname": "lab-modem-1",
+    "model": "Arris TG4482",
+    "cmts_ip": "172.16.6.212",
+    "cmts_community": "Z1gg0Sp3c1@l",
+    "tftp_ip": "172.16.6.101",
+    "location": "Lab",
+    "notes": "Main test modem"
+  }
+]
