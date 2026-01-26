@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Spectrum Analyzer — Pro Return Path UI</title>
+<style>
+  :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+  body{margin:0;background:#0b1020;color:#dfe7ff;display:flex;flex-direction:column;height:100vh}
+  header{padding:10px 16px;background:#071028;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0}
+  #controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button, select, input{background:#0f1724;border:1px solid #1f2a44;color:#dfe7ff;padding:6px 8px;border-radius:6px}
+  main{flex:1;display:flex;flex-direction:column;padding:8px}
+  #canvasWrap{flex:1;position:relative;display:flex;flex-direction:column;gap:6px}
+  canvas{width:100%;display:block;border-radius:6px;background:#071028}
+  #specCanvas{height:55%}
+  #waterfallCanvas{height:45%}
+  #status{position:absolute;left:10px;top:10px;background:rgba(7,16,40,0.6);padding:6px 8px;border-radius:6px;font-size:12px}
+  #cursor{position:absolute;right:10px;top:10px;background:rgba(7,16,40,0.6);padding:6px 8px;border-radius:6px;font-size:12px;text-align:right;white-space:pre}
+  footer{padding:8px 12px;background:#071028;font-size:13px;color:#9fb0ff}
+  .small{font-size:12px;color:#9fb0ff}
+  #jsonIn{width:320px;height:90px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Return Path Spectrum Analyzer (PNM)</h1>
+  <div id="controls">
+    <button id="resetMax">Reset Max</button>
+    <button id="clearWf">Clear WF</button>
+    <button id="pauseBtn">Pause</button>
+
+    <label class="small">Scale:
+      <select id="scalePreset">
+        <option value="auto">Auto</option>
+        <option value="-60,0">Return Path (‑60..0)</option>
+        <option value="-70,-20">High Sens (‑70..‑20)</option>
+      </select>
+    </label>
+
+    <label class="small">Hold:
+      <select id="holdMode">
+        <option value="max">Max Hold</option>
+        <option value="decay">Decay</option>
+      </select>
+    </label>
+
+    <button id="freezeA">Freeze A</button>
+    <button id="freezeB">Freeze B</button>
+    <label class="small"><input id="showFreeze" type="checkbox" checked /> Show A/B</label>
+
+    <label class="small">Impulse:
+      <input id="impulse" type="checkbox" checked />
+    </label>
+
+    <label class="small">Zoom:
+      <button id="zoomOut">Reset</button>
+    </label>
+  </div>
+</header>
+<main>
+  <div id="canvasWrap">
+    <canvas id="specCanvas"></canvas>
+    <canvas id="waterfallCanvas"></canvas>
+    <div id="status">Status: idle</div>
+    <div id="cursor">—</div>
+  </div>
+  <div style="display:flex;gap:12px;margin-top:8px;align-items:flex-start">
+    <div style="flex:1">
+      <div class="small">JSON format:</div>
+      <pre class="small" style="background:#071028;padding:8px;border-radius:6px">{
+  "freq_start_hz": 5000000,
+  "freq_step_hz": 25000,
+  "bins": [-52.1, -50.7, -48.3, ...]   // dBmV / MHz
+}</pre>
+    </div>
+    <div style="width:340px">
+      <textarea id="jsonIn" placeholder='Paste example JSON here'></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button id="injectBtn">Inject JSON</button>
+      </div>
+      <div style="margin-top:8px" class="small">WebSocket:</div>
+      <input id="wsInput" value="ws://localhost:8080/utsc" style="width:100%;margin-top:6px" />
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button id="connectWs">Connect</button>
+        <button id="disconnectWs">Disconnect</button>
+      </div>
+    </div>
+  </div>
+</main>
+<footer>
+  <span id="info">Bins: 0</span>
+</footer>
+
+<script>
+// ===== Canvas setup =====
+const specCanvas = document.getElementById('specCanvas');
+const wfCanvas   = document.getElementById('waterfallCanvas');
+const sctx = specCanvas.getContext('2d');
+const wctx = wfCanvas.getContext('2d');
+let dpr = window.devicePixelRatio || 1;
+function resize(){
+  for(const c of [specCanvas,wfCanvas]){
+    const r = c.getBoundingClientRect();
+    c.width  = Math.round(r.width  * dpr);
+    c.height = Math.round(r.height * dpr);
+    c.getContext('2d').setTransform(dpr,0,0,dpr,0,0);
+  }
+  draw(); drawWaterfall();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ===== State =====
+let bins = [];
+let freqStart = 0;
+let freqStep  = 1;
+let maxHold   = [];
+let freezeA   = null;
+let freezeB   = null;
+let paused    = false;
+let holdMode  = 'max';
+let decayRate = 0.992;
+let scaleMode = 'auto';
+let impulseOn = true;
+
+// zoom window
+let viewStart = 0;
+let viewEnd   = null; // null = full
+
+// Waterfall
+let wfRows = 240;
+let wfBuffer = [];
+
+const statusEl = document.getElementById('status');
+const cursorEl = document.getElementById('cursor');
+const infoEl   = document.getElementById('info');
+
+function setStatus(s){ statusEl.textContent = 'Status: ' + s; }
+
+// ===== Incoming data =====
+function handleMessage(msg){
+  if(!msg || !Array.isArray(msg.bins)) return;
+  bins = msg.bins.slice();
+  freqStart = msg.freq_start_hz || freqStart;
+  freqStep  = msg.freq_step_hz  || freqStep;
+
+  if(viewEnd === null){ viewStart = 0; viewEnd = bins.length-1; }
+
+  if(maxHold.length !== bins.length) maxHold = bins.slice();
+
+  if(holdMode === 'max'){
+    for(let i=0;i<bins.length;i++) if(bins[i] > maxHold[i]) maxHold[i] = bins[i];
+  } else {
+    for(let i=0;i<bins.length;i++){
+      if(bins[i] > maxHold[i]) maxHold[i] = bins[i];
+      else maxHold[i] = maxHold[i]*decayRate + bins[i]*(1-decayRate);
+    }
+  }
+
+  wfBuffer.unshift(bins.slice());
+  if(wfBuffer.length > wfRows) wfBuffer.pop();
+
+  infoEl.textContent = `Bins: ${bins.length} — ${(freqStart/1e6).toFixed(2)} MHz → ${((freqStart+freqStep*(bins.length-1))/1e6).toFixed(2)} MHz`;
+  draw(); drawWaterfall();
+}
+
+// ===== Drawing =====
+function drawGrid(ctx,w,h){
+  ctx.save(); ctx.strokeStyle='rgba(255,255,255,0.06)';
+  for(let i=0;i<=6;i++){ const y=(h/6)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+  ctx.restore();
+}
+
+function draw(){
+  const w = specCanvas.width / dpr;
+  const h = specCanvas.height / dpr;
+  const plotLeft = 60;      // space for Y axis
+  const plotBottom = 30;   // space for X axis
+  const plotTop = 10;
+  const plotRight = 10;
+
+  sctx.clearRect(0,0,w,h);
+  sctx.fillStyle='#071028'; sctx.fillRect(0,0,w,h);
+  drawGrid(sctx,w,h);
+  if(!bins.length) return;
+
+  const lo = viewStart, hi = viewEnd;
+  const plotW = w - plotLeft - plotRight;
+  const plotH = h - plotTop - plotBottom;
+  const slice = bins.slice(lo,hi+1);
+  const sliceHold = maxHold.slice(lo,hi+1);
+
+  let minV=Infinity, maxV=-Infinity;
+  for(let v of slice.concat(sliceHold, freezeA||[], freezeB||[])){
+    if(isFinite(v)){ if(v<minV) minV=v; if(v>maxV) maxV=v; }
+  }
+
+  if(scaleMode !== 'auto'){
+    const p = scaleMode.split(','); minV=parseFloat(p[0]); maxV=parseFloat(p[1]);
+  } else {
+    const pad=(maxV-minV)*0.08||1; maxV+=pad; minV-=pad;
+  }
+
+  const valToY = v => (plotTop + plotH) - ((v-minV)/(maxV-minV))*(plotH);
+  const pxStep = plotW / (slice.length-1);
+
+  // draw axes
+  sctx.strokeStyle='rgba(200,200,255,0.4)'; sctx.lineWidth=1;
+  // Y axis
+  sctx.beginPath(); sctx.moveTo(plotLeft,plotTop); sctx.lineTo(plotLeft,plotTop+plotH); sctx.stroke();
+  // X axis
+  sctx.beginPath(); sctx.moveTo(plotLeft,plotTop+plotH); sctx.lineTo(plotLeft+plotW,plotTop+plotH); sctx.stroke();
+
+  // Y ticks + labels
+  sctx.fillStyle='rgba(200,200,255,0.8)'; sctx.font='12px system-ui';
+  for(let i=0;i<=5;i++){
+    const v=minV+(maxV-minV)*(i/5);
+    const y=valToY(v);
+    sctx.beginPath(); sctx.moveTo(plotLeft-5,y); sctx.lineTo(plotLeft,y); sctx.stroke();
+    sctx.fillText(v.toFixed(1), 6, y+4);
+  }
+
+  // X ticks + labels
+  const xTicks=6;
+  for(let i=0;i<=xTicks;i++){
+    const idx=Math.floor(lo+(hi-lo)*(i/xTicks));
+    const x=plotLeft + (idx-lo)/(hi-lo)*plotW;
+    const f=(freqStart+idx*freqStep)/1e6;
+    sctx.beginPath(); sctx.moveTo(x,plotTop+plotH); sctx.lineTo(x,plotTop+plotH+5); sctx.stroke();
+    sctx.fillText(f.toFixed(2)+' MHz', x-20, plotTop+plotH+20);
+  }
+
+  // Axis titles
+  sctx.save();
+  sctx.fillStyle='rgba(220,220,255,0.9)'; sctx.font='13px system-ui';
+  sctx.fillText('Frequency (MHz)', plotLeft+plotW/2-50, h-5);
+  sctx.translate(14, plotTop+plotH/2+40);
+  sctx.rotate(-Math.PI/2);
+  sctx.fillText('Level (dBmV / MHz)', 0, 0);
+  sctx.restore();
+
+  // live trace
+  sctx.beginPath(); sctx.strokeStyle='rgba(140,200,255,0.95)'; sctx.lineWidth=1.4;
+  for(let i=0;i<slice.length;i++){ const x=plotLeft + i*pxStep,y=valToY(slice[i]); i? sctx.lineTo(x,y):sctx.moveTo(x,y); }
+  sctx.stroke();
+
+  // max hold
+  sctx.beginPath(); sctx.setLineDash([6,4]); sctx.strokeStyle='rgba(255,200,120,0.95)';
+  for(let i=0;i<sliceHold.length;i++){ const x=plotLeft + i*pxStep,y=valToY(sliceHold[i]); i? sctx.lineTo(x,y):sctx.moveTo(x,y); }
+  sctx.stroke(); sctx.setLineDash([]);
+
+  // freeze overlays
+  if(document.getElementById('showFreeze').checked){
+    if(freezeA){ sctx.beginPath(); sctx.strokeStyle='rgba(0,255,160,0.9)'; for(let i=lo;i<=hi;i++){ const x=plotLeft + (i-lo)*pxStep,y=valToY(freezeA[i]); i===lo? sctx.moveTo(x,y):sctx.lineTo(x,y);} sctx.stroke(); }
+    if(freezeB){ sctx.beginPath(); sctx.strokeStyle='rgba(255,100,180,0.9)'; for(let i=lo;i<=hi;i++){ const x=plotLeft + (i-lo)*pxStep,y=valToY(freezeB[i]); i===lo? sctx.moveTo(x,y):sctx.lineTo(x,y);} sctx.stroke(); }
+  }
+
+  // impulse detector
+  if(impulseOn){
+    for(let i=1;i<slice.length-1;i++){
+      const v=slice[i];
+      const avg=(slice[i-1]+slice[i+1])/2;
+      if(v-avg > 6){ // >6 dB spike
+        const x=plotLeft + i*pxStep, y=valToY(v);
+        sctx.fillStyle='red'; sctx.beginPath(); sctx.arc(x,y,3,0,Math.PI*2); sctx.fill();
+      }
+    }
+  }
+}
+
+// ===== Waterfall =====
+function colorMap(v,minV,maxV){
+  const t=Math.max(0,Math.min(1,(v-minV)/(maxV-minV)));
+  const r=Math.floor(255*Math.min(1,Math.max(0,(t-0.5)*2)));
+  const g=Math.floor(255*Math.min(1,Math.max(0,1-Math.abs(t-0.5)*2)));
+  const b=Math.floor(255*Math.min(1,Math.max(0,(0.5-t)*2)));
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawWaterfall(){
+  const w = wfCanvas.width / dpr;
+  const h = wfCanvas.height / dpr;
+  wctx.clearRect(0,0,w,h);
+  if(!wfBuffer.length) return;
+
+  let minV=Infinity,maxV=-Infinity;
+  for(let v of bins){ if(v<minV)minV=v; if(v>maxV)maxV=v; }
+  const pad=(maxV-minV)*0.1||1; maxV+=pad; minV-=pad;
+
+  const rowH=h/wfRows; const pxStep=w/(bins.length-1);
+  for(let r=0;r<wfBuffer.length;r++){
+    const row=wfBuffer[r]; const y=r*rowH;
+    for(let i=0;i<row.length;i++){
+      wctx.fillStyle=colorMap(row[i],minV,maxV);
+      wctx.fillRect(i*pxStep,y,pxStep+1,rowH+1);
+    }
+  }
+}
+
+// ===== Cursor + Zoom =====
+specCanvas.addEventListener('mousemove', e=>{
+  if(!bins.length) return;
+  const rect=specCanvas.getBoundingClientRect();
+  const x=(e.clientX-rect.left);
+  const idx=Math.round(viewStart + x/rect.width * (viewEnd-viewStart));
+  const f=(freqStart+idx*freqStep)/1e6;
+  const v=bins[idx];
+  cursorEl.textContent=`${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV/MHz\nBin ${idx}`;
+});
+
+// mouse wheel zoom
+specCanvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const span=viewEnd-viewStart;
+  const center=viewStart+span/2;
+  const factor=e.deltaY>0?1.2:0.8;
+  let newSpan=Math.max(50,Math.min(bins.length,span*factor));
+  viewStart=Math.max(0,Math.floor(center-newSpan/2));
+  viewEnd=Math.min(bins.length-1,Math.floor(center+newSpan/2));
+  draw();
+});
+
+document.getElementById('zoomOut').onclick=()=>{ viewStart=0; viewEnd=bins.length-1; draw(); };
+
+// ===== Controls =====
+document.getElementById('resetMax').onclick=()=>{ maxHold=bins.slice(); draw(); };
+document.getElementById('clearWf').onclick =()=>{ wfBuffer=[]; drawWaterfall(); };
+document.getElementById('pauseBtn').onclick =e=>{ paused=!paused; e.target.textContent=paused?'Resume':'Pause'; };
+document.getElementById('scalePreset').onchange=e=>{ scaleMode=e.target.value; draw(); };
+document.getElementById('holdMode').onchange=e=>{ holdMode=e.target.value; };
+document.getElementById('impulse').onchange=e=>{ impulseOn=e.target.checked; draw(); };
+document.getElementById('freezeA').onclick=()=>{ freezeA=bins.slice(); };
+document.getElementById('freezeB').onclick=()=>{ freezeB=bins.slice(); };
+
+// ===== Manual inject =====
+document.getElementById('injectBtn').onclick=()=>{ try{handleMessage(JSON.parse(jsonIn.value));}catch{} };
+
+// ===== WebSocket =====
+let ws=null;
+document.getElementById('connectWs').onclick=()=>{
+  const url=wsInput.value.trim(); ws=new WebSocket(url);
+  ws.onopen =()=>setStatus('ws open');
+  ws.onclose=()=>setStatus('ws closed');
+  ws.onerror=()=>setStatus('ws error');
+  ws.onmessage=evt=>{ if(paused) return; try{handleMessage(JSON.parse(evt.data));}catch{} };
+};
+
+document.getElementById('disconnectWs').onclick=()=>{ if(ws){ws.close();ws=null;} };
+
+setStatus('idle');
+</script>
+</body>
+</html>
