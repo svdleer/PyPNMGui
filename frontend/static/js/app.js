@@ -1475,11 +1475,6 @@ createApp({
                             
                             if (data.type === 'connected') {
                                 console.log('[UTSC]', data.message);
-                            } else if (data.type === 'spectrum') {
-                                // Update chart with live spectrum data
-                                if (data.frequencies && data.amplitude) {
-                                    this.updateUtscSciChart({ frequencies: data.frequencies, amplitude: data.amplitude });
-                                }
                             } else if (data.type === 'buffering') {
                                 console.log('[UTSC]', data.message);
                             } else if (data.type === 'complete') {
