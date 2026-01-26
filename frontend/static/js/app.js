@@ -1673,13 +1673,14 @@ createApp({
         },
         
         updateUtscSciChart(rawData) {
-            console.log('[SciChart] updateUtscSciChart called, checking state...');
+            console.log('[SciChart] updateUtscSciChart called');
+            console.log('[SciChart] rawData keys:', Object.keys(rawData || {}));
+            console.log('[SciChart] rawData:', rawData);
             console.log('[SciChart] utscSciChart:', this.utscSciChart);
             console.log('[SciChart] utscSciChartSeries:', this.utscSciChartSeries);
             
             if (!this.utscSciChart || !this.utscSciChartSeries) {
                 console.warn('[SciChart] Chart not initialized, skipping update');
-                console.warn('[SciChart] utscSciChart:', this.utscSciChart, 'utscSciChartSeries:', this.utscSciChartSeries);
                 return;
             }
             
@@ -1687,11 +1688,18 @@ createApp({
                 const { frequencies, amplitudes } = rawData;
                 
                 if (!frequencies || !amplitudes || frequencies.length === 0) {
-                    console.warn('[SciChart] No data to update');
+                    console.warn('[SciChart] No data to update', {
+                        hasFreq: !!frequencies,
+                        hasAmp: !!amplitudes,
+                        freqLen: frequencies?.length,
+                        ampLen: amplitudes?.length
+                    });
                     return;
                 }
                 
-                console.log('[SciChart] Updating with', frequencies.length, 'points');
+                console.log('[SciChart] Updating with', frequencies.length, 'points', 
+                    'freq range:', frequencies[0], '-', frequencies[frequencies.length-1],
+                    'amp range:', Math.min(...amplitudes), '-', Math.max(...amplitudes));
                 
                 // Convert Hz to MHz for display
                 const freqsMhz = frequencies.map(f => f / 1e6);
