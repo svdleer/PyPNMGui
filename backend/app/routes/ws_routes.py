@@ -409,15 +409,19 @@ def init_websocket(app):
                     
                     amplitudes = item['amplitudes']
                     num_bins = len(amplitudes)
-                    freq_start = item['center_freq_hz'] - (item['span_hz'] / 2)
-                    freq_step = item['span_hz'] / num_bins if num_bins > 0 else 1
-                    frequencies = [freq_start + i * freq_step for i in range(num_bins)]
                     
-                    # Limit to 1600 points for WebSocket
-                    raw_frequencies = frequencies[:1600]
+                    # UTSC amplitudes are in dBmV already (from file parsing: value/10.0)
+                    # But need to limit to 1600 points for WebSocket
                     raw_amplitudes = amplitudes[:1600]
+                    actual_bins = len(raw_amplitudes)
                     
-                    # Send in BOTH formats for compatibility
+                    # Calculate correct axis: span over actual bins sent
+                    span_hz = item['span_hz']
+                    center_freq_hz = item['center_freq_hz']
+                    freq_start_hz = center_freq_hz - (span_hz / 2)
+                    freq_step_hz = span_hz / actual_bins if actual_bins > 0 else 1
+                    
+                    # Send in new format (spectrum analyzer expects this)
                     message = {
                         'type': 'spectrum',
                         'timestamp': current_time,
@@ -426,14 +430,12 @@ def init_websocket(app):
                         'plot': None,
                         'raw_data': {
                             # New format (preferred by spectrum analyzer)
-                            'freq_start_hz': raw_frequencies[0] if raw_frequencies else freq_start,
-                            'freq_step_hz': freq_step,
-                            'bins': raw_amplitudes,
-                            # Old format (backward compatibility)
-                            'frequencies': raw_frequencies,
-                            'amplitudes': raw_amplitudes,
-                            'span_hz': item['span_hz'],
-                            'center_freq_hz': item['center_freq_hz']
+                            'freq_start_hz': freq_start_hz,
+                            'freq_step_hz': freq_step_hz,
+                            'bins': raw_amplitudes,  # Already in dBmV from file parsing
+                            # Metadata
+                            'span_hz': span_hz,
+                            'center_freq_hz': center_freq_hz
                         }
                     }
                     
