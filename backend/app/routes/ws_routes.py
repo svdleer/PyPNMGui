@@ -225,14 +225,20 @@ def init_websocket(app):
         """WebSocket endpoint for streaming UTSC spectrum data with buffering."""
         from flask import request
         
-        # Parse query parameters
-        refresh_ms = int(request.args.get('refresh', 500))  # Refresh rate in ms
-        duration_s = int(request.args.get('duration', 60))  # Duration in seconds
-        rf_port = request.args.get('rf_port')
-        cmts_ip = request.args.get('cmts_ip')
-        community = request.args.get('community', 'public')
+        logger.info(f"=== UTSC WebSocket handler called for {mac_address} ===")
         
-        logger.info(f"UTSC WebSocket opened for {mac_address}: refresh={refresh_ms}ms, duration={duration_s}s")
+        try:
+            # Parse query parameters
+            refresh_ms = int(request.args.get('refresh', 500))  # Refresh rate in ms
+            duration_s = int(request.args.get('duration', 60))  # Duration in seconds
+            rf_port = request.args.get('rf_port')
+            cmts_ip = request.args.get('cmts_ip')
+            community = request.args.get('community', 'public')
+            
+            logger.info(f"UTSC WebSocket opened for {mac_address}: refresh={refresh_ms}ms, duration={duration_s}s, rf_port={rf_port}, cmts_ip={cmts_ip}")
+        except Exception as e:
+            logger.error(f"UTSC WebSocket parameter parsing failed: {e}")
+            raise
         
         # Clean MAC address format
         mac_clean = mac_address.replace(':', '').replace('-', '').lower()
@@ -479,8 +485,10 @@ def init_websocket(app):
                 time.sleep(0.05)  # 50ms polling
                     
         except Exception as e:
-            logger.error(f"UTSC WebSocket error: {e}")
+            logger.error(f"UTSC WebSocket error: {e}", exc_info=True)
+            raise
         finally:
+            logger.info(f"UTSC WebSocket closing for {mac_address}")
             # Stop UTSC on WebSocket disconnect (clean shutdown)
             if rf_port and cmts_ip:
                 logger.info(f"UTSC WebSocket: Stopping continuous UTSC on {cmts_ip} port {rf_port} (completed {run_counter} runs)")
@@ -490,6 +498,7 @@ def init_websocket(app):
                     logger.warning(f"UTSC stop failed on cleanup: {e}")
             
             _utsc_sessions.pop(session_id, None)
+            logger.info(f"UTSC WebSocket closed for {mac_address}")
             logger.info(f"UTSC WebSocket closed for {mac_address} after {run_counter} runs")
     
     logger.info("WebSocket agent endpoint registered at /ws/agent")
