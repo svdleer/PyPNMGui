@@ -410,9 +410,9 @@ def init_websocket(app):
                     amplitudes = item['amplitudes']
                     num_bins = len(amplitudes)
                     
-                    # UTSC amplitudes are in dBmV already (from file parsing: value/10.0)
-                    # But need to limit to 1600 points for WebSocket
-                    raw_amplitudes = amplitudes[:1600]
+                    # UTSC amplitudes are normalized/linear (0...1), need to convert to dBmV
+                    # Mapping: 0.0 → -60 dBmV, 1.0 → -10 dBmV (realistic upstream PSD range)
+                    raw_amplitudes = [max(-60.0, -60.0 + v * 50.0) for v in amplitudes[:1600]]
                     actual_bins = len(raw_amplitudes)
                     
                     # Calculate correct axis: span over actual bins sent
@@ -432,7 +432,7 @@ def init_websocket(app):
                             # New format (preferred by spectrum analyzer)
                             'freq_start_hz': freq_start_hz,
                             'freq_step_hz': freq_step_hz,
-                            'bins': raw_amplitudes,  # Already in dBmV from file parsing
+                            'bins': raw_amplitudes,  # Now in dBmV/MHz
                             # Metadata
                             'span_hz': span_hz,
                             'center_freq_hz': center_freq_hz
