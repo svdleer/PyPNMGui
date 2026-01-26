@@ -135,7 +135,7 @@ class UtscConfig:
     center_freq_hz: int = 30000000  # 30 MHz default
     span_hz: int = 80000000  # 80 MHz span
     num_bins: int = 800
-    output_format: UtscOutputFormat = UtscOutputFormat.FFT_POWER
+    output_format: UtscOutputFormat = UtscOutputFormat.FFT_AMPLITUDE  # Better for spectrum visualization
     window: UtscWindow = UtscWindow.HANN
     filename: str = "utsc_capture"
     repeat_period_ms: int = 0  # 0 = single capture
