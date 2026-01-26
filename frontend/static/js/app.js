@@ -1236,32 +1236,38 @@ createApp({
                 this.utscWebSocket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        console.log('[UTSC] Received:', data);
+                        console.log('🔴 [UTSC] RAW MESSAGE:', data);
                         
                         // Only process real spectrum frames
                         if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
-                            console.log('[UTSC] Received spectrum frame');
+                            console.log('🟢 [UTSC] SPECTRUM FRAME DETECTED!');
                             
                             // Update buffer size display
                             if (data.buffer_size !== undefined) {
                                 this.utscBufferSize = data.buffer_size;
                             }
                             
-                            // Build analyzer frame (FINAL correct format)
+                            // UNWRAP raw_data (THIS IS THE CRITICAL STEP)
                             const frame = {
                                 freq_start_hz: data.raw_data.freq_start_hz,
                                 freq_step_hz: data.raw_data.freq_step_hz,
                                 bins: data.raw_data.bins
                             };
                             
-                            // DEBUG (very important)
-                            console.log('ANALYZER FRAME:', frame);
+                            // DEBUG (verify unwrapping worked)
+                            console.log('🟡 ANALYZER FRAME (unwrapped):', {
+                                freq_start_hz: frame.freq_start_hz,
+                                freq_step_hz: frame.freq_step_hz,
+                                bins_length: frame.bins.length,
+                                first_bin: frame.bins[0]
+                            });
                             
-                            // >>> THIS IS THE CRITICAL LINE <<<
+                            // >>> FEED TO SPECTRUM ANALYZER <<<
                             try {
                                 this.handleSpectrumData(frame);
+                                console.log('✅ handleSpectrumData called successfully');
                             } catch (specError) {
-                                console.error('[UTSC] ERROR in handleSpectrumData:', specError);
+                                console.error('❌ [UTSC] ERROR in handleSpectrumData:', specError);
                             }
                         }
                         
