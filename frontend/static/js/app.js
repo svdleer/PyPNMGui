@@ -688,7 +688,9 @@ createApp({
             
             try {
                 // Use the new fast discovery endpoint
-                const response = await fetch(`/api/pypnm/upstream/discover-rf-port/${this.selectedModem.mac_address}`, {
+                const macAddress = this.selectedModem.mac_address.replace(/[^a-fA-F0-9:]/g, "").toLowerCase();
+                console.log("[UTSC] Using cleaned MAC address:", macAddress);
+                const response = await fetch(`/api/pypnm/upstream/discover-rf-port/${macAddress}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
