@@ -1773,7 +1773,7 @@ createApp({
             if (!s.bins.length) return;
             
             // Plot margins for axes and labels
-            const plotLeft = 90;      // Space for Y-axis labels + title
+            const plotLeft = 85;      // Space for Y-axis labels + title
             const plotBottom = 50;    // Space for X-axis labels + title (avoid waterfall overlap)
             const plotTop = 20;       // Lower the analyzer slightly
             const plotRight = 10;
@@ -1853,8 +1853,8 @@ createApp({
             ctx.font = '13px system-ui';
             // X-axis title (below tick labels, well above waterfall)
             ctx.fillText('Frequency (MHz)', plotLeft + plotW / 2 - 50, h - 5);
-            // Y-axis title (rotated, left of tick labels, properly centered)
-            ctx.translate(15, plotTop + plotH / 2);
+            // Y-axis title (rotated, left of tick labels, moved further left to avoid overlap)
+            ctx.translate(8, plotTop + plotH / 2);
             ctx.rotate(-Math.PI / 2);
             ctx.fillText('Level (dBmV / MHz)', -60, 0);  // Centered text
             ctx.restore();
