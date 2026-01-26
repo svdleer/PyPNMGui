@@ -1535,7 +1535,10 @@ createApp({
                 const idx = Math.round(s.viewStart + x/rect.width * (s.viewEnd - s.viewStart));
                 const f = (s.freqStart + idx * s.freqStep) / 1e6;
                 const v = s.bins[idx];
-                document.getElementById('specCursor').textContent = `${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV\nBin ${idx}`;
+                const cursorEl = document.getElementById('specCursor');
+                if (cursorEl) {
+                    cursorEl.textContent = `${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV\nBin ${idx}`;
+                }
             });
             
             // Zoom with mouse wheel
@@ -1681,8 +1684,11 @@ createApp({
             
             // Update info
             const freqEnd = s.freqStart + s.freqStep * (s.bins.length - 1);
-            document.getElementById('specInfo').textContent = 
-                `Bins: ${s.bins.length} — ${(s.freqStart/1e6).toFixed(2)} MHz → ${(freqEnd/1e6).toFixed(2)} MHz`;
+            const specInfoEl = document.getElementById('specInfo');
+            if (specInfoEl) {
+                specInfoEl.textContent = 
+                    `Bins: ${s.bins.length} — ${(s.freqStart/1e6).toFixed(2)} MHz → ${(freqEnd/1e6).toFixed(2)} MHz`;
+            }
             
             // Draw
             this.drawSpectrum();
