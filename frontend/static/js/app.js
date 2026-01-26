@@ -1256,7 +1256,11 @@ createApp({
                             console.log('ANALYZER FRAME:', frame);
                             
                             // >>> THIS IS THE CRITICAL LINE <<<
-                            this.handleSpectrumData(frame);
+                            try {
+                                this.handleSpectrumData(frame);
+                            } catch (specError) {
+                                console.error('[UTSC] ERROR in handleSpectrumData:', specError);
+                            }
                         }
                         
                         // Handle other message types
