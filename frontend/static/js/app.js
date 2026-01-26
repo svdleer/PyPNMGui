@@ -1227,7 +1227,8 @@ createApp({
             console.log('[UTSC] Connecting WebSocket:', wsUrl);
             
             try {
-                this.utscWebSocket = new WebSocket(wsUrl);
+                window.utscWebSocket = new WebSocket(wsUrl);
+                this.utscWebSocket = window.utscWebSocket;
                 
                 this.utscWebSocket.onopen = () => {
                     console.log('[UTSC] WebSocket connected');
@@ -1382,7 +1383,8 @@ createApp({
                 this.stopUtscWebSocket(); // Close any existing connection
                 
                 try {
-                    this.utscWebSocket = new WebSocket(wsUrl);
+                    window.utscWebSocket = new WebSocket(wsUrl);
+                    this.utscWebSocket = window.utscWebSocket;
                     
                     this.utscWebSocket.onopen = async () => {
                         console.log('[UTSC] WebSocket connected! Now triggering API...');
@@ -3007,7 +3009,8 @@ createApp({
             const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${macAddress}?refresh_ms=500&duration_s=60&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(this.snmpCommunityRW)}`;
             
             console.log(`[UTSC] Connecting WebSocket: ${wsUrl}`);
-            this.utscWs = new WebSocket(wsUrl);
+            window.utscWebSocket = new WebSocket(wsUrl);
+            this.utscWs = window.utscWebSocket;
             
             this.utscWs.onopen = () => {
                 console.log('[UTSC] WebSocket connected');
