@@ -1237,52 +1237,30 @@ createApp({
                     try {
                         const data = JSON.parse(event.data);
                         
-                        if (data.type === 'spectrum') {
-                            // Debug: Log spectrum frame
-                            console.log('[UTSC] Spectrum frame received:', {
-                                hasRawData: !!data.raw_data,
-                                hasBins: !!data.raw_data?.bins,
-                                binsLength: data.raw_data?.bins?.length,
-                                freqStart: data.raw_data?.freq_start_hz,
-                                freqStep: data.raw_data?.freq_step_hz
-                            });
+                        if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
+                            console.log('[UTSC] Received spectrum frame');
                             
                             // Update buffer size display
                             if (data.buffer_size !== undefined) {
                                 this.utscBufferSize = data.buffer_size;
                             }
                             
-                            // Throttle chart updates only, not data processing
-                            const now = Date.now();
-                            const shouldUpdateChart = (now - this.utscLastUpdateTime) >= this.utscUpdateThrottle;
-                            if (shouldUpdateChart) {
-                                this.utscLastUpdateTime = now;
-                            }
+                            // Build analyzer frame (FINAL correct format)
+                            const frame = {
+                                freq_start_hz: data.raw_data.freq_start_hz,
+                                freq_step_hz: data.raw_data.freq_step_hz,
+                                bins: data.raw_data.bins
+                            };
                             
-                            // Handle interactive mode with Spectrum Analyzer (only if throttle allows)
-                            if (shouldUpdateChart && this.utscInteractive && data.raw_data) {
-                                console.log('[UTSC] Calling handleSpectrumData');
-                                this.$nextTick(() => {
-                                    this.handleSpectrumData(data.raw_data);
-                                });
-                            }
+                            // DEBUG (very important)
+                            console.log('ANALYZER FRAME:', frame);
                             
-                            // Always update plot for fallback/static mode (only if throttle allows)
-                            if (shouldUpdateChart && data.plot) {
-                                this.utscPlotImage = {
-                                    data: data.plot.data,
-                                    filename: data.plot.filename,
-                                    _timestamp: data.timestamp
-                                };
-                                
-                                // Render Chart.js if not in interactive mode
-                                if (!this.utscInteractive) {
-                                    this.$nextTick(() => {
-                                        this.renderUtscChart();
-                                    });
-                                }
-                            }
-                        } else if (data.type === 'buffering') {
+                            // >>> THIS IS THE CRITICAL LINE <<<
+                            this.handleSpectrumData(frame);
+                        }
+                        
+                        // Handle other message types
+                        if (data.type === 'buffering') {
                             // Show buffering progress
                             if (data.buffer_size !== undefined) {
                                 this.utscBufferSize = data.buffer_size;
