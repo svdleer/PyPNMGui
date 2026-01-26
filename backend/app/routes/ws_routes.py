@@ -417,6 +417,7 @@ def init_websocket(app):
                     raw_frequencies = frequencies[:1600]
                     raw_amplitudes = amplitudes[:1600]
                     
+                    # Send in BOTH formats for compatibility
                     message = {
                         'type': 'spectrum',
                         'timestamp': current_time,
@@ -424,6 +425,11 @@ def init_websocket(app):
                         'buffer_size': len(file_buffer),
                         'plot': None,
                         'raw_data': {
+                            # New format (preferred by spectrum analyzer)
+                            'freq_start_hz': raw_frequencies[0] if raw_frequencies else freq_start,
+                            'freq_step_hz': freq_step,
+                            'bins': raw_amplitudes,
+                            # Old format (backward compatibility)
                             'frequencies': raw_frequencies,
                             'amplitudes': raw_amplitudes,
                             'span_hz': item['span_hz'],
