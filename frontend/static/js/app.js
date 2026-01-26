@@ -1772,6 +1772,14 @@ createApp({
             
             if (!s.bins.length) return;
             
+            // Plot margins for axes and labels
+            const plotLeft = 60;
+            const plotBottom = 30;
+            const plotTop = 10;
+            const plotRight = 10;
+            const plotW = w - plotLeft - plotRight;
+            const plotH = h - plotTop - plotBottom;
+            
             // Get slice of data to display
             const lo = s.viewStart, hi = s.viewEnd;
             const slice = s.bins.slice(lo, hi + 1);
@@ -1796,15 +1804,65 @@ createApp({
                 minV -= pad;
             }
             
-            const valToY = v => (h - 20) - ((v - minV) / (maxV - minV)) * (h - 40);
-            const pxStep = w / (slice.length - 1);
+            const valToY = v => (plotTop + plotH) - ((v - minV) / (maxV - minV)) * plotH;
+            const pxStep = plotW / (slice.length - 1);
+            
+            // Draw axes
+            ctx.strokeStyle = 'rgba(200,200,255,0.4)';
+            ctx.lineWidth = 1;
+            // Y axis
+            ctx.beginPath();
+            ctx.moveTo(plotLeft, plotTop);
+            ctx.lineTo(plotLeft, plotTop + plotH);
+            ctx.stroke();
+            // X axis
+            ctx.beginPath();
+            ctx.moveTo(plotLeft, plotTop + plotH);
+            ctx.lineTo(plotLeft + plotW, plotTop + plotH);
+            ctx.stroke();
+            
+            // Y ticks and labels
+            ctx.fillStyle = 'rgba(200,200,255,0.8)';
+            ctx.font = '12px system-ui';
+            for (let i = 0; i <= 5; i++) {
+                const v = minV + (maxV - minV) * (i / 5);
+                const y = valToY(v);
+                ctx.beginPath();
+                ctx.moveTo(plotLeft - 5, y);
+                ctx.lineTo(plotLeft, y);
+                ctx.stroke();
+                ctx.fillText(v.toFixed(1), 6, y + 4);
+            }
+            
+            // X ticks and labels
+            const xTicks = 6;
+            for (let i = 0; i <= xTicks; i++) {
+                const idx = Math.floor(lo + (hi - lo) * (i / xTicks));
+                const x = plotLeft + (idx - lo) / (hi - lo) * plotW;
+                const f = (s.freqStart + idx * s.freqStep) / 1e6;
+                ctx.beginPath();
+                ctx.moveTo(x, plotTop + plotH);
+                ctx.lineTo(x, plotTop + plotH + 5);
+                ctx.stroke();
+                ctx.fillText(f.toFixed(2) + ' MHz', x - 20, plotTop + plotH + 20);
+            }
+            
+            // Axis titles
+            ctx.save();
+            ctx.fillStyle = 'rgba(220,220,255,0.9)';
+            ctx.font = '13px system-ui';
+            ctx.fillText('Frequency (MHz)', plotLeft + plotW / 2 - 50, h - 5);
+            ctx.translate(14, plotTop + plotH / 2 + 40);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('Level (dBmV / MHz)', 0, 0);
+            ctx.restore();
             
             // Draw live trace
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(140,200,255,0.95)';
             ctx.lineWidth = 1.4;
             for (let i = 0; i < slice.length; i++) {
-                const x = i * pxStep, y = valToY(slice[i]);
+                const x = plotLeft + i * pxStep, y = valToY(slice[i]);
                 i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
             }
             ctx.stroke();
@@ -1814,7 +1872,7 @@ createApp({
             ctx.setLineDash([6, 4]);
             ctx.strokeStyle = 'rgba(255,200,120,0.95)';
             for (let i = 0; i < sliceHold.length; i++) {
-                const x = i * pxStep, y = valToY(sliceHold[i]);
+                const x = plotLeft + i * pxStep, y = valToY(sliceHold[i]);
                 i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
             }
             ctx.stroke();
@@ -1826,7 +1884,7 @@ createApp({
                     ctx.beginPath();
                     ctx.strokeStyle = 'rgba(0,255,160,0.9)';
                     for (let i = lo; i <= hi; i++) {
-                        const x = (i - lo) * pxStep, y = valToY(s.freezeA[i]);
+                        const x = plotLeft + (i - lo) * pxStep, y = valToY(s.freezeA[i]);
                         i === lo ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                     }
                     ctx.stroke();
@@ -1835,7 +1893,7 @@ createApp({
                     ctx.beginPath();
                     ctx.strokeStyle = 'rgba(255,100,180,0.9)';
                     for (let i = lo; i <= hi; i++) {
-                        const x = (i - lo) * pxStep, y = valToY(s.freezeB[i]);
+                        const x = plotLeft + (i - lo) * pxStep, y = valToY(s.freezeB[i]);
                         i === lo ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                     }
                     ctx.stroke();
@@ -1848,7 +1906,7 @@ createApp({
                     const v = slice[i];
                     const avg = (slice[i - 1] + slice[i + 1]) / 2;
                     if (v - avg > 6) { // >6 dB spike
-                        const x = i * pxStep, y = valToY(v);
+                        const x = plotLeft + i * pxStep, y = valToY(v);
                         ctx.fillStyle = 'red';
                         ctx.beginPath();
                         ctx.arc(x, y, 3, 0, Math.PI * 2);
