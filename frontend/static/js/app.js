@@ -1851,8 +1851,10 @@ createApp({
             ctx.save();
             ctx.fillStyle = 'rgba(220,220,255,0.9)';
             ctx.font = '13px system-ui';
-            ctx.fillText('Frequency (MHz)', plotLeft + plotW / 2 - 50, h - 5);
-            ctx.translate(14, plotTop + plotH / 2 + 40);
+            // X-axis title (below tick labels)
+            ctx.fillText('Frequency (MHz)', plotLeft + plotW / 2 - 50, plotTop + plotH + 45);
+            // Y-axis title (rotated, left of tick labels)
+            ctx.translate(12, plotTop + plotH / 2);
             ctx.rotate(-Math.PI / 2);
             ctx.fillText('Level (dBmV / MHz)', 0, 0);
             ctx.restore();
