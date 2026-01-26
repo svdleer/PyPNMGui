@@ -1636,8 +1636,24 @@ createApp({
         },
         
         handleSpectrumData(rawData) {
-            if (!rawData || !rawData.frequencies || !rawData.amplitudes) return;
-            if (this.spectrumState.paused) return;
+            console.log('[Spectrum] handleSpectrumData called', {
+                hasRawData: !!rawData,
+                hasFreq: !!rawData?.frequencies,
+                hasAmp: !!rawData?.amplitudes,
+                freqLen: rawData?.frequencies?.length,
+                ampLen: rawData?.amplitudes?.length,
+                paused: this.spectrumState?.paused,
+                hasState: !!this.spectrumState
+            });
+            
+            if (!rawData || !rawData.frequencies || !rawData.amplitudes) {
+                console.warn('[Spectrum] Missing data - returning');
+                return;
+            }
+            if (this.spectrumState.paused) {
+                console.log('[Spectrum] Paused - returning');
+                return;
+            }
             
             const s = this.spectrumState;
             
