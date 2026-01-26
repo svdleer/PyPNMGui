@@ -389,7 +389,7 @@ def init_websocket(app):
                 # Wait for initial buffer to fill before starting stream (must be exactly target or more)
                 if not streaming_started:
                     current_buffer_size = len(file_buffer)
-                    logger.debug(f"UTSC: Checking buffer - current: {current_buffer_size}, target: {initial_buffer_target}, streaming_started: {streaming_started}")
+                    logger.info(f"UTSC: Buffer check - size={current_buffer_size}, target={initial_buffer_target}")
                     if current_buffer_size >= initial_buffer_target:
                         streaming_started = True
                         logger.info(f"UTSC WebSocket: Initial buffer of {current_buffer_size} files ready (target was {initial_buffer_target}), starting stream")
