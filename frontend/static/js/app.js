@@ -3171,9 +3171,10 @@ createApp({
             }
             
             this.utscWsStatus = 'connecting';
-            const wsUrl = `ws://${window.location.host}/ws/utsc/${macAddress}?refresh_ms=500&duration_s=60&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(this.snmpCommunityRW)}`;
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${macAddress}?refresh_ms=500&duration_s=60&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(this.snmpCommunityRW)}`;
             
-            console.log(`[UTSC] Connecting persistent WebSocket: ${wsUrl}`);
+            console.log(`[UTSC] Connecting WebSocket: ${wsUrl}`);
             this.utscWs = new WebSocket(wsUrl);
             
             this.utscWs.onopen = () => {
@@ -3193,8 +3194,9 @@ createApp({
             
             this.utscWs.onerror = (error) => {
                 console.error('[UTSC] WebSocket error:', error);
+                console.error('[UTSC] URL was:', wsUrl);
                 this.utscWsStatus = 'error';
-                this.showError('WebSocket Error', 'Connection failed');
+                this.showError('WebSocket Error', 'Connection failed - check console');
             };
             
             this.utscWs.onclose = () => {
