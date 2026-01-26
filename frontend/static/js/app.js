@@ -91,10 +91,7 @@ createApp({
             utscRefreshRate: 500,  // 0.5 seconds between updates (streaming rate)
             utscDuration: 60,  // Duration in seconds
             utscBufferSize: 0,  // Current buffer size from backend
-            utscInteractive: true,  // Always use SciChart interactive mode
-            utscSciChart: null,  // SciChart instance
-            utscSciChartSeries: null,  // SciChart data series
-            utscFallbackChart: null,  // Chart.js fallback if SciChart fails
+            utscInteractive: true,  // Always use interactive spectrum analyzer
             utscLastUpdateTime: 0,  // Throttle rapid updates
             utscUpdateThrottle: 100,  // Min 100ms between updates
             
@@ -814,35 +811,27 @@ createApp({
             this.utscPlotImage = null;
             this.utscSpectrumData = null;
             
-            console.log('[UTSC] Live mode active, checking chart...');
-            console.log('[UTSC] utscSciChart:', this.utscSciChart);
+            console.log('[UTSC] Live mode active, checking spectrum analyzer...');
             
             // Wait for DOM to render
             await this.$nextTick();
             await new Promise(resolve => setTimeout(resolve, 100));
             
-            // Check if chart div exists
-            const chartDiv = document.getElementById('utscSciChart');
-            console.log('[UTSC] Chart div element:', chartDiv, 'exists:', !!chartDiv);
-            
-            // Initialize chart if not already done
-            if (!this.utscSciChart) {
-                console.log('[UTSC] Initializing chart (first time)...');
-                await this.ensureSciChartLoaded();
+            // Initialize spectrum analyzer if not already done
+            if (!this.spectrumState) {
+                console.log('[UTSC] Initializing spectrum analyzer (first time)...');
                 await this.$nextTick();
-                await this.initUtscSciChart();
+                await this.initUtscSpectrumAnalyzer();
                 
-                if (!this.utscSciChart) {
-                    console.error('[UTSC] Chart initialization FAILED!');
-                    this.$toast?.error('Failed to initialize chart');
+                if (!this.spectrumState) {
+                    console.error('[UTSC] Spectrum analyzer initialization FAILED!');
+                    this.$toast?.error('Failed to initialize spectrum analyzer');
                     this.utscLiveMode = false;
                     return;
                 }
-                console.log('[UTSC] Chart initialized successfully!');
+                console.log('[UTSC] Spectrum analyzer initialized successfully!');
             } else {
-                console.log('[UTSC] Reusing existing chart');
-                // Clear existing data
-                this.utscSciChartSeries.clear();
+                console.log('[UTSC] Reusing existing spectrum analyzer');
             }
             
             // Use new flow: WebSocket FIRST, then API trigger
@@ -881,9 +870,6 @@ createApp({
             this.runningUtsc = false;
             this.$toast?.info('Live monitoring stopped');
             this.stopUtscWebSocket();
-            
-            // Clean up SciChart when user explicitly stops
-            this.destroyUtscSciChart();
             
             // Also stop UTSC on CMTS (don't wait for result)
             const cmtsIpForStop = this.getCmtsIpForModem();
@@ -1152,7 +1138,7 @@ createApp({
                     if (!this.spectrumState) {
                         console.log('[UTSC] First data received, initializing Spectrum Analyzer...');
                         this.$nextTick(async () => {
-                            await this.initUtscSciChart();
+                            await this.initUtscSpectrumAnalyzer();
                             // Display initial data
                             if (result.data.raw_data) {
                                 this.handleSpectrumData(result.data.raw_data);
@@ -1182,25 +1168,24 @@ createApp({
             if (this.utscLiveMode) {
                 console.log('[UTSC] Starting live mode...');
                 
-                // Chart should already be initialized from first measurement
+                // Spectrum analyzer should already be initialized from first measurement
                 // If not, initialize it now
-                if (!this.utscSciChart) {
-                    console.log('[UTSC] Chart not initialized yet, initializing...');
-                    await this.ensureSciChartLoaded();
+                if (!this.spectrumState) {
+                    console.log('[UTSC] Spectrum analyzer not initialized yet, initializing...');
                     await this.$nextTick();
                     await new Promise(resolve => setTimeout(resolve, 150));
-                    await this.initUtscSciChart();
+                    await this.initUtscSpectrumAnalyzer();
                 }
                 
-                // Verify chart is ready
-                if (!this.utscSciChart || !this.utscSciChartSeries) {
-                    console.error('[UTSC] SciChart failed to initialize, aborting live mode');
-                    this.$toast?.error('Failed to initialize chart');
+                // Verify spectrum analyzer is ready
+                if (!this.spectrumState) {
+                    console.error('[UTSC] Spectrum analyzer failed to initialize, aborting live mode');
+                    this.$toast?.error('Failed to initialize spectrum analyzer');
                     this.utscLiveMode = false;
                     return;
                 }
                 
-                console.log('[UTSC] SciChart ready, starting WebSocket...');
+                console.log('[UTSC] Spectrum analyzer ready, starting WebSocket...');
                 this.$toast?.success('Live monitoring started - continuous streaming');
                 // Connect WebSocket FIRST, then trigger UTSC API after WS opens
                 await this.startUtscWebSocketAndTrigger();
@@ -1505,28 +1490,7 @@ createApp({
             // Chart will be destroyed in stopUtscLiveMode() when user explicitly stops
         },
         
-        async ensureSciChartLoaded() {
-            // Wait for SciChart library to load (max 10 seconds)
-            const maxWait = 10000;
-            const interval = 100;
-            let waited = 0;
-            
-            while (typeof SciChart === 'undefined' && waited < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, interval));
-                waited += interval;
-            }
-            
-            if (typeof SciChart === 'undefined') {
-                console.error('SciChart failed to load after', maxWait, 'ms');
-                this.$toast?.error('SciChart library failed to load');
-                return false;
-            }
-            
-            console.log('[SciChart] Library loaded successfully');
-            return true;
-        },
-        
-        async initUtscSciChart() {
+        async initUtscSpectrumAnalyzer() {
             // Initialize professional spectrum analyzer
             console.log('[Spectrum] Initializing spectrum analyzer...');
             
