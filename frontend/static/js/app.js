@@ -1,5 +1,6 @@
 // PyPNM Web GUI - Main Application
 // SPDX-License-Identifier: Apache-2.0
+// Version: 2026-01-26-20:30 CACHE_BUST_V4
 
 const { createApp } = Vue;
 
@@ -2474,26 +2475,24 @@ createApp({
                             }
                         }
                     }
-                });
-                
-                // Add device info if available
-                if (analysis.device_details && analysis.device_details.system_description) {
-                    const deviceInfo = analysis.device_details.system_description;
-                    const infoDiv = document.createElement('div');
-                    infoDiv.className = 'alert alert-info mt-3';
-                    infoDiv.innerHTML = `
-                        <h6><i class="bi bi-info-circle me-2"></i>Device Information</h6>
-                        <div class="row">
-                            <div class="col-md-3"><strong>Vendor:</strong> ${deviceInfo.VENDOR || 'N/A'}</div>
-                            <div class="col-md-3"><strong>Model:</strong> ${deviceInfo.MODEL || 'N/A'}</div>
-                            <div class="col-md-3"><strong>SW Version:</strong> ${deviceInfo.SW_REV || 'N/A'}</div>
-                            <div class="col-md-3"><strong>HW Version:</strong> ${deviceInfo.HW_REV || 'N/A'}</div>
-                        </div>
-                    `;
-                    container.appendChild(infoDiv);
                 }
-            } catch (error) {
-                console.error('[Chart] Spectrum chart failed:', error);
+            });
+            
+            // Add device info if available
+            if (analysis.device_details && analysis.device_details.system_description) {
+                const deviceInfo = analysis.device_details.system_description;
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'alert alert-info mt-3';
+                infoDiv.innerHTML = `
+                    <h6><i class="bi bi-info-circle me-2"></i>Device Information</h6>
+                    <div class="row">
+                        <div class="col-md-3"><strong>Vendor:</strong> ${deviceInfo.VENDOR || 'N/A'}</div>
+                        <div class="col-md-3"><strong>Model:</strong> ${deviceInfo.MODEL || 'N/A'}</div>
+                        <div class="col-md-3"><strong>SW Version:</strong> ${deviceInfo.SW_REV || 'N/A'}</div>
+                        <div class="col-md-3"><strong>HW Version:</strong> ${deviceInfo.HW_REV || 'N/A'}</div>
+                    </div>
+                `;
+                container.appendChild(infoDiv);
             }
         },
         
@@ -3170,31 +3169,3 @@ createApp({
         }
     }
 }).mount('#app');
-
-// Expose analyzer to global scope for WebSocket
-window.handleMessage = function(msg) {
-    // Find the Vue app instance
-    const app = Vue && Vue.__app__ ? Vue.__app__ : document.querySelector('#app').__vue_app__;
-    if (app && app.config && app.config.globalProperties && app.config.globalProperties.$data) {
-        // Call the method on the Vue app instance
-        app._instance.proxy.handleSpectrumData(msg);
-    } else if (window.$vm && typeof window.$vm.handleSpectrumData === 'function') {
-        window.$vm.handleSpectrumData(msg);
-    } else {
-        console.error('handleMessage: Could not find Vue app instance to call handleSpectrumData');
-    }
-};
-
-// For debugging: attach Vue app instance to window
-window.$vm = null;
-const origMount = Vue.createApp().mount;
-Vue.createApp = function(...args) {
-    const app = createApp(...args);
-    const orig = app.mount;
-    app.mount = function(selector) {
-        const vm = orig.call(this, selector);
-        window.$vm = vm;
-        return vm;
-    };
-    return app;
-};
