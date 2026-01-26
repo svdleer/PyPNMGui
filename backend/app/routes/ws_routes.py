@@ -254,7 +254,7 @@ def init_websocket(app):
         stream_interval = refresh_ms / 1000.0  # Convert to seconds
         connection_start_time = time.time()
         last_status = None
-        initial_buffer_target = 8  # Buffer full burst from E6000 (~10 files per run) before streaming
+        initial_buffer_target = 0  # TEMPORARY: Disable buffering for testing
         streaming_started = False
         
         # Continuous streaming: re-trigger UTSC every 10 seconds (E6000 gives ~10 captures per run)
