@@ -1436,27 +1436,60 @@ createApp({
                         console.log('[UTSC] WebSocket closed');
                     };
                     
+                    // Set the comprehensive message handler (handles ALL types including spectrum)
                     this.utscWebSocket.onmessage = (event) => {
                         try {
-                            const msg = JSON.parse(event.data);
-                            
-                            // Only handle control messages here (buffering, error, complete)
-                            // Spectrum data is handled by the first WebSocket handler
-                            if (msg.type === 'connected') {
-                                console.log('[UTSC]', msg.message);
-                            } else if (msg.type === 'buffering') {
-                                console.log('[UTSC]', msg.message);
-                            } else if (msg.type === 'complete') {
-                                console.log('[UTSC] Stream complete');
-                                this.$toast?.success('UTSC live stream complete');
-                                this.utscLiveMode = false;
-                                this.stopUtscWebSocket();
-                            } else if (msg.type === 'error') {
-                                console.error('[UTSC] Error:', msg.message);
-                                this.$toast?.error(msg.message);
+                            const data = JSON.parse(event.data);
+                            console.log('🔴 [UTSC] RAW MESSAGE:', data);
+
+                            // ========== SPECTRUM FRAMES ==========
+                            if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
+                                console.log('🟢 [UTSC] SPECTRUM FRAME DETECTED!');
+
+                                if (data.buffer_size !== undefined) {
+                                    this.utscBufferSize = data.buffer_size;
+                                }
+
+                                const frame = {
+                                    freq_start_hz: data.raw_data.freq_start_hz,
+                                    freq_step_hz:  data.raw_data.freq_step_hz,
+                                    bins:          data.raw_data.bins
+                                };
+
+                                console.log('🟡 ANALYZER FRAME:', {
+                                    bins: frame.bins.length,
+                                    first: frame.bins[0],
+                                    start: frame.freq_start_hz,
+                                    step: frame.freq_step_hz
+                                });
+
+                                // >>> THIS IS THE ONLY FEED POINT <<<
+                                this.handleSpectrumData(frame);
+                                return;
                             }
-                        } catch (error) {
-                            console.error('[UTSC] Message parse error:', error);
+
+                            // ========== CONTROL / STATUS FRAMES ==========
+                            if (data.type === 'buffering') {
+                                this.utscBufferSize = data.buffer_size || 0;
+                                console.log('[UTSC]', data.message);
+                            }
+                            else if (data.type === 'buffering_complete') {
+                                console.log('[UTSC]', data.message);
+                                this.$toast?.success(data.message);
+                            }
+                            else if (data.type === 'connected') {
+                                console.log('[UTSC]', data.message);
+                            }
+                            else if (data.type === 'heartbeat') {
+                                this.utscBufferSize = data.buffer_size || this.utscBufferSize;
+                            }
+                            else if (data.type === 'error') {
+                                console.error('[UTSC] Stream error:', data.message);
+                                this.$toast?.error(data.message);
+                            }
+
+                        } catch (e) {
+                            console.error('[UTSC] Parse error:', e);
                         }
                     };
                 } catch (error) {
