@@ -1151,17 +1151,53 @@
                                             <!-- UTSC Spectrum Chart -->
                                             <div class="col-12" v-show="utscSpectrumData || utscLiveMode">
                                                 <div class="card mb-3">
-                                                    <div class="card-header bg-primary bg-opacity-10 d-flex justify-content-between align-items-center">
-                                                        <h6 class="mb-0">
-                                                            <i class="bi bi-graph-up me-2"></i>UTSC Live Spectrum
-                                                        </h6>
-                                                        <button @click="closeUtscSpectrum" class="btn btn-sm btn-outline-secondary">
-                                                            <i class="bi bi-x"></i>
-                                                        </button>
+                                                    <div class="card-header bg-primary bg-opacity-10">
+                                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                                            <h6 class="mb-0">
+                                                                <i class="bi bi-graph-up me-2"></i>UTSC Live Spectrum Analyzer
+                                                            </h6>
+                                                            <button @click="closeUtscSpectrum" class="btn btn-sm btn-outline-secondary">
+                                                                <i class="bi bi-x"></i>
+                                                            </button>
+                                                        </div>
+                                                        <!-- Spectrum Analyzer Controls -->
+                                                        <div id="spectrumControls" class="d-flex gap-2 flex-wrap align-items-center mt-2">
+                                                            <button id="resetMax" class="btn btn-sm btn-secondary"><i class="bi bi-arrow-repeat me-1"></i>Reset Max</button>
+                                                            <button id="clearWf" class="btn btn-sm btn-secondary"><i class="bi bi-trash me-1"></i>Clear WF</button>
+                                                            <button id="pauseBtn" class="btn btn-sm btn-warning"><i class="bi bi-pause-fill me-1"></i>Pause</button>
+                                                            <select id="scalePreset" class="form-select form-select-sm" style="width: auto;">
+                                                                <option value="auto">Auto Scale</option>
+                                                                <option value="-60,0">Return Path (‑60..0)</option>
+                                                                <option value="-70,-20">High Sens (‑70..‑20)</option>
+                                                            </select>
+                                                            <select id="holdMode" class="form-select form-select-sm" style="width: auto;">
+                                                                <option value="max">Max Hold</option>
+                                                                <option value="decay">Decay</option>
+                                                            </select>
+                                                            <button id="freezeA" class="btn btn-sm btn-info">Freeze A</button>
+                                                            <button id="freezeB" class="btn btn-sm btn-info">Freeze B</button>
+                                                            <label class="form-check-label small ms-2">
+                                                                <input id="showFreeze" type="checkbox" class="form-check-input" checked> Show A/B
+                                                            </label>
+                                                            <label class="form-check-label small ms-2">
+                                                                <input id="impulse" type="checkbox" class="form-check-input" checked> Impulse
+                                                            </label>
+                                                            <button id="zoomOut" class="btn btn-sm btn-outline-light"><i class="bi bi-zoom-out"></i></button>
+                                                        </div>
                                                     </div>
-                                                    <div class="card-body">
-                                                        <!-- SciChart Interactive Chart -->
-                                                        <div id="utscSciChart" style="width: 100%; height: 400px;"></div>
+                                                    <div class="card-body p-2" style="background: #0b1020;">
+                                                        <!-- Spectrum & Waterfall Canvases -->
+                                                        <div style="position: relative;">
+                                                            <canvas id="specCanvas" style="width: 100%; height: 300px; display: block; border-radius: 6px; background: #071028;"></canvas>
+                                                            <canvas id="waterfallCanvas" style="width: 100%; height: 250px; display: block; border-radius: 6px; background: #071028; margin-top: 6px;"></canvas>
+                                                            <div id="specStatus" style="position: absolute; left: 10px; top: 10px; background: rgba(7,16,40,0.7); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: #dfe7ff;">
+                                                                Status: idle
+                                                            </div>
+                                                            <div id="specCursor" style="position: absolute; right: 10px; top: 10px; background: rgba(7,16,40,0.7); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: #dfe7ff; text-align: right; white-space: pre;">
+                                                                —
+                                                            </div>
+                                                        </div>
+                                                        <div class="mt-2 text-light small" id="specInfo">Bins: 0</div>
                                                     </div>
                                                 </div>
                                             </div>

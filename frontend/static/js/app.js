@@ -1146,16 +1146,14 @@ createApp({
                     this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
                     console.log('[UTSC] Updated utscPlotImage:', !!this.utscPlotImage, 'timestamp:', this.utscPlotImage?._timestamp);
                     
-                    // Initialize SciChart immediately when data first loads
-                    if (!this.utscSciChart) {
-                        console.log('[UTSC] First data received, initializing SciChart...');
+                    // Initialize Spectrum Analyzer immediately when data first loads
+                    if (!this.spectrumState) {
+                        console.log('[UTSC] First data received, initializing Spectrum Analyzer...');
                         this.$nextTick(async () => {
-                            await this.ensureSciChartLoaded();
-                            await new Promise(resolve => setTimeout(resolve, 100));
                             await this.initUtscSciChart();
                             // Display initial data
                             if (result.data.raw_data) {
-                                this.updateUtscSciChart(result.data.raw_data);
+                                this.handleSpectrumData(result.data.raw_data);
                             }
                         });
                     }
@@ -1279,16 +1277,10 @@ createApp({
                                 'interactive:', this.utscInteractive, 
                                 'has raw_data:', !!data.raw_data);
                             
-                            // Handle interactive mode with SciChart (only if throttle allows)
+                            // Handle interactive mode with Spectrum Analyzer (only if throttle allows)
                             if (shouldUpdateChart && this.utscInteractive && data.raw_data) {
                                 this.$nextTick(() => {
-                                    // Try SciChart first, fall back to Chart.js if not available
-                                    if (this.utscSciChart && this.utscSciChartSeries) {
-                                        this.updateUtscSciChart(data.raw_data);
-                                    } else {
-                                        console.log('[Chart] Using fallback chart (SciChart not available)');
-                                        this.updateUtscFallbackChart(data.raw_data);
-                                    }
+                                    this.handleSpectrumData(data.raw_data);
                                 });
                             }
                             
@@ -1533,81 +1525,356 @@ createApp({
         },
         
         async initUtscSciChart() {
-            // Don't destroy if chart already exists and is valid
-            if (this.utscSciChart && this.utscSciChartSeries) {
-                console.log('[SciChart] Chart already initialized, reusing existing instance');
+            // Initialize professional spectrum analyzer
+            console.log('[Spectrum] Initializing spectrum analyzer...');
+            
+            // Initialize spectrum analyzer state if not exists
+            if (!this.spectrumState) {
+                this.spectrumState = {
+                    bins: [],
+                    freqStart: 0,
+                    freqStep: 1,
+                    maxHold: [],
+                    freezeA: null,
+                    freezeB: null,
+                    paused: false,
+                    holdMode: 'max',
+                    decayRate: 0.992,
+                    scaleMode: 'auto',
+                    impulseOn: true,
+                    viewStart: 0,
+                    viewEnd: null,
+                    wfRows: 240,
+                    wfBuffer: []
+                };
+            }
+            
+            // Get canvas elements
+            const specCanvas = document.getElementById('specCanvas');
+            const wfCanvas = document.getElementById('waterfallCanvas');
+            
+            if (!specCanvas || !wfCanvas) {
+                console.error('[Spectrum] Canvas elements not found');
                 return;
             }
             
-            // Only destroy if chart is partially initialized (not if it's fully working)
-            if (this.utscSciChart && !this.utscSciChartSeries) {
-                console.log('[SciChart] Cleaning up partial initialization');
-                this.destroyUtscSciChart();
+            // Setup canvases
+            this.setupSpectrumCanvases(specCanvas, wfCanvas);
+            
+            // Setup controls
+            this.setupSpectrumControls();
+            
+            console.log('[Spectrum] Initialized successfully');
+        },
+        
+        setupSpectrumCanvases(specCanvas, wfCanvas) {
+            const dpr = window.devicePixelRatio || 1;
+            
+            const resizeCanvas = (canvas) => {
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = Math.round(rect.width * dpr);
+                canvas.height = Math.round(rect.height * dpr);
+                const ctx = canvas.getContext('2d');
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            };
+            
+            resizeCanvas(specCanvas);
+            resizeCanvas(wfCanvas);
+            
+            // Store contexts
+            this.specCtx = specCanvas.getContext('2d');
+            this.wfCtx = wfCanvas.getContext('2d');
+            
+            // Mouse tracking for cursor info
+            specCanvas.addEventListener('mousemove', (e) => {
+                if (!this.spectrumState.bins.length) return;
+                const rect = specCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const s = this.spectrumState;
+                const idx = Math.round(s.viewStart + x/rect.width * (s.viewEnd - s.viewStart));
+                const f = (s.freqStart + idx * s.freqStep) / 1e6;
+                const v = s.bins[idx];
+                document.getElementById('specCursor').textContent = `${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV\nBin ${idx}`;
+            });
+            
+            // Zoom with mouse wheel
+            specCanvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const s = this.spectrumState;
+                if (!s.bins.length) return;
+                
+                const span = s.viewEnd - s.viewStart;
+                const center = s.viewStart + span / 2;
+                const factor = e.deltaY > 0 ? 1.2 : 0.8;
+                let newSpan = Math.max(50, Math.min(s.bins.length, span * factor));
+                s.viewStart = Math.max(0, Math.floor(center - newSpan / 2));
+                s.viewEnd = Math.min(s.bins.length - 1, Math.floor(center + newSpan / 2));
+                this.drawSpectrum();
+            });
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                resizeCanvas(specCanvas);
+                resizeCanvas(wfCanvas);
+                this.drawSpectrum();
+                this.drawWaterfall();
+            });
+        },
+        
+        setupSpectrumControls() {
+            document.getElementById('resetMax')?.addEventListener('click', () => {
+                this.spectrumState.maxHold = this.spectrumState.bins.slice();
+                this.drawSpectrum();
+            });
+            
+            document.getElementById('clearWf')?.addEventListener('click', () => {
+                this.spectrumState.wfBuffer = [];
+                this.drawWaterfall();
+            });
+            
+            document.getElementById('pauseBtn')?.addEventListener('click', (e) => {
+                this.spectrumState.paused = !this.spectrumState.paused;
+                e.target.innerHTML = this.spectrumState.paused ? 
+                    '<i class="bi bi-play-fill me-1"></i>Resume' : 
+                    '<i class="bi bi-pause-fill me-1"></i>Pause';
+            });
+            
+            document.getElementById('scalePreset')?.addEventListener('change', (e) => {
+                this.spectrumState.scaleMode = e.target.value;
+                this.drawSpectrum();
+            });
+            
+            document.getElementById('holdMode')?.addEventListener('change', (e) => {
+                this.spectrumState.holdMode = e.target.value;
+            });
+            
+            document.getElementById('impulse')?.addEventListener('change', (e) => {
+                this.spectrumState.impulseOn = e.target.checked;
+                this.drawSpectrum();
+            });
+            
+            document.getElementById('freezeA')?.addEventListener('click', () => {
+                this.spectrumState.freezeA = this.spectrumState.bins.slice();
+            });
+            
+            document.getElementById('freezeB')?.addEventListener('click', () => {
+                this.spectrumState.freezeB = this.spectrumState.bins.slice();
+            });
+            
+            document.getElementById('zoomOut')?.addEventListener('click', () => {
+                const s = this.spectrumState;
+                s.viewStart = 0;
+                s.viewEnd = s.bins.length - 1;
+                this.drawSpectrum();
+            });
+        },
+        
+        handleSpectrumData(rawData) {
+            if (!rawData || !rawData.frequencies || !rawData.amplitudes) return;
+            if (this.spectrumState.paused) return;
+            
+            const s = this.spectrumState;
+            
+            // Update data
+            s.bins = rawData.amplitudes.slice();
+            s.freqStart = rawData.frequencies[0];
+            s.freqStep = rawData.frequencies[1] - rawData.frequencies[0];
+            
+            // Initialize view if needed
+            if (s.viewEnd === null) {
+                s.viewStart = 0;
+                s.viewEnd = s.bins.length - 1;
             }
             
-            try {
-                // Ensure SciChart is loaded
-                const loaded = await this.ensureSciChartLoaded();
-                if (!loaded) {
-                    console.warn('SciChart not loaded, cannot initialize chart');
-                    return;
+            // Initialize max hold
+            if (s.maxHold.length !== s.bins.length) {
+                s.maxHold = s.bins.slice();
+            }
+            
+            // Update max hold
+            if (s.holdMode === 'max') {
+                for (let i = 0; i < s.bins.length; i++) {
+                    if (s.bins[i] > s.maxHold[i]) s.maxHold[i] = s.bins[i];
                 }
-                
-                // Check if div exists
-                const chartDiv = document.getElementById('utscSciChart');
-                if (!chartDiv) {
-                    console.error('[SciChart] Chart div not found in DOM');
-                    return;
+            } else {
+                for (let i = 0; i < s.bins.length; i++) {
+                    if (s.bins[i] > s.maxHold[i]) s.maxHold[i] = s.bins[i];
+                    else s.maxHold[i] = s.maxHold[i] * s.decayRate + s.bins[i] * (1 - s.decayRate);
                 }
-                
-                console.log('[SciChart] Initializing chart...');
-                
-                const { SciChartSurface, NumericAxis, FastLineRenderableSeries, XyDataSeries, EAxisAlignment, NumberRange, ZoomPanModifier, MouseWheelZoomModifier, ZoomExtentsModifier } = SciChart;
-                
-                // Use community license to avoid license server checks
-                SciChartSurface.UseCommunityLicense();
-                
-                // Create the chart surface
-                const { sciChartSurface, wasmContext } = await SciChartSurface.create('utscSciChart');
-                
-                // Add axes
-                sciChartSurface.xAxes.add(new NumericAxis(wasmContext, { 
-                    axisAlignment: EAxisAlignment.Bottom,
-                    axisTitle: 'Frequency (MHz)',
-                    labelPrecision: 0,
-                    visibleRange: new NumberRange(0, 100)
-                }));
-                
-                sciChartSurface.yAxes.add(new NumericAxis(wasmContext, { 
-                    axisAlignment: EAxisAlignment.Left,
-                    axisTitle: 'Amplitude (dBmV)',
-                    labelPrecision: 1,
-                    autoRange: EAutoRange.Always
-                }));
-                
-                // Create data series
-                const dataSeries = new XyDataSeries(wasmContext);
-                const series = new FastLineRenderableSeries(wasmContext, {
-                    dataSeries,
-                    strokeThickness: 2,
-                    stroke: '#00aaff'
-                });
-                
-                sciChartSurface.renderableSeries.add(series);
-                
-                // Add interactivity
-                sciChartSurface.chartModifiers.add(new ZoomPanModifier());
-                sciChartSurface.chartModifiers.add(new MouseWheelZoomModifier());
-                sciChartSurface.chartModifiers.add(new ZoomExtentsModifier());
-                
-                // Store references
-                this.utscSciChart = sciChartSurface;
-                this.utscSciChartSeries = dataSeries;
-                
-                console.log('[SciChart] Initialized successfully');
-            } catch (error) {
-                console.error('[SciChart] Initialization failed:', error);
-                this.$toast?.error('Failed to initialize interactive chart');
+            }
+            
+            // Update waterfall
+            s.wfBuffer.unshift(s.bins.slice());
+            if (s.wfBuffer.length > s.wfRows) s.wfBuffer.pop();
+            
+            // Update info
+            const freqEnd = s.freqStart + s.freqStep * (s.bins.length - 1);
+            document.getElementById('specInfo').textContent = 
+                `Bins: ${s.bins.length} — ${(s.freqStart/1e6).toFixed(2)} MHz → ${(freqEnd/1e6).toFixed(2)} MHz`;
+            
+            // Draw
+            this.drawSpectrum();
+            this.drawWaterfall();
+        },
+        
+        drawSpectrum() {
+            if (!this.specCtx) return;
+            
+            const canvas = document.getElementById('specCanvas');
+            if (!canvas) return;
+            
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            const ctx = this.specCtx;
+            const s = this.spectrumState;
+            
+            // Clear
+            ctx.fillStyle = '#071028';
+            ctx.fillRect(0, 0, w, h);
+            
+            // Draw grid
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            for (let i = 0; i <= 6; i++) {
+                const y = (h / 6) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+            ctx.restore();
+            
+            if (!s.bins.length) return;
+            
+            // Get slice of data to display
+            const lo = s.viewStart, hi = s.viewEnd;
+            const slice = s.bins.slice(lo, hi + 1);
+            const sliceHold = s.maxHold.slice(lo, hi + 1);
+            
+            // Calculate scale
+            let minV = Infinity, maxV = -Infinity;
+            for (let v of slice.concat(sliceHold, s.freezeA || [], s.freezeB || [])) {
+                if (isFinite(v)) {
+                    if (v < minV) minV = v;
+                    if (v > maxV) maxV = v;
+                }
+            }
+            
+            if (s.scaleMode !== 'auto') {
+                const p = s.scaleMode.split(',');
+                minV = parseFloat(p[0]);
+                maxV = parseFloat(p[1]);
+            } else {
+                const pad = (maxV - minV) * 0.08 || 1;
+                maxV += pad;
+                minV -= pad;
+            }
+            
+            const valToY = v => (h - 20) - ((v - minV) / (maxV - minV)) * (h - 40);
+            const pxStep = w / (slice.length - 1);
+            
+            // Draw live trace
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(140,200,255,0.95)';
+            ctx.lineWidth = 1.4;
+            for (let i = 0; i < slice.length; i++) {
+                const x = i * pxStep, y = valToY(slice[i]);
+                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            }
+            ctx.stroke();
+            
+            // Draw max hold
+            ctx.beginPath();
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = 'rgba(255,200,120,0.95)';
+            for (let i = 0; i < sliceHold.length; i++) {
+                const x = i * pxStep, y = valToY(sliceHold[i]);
+                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Draw freeze overlays
+            if (document.getElementById('showFreeze')?.checked) {
+                if (s.freezeA) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'rgba(0,255,160,0.9)';
+                    for (let i = lo; i <= hi; i++) {
+                        const x = (i - lo) * pxStep, y = valToY(s.freezeA[i]);
+                        i === lo ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+                if (s.freezeB) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'rgba(255,100,180,0.9)';
+                    for (let i = lo; i <= hi; i++) {
+                        const x = (i - lo) * pxStep, y = valToY(s.freezeB[i]);
+                        i === lo ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            }
+            
+            // Draw impulse markers
+            if (s.impulseOn) {
+                for (let i = 1; i < slice.length - 1; i++) {
+                    const v = slice[i];
+                    const avg = (slice[i - 1] + slice[i + 1]) / 2;
+                    if (v - avg > 6) { // >6 dB spike
+                        const x = i * pxStep, y = valToY(v);
+                        ctx.fillStyle = 'red';
+                        ctx.beginPath();
+                        ctx.arc(x, y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        },
+        
+        drawWaterfall() {
+            if (!this.wfCtx) return;
+            
+            const canvas = document.getElementById('waterfallCanvas');
+            if (!canvas) return;
+            
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            const ctx = this.wfCtx;
+            const s = this.spectrumState;
+            
+            ctx.clearRect(0, 0, w, h);
+            if (!s.wfBuffer.length) return;
+            
+            // Calculate scale
+            let minV = Infinity, maxV = -Infinity;
+            for (let v of s.bins) {
+                if (v < minV) minV = v;
+                if (v > maxV) maxV = v;
+            }
+            const pad = (maxV - minV) * 0.1 || 1;
+            maxV += pad;
+            minV -= pad;
+            
+            // Color map
+            const colorMap = (v) => {
+                const t = Math.max(0, Math.min(1, (v - minV) / (maxV - minV)));
+                const r = Math.floor(255 * Math.min(1, Math.max(0, (t - 0.5) * 2)));
+                const g = Math.floor(255 * Math.min(1, Math.max(0, 1 - Math.abs(t - 0.5) * 2)));
+                const b = Math.floor(255 * Math.min(1, Math.max(0, (0.5 - t) * 2)));
+                return `rgb(${r},${g},${b})`;
+            };
+            
+            const rowH = h / s.wfRows;
+            const pxStep = w / (s.bins.length - 1);
+            
+            for (let r = 0; r < s.wfBuffer.length; r++) {
+                const row = s.wfBuffer[r];
+                const y = r * rowH;
+                for (let i = 0; i < row.length; i++) {
+                    ctx.fillStyle = colorMap(row[i]);
+                    ctx.fillRect(i * pxStep, y, pxStep + 1, rowH + 1);
+                }
             }
         },
         
