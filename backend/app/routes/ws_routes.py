@@ -382,7 +382,7 @@ def init_websocket(app):
                                 'center_freq_hz': center_freq_hz,
                                 'collected_at': current_time
                             })
-                            logger.info(f"Parsed {len(all_amplitudes)} amplitude samples from {os.path.basename(filepath)}")
+                            logger.info(f"Parsed {len(all_amplitudes)} amplitude samples from {os.path.basename(filepath)} - Buffer size now: {len(file_buffer)}")
                     except Exception as e:
                         logger.error(f"Error parsing UTSC file {filepath}: {e}")
                 
