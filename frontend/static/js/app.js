@@ -1580,9 +1580,9 @@ createApp({
                 
                 sciChartSurface.yAxes.add(new NumericAxis(wasmContext, { 
                     axisAlignment: EAxisAlignment.Left,
-                    axisTitle: 'Power (dBmV)',
+                    axisTitle: 'Amplitude (dBmV)',
                     labelPrecision: 1,
-                    visibleRange: new NumberRange(-25, 15)
+                    autoRange: EAutoRange.Always
                 }));
                 
                 // Create data series
