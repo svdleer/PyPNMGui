@@ -1632,6 +1632,15 @@ createApp({
         },
         
         handleSpectrumData(rawData) {
+            console.log('[Spectrum] handleSpectrumData called with:', {
+                hasBins: !!rawData?.bins,
+                hasFreqStart: rawData?.freq_start_hz !== undefined,
+                hasFreqStep: rawData?.freq_step_hz !== undefined,
+                binsLength: rawData?.bins?.length,
+                firstBin: rawData?.bins?.[0],
+                lastBin: rawData?.bins?.[rawData?.bins?.length - 1]
+            });
+            
             if (!rawData) return;
             if (this.spectrumState?.paused) return;
             
@@ -1645,12 +1654,15 @@ createApp({
                 bins = rawData.bins;
                 freqStart = rawData.freq_start_hz;
                 freqStep = rawData.freq_step_hz;
+                console.log('[Spectrum] Using new format:', {bins: bins.length, freqStart, freqStep});
             } else if (rawData.frequencies && rawData.amplitudes) {
                 // Old format (backward compatibility)
                 bins = rawData.amplitudes;
                 freqStart = rawData.frequencies[0];
                 freqStep = rawData.frequencies[1] - rawData.frequencies[0];
+                console.log('[Spectrum] Using old format');
             } else {
+                console.warn('[Spectrum] Data format not recognized, returning');
                 return; // Missing required fields
             }
             
