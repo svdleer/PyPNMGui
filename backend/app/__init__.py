@@ -1,7 +1,7 @@
 # PyPNM Web GUI - Flask Application
 # SPDX-License-Identifier: Apache-2.0
 
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 
 
@@ -34,6 +34,15 @@ def create_app():
     app = CustomFlask(__name__, 
                 static_folder=os.path.join(frontend_dir, 'static'),
                 template_folder=os.path.join(frontend_dir, 'templates'))
+    
+    # Add no-cache headers for static files to prevent browser caching issues
+    @app.after_request
+    def add_no_cache_headers(response):
+        if request.path.startswith('/static/'):
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        return response
     
     # Enable CORS for API calls
     CORS(app)
