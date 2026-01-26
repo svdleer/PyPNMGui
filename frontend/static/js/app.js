@@ -1773,7 +1773,7 @@ createApp({
             if (!s.bins.length) return;
             
             // Plot margins for axes and labels
-            const plotLeft = 75;      // Space for Y-axis labels + title
+            const plotLeft = 85;      // Space for Y-axis labels + title
             const plotBottom = 50;    // Space for X-axis labels + title (avoid waterfall overlap)
             const plotTop = 15;       // Lower the analyzer slightly
             const plotRight = 10;
