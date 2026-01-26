@@ -1853,7 +1853,7 @@ createApp({
             ctx.font = '13px system-ui';
             // X-axis title (below tick labels, well above waterfall)
             ctx.fillText('Frequency (MHz)', plotLeft + plotW / 2 - 50, h - 5);
-            // Y-axis title (rotated, left of tick labels, moved further left to avoid overlap)
+            // Y-axis title (rotated, moved 5px further left for more space from tick values)
             ctx.translate(3, plotTop + plotH / 2);
             ctx.rotate(-Math.PI / 2);
             ctx.fillText('Level (dBmV / MHz)', -60, 0);  // Centered text
