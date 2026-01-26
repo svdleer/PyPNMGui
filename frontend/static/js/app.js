@@ -1632,47 +1632,26 @@ createApp({
         },
         
         handleSpectrumData(rawData) {
-            console.log('[Spectrum] handleSpectrumData called', {
-                hasRawData: !!rawData,
-                hasFreq: !!rawData?.frequencies,
-                hasAmp: !!rawData?.amplitudes,
-                hasBins: !!rawData?.bins,
-                hasFreqStart: !!rawData?.freq_start_hz,
-                hasFreqStep: !!rawData?.freq_step_hz,
-                paused: this.spectrumState?.paused,
-                hasState: !!this.spectrumState
-            });
-            
-            if (!rawData) {
-                console.warn('[Spectrum] No data - returning');
-                return;
-            }
+            if (!rawData) return;
+            if (this.spectrumState?.paused) return;
             
             // Support two formats:
             // 1. {frequencies: [...], amplitudes: [...]} (old format)
-            // 2. {freq_start_hz: X, freq_step_hz: Y, bins: [...]} (new format)
+            // 2. {freq_start_hz: X, freq_step_hz: Y, bins: [...]} (new format - preferred)
             let bins, freqStart, freqStep;
             
             if (rawData.bins && rawData.freq_start_hz !== undefined && rawData.freq_step_hz !== undefined) {
-                // New format
+                // New format (UTSC uses this)
                 bins = rawData.bins;
                 freqStart = rawData.freq_start_hz;
                 freqStep = rawData.freq_step_hz;
-                console.log('[Spectrum] Using new format: bins=', bins.length, 'start=', freqStart, 'step=', freqStep);
             } else if (rawData.frequencies && rawData.amplitudes) {
-                // Old format
+                // Old format (backward compatibility)
                 bins = rawData.amplitudes;
                 freqStart = rawData.frequencies[0];
                 freqStep = rawData.frequencies[1] - rawData.frequencies[0];
-                console.log('[Spectrum] Using old format: amplitudes=', bins.length);
             } else {
-                console.warn('[Spectrum] Missing required data fields - returning');
-                return;
-            }
-            
-            if (this.spectrumState.paused) {
-                console.log('[Spectrum] Paused - returning');
-                return;
+                return; // Missing required fields
             }
             
             const s = this.spectrumState;
