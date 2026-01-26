@@ -1423,21 +1423,22 @@ createApp({
                     
                     this.utscWebSocket.onmessage = (event) => {
                         try {
-                            const data = JSON.parse(event.data);
-                            console.log('[UTSC] Received:', data.type, data);
+                            const msg = JSON.parse(event.data);
                             
-                            if (data.type === 'connected') {
-                                console.log('[UTSC]', data.message);
-                            } else if (data.type === 'buffering') {
-                                console.log('[UTSC]', data.message);
-                            } else if (data.type === 'complete') {
+                            // Only handle control messages here (buffering, error, complete)
+                            // Spectrum data is handled by the first WebSocket handler
+                            if (msg.type === 'connected') {
+                                console.log('[UTSC]', msg.message);
+                            } else if (msg.type === 'buffering') {
+                                console.log('[UTSC]', msg.message);
+                            } else if (msg.type === 'complete') {
                                 console.log('[UTSC] Stream complete');
                                 this.$toast?.success('UTSC live stream complete');
                                 this.utscLiveMode = false;
                                 this.stopUtscWebSocket();
-                            } else if (data.type === 'error') {
-                                console.error('[UTSC] Error:', data.message);
-                                this.$toast?.error(data.message);
+                            } else if (msg.type === 'error') {
+                                console.error('[UTSC] Error:', msg.message);
+                                this.$toast?.error(msg.message);
                             }
                         } catch (error) {
                             console.error('[UTSC] Message parse error:', error);
