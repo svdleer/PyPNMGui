@@ -1236,6 +1236,7 @@ createApp({
                 this.utscWebSocket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
+                        console.log('[UTSC] Received:', data);
                         
                         if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
                             console.log('[UTSC] Received spectrum frame');
