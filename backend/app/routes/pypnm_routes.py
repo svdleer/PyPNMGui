@@ -220,7 +220,6 @@ def pnm_measurement(measurement_type, mac_address):
             import zipfile
             import io
             import base64
-            import json
             from datetime import datetime
             
             # Detect archive type
