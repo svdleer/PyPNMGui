@@ -39,7 +39,7 @@ def get_default_community():
 
 def get_default_tftp():
     """Get default TFTP IP."""
-    return os.environ.get('TFTP_IPV4', '172.16.6.101')
+    return os.environ.get('TFTP_IPV4', '172.22.147.18')
 
 
 @pypnm_bp.route('/measurements/<measurement_type>/<mac_address>', methods=['POST'])

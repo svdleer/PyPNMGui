@@ -10,7 +10,7 @@ from app.core.cmts_provider import CMTSProvider
 from app.core.simple_ws import get_simple_agent_manager
 
 # Default TFTP server (same as pypnm_routes.py)
-DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.16.6.101')
+DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
 
 # Redis for caching modem data
 try:
