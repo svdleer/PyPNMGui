@@ -2174,9 +2174,12 @@ createApp({
                     // Map to legacy variables for compatibility
                     if (measurementType === 'rxmer') {
                         this.rxmerData = data;
-                        this.$nextTick(() => {
-                            this.drawRxmerCharts();
-                        });
+                        // Only draw charts if we don't have matplotlib plots
+                        if (!data.plots || data.plots.length === 0) {
+                            this.$nextTick(() => {
+                                this.drawRxmerCharts();
+                            });
+                        }
                     } else if (measurementType === 'spectrum') {
                         this.spectrumData = data;
                     } else if (measurementType === 'fec_summary') {
@@ -2195,7 +2198,9 @@ createApp({
                             this.drawMeasurementCharts(measurementType, data);
                         });
                     } else if (hasMatplotlibPlots) {
+                        console.log('Matplotlib plots available:', data.plots.length);
                     } else {
+                        console.log('No data or plots to display');
                     }
                     
                     const typeNames = {
