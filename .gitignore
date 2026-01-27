@@ -15,6 +15,9 @@ agent/agent_config.json
 docker/agent-config/agent_config.json
 config/*.json
 !config/*.example.json
+backend/data/devices.json
+docker/.env*
+!docker/.env.example
 
 # Python
 __pycache__/
