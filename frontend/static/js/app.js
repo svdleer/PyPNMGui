@@ -137,8 +137,8 @@ createApp({
         // Load CMTS list
         await this.loadCmtsList();
         
-        // Clean up old PNM files on page load
-        await this.cleanupOldPnmFiles();
+        // Clean up old PNM files on page load (non-blocking)
+        this.cleanupOldPnmFiles();
         
         // Don't load mock modems - only show live data from CMTS
         // await this.searchModems();
