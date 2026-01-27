@@ -216,13 +216,16 @@ def pnm_measurement(measurement_type, mac_address):
             plots = []
             try:
                 with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
-                    for filename in zf.namelist():
+                    zip_files = zf.namelist()
+                    logger.info(f"ZIP contains {len(zip_files)} files: {zip_files}")
+                    for filename in zip_files:
                         if filename.endswith('.png'):
                             img_data = zf.read(filename)
                             plots.append({
                                 'filename': filename,
                                 'data': base64.b64encode(img_data).decode('utf-8')
                             })
+                    logger.info(f"Extracted {len(plots)} PNG plots from ZIP")
             except Exception as e:
                 logger.error(f"Failed to extract plots from ZIP: {e}")
             
