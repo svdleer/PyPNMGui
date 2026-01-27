@@ -50,7 +50,7 @@ createApp({
             
             // PNM Measurement selection
             pnmMeasurementType: 'rxmer',
-            pnmOutputType: 'json',  // archive (with plots) or json
+            pnmOutputType: 'archive',  // archive (with plots) or json - default to archive for PyPNM plots
             showRawData: false,
             selectedMeasurementData: null,
             
