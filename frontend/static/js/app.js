@@ -90,7 +90,7 @@ createApp({
             utscLiveInterval: null,
             utscWebSocket: null,  // WebSocket for live UTSC streaming
             utscRefreshRate: 500,  // 0.5 seconds between updates (streaming rate)
-            utscDuration: 60,  // Duration in seconds
+            utscDuration: 120,  // Duration in seconds (default 2 minutes, max 5 minutes)
             utscBufferSize: 0,  // Current buffer size from backend
             utscInteractive: true,  // Always use interactive spectrum analyzer
             utscLastUpdateTime: 0,  // Throttle rapid updates
@@ -103,7 +103,7 @@ createApp({
             utscStreaming: false,  // Currently streaming data
             utscDataCount: 0,  // Number of spectrum samples received
             utscStartTime: null,  // Stream start timestamp
-            utscTimeRemaining: 60,  // Seconds remaining in freerun
+            utscTimeRemaining: 120,  // Seconds remaining in freerun (max 300)
             utscDurationTimer: null,  // Interval timer for countdown
             housekeepingDays: 7,
             housekeepingDryRun: true,
@@ -136,6 +136,9 @@ createApp({
         
         // Load CMTS list
         await this.loadCmtsList();
+        
+        // Clean up old PNM files on page load
+        await this.cleanupOldPnmFiles();
         
         // Don't load mock modems - only show live data from CMTS
         // await this.searchModems();
@@ -207,10 +210,19 @@ createApp({
                     }));
                     this.cmtsListFull = cmtsList;
                     this.cmtsList = cmtsList;
-                    console.log(`Loaded ${this.cmtsList.length} CMTS systems from appdb`);
                 }
             } catch (error) {
                 console.error('Failed to load CMTS list:', error);
+            }
+        },
+        
+        async cleanupOldPnmFiles() {
+            try {
+                await fetch(`${API_BASE}/pypnm/cleanup`, {
+                    method: 'POST'
+                });
+            } catch (error) {
+                // Silent fail - cleanup is not critical
             }
         },
         
@@ -677,17 +689,14 @@ createApp({
         async loadUpstreamInterfaces() {
             const cmtsIp = this.getCmtsIpForModem();
             if (!this.selectedModem || !cmtsIp) {
-                console.log('[UTSC] Cannot discover RF port: no CMTS IP available');
                 return;
             }
             
             this.upstreamInterfaces.loading = true;
-            console.log('[UTSC] Starting fast RF port discovery...');
             
             try {
                 // Use the new fast discovery endpoint
                 const macAddress = this.selectedModem.mac_address.replace(/[^a-fA-F0-9:]/g, "").toLowerCase();
-                console.log("[UTSC] Using cleaned MAC address:", macAddress);
                 const response = await fetch(`/api/pypnm/upstream/discover-rf-port/${macAddress}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -715,8 +724,6 @@ createApp({
                         description: result.rf_port_description
                     };
                     
-                    console.log(`[UTSC] Discovered RF port: ${result.rf_port_ifindex} (${result.rf_port_description})`);
-                    console.log(`[UTSC] CM Index: ${result.cm_index}, US Channels: ${result.us_channels?.length || 0}`);
                     
                     this.$toast?.success(`RF port discovered: ${result.rf_port_description}`);
                 } else {
@@ -812,7 +819,6 @@ createApp({
             this.utscPlotImage = null;
             this.utscSpectrumData = null;
             
-            console.log('[UTSC] Live mode active, checking spectrum analyzer...');
             
             // Wait for DOM to render
             await this.$nextTick();
@@ -820,7 +826,6 @@ createApp({
             
             // Initialize spectrum analyzer if not already done
             if (!this.spectrumState) {
-                console.log('[UTSC] Initializing spectrum analyzer (first time)...');
                 await this.$nextTick();
                 await this.initUtscSpectrumAnalyzer();
                 
@@ -830,13 +835,10 @@ createApp({
                     this.utscLiveMode = false;
                     return;
                 }
-                console.log('[UTSC] Spectrum analyzer initialized successfully!');
             } else {
-                console.log('[UTSC] Reusing existing spectrum analyzer');
             }
             
             // Use new flow: WebSocket FIRST, then API trigger
-            console.log('[UTSC] Chart ready, using WebSocket-first flow...');
             await this.startUtscWebSocketAndTrigger();
             
             // Wait for WebSocket to connect (max 5 seconds)
@@ -866,7 +868,6 @@ createApp({
         },
         
         stopUtscLive() {
-            console.log('[UTSC] Stopping live mode...');
             this.utscLiveMode = false;
             this.runningUtsc = false;
             this.$toast?.info('Live monitoring stopped');
@@ -1126,18 +1127,14 @@ createApp({
                 });
                 
                 const result = await response.json();
-                console.log('UTSC data response:', result);
                 
                 if (result.success && result.data) {
-                    console.log('[UTSC] Success, updating data, plot exists:', !!result.plot, 'has data:', !!result.plot?.data);
                     this.utscSpectrumData = result.data;
                     // Force Vue reactivity by creating new object reference
                     this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
-                    console.log('[UTSC] Updated utscPlotImage:', !!this.utscPlotImage, 'timestamp:', this.utscPlotImage?._timestamp);
                     
                     // Initialize Spectrum Analyzer immediately when data first loads
                     if (!this.spectrumState) {
-                        console.log('[UTSC] First data received, initializing Spectrum Analyzer...');
                         this.$nextTick(async () => {
                             await this.initUtscSpectrumAnalyzer();
                             // Display initial data
@@ -1167,12 +1164,10 @@ createApp({
             this.utscLiveMode = !this.utscLiveMode;
             
             if (this.utscLiveMode) {
-                console.log('[UTSC] Starting live mode...');
                 
                 // Spectrum analyzer should already be initialized from first measurement
                 // If not, initialize it now
                 if (!this.spectrumState) {
-                    console.log('[UTSC] Spectrum analyzer not initialized yet, initializing...');
                     await this.$nextTick();
                     await new Promise(resolve => setTimeout(resolve, 150));
                     await this.initUtscSpectrumAnalyzer();
@@ -1186,7 +1181,6 @@ createApp({
                     return;
                 }
                 
-                console.log('[UTSC] Spectrum analyzer ready, starting WebSocket...');
                 this.$toast?.success('Live monitoring started - continuous streaming');
                 // Connect WebSocket FIRST, then trigger UTSC API after WS opens
                 await this.startUtscWebSocketAndTrigger();
@@ -1195,7 +1189,6 @@ createApp({
                 // by re-triggering UTSC when buffer gets low (no frontend timer needed)
                 
             } else {
-                console.log('[UTSC] Stopping live mode...');
                 this.$toast?.info('Live monitoring stopped');
                 this.stopUtscWebSocket();
                 
@@ -1224,25 +1217,21 @@ createApp({
             const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
             const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
             
-            console.log('[UTSC] Connecting WebSocket:', wsUrl);
             
             try {
                 window.utscWebSocket = new WebSocket(wsUrl);
                 this.utscWebSocket = window.utscWebSocket;
                 
                 this.utscWebSocket.onopen = () => {
-                    console.log('[UTSC] WebSocket connected');
                     this.$toast?.success(`UTSC stream: ${(refreshMs/1000).toFixed(1)}s refresh, ${durationS}s duration`);
                 };
                 
                 this.utscWebSocket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        console.log('🔴 [UTSC] RAW MESSAGE:', data);
                         
                         // Only process real spectrum frames
                         if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
-                            console.log('🟢 [UTSC] SPECTRUM FRAME DETECTED!');
                             
                             // Update buffer size display
                             if (data.buffer_size !== undefined) {
@@ -1280,11 +1269,9 @@ createApp({
                                 this.utscBufferSize = data.buffer_size;
                             }
                             if (data.message) {
-                                console.log('[UTSC]', data.message);
                             }
                         } else if (data.type === 'buffering_complete') {
                             // Buffering complete, stream starting
-                            console.log('[UTSC]', data.message);
                             this.$toast?.success(data.message);
                         } else if (data.type === 'heartbeat') {
                             // Update buffer size from heartbeat
@@ -1294,7 +1281,6 @@ createApp({
                         } else if (data.type === 'error') {
                             console.error('[UTSC] Stream error:', data.message);
                         } else if (data.type === 'connected') {
-                            console.log('[UTSC]', data.message);
                         }
                     } catch (e) {
                         console.error('[UTSC] Failed to parse message:', e);
@@ -1307,7 +1293,6 @@ createApp({
                 };
                 
                 this.utscWebSocket.onclose = () => {
-                    console.log('[UTSC] WebSocket closed - session complete');
                     // Don't auto-reconnect - session duration has completed
                     // User needs to manually restart if they want to continue
                     if (this.utscLiveMode) {
@@ -1331,7 +1316,6 @@ createApp({
             }
             
             try {
-                console.log('[UTSC] Starting new UTSC session...');
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1351,7 +1335,6 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    console.log('[UTSC] UTSC restarted, waiting for files...');
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     this.startUtscWebSocket();
                 } else {
@@ -1379,7 +1362,6 @@ createApp({
                 const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
                 const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
                 
-                console.log('[UTSC] Connecting WebSocket FIRST before API trigger:', wsUrl);
                 this.stopUtscWebSocket(); // Close any existing connection
                 
                 try {
@@ -1387,7 +1369,6 @@ createApp({
                     this.utscWebSocket = window.utscWebSocket;
                     
                     this.utscWebSocket.onopen = async () => {
-                        console.log('[UTSC] WebSocket connected! Now triggering API...');
                         
                         // Now that WebSocket is ready, trigger the UTSC API
                         try {
@@ -1410,7 +1391,6 @@ createApp({
                             
                             const result = await response.json();
                             if (result.success) {
-                                console.log('[UTSC] API triggered successfully, WebSocket will receive files');
                                 resolve();
                             } else {
                                 console.error('[UTSC] API trigger failed:', result.error);
@@ -1433,18 +1413,15 @@ createApp({
                     };
                     
                     this.utscWebSocket.onclose = () => {
-                        console.log('[UTSC] WebSocket closed');
                     };
                     
                     // Set the comprehensive message handler (handles ALL types including spectrum)
                     this.utscWebSocket.onmessage = (event) => {
                         try {
                             const data = JSON.parse(event.data);
-                            console.log('🔴 [UTSC] RAW MESSAGE:', data);
 
                             // ========== SPECTRUM FRAMES ==========
                             if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
-                                console.log('🟢 [UTSC] SPECTRUM FRAME DETECTED!');
 
                                 if (data.buffer_size !== undefined) {
                                     this.utscBufferSize = data.buffer_size;
@@ -1471,14 +1448,11 @@ createApp({
                             // ========== CONTROL / STATUS FRAMES ==========
                             if (data.type === 'buffering') {
                                 this.utscBufferSize = data.buffer_size || 0;
-                                console.log('[UTSC]', data.message);
                             }
                             else if (data.type === 'buffering_complete') {
-                                console.log('[UTSC]', data.message);
                                 this.$toast?.success(data.message);
                             }
                             else if (data.type === 'connected') {
-                                console.log('[UTSC]', data.message);
                             }
                             else if (data.type === 'heartbeat') {
                                 this.utscBufferSize = data.buffer_size || this.utscBufferSize;
@@ -1515,7 +1489,6 @@ createApp({
         
         async initUtscSpectrumAnalyzer() {
             // Initialize professional spectrum analyzer
-            console.log('[Spectrum] Initializing spectrum analyzer...');
             
             // Initialize spectrum analyzer state if not exists
             if (!this.spectrumState) {
@@ -1553,7 +1526,6 @@ createApp({
             // Setup controls
             this.setupSpectrumControls();
             
-            console.log('[Spectrum] Initialized successfully');
         },
         
         setupSpectrumCanvases(specCanvas, wfCanvas) {
@@ -1662,7 +1634,6 @@ createApp({
         },
         
         handleSpectrumData(rawData) {
-            console.log('[Spectrum] handleSpectrumData called with:', {
                 hasBins: !!rawData?.bins,
                 hasFreqStart: rawData?.freq_start_hz !== undefined,
                 hasFreqStep: rawData?.freq_step_hz !== undefined,
@@ -1684,13 +1655,11 @@ createApp({
                 bins = rawData.bins;
                 freqStart = rawData.freq_start_hz;
                 freqStep = rawData.freq_step_hz;
-                console.log('[Spectrum] Using new format:', {bins: bins.length, freqStart, freqStep});
             } else if (rawData.frequencies && rawData.amplitudes) {
                 // Old format (backward compatibility)
                 bins = rawData.amplitudes;
                 freqStart = rawData.frequencies[0];
                 freqStep = rawData.frequencies[1] - rawData.frequencies[0];
-                console.log('[Spectrum] Using old format');
             } else {
                 console.warn('[Spectrum] Data format not recognized, returning');
                 return; // Missing required fields
@@ -2028,7 +1997,6 @@ createApp({
                     }
                 });
                 
-                console.log('[Chart] Fallback chart updated with', freqMHz.length, 'points');
             } catch (error) {
                 console.error('[Chart] Fallback chart failed:', error);
             }
@@ -2206,15 +2174,6 @@ createApp({
                 
                 const data = await response.json();
                 
-                console.log('=== PNM Measurement Response ===');
-                console.log('Status:', data.status);
-                console.log('Has data field:', !!data.data);
-                console.log('data.data:', data.data);
-                console.log('Measurement type:', measurementType);
-                console.log('Output type:', this.pnmOutputType);
-                console.log('Plots:', data.plots);
-                console.log('Plots count:', data.plots ? data.plots.length : 0);
-                console.log('================================');
                 
                 if (data.status === 0) {
                     // Store data in the appropriate variable
@@ -2240,14 +2199,11 @@ createApp({
                     const hasMatplotlibPlots = data.plots && data.plots.length > 0;
                     
                     if (hasJsonData && !hasMatplotlibPlots) {
-                        console.log('Will call drawMeasurementCharts with:', measurementType, data);
                         this.$nextTick(() => {
                             this.drawMeasurementCharts(measurementType, data);
                         });
                     } else if (hasMatplotlibPlots) {
-                        console.log(`Using ${data.plots.length} matplotlib plot(s) for ${measurementType}`);
                     } else {
-                        console.log('Skipping chart draw - no JSON data available. Output type:', this.pnmOutputType);
                     }
                     
                     const typeNames = {
@@ -3101,12 +3057,10 @@ createApp({
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${macAddress}?refresh_ms=500&duration_s=60&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(this.snmpCommunityRW)}`;
             
-            console.log(`[UTSC] Connecting WebSocket: ${wsUrl}`);
             window.utscWebSocket = new WebSocket(wsUrl);
             this.utscWs = window.utscWebSocket;
             
             this.utscWs.onopen = () => {
-                console.log('[UTSC] WebSocket connected');
                 this.utscWsStatus = 'connected';
                 this.showSuccess('WebSocket Connected', 'Control channel ready');
             };
@@ -3128,12 +3082,10 @@ createApp({
             };
             
             this.utscWs.onclose = () => {
-                console.log('[UTSC] WebSocket closed');
                 this.utscWsStatus = 'disconnected';
                 // Auto-reconnect after 3 seconds
                 setTimeout(() => {
                     if (this.utscWsStatus === 'disconnected') {
-                        console.log('[UTSC] Auto-reconnecting...');
                         this.connectUtscWebSocket();
                     }
                 }, 3000);
@@ -3144,16 +3096,12 @@ createApp({
             const msgType = data.type;
             
             if (msgType === 'connected') {
-                console.log('[UTSC] Stream connected');
             } else if (msgType === 'buffering') {
-                console.log(`[UTSC] Buffering: ${data.buffer_size}/${data.target}`);
             } else if (msgType === 'buffering_complete') {
-                console.log(`[UTSC] Buffering complete: ${data.buffer_size} samples`);
             } else if (msgType === 'spectrum_data' || msgType === 'spectrum') {
                 this.utscDataCount++;
                 this.updateUtscChart(data);
             } else if (msgType === 'status') {
-                console.log(`[UTSC] Status: ${data.message}`);
             }
         },
         
@@ -3172,16 +3120,17 @@ createApp({
                 freerun_duration_ms: this.utscConfig.freerunDurationMs
             };
             
-            console.log('[UTSC] Starting 60s freerun stream:', payload);
             this.utscStreaming = true;
             this.utscDataCount = 0;
             this.utscStartTime = Date.now();
-            this.utscTimeRemaining = 60;
+            // Enforce 5-minute maximum (300 seconds)
+            const maxDuration = Math.min(this.utscDuration, 300);
+            this.utscTimeRemaining = maxDuration;
             
             // Start countdown timer
             this.utscDurationTimer = setInterval(() => {
                 const elapsed = (Date.now() - this.utscStartTime) / 1000;
-                this.utscTimeRemaining = Math.max(0, Math.floor(60 - elapsed));
+                this.utscTimeRemaining = Math.max(0, Math.floor(maxDuration - elapsed));
                 
                 if (this.utscTimeRemaining === 0) {
                     this.stopUtscStream();
@@ -3197,7 +3146,7 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    this.showSuccess('UTSC Started', '60 second freerun capture initiated');
+                    this.showSuccess('UTSC Started', `${maxDuration} second capture initiated`);
                 } else {
                     this.showError('UTSC Failed', result.error || 'Unknown error');
                     this.stopUtscStream();
@@ -3210,7 +3159,6 @@ createApp({
         },
         
         stopUtscStream() {
-            console.log('[UTSC] Stopping stream');
             this.utscStreaming = false;
             
             if (this.utscDurationTimer) {

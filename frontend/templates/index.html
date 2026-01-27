@@ -906,9 +906,12 @@
                         <div class="row">
                             <!-- PNM Measurement Controls -->
                             <div class="col-12 mb-4">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
-                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>PNM Measurements</h5>
+                                <div class="card shadow-sm border-primary">
+                                    <div class="card-header bg-primary bg-opacity-10">
+                                        <h5 class="mb-0 text-primary">
+                                            <i class="bi bi-arrow-down-circle me-2"></i>Downstream PNM (Modem-side)
+                                            <span class="badge bg-primary text-white ms-2">DOCSIS 3.0/3.1</span>
+                                        </h5>
                                     </div>
                                     <div class="card-body">
                                         <div class="row g-3 mb-3">
@@ -1074,23 +1077,28 @@
                                                         </div>
                                                         <div class="mt-2">
                                                             <label class="form-label small mb-1">
-                                                                Duration: {{ utscDuration }}s
+                                                                Duration: {{ Math.floor(utscDuration / 60) }}m {{ utscDuration % 60 }}s
                                                             </label>
                                                             <input type="range" v-model.number="utscDuration" 
                                                                    class="form-range" 
-                                                                   min="30" max="60" step="10" 
-                                                                   title="Test duration in seconds">
+                                                                   min="30" max="300" step="30" 
+                                                                   title="Test duration (max 5 minutes)">
                                                         </div>
-                                                        <div v-if="utscLiveMode" class="mt-1">
-                                                            <small class="text-muted">
-                                                                <i class="bi bi-layers me-1"></i>Buffer: {{ utscBufferSize || 0 }}/20 files
-                                                                <span v-if="utscBufferSize < 20" class="text-warning ms-1">
-                                                                    <i class="bi bi-hourglass-split me-1"></i>Buffering... {{ Math.round((utscBufferSize / 20) * 100) }}%
+                                                        <div v-if="utscLiveMode" class="mt-2">
+                                                            <div class="d-flex align-items-center gap-2">
+                                                                <small class="text-muted">
+                                                                    <i class="bi bi-layers me-1"></i><strong>{{ utscBufferSize || 0 }}/20</strong> captures
+                                                                </small>
+                                                                <span v-if="utscBufferSize < 20" class="badge bg-warning text-dark">
+                                                                    <i class="bi bi-hourglass-split me-1"></i>Buffering {{ Math.round((utscBufferSize / 20) * 100) }}%
                                                                 </span>
-                                                                <span v-else-if="utscBufferSize <= 10" class="text-info ms-1">
-                                                                    <i class="bi bi-arrow-repeat me-1"></i>Refilling...
+                                                                <span v-else-if="utscBufferSize <= 10" class="badge bg-info">
+                                                                    <i class="bi bi-arrow-repeat spin me-1"></i>Live
                                                                 </span>
-                                                            </small>
+                                                                <span v-else class="badge bg-success">
+                                                                    <i class="bi bi-check-circle me-1"></i>Ready
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                         <div v-if="utscStatus" class="mt-2">
                                                             <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">

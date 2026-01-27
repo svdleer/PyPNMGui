@@ -1554,3 +1554,36 @@ def get_us_rxmer_data(mac_address):
     except Exception as e:
         logger.error(f"Get US RxMER data failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/cleanup', methods=['POST'])
+def cleanup_old_files():
+    """Clean up old PNM measurement files."""
+    try:
+        import glob
+        import time
+        
+        # Clean up temp files older than 1 hour
+        temp_dir = tempfile.gettempdir()
+        cleanup_count = 0
+        cutoff_time = time.time() - 3600  # 1 hour ago
+        
+        # Clean PNG, CSV, and ZIP files in temp directory
+        patterns = ['*_rxmer*.png', '*_spectrum*.png', '*_channel*.png', '*_modulation*.png', 
+                   '*.csv', 'pnm_*.zip']
+        
+        for pattern in patterns:
+            for filepath in glob.glob(os.path.join(temp_dir, pattern)):
+                try:
+                    if os.path.getmtime(filepath) < cutoff_time:
+                        os.remove(filepath)
+                        cleanup_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete {filepath}: {e}")
+        
+        logger.info(f"Cleaned up {cleanup_count} old PNM files")
+        return jsonify({"success": True, "files_removed": cleanup_count})
+        
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
