@@ -1363,14 +1363,21 @@ def pypnm_fec(mac_address):
 def pypnm_constellation(mac_address):
     """Get constellation display via PyPNM."""
     from app.core.pypnm_client import PyPNMClient
+    import os
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
-    tftp_ip = data.get('tftp_ip', '')
+    # Use LAB community in LAB mode, otherwise default
+    default_community = 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
+    community = data.get('community', default_community)
+    # Default TFTP IP for lab environment - 172.22.147.18 is the working TFTP server
+    tftp_ip = data.get('tftp_ip', os.environ.get('TFTP_IPV4', '172.22.147.18'))
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    if not tftp_ip:
+        return jsonify({"status": "error", "message": "TFTP server not configured. Set TFTP_IPV4 environment variable."}), 400
     
     client = PyPNMClient()
     result = client.get_constellation_display(mac_address, modem_ip, tftp_ip, community)
