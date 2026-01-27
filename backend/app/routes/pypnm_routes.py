@@ -198,43 +198,66 @@ def pnm_measurement(measurement_type, mac_address):
         
         # Handle archive (tar.gz) response - fetch matplotlib plots from PyPNM
         if requested_archive and isinstance(result, bytes):
-            # PyPNM returns binary tar.gz file
+            # PyPNM returns binary archive file (ZIP or tar.gz)
             import tarfile
+            import zipfile
             import io
             import base64
             import json
             from datetime import datetime
             
-            # Save tar.gz file
+            # Detect archive type
+            is_zip = result.startswith(b'PK')  # ZIP magic number
+            
+            # Save archive file
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            archive_filename = f"{measurement_type}_{mac_address}_{timestamp}.tar.gz"
+            archive_ext = 'zip' if is_zip else 'tar.gz'
+            archive_filename = f"{measurement_type}_{mac_address}_{timestamp}.{archive_ext}"
             archive_path = f"/app/data/{archive_filename}"
             
             with open(archive_path, 'wb') as f:
                 f.write(result)
             
-            # Extract PNG images and JSON from tar.gz
+            # Extract PNG images and JSON from archive
             plots = []
             json_data = None
             try:
-                with tarfile.open(fileobj=io.BytesIO(result), mode='r:gz') as tf:
-                    archive_files = tf.getnames()
-                    logger.info(f"Archive contains {len(archive_files)} files: {archive_files}")
-                    for filename in archive_files:
-                        if filename.endswith('.png'):
-                            member = tf.getmember(filename)
-                            img_data = tf.extractfile(member).read()
-                            plots.append({
-                                'filename': filename,
-                                'data': base64.b64encode(img_data).decode('utf-8')
-                            })
-                        elif filename.endswith('result.json'):
-                            member = tf.getmember(filename)
-                            json_content = tf.extractfile(member).read().decode('utf-8')
-                            json_data = json.loads(json_content)
-                    logger.info(f"Extracted {len(plots)} PNG plots from tar.gz")
+                if is_zip:
+                    # Handle ZIP archive
+                    with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
+                        archive_files = zf.namelist()
+                        logger.info(f"ZIP archive contains {len(archive_files)} files")
+                        for filename in archive_files:
+                            if filename.endswith('.png'):
+                                img_data = zf.read(filename)
+                                plots.append({
+                                    'filename': filename.split('/')[-1],  # Get basename
+                                    'data': base64.b64encode(img_data).decode('utf-8')
+                                })
+                            elif filename.endswith('.json'):
+                                json_content = zf.read(filename).decode('utf-8')
+                                json_data = json.loads(json_content)
+                        logger.info(f"Extracted {len(plots)} PNG plots from ZIP")
+                else:
+                    # Handle tar.gz archive
+                    with tarfile.open(fileobj=io.BytesIO(result), mode='r:gz') as tf:
+                        archive_files = tf.getnames()
+                        logger.info(f"TAR archive contains {len(archive_files)} files")
+                        for filename in archive_files:
+                            if filename.endswith('.png'):
+                                member = tf.getmember(filename)
+                                img_data = tf.extractfile(member).read()
+                                plots.append({
+                                    'filename': filename.split('/')[-1],  # Get basename
+                                    'data': base64.b64encode(img_data).decode('utf-8')
+                                })
+                            elif filename.endswith('.json'):
+                                member = tf.getmember(filename)
+                                json_content = tf.extractfile(member).read().decode('utf-8')
+                                json_data = json.loads(json_content)
+                        logger.info(f"Extracted {len(plots)} PNG plots from TAR")
             except Exception as e:
-                logger.error(f"Failed to extract from tar.gz: {e}")
+                logger.error(f"Failed to extract from archive: {e}")
             
             # If we extracted JSON, return it with plots
             if json_data:
