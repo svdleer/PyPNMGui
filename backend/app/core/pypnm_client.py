@@ -106,6 +106,10 @@ class PyPNMClient:
             
             # For archive responses, return binary content
             if expect_binary or payload.get('analysis', {}).get('output', {}).get('type') == 'archive':
+                content_len = len(response.content)
+                logger.info(f"PyPNM returned binary content: {content_len} bytes, Content-Type: {response.headers.get('content-type')}")
+                if content_len == 0:
+                    logger.error("PyPNM returned empty content for archive request!")
                 return response.content
             
             return response.json()
