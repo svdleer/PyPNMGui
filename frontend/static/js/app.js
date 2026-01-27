@@ -1634,14 +1634,6 @@ createApp({
         },
         
         handleSpectrumData(rawData) {
-                hasBins: !!rawData?.bins,
-                hasFreqStart: rawData?.freq_start_hz !== undefined,
-                hasFreqStep: rawData?.freq_step_hz !== undefined,
-                binsLength: rawData?.bins?.length,
-                firstBin: rawData?.bins?.[0],
-                lastBin: rawData?.bins?.[rawData?.bins?.length - 1]
-            });
-            
             if (!rawData) return;
             if (this.spectrumState?.paused) return;
             
