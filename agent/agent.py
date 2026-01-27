@@ -89,14 +89,13 @@ class AgentConfig:
     
     # CMTS Access (can be direct SNMP or via SSH)
     cmts_snmp_direct: bool = True
-    cmts_community: str = 'public'  # Read community
-    cmts_write_community: Optional[str] = None  # Write community for SNMP SET (upstream PNM)
+    cmts_community: str = os.environ.get('CMTS_SNMP_COMMUNITY', 'public')
+    cmts_write_community: Optional[str] = os.environ.get('CMTS_SNMP_WRITE_COMMUNITY')
     cmts_ssh_enabled: bool = False
     cmts_ssh_user: Optional[str] = None
     cmts_ssh_key: Optional[str] = None
     
     # CM Proxy - Server with connectivity to Cable Modems
-    # SNMP commands to modems are executed on this server via SSH
     cm_proxy_host: Optional[str] = None
     cm_proxy_port: int = 22
     cm_proxy_user: Optional[str] = None
@@ -104,7 +103,7 @@ class AgentConfig:
     
     # CM Direct - Direct SNMP access to modems (no proxy)
     cm_direct_enabled: bool = False
-    cm_direct_community: str = 'm0d3m1nf0'
+    cm_direct_community: str = os.environ.get('CM_DIRECT_COMMUNITY', 'public')
     
     # Equalizer Server - for SNMP queries via SSH (has best CMTS connectivity)
     equalizer_host: Optional[str] = None

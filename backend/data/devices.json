@@ -5,9 +5,9 @@
     "hostname": "lab-modem-1",
     "model": "Arris TG4482",
     "cmts_ip": "172.16.6.212",
-    "cmts_community": "Z1gg0Sp3c1@l",
+    "cmts_community": "USE_ENV",
     "tftp_ip": "172.16.6.101",
     "location": "Lab",
-    "notes": "Main test modem"
+    "notes": "Main test modem - SNMP community from environment"
   }
 ]

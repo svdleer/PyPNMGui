@@ -1,5 +1,15 @@
 venv/
 
+# Postmortem and archived files
+postmortem/
+archive/
+
+# Lab config files
+docker-compose.lab.yml
+docker-compose.*.lab*.yml
+.env.lab
+*.lab.json
+
 # Config files with credentials (use *.example.json as template)
 agent/agent_config.json
 docker/agent-config/agent_config.json
