@@ -87,7 +87,7 @@ class PyPNMClient:
         timeout = 300 if 'spectrumAnalyzer' in endpoint else self.config.timeout
         
         try:
-            logger.debug(f"POST {url}")
+            logger.debug(f"POST {url} with payload: {payload}")
             response = self.session.post(
                 url,
                 json=payload,
@@ -107,9 +107,13 @@ class PyPNMClient:
             # For archive responses, return binary content
             if expect_binary or payload.get('analysis', {}).get('output', {}).get('type') == 'archive':
                 content_len = len(response.content)
-                logger.info(f"PyPNM returned binary content: {content_len} bytes, Content-Type: {response.headers.get('content-type')}")
+                content_type = response.headers.get('content-type')
+                logger.info(f"PyPNM returned {content_len} bytes, Content-Type: {content_type}")
                 if content_len == 0:
                     logger.error("PyPNM returned empty content for archive request!")
+                # Log first 200 bytes if not binary
+                if content_len > 0 and content_len < 1000:
+                    logger.warning(f"Small response ({content_len} bytes): {response.content[:200]}")
                 return response.content
             
             return response.json()
