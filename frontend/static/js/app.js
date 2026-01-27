@@ -27,6 +27,7 @@ createApp({
             snmpCommunity: 'Z1gg0@LL',
             snmpCommunityRW: 'Z1gg0Sp3c1@l',
             snmpCommunityModem: 'z1gg0m0n1t0r1ng',
+            snmpCommunityModemRW: 'Wr1t3M0d3m',  // Modem read-write community for PNM measurements
             selectedCmts: '',
             selectedInterface: '',
             searchPerformed: false,
@@ -2144,9 +2145,15 @@ createApp({
             this.showRawData = false;
             
             try {
+                // RxMER and other PNM measurements require SNMP SET, use RW community
+                const needsRW = ['rxmer', 'spectrum', 'histogram', 'constellation'].includes(measurementType);
+                const community = needsRW 
+                    ? (this.snmpCommunityModemRW || 'Wr1t3M0d3m')
+                    : (this.snmpCommunityModem || 'z1gg0m0n1t0r1ng');
+                
                 const payload = {
                     modem_ip: this.selectedModem.ip_address,
-                    community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng',
+                    community: community,
                     output_type: this.pnmOutputType
                 };
                 
