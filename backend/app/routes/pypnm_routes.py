@@ -262,6 +262,9 @@ def pnm_measurement(measurement_type, mac_address):
             # If we extracted JSON, return it with plots
             if json_data:
                 response = json_data
+                # CRITICAL: Ensure status field exists (frontend requires it)
+                if 'status' not in response:
+                    response['status'] = 0  # SUCCESS - use PyPNM status codes
                 response['plots'] = plots
                 response['output_type'] = 'archive'
                 response['archive_file'] = archive_filename
