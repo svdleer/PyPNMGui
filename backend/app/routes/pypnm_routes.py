@@ -181,10 +181,27 @@ def pnm_measurement(measurement_type, mac_address):
                 tftp_ipv6="::1", sample_duration=duration, output_type=output_type
             )
         elif measurement_type == 'constellation':
+            logger.info(f"=== CONSTELLATION DEBUG START ===")
+            logger.info(f"Requesting constellation for {mac_address} at {modem_ip}")
+            logger.info(f"Output type: {output_type}, Requested archive: {requested_archive}")
             result = client.get_constellation_display(
                 mac_address, modem_ip, tftp_ip, community,
                 tftp_ipv6="::1", output_type=output_type
             )
+            logger.info(f"=== CONSTELLATION RAW RESULT ===")
+            logger.info(f"Result type: {type(result)}")
+            if isinstance(result, dict):
+                logger.info(f"Result keys: {result.keys()}")
+                logger.info(f"Result status: {result.get('status')}")
+                logger.info(f"Result message: {result.get('message')}")
+                if 'data' in result:
+                    logger.info(f"Data keys: {result['data'].keys() if isinstance(result['data'], dict) else 'not a dict'}")
+                logger.info(f"Full result: {json.dumps(result, indent=2, default=str)}")
+            elif isinstance(result, bytes):
+                logger.info(f"Result is bytes, length: {len(result)}")
+            else:
+                logger.info(f"Result: {result}")
+            logger.info(f"=== CONSTELLATION DEBUG END ===")
         elif measurement_type == 'us_pre_eq':
             result = client.get_us_ofdma_pre_equalization(
                 mac_address, modem_ip, tftp_ip, community,

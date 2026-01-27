@@ -4,6 +4,7 @@
 # Client wrapper for PyPNM FastAPI endpoints
 
 import os
+import json
 import logging
 import requests
 from typing import Optional, Dict, Any, List, Union
@@ -99,8 +100,14 @@ class PyPNMClient:
                 try:
                     error_detail = response.json()
                     logger.error(f"PyPNM returned {response.status_code}: {error_detail}")
+                    if 'constellation' in endpoint.lower():
+                        logger.error(f"=== CONSTELLATION ERROR DETAIL ===")
+                        logger.error(f"Full error response: {json.dumps(error_detail, indent=2)}")
                 except:
                     logger.error(f"PyPNM returned {response.status_code}: {response.text[:500]}")
+                    if 'constellation' in endpoint.lower():
+                        logger.error(f"=== CONSTELLATION ERROR (RAW) ===")
+                        logger.error(f"Full response text: {response.text}")
             
             response.raise_for_status()
             
