@@ -196,45 +196,62 @@ def pnm_measurement(measurement_type, mac_address):
                 "message": f"Unknown measurement type: {measurement_type}"
             }), 400
         
-        # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
+        # Handle archive (tar.gz) response - fetch matplotlib plots from PyPNM
         if requested_archive and isinstance(result, bytes):
-            # PyPNM returned binary ZIP file
-            import zipfile
+            # PyPNM returns binary tar.gz file
+            import tarfile
             import io
             import base64
+            import json
             from datetime import datetime
             
-            # Save ZIP file
+            # Save tar.gz file
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            zip_filename = f"{measurement_type}_{mac_address}_{timestamp}.zip"
-            zip_path = f"/app/data/{zip_filename}"
+            archive_filename = f"{measurement_type}_{mac_address}_{timestamp}.tar.gz"
+            archive_path = f"/app/data/{archive_filename}"
             
-            with open(zip_path, 'wb') as f:
+            with open(archive_path, 'wb') as f:
                 f.write(result)
             
-            # Extract PNG images from ZIP
+            # Extract PNG images and JSON from tar.gz
             plots = []
+            json_data = None
             try:
-                with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
-                    zip_files = zf.namelist()
-                    logger.info(f"ZIP contains {len(zip_files)} files: {zip_files}")
-                    for filename in zip_files:
+                with tarfile.open(fileobj=io.BytesIO(result), mode='r:gz') as tf:
+                    archive_files = tf.getnames()
+                    logger.info(f"Archive contains {len(archive_files)} files: {archive_files}")
+                    for filename in archive_files:
                         if filename.endswith('.png'):
-                            img_data = zf.read(filename)
+                            member = tf.getmember(filename)
+                            img_data = tf.extractfile(member).read()
                             plots.append({
                                 'filename': filename,
                                 'data': base64.b64encode(img_data).decode('utf-8')
                             })
-                    logger.info(f"Extracted {len(plots)} PNG plots from ZIP")
+                        elif filename.endswith('result.json'):
+                            member = tf.getmember(filename)
+                            json_content = tf.extractfile(member).read().decode('utf-8')
+                            json_data = json.loads(json_content)
+                    logger.info(f"Extracted {len(plots)} PNG plots from tar.gz")
             except Exception as e:
-                logger.error(f"Failed to extract plots from ZIP: {e}")
+                logger.error(f"Failed to extract from tar.gz: {e}")
             
+            # If we extracted JSON, return it with plots
+            if json_data:
+                response = json_data
+                response['plots'] = plots
+                response['output_type'] = 'archive'
+                response['archive_file'] = archive_filename
+                response['download_url'] = f"/api/pypnm/download/{archive_filename}"
+                return jsonify(response)
+            
+            # Fallback if no JSON found
             return jsonify({
                 "status": 0,
                 "message": f"Measurement complete - {len(plots)} plots generated",
                 "output_type": "archive",
-                "zip_file": zip_filename,
-                "download_url": f"/api/pypnm/download/{zip_filename}",
+                "archive_file": archive_filename,
+                "download_url": f"/api/pypnm/download/{archive_filename}",
                 "plots": plots,
                 "mac_address": mac_address
             })

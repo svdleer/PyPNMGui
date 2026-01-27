@@ -236,7 +236,7 @@ class PyPNMClient:
         tftp_ipv4: str,
         community: str = "private",
         tftp_ipv6: Optional[str] = None,
-        output_type: str = "json"
+        output_type: str = "archive"
     ) -> Dict[str, Any]:
         """
         Trigger RxMER measurement capture.
@@ -244,7 +244,10 @@ class PyPNMClient:
         Endpoint: POST /docs/pnm/ds/ofdm/rxMer/getCapture
         
         Args:
-            output_type: "json" or "archive" (ZIP with plots)
+            output_type: "json" or "archive" (tar.gz with JSON and plots)
+        
+        Note: PyPNM always returns a tar.gz archive, even when output_type='json' is specified.
+        The archive contains result.json with the measurement data.
         """
         # Build PyPNM PnmSingleCaptureRequest format
         payload = {
