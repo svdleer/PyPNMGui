@@ -75,7 +75,8 @@ createApp({
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,
-                preEq: true
+                preEq: true,
+                lastFilename: null  // Store filename from start response
             },
             runningUtsc: false,
             runningUsRxmer: false,
@@ -1113,6 +1114,9 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
+                    // Save filename for later retrieval
+                    this.usRxmerConfig.lastFilename = result.filename;
+                    console.log('US RxMER started, filename:', result.filename);
                     this.$toast?.success('US RxMER measurement started');
                     this.pollUsRxmerStatus();
                 } else {
@@ -2091,8 +2095,16 @@ createApp({
             }
             
             try {
-                // Get the filename from status response or generate from timestamp
-                const filename = this.usRxmerStatus?.filename || `us_rxmer_${Date.now()}`;
+                // Get the filename from config (saved from start response)
+                const filename = this.usRxmerConfig.lastFilename;
+                
+                if (!filename) {
+                    this.$toast?.error('No filename available for US RxMER capture');
+                    console.error('US RxMER filename not found');
+                    return;
+                }
+                
+                console.log('Fetching US RxMER plot for filename:', filename);
                 
                 // Fetch the plot image from PyPNM API via backend
                 const response = await fetch(`/api/pypnm/upstream/rxmer/plot/${this.selectedModem.mac_address}`, {
