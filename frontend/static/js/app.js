@@ -2091,24 +2091,35 @@ createApp({
             }
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/rxmer/data/${this.selectedModem.mac_address}`, {
+                // Get the filename from status response or generate from timestamp
+                const filename = this.usRxmerStatus?.filename || `us_rxmer_${Date.now()}`;
+                
+                // Fetch the plot image from PyPNM API via backend
+                const response = await fetch(`/api/pypnm/upstream/rxmer/plot/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
-                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                        filename: filename
                     })
                 });
                 
-                const result = await response.json();
-                
-                if (result.success && result.data) {
-                    this.usRxmerSpectrumData = result.data;
-                    this.$toast?.success('US RxMER data loaded');
-                    this.$nextTick(() => this.renderUsRxmerChart());
+                if (response.ok && response.headers.get('Content-Type')?.startsWith('image/')) {
+                    // Convert to blob and create object URL
+                    const blob = await response.blob();
+                    const imageUrl = URL.createObjectURL(blob);
+                    
+                    // Store plot image data
+                    this.usRxmerSpectrumData = {
+                        plotUrl: imageUrl,
+                        filename: filename,
+                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex
+                    };
+                    
+                    this.$toast?.success('US RxMER plot loaded');
+                    this.$nextTick(() => this.renderUsRxmerPlot());
                 } else {
-                    this.$toast?.error(result.error || 'Failed to fetch US RxMER data');
+                    const result = await response.json();
+                    this.$toast?.error(result.message || result.error || 'Failed to fetch US RxMER plot');
                 }
             } catch (error) {
                 console.error('Fetch US RxMER data error:', error);
@@ -2116,7 +2127,18 @@ createApp({
             }
         },
         
+        renderUsRxmerPlot() {
+            // Display the matplotlib plot image
+            const container = document.getElementById('usRxmerPlotContainer');
+            if (!container || !this.usRxmerSpectrumData?.plotUrl) return;
+            
+            container.innerHTML = `<img src="${this.usRxmerSpectrumData.plotUrl}" 
+                alt="US OFDMA RxMER Plot" 
+                style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+        },
+        
         renderUsRxmerChart() {
+            // Legacy Chart.js rendering - now using matplotlib plot instead
             const canvas = document.getElementById('usRxmerChart');
             if (!canvas || !this.usRxmerSpectrumData) return;
             

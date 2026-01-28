@@ -1218,8 +1218,14 @@
                                                             <i class="bi bi-x"></i>
                                                         </button>
                                                     </div>
-                                                    <div class="card-body">
-                                                        <canvas id="usRxmerChart" style="height: 300px;"></canvas>
+                                                    <div class="card-body text-center">
+                                                        <!-- Matplotlib plot container -->
+                                                        <div id="usRxmerPlotContainer" v-if="usRxmerSpectrumData.plotUrl">
+                                                            <img :src="usRxmerSpectrumData.plotUrl" alt="US OFDMA RxMER Plot" 
+                                                                style="max-width: 100%; height: auto; border-radius: 8px;">
+                                                        </div>
+                                                        <!-- Fallback to Chart.js canvas if no plot URL -->
+                                                        <canvas v-else id="usRxmerChart" style="height: 300px;"></canvas>
                                                     </div>
                                                 </div>
                                             </div>

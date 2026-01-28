@@ -1821,6 +1821,70 @@ def get_us_rxmer_data(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@pypnm_bp.route('/upstream/rxmer/plot/<mac_address>', methods=['POST'])
+def get_us_rxmer_plot(mac_address):
+    """
+    Fetch Upstream RxMER plot from PyPNM API.
+    
+    POST body:
+    {
+        "filename": "us_rxmer_2026-01-28_12.13.25.870"
+    }
+    
+    Returns PNG image of the RxMER spectrum.
+    """
+    import requests
+    from flask import Response as FlaskResponse
+    from app.core.cmts_pnm import get_pypnm_api_url
+    
+    data = request.get_json() or {}
+    filename = data.get('filename')
+    
+    if not filename:
+        return jsonify({"status": "error", "message": "filename required"}), 400
+    
+    try:
+        pypnm_url = get_pypnm_api_url()
+        api_url = f"{pypnm_url}/docs/pnm/us/ofdma/rxmer/getCapture"
+        
+        logger.info(f"Fetching US RxMER plot from {api_url} for file {filename}")
+        
+        response = requests.post(
+            api_url,
+            json={
+                "filename": filename,
+                "tftp_path": "/var/lib/tftpboot"
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200 and response.headers.get('Content-Type', '').startswith('image/'):
+            # Return the PNG image directly
+            return FlaskResponse(
+                response.content,
+                mimetype='image/png',
+                headers={
+                    'Content-Disposition': f'inline; filename=us_rxmer_{mac_address.replace(":", "")}.png'
+                }
+            )
+        else:
+            # Parse JSON error response
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('error', 'Unknown error')
+            except Exception:
+                error_msg = response.text or f"HTTP {response.status_code}"
+            
+            return jsonify({"status": "error", "message": error_msg}), response.status_code
+            
+    except requests.Timeout:
+        logger.error("PyPNM API timeout fetching US RxMER plot")
+        return jsonify({"status": "error", "message": "PyPNM API timeout"}), 504
+    except Exception as e:
+        logger.error(f"Get US RxMER plot failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @pypnm_bp.route('/cleanup', methods=['POST'])
 def cleanup_old_files():
     """Clean up old PNM measurement files."""
