@@ -232,6 +232,20 @@ def pnm_measurement(measurement_type, mac_address):
         
         # Handle archive (tar.gz) response - fetch matplotlib plots from PyPNM
         if requested_archive and isinstance(result, bytes):
+            # Check if the "bytes" is actually a JSON error response
+            if len(result) < 1000:
+                try:
+                    error_json = json.loads(result.decode('utf-8'))
+                    if isinstance(error_json, dict) and error_json.get('status', 0) != 0:
+                        logger.error(f"PyPNM returned error: {error_json}")
+                        return jsonify({
+                            "status": error_json.get('status', 'error'),
+                            "message": error_json.get('message', 'Measurement failed'),
+                            "mac_address": mac_address
+                        }), 400
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass  # Not JSON, continue processing as binary
+            
             # PyPNM returns binary archive file (ZIP or tar.gz)
             import tarfile
             import zipfile
