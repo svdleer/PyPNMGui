@@ -1106,6 +1106,153 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# ============== PyPNM pysnmp-based CMTS Operations ==============
+
+@pypnm_bp.route('/cmts/ofdma/discover/<mac_address>', methods=['POST'])
+def discover_modem_ofdma(mac_address):
+    """
+    Discover modem's OFDMA channel on CMTS using PyPNM pysnmp.
+    
+    This endpoint uses PyPNM's Snmp_v2c class for direct CMTS SNMP queries.
+    Returns the OFDMA ifIndex needed for US RxMER measurements.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "community": "optional"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "cm_index": 12345,
+        "ofdma_ifindex": 843087001,
+        "ofdma_description": "cable-us-ofdma 1/ofd/4.0"
+    }
+    """
+    from app.core.cmts_pnm import discover_modem_ofdma_sync, PYPNM_AVAILABLE
+    
+    if not PYPNM_AVAILABLE:
+        return jsonify({"success": False, "error": "PyPNM not available"}), 503
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    community = data.get('community', get_cmts_community())
+    
+    if not cmts_ip:
+        return jsonify({"success": False, "error": "cmts_ip required"}), 400
+    
+    try:
+        result = discover_modem_ofdma_sync(cmts_ip, mac_address, community)
+        
+        if result.get("success"):
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "cmts_ip": cmts_ip,
+                **result
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "mac_address": mac_address,
+                "cmts_ip": cmts_ip,
+                "error": result.get("error", "Discovery failed")
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"OFDMA discovery failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@pypnm_bp.route('/cmts/ofdma/rxmer/start/<mac_address>', methods=['POST'])
+def start_cmts_us_rxmer(mac_address):
+    """
+    Start US OFDMA RxMER measurement on CMTS using PyPNM pysnmp.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 843087001,
+        "pre_eq": true,
+        "filename": "optional",
+        "community": "optional"
+    }
+    """
+    from app.core.cmts_pnm import start_us_rxmer_sync, UsOfdmaRxMerConfig, PYPNM_AVAILABLE
+    
+    if not PYPNM_AVAILABLE:
+        return jsonify({"success": False, "error": "PyPNM not available"}), 503
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', get_cmts_community())
+    
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
+    
+    try:
+        config = UsOfdmaRxMerConfig(
+            cmts_ip=cmts_ip,
+            ofdma_ifindex=ofdma_ifindex,
+            cm_mac_address=mac_address,
+            community=community,
+            filename=data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
+            pre_eq=data.get('pre_eq', True),
+            num_averages=data.get('num_averages', 1)
+        )
+        
+        result = start_us_rxmer_sync(config)
+        
+        return jsonify({
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Start US RxMER failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@pypnm_bp.route('/cmts/ofdma/rxmer/status/<mac_address>', methods=['POST'])
+def get_cmts_us_rxmer_status(mac_address):
+    """
+    Get US OFDMA RxMER measurement status from CMTS using PyPNM pysnmp.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 843087001,
+        "community": "optional"
+    }
+    """
+    from app.core.cmts_pnm import get_us_rxmer_status_sync, PYPNM_AVAILABLE
+    
+    if not PYPNM_AVAILABLE:
+        return jsonify({"success": False, "error": "PyPNM not available"}), 503
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', get_cmts_community())
+    
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
+    
+    try:
+        result = get_us_rxmer_status_sync(cmts_ip, ofdma_ifindex, community)
+        
+        return jsonify({
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get US RxMER status failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @pypnm_bp.route('/upstream/utsc/limits', methods=['GET'])
 def get_utsc_limits():
     """

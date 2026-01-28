@@ -720,44 +720,71 @@ createApp({
             this.upstreamInterfaces.loading = true;
             
             try {
-                // Use the new fast discovery endpoint
                 const macAddress = this.selectedModem.mac_address.replace(/[^a-fA-F0-9:]/g, "").toLowerCase();
-                const response = await fetch(`/api/pypnm/upstream/discover-rf-port/${macAddress}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip: cmtsIp
-                    })
-                });
                 
-                const result = await response.json();
-                if (result.success) {
-                    // Store the CMTS IP on the modem for later use
+                // Run both discoveries in parallel: RF port for UTSC and OFDMA for US RxMER
+                const [rfPortResponse, ofdmaResponse] = await Promise.all([
+                    // RF port discovery for UTSC
+                    fetch(`/api/pypnm/upstream/discover-rf-port/${macAddress}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cmts_ip: cmtsIp })
+                    }),
+                    // OFDMA channel discovery using PyPNM pysnmp
+                    fetch(`/api/pypnm/cmts/ofdma/discover/${macAddress}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cmts_ip: cmtsIp })
+                    })
+                ]);
+                
+                // Process RF port result (for UTSC)
+                const rfResult = await rfPortResponse.json();
+                if (rfResult.success) {
                     this.selectedModem.cmts_ip = cmtsIp;
-                    
-                    // Set the discovered RF port
-                    this.utscConfig.rfPortIfindex = result.rf_port_ifindex;
-                    
-                    // Store in upstreamInterfaces for UI display
+                    this.utscConfig.rfPortIfindex = rfResult.rf_port_ifindex;
                     this.upstreamInterfaces.rfPorts = [{
-                        ifindex: result.rf_port_ifindex,
-                        description: result.rf_port_description,
-                        name: result.rf_port_description
+                        ifindex: rfResult.rf_port_ifindex,
+                        description: rfResult.rf_port_description,
+                        name: rfResult.rf_port_description
                     }];
                     this.upstreamInterfaces.modemRfPort = {
-                        ifindex: result.rf_port_ifindex,
-                        description: result.rf_port_description
+                        ifindex: rfResult.rf_port_ifindex,
+                        description: rfResult.rf_port_description
                     };
-                    
-                    
-                    this.$toast?.success(`RF port discovered: ${result.rf_port_description}`);
+                    console.log(`[UTSC] RF port discovered: ${rfResult.rf_port_description}`);
                 } else {
-                    console.error('[UTSC] RF port discovery failed:', result.error);
-                    this.$toast?.warning(result.error || 'RF port discovery failed');
+                    console.warn('[UTSC] RF port discovery failed:', rfResult.error);
                 }
+                
+                // Process OFDMA result (for US RxMER)
+                const ofdmaResult = await ofdmaResponse.json();
+                if (ofdmaResult.success) {
+                    this.usRxmerConfig.ofdmaIfindex = ofdmaResult.ofdma_ifindex;
+                    this.upstreamInterfaces.ofdmaChannels = [{
+                        ifindex: ofdmaResult.ofdma_ifindex,
+                        description: ofdmaResult.ofdma_description || `OFDMA ${ofdmaResult.ofdma_ifindex}`,
+                        cm_index: ofdmaResult.cm_index
+                    }];
+                    console.log(`[US RxMER] OFDMA ifIndex discovered: ${ofdmaResult.ofdma_ifindex}`);
+                    this.$toast?.success(`OFDMA channel discovered: ${ofdmaResult.ofdma_description || ofdmaResult.ofdma_ifindex}`);
+                } else {
+                    console.warn('[US RxMER] OFDMA discovery failed:', ofdmaResult.error);
+                    // Modem may not have OFDMA channel (DOCSIS 3.0 modem)
+                    this.upstreamInterfaces.ofdmaChannels = [];
+                    if (ofdmaResult.error && !ofdmaResult.error.includes('No OFDMA')) {
+                        this.$toast?.warning(ofdmaResult.error || 'OFDMA discovery failed');
+                    }
+                }
+                
+                // Show success toast only if RF port was found
+                if (rfResult.success) {
+                    this.$toast?.success(`RF port discovered: ${rfResult.rf_port_description}`);
+                }
+                
             } catch (error) {
-                console.error('[UTSC] Discovery error:', error);
-                this.$toast?.error('RF port discovery failed: ' + error.message);
+                console.error('[Upstream] Discovery error:', error);
+                this.$toast?.error('Upstream discovery failed: ' + error.message);
             } finally {
                 this.upstreamInterfaces.loading = false;
             }
@@ -1072,14 +1099,15 @@ createApp({
             this.usRxmerStatus = null;
             
             try {
-                const response = await fetch(`/api/pypnm/upstream/rxmer/start/${this.selectedModem.mac_address}`, {
+                // Use PyPNM pysnmp-based endpoint for US RxMER
+                const response = await fetch(`/api/pypnm/cmts/ofdma/rxmer/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         cmts_ip: cmtsIp,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
                         pre_eq: this.usRxmerConfig.preEq,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
                 });
                 
@@ -1103,13 +1131,14 @@ createApp({
             
             const cmtsIp = this.getCmtsIpForModem();
             try {
-                const response = await fetch(`/api/pypnm/upstream/rxmer/status/${this.selectedModem.mac_address}`, {
+                // Use PyPNM pysnmp-based endpoint for status polling
+                const response = await fetch(`/api/pypnm/cmts/ofdma/rxmer/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         cmts_ip: cmtsIp,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
                     })
                 });
                 
@@ -1125,6 +1154,9 @@ createApp({
                     this.runningUsRxmer = false;
                     this.$toast?.error('US RxMER measurement failed');
                 } else if (result.is_busy) {
+                    setTimeout(() => this.pollUsRxmerStatus(), 2000);
+                } else {
+                    // Status is inactive or other, keep polling for a bit
                     setTimeout(() => this.pollUsRxmerStatus(), 2000);
                 }
             } catch (error) {
