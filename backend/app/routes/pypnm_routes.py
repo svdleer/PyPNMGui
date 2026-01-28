@@ -1854,15 +1854,15 @@ def get_us_rxmer_plot(mac_address):
     
     try:
         pypnm_url = get_pypnm_api_url()
-        api_url = f"{pypnm_url}/docs/pnm/us/ofdma/rxmer/getCapture"
+        # Use /data endpoint which finds the most recent file matching the base filename pattern
+        api_url = f"{pypnm_url}/docs/pnm/us/ofdma/rxmer/data"
         
-        logger.info(f"Fetching US RxMER plot from {api_url} for file {filename}")
+        logger.info(f"Fetching US RxMER plot from {api_url} for file pattern {filename}")
         
         response = requests.post(
             api_url,
             json={
-                "filename": filename,
-                "tftp_path": "/var/lib/tftpboot"
+                "filename": filename  # Base filename without timestamp
             },
             timeout=30
         )
