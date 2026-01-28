@@ -1572,11 +1572,17 @@ def start_us_rxmer(mac_address):
         
         task_result = result.get('result', {})
         
-        return jsonify({
+        # Extract filename from result - PyPNM returns it in the result
+        response = {
             "success": task_result.get('success', False),
             "mac_address": mac_address,
             **task_result
-        })
+        }
+        
+        # Log the filename for debugging
+        logger.info(f"US RxMER started for {mac_address}, filename: {response.get('filename')}, full result: {task_result}")
+        
+        return jsonify(response)
         
     except Exception as e:
         logger.error(f"Start US RxMER failed: {e}")
@@ -1840,7 +1846,10 @@ def get_us_rxmer_plot(mac_address):
     data = request.get_json() or {}
     filename = data.get('filename')
     
+    logger.info(f"US RxMER plot request for {mac_address}, filename: {filename}")
+    
     if not filename:
+        logger.error("No filename provided in request")
         return jsonify({"status": "error", "message": "filename required"}), 400
     
     try:
@@ -1860,6 +1869,7 @@ def get_us_rxmer_plot(mac_address):
         
         if response.status_code == 200 and response.headers.get('Content-Type', '').startswith('image/'):
             # Return the PNG image directly
+            logger.info(f"Successfully fetched US RxMER plot for {mac_address}, size: {len(response.content)} bytes")
             return FlaskResponse(
                 response.content,
                 mimetype='image/png',
@@ -1869,11 +1879,14 @@ def get_us_rxmer_plot(mac_address):
             )
         else:
             # Parse JSON error response
+            logger.warning(f"PyPNM API returned non-image response: {response.status_code}, content-type: {response.headers.get('Content-Type')}")
             try:
                 error_data = response.json()
                 error_msg = error_data.get('error', 'Unknown error')
+                logger.error(f"PyPNM error: {error_msg}")
             except Exception:
                 error_msg = response.text or f"HTTP {response.status_code}"
+                logger.error(f"PyPNM error (raw): {error_msg}")
             
             return jsonify({"status": "error", "message": error_msg}), response.status_code
             
