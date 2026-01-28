@@ -2380,28 +2380,29 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip, ofdma_ifindex, and cm_mac_address required'}
         
         try:
-            # docsPnmCmtsUsOfdmaRxMerTable OIDs
-            base = '1.3.6.1.4.1.4491.2.1.27.1.3.8.1'
+            # docsPnmCmtsUsOfdmaRxMerTable OIDs (1.3.6.1.4.1.4491.2.1.27.1.3.7.1)
+            # .1 = Enable, .2 = PreEq, .3 = NumAvgs, .4 = MeasStatus, .5 = DestIndex, .6 = FileName, .7 = CmMac
+            base = '1.3.6.1.4.1.4491.2.1.27.1.3.7.1'
             idx = f".{ofdma_ifindex}"
             
-            # Set filename first
-            filename = params.get('filename', 'us_rxmer')
-            result = self._set_cmts_direct(cmts_ip, f"{base}.5{idx}", filename, 's', community)
-            if not result.get('success'):
-                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
-            
-            # Set CM MAC address
+            # Set CM MAC address FIRST (CMTS uses this to identify the modem)
             mac = cm_mac.replace(':', '').replace('-', '').upper()
             mac_hex = ' '.join([mac[i:i+2] for i in range(0, 12, 2)])
-            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", mac_hex, 'x', community)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.7{idx}", mac_hex, 'x', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to set CM MAC: {result.get('error')}"}
             
-            # Set pre-equalization option
-            pre_eq = 1 if params.get('pre_eq', True) else 2  # 1=true, 2=false
+            # Set filename (column .6)
+            filename = params.get('filename', 'us_rxmer')
+            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", filename, 's', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
+            
+            # Set pre-equalization option (column .2: 1=true, 2=false)
+            pre_eq = 1 if params.get('pre_eq', True) else 2
             result = self._set_cmts_direct(cmts_ip, f"{base}.2{idx}", str(pre_eq), 'i', community)
             
-            # Enable measurement (1 = true)
+            # Enable measurement (column .1: 1=true)
             result = self._set_cmts_direct(cmts_ip, f"{base}.1{idx}", '1', 'i', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to start US RxMER: {result.get('error')}"}
@@ -2428,8 +2429,8 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and ofdma_ifindex required'}
         
         try:
-            # docsPnmCmtsUsOfdmaRxMerMeasStatus
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.8.1.4.{ofdma_ifindex}"
+            # docsPnmCmtsUsOfdmaRxMerMeasStatus (column .4 of table .3.7.1)
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.7.1.4.{ofdma_ifindex}"
             
             result = self._query_cmts_direct(cmts_ip, oid, community, walk=False)
             
@@ -2448,7 +2449,20 @@ class PyPNMAgent:
                 except:
                     pass
             
-            return {
+            # Also read the filename from CMTS (column .6) - it may have timestamp appended
+            filename = None
+            try:
+                fn_oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.7.1.6.{ofdma_ifindex}"
+                fn_result = self._query_cmts_direct(cmts_ip, fn_oid, community, walk=False)
+                if fn_result.get('success'):
+                    fn_output = fn_result.get('output', '')
+                    if 'STRING' in fn_output:
+                        # Extract string value
+                        filename = fn_output.split('STRING:')[-1].strip().strip('"')
+            except:
+                pass
+            
+            response = {
                 'success': True,
                 'ofdma_ifindex': ofdma_ifindex,
                 'meas_status': status_value,
@@ -2457,6 +2471,11 @@ class PyPNMAgent:
                 'is_busy': status_value == 3,
                 'is_error': status_value == 5
             }
+            
+            if filename:
+                response['filename'] = filename
+            
+            return response
             
         except Exception as e:
             self.logger.error(f"US RxMER status error: {e}")
