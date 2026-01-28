@@ -12,6 +12,8 @@ services:
     environment:
       # Pysnmp MIB configuration - Include pysnmp-mibs package directory
       - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
+    volumes:
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs').read()\""]
