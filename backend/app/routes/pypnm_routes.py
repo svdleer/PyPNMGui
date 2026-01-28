@@ -38,6 +38,11 @@ def get_default_community():
     return 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
 
 
+def get_default_write_community():
+    """Get default SNMP write community for PNM operations (SET)."""
+    return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
+
+
 def get_default_tftp():
     """Get default TFTP IP."""
     return os.environ.get('TFTP_IPV4', '172.22.147.18')
@@ -72,7 +77,8 @@ def pnm_measurement(measurement_type, mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', get_default_community())
+    # Use write community for PNM operations that require SET
+    community = data.get('community', get_default_write_community())
     tftp_ip = data.get('tftp_ip', get_default_tftp())
     output_type = data.get('output_type', 'json')
     
