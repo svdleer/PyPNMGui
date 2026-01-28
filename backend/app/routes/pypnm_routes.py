@@ -1840,29 +1840,46 @@ def get_us_rxmer_plot(mac_address):
     Returns PNG image of the RxMER spectrum.
     """
     import requests
+    import glob
+    import os
     from flask import Response as FlaskResponse
     from app.core.cmts_pnm import get_pypnm_api_url
     
     data = request.get_json() or {}
-    filename = data.get('filename')
+    filename_base = data.get('filename')  # Base filename without timestamp
     
-    logger.info(f"US RxMER plot request for {mac_address}, filename: {filename}")
+    logger.info(f"US RxMER plot request for {mac_address}, base filename: {filename_base}")
     
-    if not filename:
+    if not filename_base:
         logger.error("No filename provided in request")
         return jsonify({"status": "error", "message": "filename required"}), 400
     
     try:
-        pypnm_url = get_pypnm_api_url()
-        # Use /data endpoint which finds the most recent file matching the base filename pattern
-        api_url = f"{pypnm_url}/docs/pnm/us/ofdma/rxmer/data"
+        # Find the most recent file matching the pattern
+        tftp_path = "/var/lib/tftpboot"
+        pattern = os.path.join(tftp_path, f"{filename_base}_*")
+        matching_files = glob.glob(pattern)
         
-        logger.info(f"Fetching US RxMER plot from {api_url} for file pattern {filename}")
+        if not matching_files:
+            logger.error(f"No files found matching pattern: {pattern}")
+            return jsonify({"status": "error", "message": f"No measurement files found for {filename_base}"}), 404
+        
+        # Get the most recent file (sorted by modification time)
+        latest_file = max(matching_files, key=os.path.getmtime)
+        full_filename = os.path.basename(latest_file)
+        
+        logger.info(f"Found latest US RxMER file: {full_filename}")
+        
+        pypnm_url = get_pypnm_api_url()
+        api_url = f"{pypnm_url}/docs/pnm/us/ofdma/rxmer/getCapture"
+        
+        logger.info(f"Fetching US RxMER plot from {api_url} for file {full_filename}")
         
         response = requests.post(
             api_url,
             json={
-                "filename": filename  # Base filename without timestamp
+                "filename": full_filename,  # Full filename with timestamp
+                "tftp_path": tftp_path
             },
             timeout=30
         )
