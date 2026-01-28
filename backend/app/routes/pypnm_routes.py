@@ -292,6 +292,20 @@ def pnm_measurement(measurement_type, mac_address):
             except Exception as e:
                 logger.error(f"Failed to extract from archive: {e}")
             
+            # For constellation, generate matplotlib plots from extracted JSON data
+            # (PyPNM constellation archives don't contain pre-generated PNGs)
+            if measurement_type == 'constellation' and json_data and len(plots) == 0:
+                logger.info(f"Generating constellation plots from extracted JSON data")
+                raw_data = json_data if isinstance(json_data, list) else json_data.get('data', [])
+                if isinstance(raw_data, list) and len(raw_data) > 0:
+                    try:
+                        constellation_plots = generate_constellation_plots_from_data(raw_data, mac_address)
+                        if constellation_plots:
+                            plots.extend(constellation_plots)
+                            logger.info(f"Generated {len(constellation_plots)} matplotlib constellation plots")
+                    except Exception as e:
+                        logger.error(f"Failed to generate constellation plots: {e}", exc_info=True)
+            
             # If we extracted JSON, return it with plots
             if json_data:
                 response = json_data
