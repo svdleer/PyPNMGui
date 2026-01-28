@@ -154,22 +154,47 @@ createApp({
             const parts = cleanName.split('_');
             
             // Extract meaningful parts
+            // Find channel number (1-3 digits, less than 200)
+            const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
+            
             if (cleanName.includes('rxmer')) {
-                const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
                 return channel ? `RxMER - Channel ${channel}` : 'RxMER';
             } else if (cleanName.includes('modulation_count')) {
-                const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
                 return channel ? `Modulation Profile - Channel ${channel}` : 'Modulation Profile';
             } else if (cleanName.includes('signal_aggregate')) {
                 return 'Signal Aggregate (All Channels)';
-            } else if (cleanName.includes('channel_est')) {
-                return 'Channel Estimation Coefficients';
+            } else if (cleanName.includes('channel_est') || cleanName.includes('chanest')) {
+                return channel ? `Channel Estimation - Channel ${channel}` : 'Channel Estimation Coefficients';
             } else if (cleanName.includes('spectrum')) {
                 return 'Spectrum Analyzer';
+            } else if (cleanName.includes('constdisplay') || cleanName.includes('constellation')) {
+                return channel ? `Constellation Display - Channel ${channel}` : 'Constellation Display';
+            } else if (cleanName.includes('preeq') || cleanName.includes('pre_eq')) {
+                return channel ? `Pre-Equalizer - Channel ${channel}` : 'Pre-Equalizer';
+            } else if (cleanName.includes('histogram')) {
+                return channel ? `Histogram - Channel ${channel}` : 'Histogram';
             }
             
-            // Fallback: clean up the filename
-            return cleanName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            // Fallback: extract just the measurement type part (last meaningful word before extension)
+            // Skip MAC address (hex), model name, timestamp (all digits)
+            const meaningfulParts = parts.filter(p => {
+                // Skip MAC addresses (12 hex chars)
+                if (p.match(/^[0-9a-f]{12}$/i)) return false;
+                // Skip timestamps (10 digits)
+                if (p.match(/^\d{10}$/)) return false;
+                // Skip channel numbers
+                if (p.match(/^\d{1,3}$/) && parseInt(p) < 200) return false;
+                // Skip model names (alphanumeric strings that look like model numbers)
+                if (p.match(/^[a-z]+\d+[a-z]*$/i)) return false;
+                return true;
+            });
+            
+            if (meaningfulParts.length > 0) {
+                const title = meaningfulParts.join(' ').replace(/\b\w/g, l => l.toUpperCase());
+                return channel ? `${title} - Channel ${channel}` : title;
+            }
+            
+            return channel ? `Measurement - Channel ${channel}` : 'PNM Measurement';
         },
         
         // ============== API Calls ==============

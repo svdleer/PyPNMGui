@@ -114,8 +114,22 @@ class PyPNMClient:
             # For archive responses, return binary content
             if expect_binary or payload.get('analysis', {}).get('output', {}).get('type') == 'archive':
                 content_len = len(response.content)
-                content_type = response.headers.get('content-type')
+                content_type = response.headers.get('content-type', '')
                 logger.info(f"PyPNM returned {content_len} bytes, Content-Type: {content_type}")
+                
+                # Check if response is actually JSON (error response) vs binary archive
+                # PyPNM may return JSON error even when archive was requested
+                if 'application/json' in content_type or (content_len < 1000 and response.content.startswith(b'{')):
+                    try:
+                        json_response = response.json()
+                        # Check if it's an error response (status != 0)
+                        if isinstance(json_response, dict) and json_response.get('status', 0) != 0:
+                            logger.error(f"PyPNM returned error: {json_response}")
+                            return json_response
+                        return json_response
+                    except Exception as e:
+                        logger.warning(f"Response looks like JSON but failed to parse: {e}")
+                
                 if content_len == 0:
                     logger.error("PyPNM returned empty content for archive request!")
                 # Log first 200 bytes if not binary
