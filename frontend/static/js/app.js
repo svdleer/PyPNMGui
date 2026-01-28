@@ -1154,6 +1154,11 @@ createApp({
                 
                 if (result.is_ready) {
                     this.runningUsRxmer = false;
+                    // **FIX: Update filename from status response (has timestamp)**
+                    if (result.filename) {
+                        this.usRxmerConfig.lastFilename = result.filename;
+                        console.log('Updated filename from status:', result.filename);
+                    }
                     this.$toast?.success('US RxMER complete - fetching plot...');
                     console.log('Status is READY, fetching data with filename:', this.usRxmerConfig.lastFilename);
                     // Auto-fetch RxMER data
