@@ -1243,6 +1243,8 @@ def get_cmts_us_rxmer_status(mac_address):
     try:
         result = get_us_rxmer_status_sync(cmts_ip, ofdma_ifindex, community)
         
+        logger.info(f"US RxMER status response from PyPNM: {result}")
+        
         return jsonify({
             "mac_address": mac_address,
             **result
