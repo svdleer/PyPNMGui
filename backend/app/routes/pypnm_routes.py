@@ -45,7 +45,7 @@ def get_default_write_community():
 
 def get_cmts_community():
     """Get default SNMP community for CMTS operations."""
-    return get_cmts_community() if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
+    return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
 
 
 def get_default_tftp():

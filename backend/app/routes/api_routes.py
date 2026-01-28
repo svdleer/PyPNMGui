@@ -15,12 +15,12 @@ DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
 
 def get_default_community():
     """Get default SNMP community for modems based on mode."""
-    return get_default_community() if os.environ.get('PYPNM_MODE') == 'lab' else get_default_community()
+    return 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
 
 
 def get_cmts_community():
     """Get default SNMP community for CMTS operations."""
-    return get_cmts_community() if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
+    return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
 
 
 # Redis for caching modem data
