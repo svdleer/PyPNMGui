@@ -1670,6 +1670,7 @@ class PyPNMAgent:
         except Exception as e:
             self.logger.error(f"OFDM capture error: {e}")
             return {'success': False, 'error': str(e)}
+    
     def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
         """Get OFDM RxMER data via cm_proxy SNMP walk."""
         modem_ip = params.get('modem_ip')
