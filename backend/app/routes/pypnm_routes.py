@@ -35,7 +35,7 @@ except:
 
 def get_default_community():
     """Get default SNMP community based on mode."""
-    return 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
+    return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
 
 
 def get_default_write_community():
