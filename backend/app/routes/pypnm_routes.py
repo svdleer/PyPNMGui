@@ -45,7 +45,7 @@ def get_default_write_community():
 
 def get_cmts_community():
     """Get default SNMP community for CMTS operations."""
-    return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
+    return get_cmts_community() if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
 
 
 def get_default_tftp():
@@ -1017,7 +1017,7 @@ def discover_rf_port(mac_address):
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', 'Z1gg0Sp3c1@l')  # Default write community
+    community = data.get('community', get_cmts_community())  # Default write community
     
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
@@ -1053,7 +1053,7 @@ def get_upstream_interfaces(mac_address):
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
@@ -1161,7 +1161,7 @@ def validate_utsc_parameters():
             trigger_mode=data.get('trigger_mode', 2),
             repeat_period_ms=data.get('repeat_period_ms', 1000),
             freerun_duration_ms=data.get('freerun_duration_ms', 60000),
-            trigger_count=data.get('trigger_count', 10)
+            trigger_count=data.get('trigger_count') if 'trigger_count' in data else None  # Only set if explicitly provided
         )
         
         return jsonify(result), 200
@@ -1201,7 +1201,7 @@ def configure_utsc(mac_address):
     
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')  # UTSC needs CMTS write community
+    community = data.get('community', get_cmts_community())  # UTSC needs CMTS write community
     tftp_ip = data.get('tftp_ip', get_default_tftp())
     
     logger.info(f"Extracted params: cmts_ip={cmts_ip}, rf_port={rf_port_ifindex}, community={community}")
@@ -1270,7 +1270,7 @@ def stop_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
@@ -1326,7 +1326,7 @@ def get_utsc_status(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
@@ -1389,7 +1389,7 @@ def start_us_rxmer(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1444,7 +1444,7 @@ def get_us_rxmer_status(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1629,7 +1629,7 @@ def get_us_rxmer_data(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400

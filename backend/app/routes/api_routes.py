@@ -12,6 +12,17 @@ from app.core.simple_ws import get_simple_agent_manager
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
 
+
+def get_default_community():
+    """Get default SNMP community for modems based on mode."""
+    return get_default_community() if os.environ.get('PYPNM_MODE') == 'lab' else get_default_community()
+
+
+def get_cmts_community():
+    """Get default SNMP community for CMTS operations."""
+    return get_cmts_community() if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
+
+
 # Redis for caching modem data
 try:
     import redis
@@ -186,7 +197,7 @@ def get_system_info(mac_address):
     """Get system information for a modem via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -215,7 +226,7 @@ def get_uptime(mac_address):
     """Get uptime for a modem via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -263,7 +274,7 @@ def get_ds_channels(mac_address):
     """Get downstream channel statistics via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -299,7 +310,7 @@ def get_us_channels(mac_address):
     """Get upstream channel statistics via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -335,7 +346,7 @@ def get_interface_stats(mac_address):
     """Get interface statistics via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -373,7 +384,7 @@ def get_rxmer(mac_address):
     """Get RxMER measurement for a modem via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -412,7 +423,7 @@ def get_spectrum(mac_address):
     """Get spectrum analysis data via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -448,7 +459,7 @@ def get_fec_summary(mac_address):
     """Get FEC summary statistics via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -484,7 +495,7 @@ def get_pre_eq(mac_address):
     """Get pre-equalization coefficients via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -520,7 +531,7 @@ def get_channel_info(mac_address):
     """Get downstream/upstream channel info via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -558,7 +569,7 @@ def get_event_log(mac_address):
     """Get modem event log via agent."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', 'm0d3m1nf0')
+    community = request_data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -618,7 +629,7 @@ def get_cmts_modems(hostname):
     """
     from app.core.simple_ws import get_simple_agent_manager
     
-    community = request.args.get('community', 'Z1gg0@LL')
+    community = request.args.get('community', get_cmts_community())
     limit = int(request.args.get('limit', 500))
     
     # Get CMTS IP from our CMTS provider
@@ -675,7 +686,7 @@ def get_cmts_modems(hostname):
         # Check if enriched data exists in cache
         # Enrich is enabled by default
         enrich = request.args.get('enrich', 'true').lower() != 'false'
-        modem_community = request.args.get('modem_community', 'z1gg0m0n1t0r1ng')
+        modem_community = request.args.get('modem_community', get_default_community())
         enriched_cache_key = f"modems_enriched:{hostname}:{cmts_ip}"
         
         # Try enriched cache first if enrich requested
@@ -726,7 +737,7 @@ def get_cmts_modems(hostname):
             "status": "success",
             "cmts_hostname": hostname,
             "cmts_ip": cmts_ip,
-            "cmts_community": cmts.get('snmp_rw_community', 'Z1gg0Sp3c1@l'),
+            "cmts_community": cmts.get('snmp_rw_community', get_cmts_community()),
             "tftp_ip": cmts.get('tftp_ip', DEFAULT_TFTP_IP),  # Use default TFTP server, not CMTS IP
             "cmts_vendor": cmts.get('Vendor'),
             "cmts_type": cmts.get('Type'),
@@ -877,7 +888,7 @@ def snmp_set():
                 'oid': oid,
                 'value': value,
                 'type': data.get('type', 'i'),
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=30
         )
@@ -915,7 +926,7 @@ def snmp_get():
             params={
                 'target_ip': modem_ip,
                 'oid': oid,
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=30
         )
@@ -953,7 +964,7 @@ def snmp_walk():
             params={
                 'target_ip': modem_ip,
                 'oid': oid,
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=60
         )
@@ -988,7 +999,7 @@ def snmp_bulk_get():
             params={
                 'target_ip': modem_ip,
                 'oids': oids,
-                'community': data.get('community', 'm0d3m1nf0'),
+                'community': data.get('community', get_default_community()),
                 'non_repeaters': data.get('non_repeaters', 0),
                 'max_repetitions': data.get('max_repetitions', 25)
             },
@@ -1031,7 +1042,7 @@ def configure_ofdm_tftp():
                 'modem_ip': modem_ip,
                 'tftp_server': tftp_server,
                 'tftp_path': tftp_path,
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=30
         )
@@ -1071,7 +1082,7 @@ def trigger_ofdm_capture():
                 'modem_ip': modem_ip,
                 'tftp_server': tftp_server,
                 'tftp_path': '',
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=30
         )
@@ -1092,7 +1103,7 @@ def trigger_ofdm_capture():
                 'modem_ip': modem_ip,
                 'ofdm_channel': ofdm_channel,
                 'filename': filename,
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=60
         )
@@ -1167,7 +1178,7 @@ def get_ofdm_channels():
             params={
                 'mac_address': mac_address,
                 'modem_ip': modem_ip,
-                'community': data.get('community', 'm0d3m1nf0')
+                'community': data.get('community', get_default_community())
             },
             timeout=30
         )
@@ -1230,7 +1241,7 @@ def get_ofdm_rxmer_data(mac_address):
             params={
                 'mac_address': mac_address,
                 'modem_ip': modem_ip,
-                'community': request.args.get('community', 'm0d3m1nf0')
+                'community': request.args.get('community', get_default_community())
             },
             timeout=30
         )
@@ -1297,7 +1308,7 @@ def pypnm_rxmer(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     # Use LAB community in LAB mode, otherwise default
-    default_community = 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
+    default_community = get_default_community() if os.environ.get('PYPNM_MODE') == 'lab' else get_default_community()
     community = data.get('community', default_community)
     # Default TFTP IP for lab environment - 172.22.147.18 is the working TFTP server
     tftp_ip = data.get('tftp_ip', os.environ.get('TFTP_IPV4', '172.22.147.18'))
@@ -1324,7 +1335,7 @@ def pypnm_spectrum(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
+    community = data.get('community', get_default_community())
     tftp_ip = data.get('tftp_ip', '')
     
     if not modem_ip:
@@ -1345,7 +1356,7 @@ def pypnm_fec(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
+    community = data.get('community', get_default_community())
     tftp_ip = data.get('tftp_ip', '')
     
     if not modem_ip:
@@ -1368,7 +1379,7 @@ def pypnm_constellation(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     # Use LAB community in LAB mode, otherwise default
-    default_community = 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
+    default_community = get_default_community() if os.environ.get('PYPNM_MODE') == 'lab' else get_default_community()
     community = data.get('community', default_community)
     # Default TFTP IP for lab environment - 172.22.147.18 is the working TFTP server
     tftp_ip = data.get('tftp_ip', os.environ.get('TFTP_IPV4', '172.22.147.18'))
@@ -1394,7 +1405,7 @@ def pypnm_channel_stats(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
+    community = data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -1427,7 +1438,7 @@ def pypnm_pre_eq(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
+    community = data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -1448,7 +1459,7 @@ def pypnm_sysdescr(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
+    community = data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -1511,7 +1522,7 @@ def pypnm_event_log(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', 'm0d3m1nf0')
+    community = data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
