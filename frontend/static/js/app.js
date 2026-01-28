@@ -1117,7 +1117,8 @@ createApp({
                     // Save filename for later retrieval
                     this.usRxmerConfig.lastFilename = result.filename;
                     console.log('US RxMER started, filename:', result.filename);
-                    this.$toast?.success('US RxMER measurement started');
+                    this.$toast?.success('US RxMER measurement started - waiting for completion...');
+                    // Start polling status - do NOT fetch plot yet
                     this.pollUsRxmerStatus();
                 } else {
                     this.$toast?.error(result.error || 'Failed to start US RxMER');
