@@ -1150,18 +1150,23 @@ createApp({
                 const result = await response.json();
                 this.usRxmerStatus = result;
                 
+                console.log('US RxMER status poll result:', result);
+                
                 if (result.is_ready) {
                     this.runningUsRxmer = false;
-                    this.$toast?.success('US RxMER complete - fetching data...');
+                    this.$toast?.success('US RxMER complete - fetching plot...');
+                    console.log('Status is READY, fetching data with filename:', this.usRxmerConfig.lastFilename);
                     // Auto-fetch RxMER data
                     await this.fetchUsRxmerData();
                 } else if (result.is_error) {
                     this.runningUsRxmer = false;
                     this.$toast?.error('US RxMER measurement failed');
                 } else if (result.is_busy) {
+                    console.log('Status is BUSY, polling again in 2s');
                     setTimeout(() => this.pollUsRxmerStatus(), 2000);
                 } else {
                     // Status is inactive or other, keep polling for a bit
+                    console.log('Status is unknown/inactive, polling again in 2s');
                     setTimeout(() => this.pollUsRxmerStatus(), 2000);
                 }
             } catch (error) {
