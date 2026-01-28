@@ -2376,16 +2376,16 @@ createApp({
             if (!container) {
                 console.warn('Chart container not found');
                 return;
-            }
+            }t
             
             // Clear old charts
             container.innerHTML = '';
             
             console.log('Drawing charts for type:', type, 'with data:', data);
             
-            // SKIP Chart.js for spectrum - we use matplotlib PNG plots instead
-            if (type === 'spectrum') {
-                console.log('Spectrum uses matplotlib plots - skipping Chart.js');
+            // SKIP Chart.js for spectrum and constellation - we use matplotlib PNG plots instead
+            if (type === 'spectrum' || type === 'constellation') {
+                console.log(`${type} uses matplotlib plots - skipping Chart.js`);
                 return;
             }
             
@@ -2399,8 +2399,6 @@ createApp({
                 this.drawFecSummaryCharts(data.data);
             } else if (type === 'histogram' && data.data) {
                 this.drawHistogramCharts(data.data);
-            } else if (type === 'constellation' && data.data) {
-                this.drawConstellationCharts(data.data);
             } else if (type === 'us_pre_eq') {
                 this.drawPreEqCharts();
             } else {

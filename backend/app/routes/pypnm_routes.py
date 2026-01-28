@@ -14,6 +14,7 @@ import json
 
 # Import spectrum plotter for generating matplotlib plots
 from app.core.spectrum_plotter import generate_spectrum_plot_from_data
+from app.core.constellation_plotter import generate_constellation_plots_from_data
 
 logger = logging.getLogger(__name__)
 
@@ -196,11 +197,27 @@ def pnm_measurement(measurement_type, mac_address):
                 logger.info(f"Result message: {result.get('message')}")
                 if 'data' in result:
                     logger.info(f"Data keys: {result['data'].keys() if isinstance(result['data'], dict) else 'not a dict'}")
-                logger.info(f"Full result: {json.dumps(result, indent=2, default=str)}")
             elif isinstance(result, bytes):
                 logger.info(f"Result is bytes, length: {len(result)}")
             else:
                 logger.info(f"Result: {result}")
+            
+            # Generate matplotlib plots for constellation data (like other measurements)
+            # PyPNM returns: {data: [{channel_id, samples: [(I, Q), ...]}, ...]}
+            if isinstance(result, dict) and result.get('status') == 0:
+                raw_data = result.get('data', [])
+                if isinstance(raw_data, list) and len(raw_data) > 0:
+                    try:
+                        constellation_plots = generate_constellation_plots_from_data(raw_data, mac_address)
+                        if constellation_plots:
+                            # Add plots to result (like other measurements)
+                            if 'plots' not in result:
+                                result['plots'] = []
+                            result['plots'].extend(constellation_plots)
+                            logger.info(f"Generated {len(constellation_plots)} matplotlib constellation plots")
+                    except Exception as e:
+                        logger.error(f"Failed to generate constellation plots: {e}", exc_info=True)
+            
             logger.info(f"=== CONSTELLATION DEBUG END ===")
         elif measurement_type == 'us_pre_eq':
             result = client.get_us_ofdma_pre_equalization(
