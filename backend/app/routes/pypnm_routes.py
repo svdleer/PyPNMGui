@@ -111,7 +111,7 @@ def pnm_measurement(measurement_type, mac_address):
                 tftp_ipv6="::1", output_type=output_type
             )
         elif measurement_type == 'spectrum':
-            current_app.logger.info(f"[DEBUG] Spectrum request: mac={mac_address}, ip={modem_ip}, tftp={tftp_ip}, community={community}, output_type={output_type}")
+            print(f"[DEBUG] Spectrum request: mac={mac_address}, ip={modem_ip}, tftp={tftp_ip}, community={community}, output_type={output_type}")
             result = client.get_spectrum_capture(
                 mac_address, modem_ip, tftp_ip, community,
                 tftp_ipv6="::1", output_type=output_type
