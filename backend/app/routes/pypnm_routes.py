@@ -1170,16 +1170,19 @@ def start_cmts_us_rxmer(mac_address):
     """
     Start US OFDMA RxMER measurement on CMTS using PyPNM pysnmp.
     
+    Automatically provisions TFTP bulk destination if not already configured.
+    
     POST body:
     {
         "cmts_ip": "x.x.x.x",
         "ofdma_ifindex": 843087001,
         "pre_eq": true,
         "filename": "optional",
-        "community": "optional"
+        "community": "optional",
+        "tftp_ip": "optional - defaults to server's TFTP IP"
     }
     """
-    from app.core.cmts_pnm import start_us_rxmer_sync, UsOfdmaRxMerConfig, PYPNM_AVAILABLE
+    from app.core.cmts_pnm import start_us_rxmer_sync, UsOfdmaRxMerConfig, CmtsPnmClient, PYPNM_AVAILABLE
     
     if not PYPNM_AVAILABLE:
         return jsonify({"success": False, "error": "PyPNM not available"}), 503
@@ -1189,10 +1192,47 @@ def start_cmts_us_rxmer(mac_address):
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', get_cmts_community())
     
+    # Get TFTP server IP from config or environment
+    tftp_ip = data.get('tftp_ip')
+    if not tftp_ip:
+        # Try to get from config_lab or environment
+        tftp_ip = os.environ.get('TFTP_SERVER_IP')
+        if not tftp_ip:
+            try:
+                from config_lab import LAB_CONFIG
+                tftp_ip = LAB_CONFIG.get('tftp_server', {}).get('ip')
+            except ImportError:
+                pass
+        if not tftp_ip:
+            # Default to the server hosting PyPNM API
+            tftp_ip = os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8000').replace('http://', '').split(':')[0]
+            if tftp_ip == '172.17.0.1':
+                # Docker host - use actual server IP
+                tftp_ip = os.environ.get('LAB_SSH_HOST', 'access-engineering.nl')
+    
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
+        client = CmtsPnmClient()
+        
+        # Step 1: Ensure TFTP bulk destination is configured on CMTS
+        logger.info(f"Ensuring TFTP destination {tftp_ip} exists on CMTS {cmts_ip}")
+        dest_result = client.ensure_tftp_destination(
+            cmts_ip=cmts_ip,
+            tftp_ip=tftp_ip,
+            community=community,
+            write_community=community
+        )
+        
+        destination_index = 0  # Default to local storage if provisioning fails
+        if dest_result.get("success"):
+            destination_index = dest_result.get("destination_index", 0)
+            logger.info(f"Using TFTP destination index {destination_index}")
+        else:
+            logger.warning(f"Failed to provision TFTP destination: {dest_result.get('error')}")
+        
+        # Step 2: Start the measurement with destination_index for TFTP upload
         config = UsOfdmaRxMerConfig(
             cmts_ip=cmts_ip,
             ofdma_ifindex=ofdma_ifindex,
@@ -1200,13 +1240,16 @@ def start_cmts_us_rxmer(mac_address):
             community=community,
             filename=data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
             pre_eq=data.get('pre_eq', True),
-            num_averages=data.get('num_averages', 1)
+            num_averages=data.get('num_averages', 1),
+            destination_index=destination_index
         )
         
         result = start_us_rxmer_sync(config)
         
         return jsonify({
             "mac_address": mac_address,
+            "destination_index": destination_index,
+            "tftp_ip": tftp_ip,
             **result
         })
         

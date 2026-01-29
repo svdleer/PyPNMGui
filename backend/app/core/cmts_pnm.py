@@ -46,6 +46,7 @@ class UsOfdmaRxMerConfig:
     filename: str = "us_rxmer"
     pre_eq: bool = True
     num_averages: int = 1
+    destination_index: int = 0  # 0=local only, >0=TFTP upload
 
 
 class CmtsPnmClient:
@@ -148,7 +149,8 @@ class CmtsPnmClient:
             "cm_mac_address": config.cm_mac_address,
             "filename": config.filename,
             "pre_eq": config.pre_eq,
-            "num_averages": config.num_averages
+            "num_averages": config.num_averages,
+            "destination_index": config.destination_index
         }
         
         result = self._post("/docs/pnm/us/ofdma/rxmer/start", payload)
@@ -194,6 +196,120 @@ class CmtsPnmClient:
             result["success"] = "error" not in result
         
         return result
+    
+    def get_bulk_destinations(
+        self,
+        cmts_ip: str,
+        community: str = "private",
+        write_community: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get list of configured bulk data transfer destinations.
+        
+        Args:
+            cmts_ip: CMTS IP address
+            community: SNMP community
+            write_community: SNMP write community
+            
+        Returns:
+            Dict with list of destinations
+        """
+        payload = {
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community,
+                "write_community": write_community
+            }
+        }
+        
+        return self._post("/docs/pnm/us/ofdma/rxmer/destinations", payload)
+    
+    def create_bulk_destination(
+        self,
+        cmts_ip: str,
+        tftp_ip: str,
+        community: str = "private",
+        write_community: Optional[str] = None,
+        port: int = 69,
+        local_store: bool = True,
+        dest_index: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Create or configure a bulk data transfer destination for TFTP uploads.
+        
+        Args:
+            cmts_ip: CMTS IP address
+            tftp_ip: TFTP server IP address
+            community: SNMP community
+            write_community: SNMP write community
+            port: TFTP port (default 69)
+            local_store: Also store locally on CMTS
+            dest_index: Destination index (1-10). If None, finds first available.
+            
+        Returns:
+            Dict with destination_index and status
+        """
+        payload = {
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community,
+                "write_community": write_community
+            },
+            "tftp_ip": tftp_ip,
+            "port": port,
+            "local_store": local_store
+        }
+        
+        if dest_index is not None:
+            payload["dest_index"] = dest_index
+        
+        return self._post("/docs/pnm/us/ofdma/rxmer/destinations/create", payload)
+    
+    def ensure_tftp_destination(
+        self,
+        cmts_ip: str,
+        tftp_ip: str,
+        community: str = "private",
+        write_community: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Ensure a TFTP bulk destination exists, creating if necessary.
+        
+        This is a convenience method that:
+        1. Checks if a destination pointing to tftp_ip exists
+        2. If not, creates one
+        3. Returns the destination_index to use
+        
+        Args:
+            cmts_ip: CMTS IP address
+            tftp_ip: TFTP server IP address
+            community: SNMP community
+            write_community: SNMP write community
+            
+        Returns:
+            Dict with destination_index and status
+        """
+        # First check existing destinations
+        existing = self.get_bulk_destinations(cmts_ip, community, write_community)
+        
+        if existing.get("success") and existing.get("destinations"):
+            for dest in existing["destinations"]:
+                if dest.get("ip_address") == tftp_ip:
+                    logger.info(f"Found existing TFTP destination at index {dest['index']}")
+                    return {
+                        "success": True,
+                        "destination_index": dest["index"],
+                        "message": f"Using existing destination {dest['index']}",
+                        "created": False
+                    }
+        
+        # No existing destination, create one
+        return self.create_bulk_destination(
+            cmts_ip=cmts_ip,
+            tftp_ip=tftp_ip,
+            community=community,
+            write_community=write_community
+        )
 
 
 # Convenience functions for Flask routes
