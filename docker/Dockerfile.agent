@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     netcat-openbsd \
     tzdata \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Set timezone

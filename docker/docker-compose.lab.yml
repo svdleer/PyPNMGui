@@ -16,7 +16,7 @@ services:
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs').read()\""]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8000/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 15
