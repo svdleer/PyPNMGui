@@ -288,8 +288,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "output": {"type": output_type}
             }
         }
         
@@ -328,7 +327,6 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}},
                 "spectrum_analysis": {
                     "moving_average": {"points": 10}
                 }
@@ -378,8 +376,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "output": {"type": output_type}
             }
         }
         return self._post("/docs/pnm/ds/ofdm/channelEstCoeff/getCapture", payload)
@@ -414,8 +411,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "output": {"type": output_type}
             }
         }
         return self._post("/docs/pnm/ds/ofdm/modulationProfile/getCapture", payload)
@@ -454,8 +450,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "output": {"type": output_type}
             },
             "capture_settings": {
                 "fec_summary_type": fec_summary_type
@@ -493,8 +488,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "output": {"type": output_type}
             },
             "capture_settings": {
                 "sample_duration": sample_duration
@@ -533,7 +527,6 @@ class PyPNMClient:
                 "type": "basic",
                 "output": {"type": output_type},
                 "plot": {
-                    "ui": {"theme": "light"},
                     "options": {"display_cross_hair": True}
                 }
             },
@@ -574,8 +567,7 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "output": {"type": output_type}
             }
         }
         return self._post("/docs/pnm/us/ofdma/preEqualization/getCapture", payload)
