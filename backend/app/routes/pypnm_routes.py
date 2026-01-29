@@ -468,7 +468,7 @@ def pnm_measurement(measurement_type, mac_address):
         
         # Handle errors
         if result.get('status') != 0:
-            return jsonify(result), 500
+            return jsonify(result), 400  # Client error (modem doesn't support or invalid parameters)
         
         # Fetch matplotlib plots for successful measurements (regardless of output_type)
         import glob
