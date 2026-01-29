@@ -288,7 +288,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
         
@@ -376,7 +377,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
         return self._post("/docs/pnm/ds/ofdm/channelEstCoeff/getCapture", payload)
@@ -411,7 +413,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
         return self._post("/docs/pnm/ds/ofdm/modulationProfile/getCapture", payload)
@@ -450,7 +453,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}
             },
             "capture_settings": {
                 "fec_summary_type": fec_summary_type
@@ -488,7 +492,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}
             },
             "capture_settings": {
                 "sample_duration": sample_duration
@@ -567,7 +572,8 @@ class PyPNMClient:
             },
             "analysis": {
                 "type": "basic",
-                "output": {"type": output_type}
+                "output": {"type": output_type},
+                "plot": {"ui": {"theme": "dark"}}
             }
         }
         return self._post("/docs/pnm/us/ofdma/preEqualization/getCapture", payload)
