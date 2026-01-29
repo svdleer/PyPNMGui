@@ -65,6 +65,6 @@ def create_app():
     from app.routes.pypnm_routes import pypnm_bp
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
-    app.register_blueprint(pypnm_bp)
+    app.register_blueprint(pypnm_bp)  # pypnm_bp already has url_prefix='/api/pypnm'
     
     return app
