@@ -30,10 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone PyPNM from source
+# Clone PyPNM from source (using svdleer fork)
 ARG PYPNM_VERSION=main
 RUN git clone --depth 1 --branch ${PYPNM_VERSION} \
-    https://github.com/PyPNMApps/PyPNM.git /tmp/pypnm && \
+    https://github.com/svdleer/PyPNM.git /tmp/pypnm && \
     cp -r /tmp/pypnm/* /app/ && \
     cp /tmp/pypnm/docker/entrypoint.sh /app/entrypoint.sh && \
     rm -rf /tmp/pypnm
