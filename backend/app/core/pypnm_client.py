@@ -655,7 +655,7 @@ class PyPNMClient:
             cmts_ip: CMTS IP address
             rf_port_ifindex: RF port ifIndex (e.g., 843071491 for cable-upstream)
             tftp_ipv4: TFTP server IP for file upload
-            community: SNMP write community (default: Z1gg0Sp3c1@l)
+            community: SNMP write community 
             trigger_mode: 2=FreeRunning, 6=CM MAC trigger
             center_freq_hz: Center frequency in Hz (default: 30 MHz)
             span_hz: Frequency span in Hz (default: 80 MHz)
