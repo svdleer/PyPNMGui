@@ -641,35 +641,49 @@ createApp({
             
             this.upstreamInterfaces.loading = true;
             try {
-                const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
+                // In lab mode with cm_direct, call PyPNM API directly
+                // Call PyPNM API to discover OFDMA channel for this modem
+                const response = await fetch(`${this.pypnmApiUrl}/docs/pnm/us/ofdma/rxmer/discover`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: this.selectedModem.cmts_ip
+                        cmts: {
+                            cmts_ip: this.selectedModem.cmts_ip,
+                            community: "Z1gg0@LL"
+                        },
+                        cm_mac_address: this.selectedModem.mac_address
                     })
                 });
                 
                 const result = await response.json();
-                if (result.success) {
-                    this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
-                    this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
+                
+                if (result.success && result.ofdma_ifindex) {
+                    // Build OFDMA channel info
+                    this.upstreamInterfaces.ofdmaChannels = [{
+                        ifindex: result.ofdma_ifindex,
+                        index: result.cm_index,
+                        description: result.ofdma_description || `OFDMA Channel (ifIndex ${result.ofdma_ifindex})`
+                    }];
                     
-                    // Auto-select first SC-QAM channel for UTSC if available
-                    if (this.upstreamInterfaces.scqamChannels.length > 0 && !this.utscConfig.rfPortIfindex) {
-                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
+                    // Auto-select OFDMA channel for RxMER
+                    if (!this.usRxmerConfig.ofdmaIfindex) {
+                        this.usRxmerConfig.ofdmaIfindex = result.ofdma_ifindex;
                     }
                     
-                    // Auto-select first OFDMA channel for RxMER if available
-                    if (this.upstreamInterfaces.ofdmaChannels.length > 0 && !this.usRxmerConfig.ofdmaIfindex) {
-                        this.usRxmerConfig.ofdmaIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
-                    }
-                    
-                    console.log('Loaded upstream interfaces:', this.upstreamInterfaces);
+                    console.log('Discovered OFDMA channel:', this.upstreamInterfaces.ofdmaChannels[0]);
                 } else {
-                    console.error('Failed to load upstream interfaces:', result.error);
+                    console.warn('No OFDMA channel found for this modem:', result.error || 'Unknown error');
+                    this.upstreamInterfaces.ofdmaChannels = [];
                 }
+                
+                // Note: SC-QAM channels for UTSC would require a separate discovery
+                // For now, leave empty - UTSC discovery is separate
+                this.upstreamInterfaces.scqamChannels = [];
+                
             } catch (error) {
-                console.error('Failed to load upstream interfaces:', error);
+                console.error('Failed to discover OFDMA channel:', error);
+                this.upstreamInterfaces.ofdmaChannels = [];
+                this.upstreamInterfaces.scqamChannels = [];
             } finally {
                 this.upstreamInterfaces.loading = false;
             }
