@@ -9,16 +9,18 @@
 #   ./lab-deploy.sh [command]
 #
 # Commands:
-#   deploy    - Full deployment (pull, build, start all)
-#   start     - Start all containers
-#   stop      - Stop all containers
-#   restart   - Restart all containers properly
-#   status    - Show status of all containers
-#   logs      - Show logs from all containers
-#   pull      - Pull latest code from git
-#   build     - Rebuild all images
-#   fix       - Emergency fix (stop everything, rebuild, restart)
-#   health    - Check health of all services
+#   deploy      - Full remote deployment (pull local, then ssh to remote and deploy)
+#   local       - Local deployment (pull, build, start all)
+#   start       - Start all containers
+#   stop        - Stop all containers
+#   restart     - Restart all containers properly
+#   status      - Show status of all containers
+#   logs        - Show logs from all containers
+#   pull        - Pull latest code from git
+#   build       - Rebuild all images
+#   fix         - Emergency fix (stop everything, rebuild, restart)
+#   health      - Check health of all services
+#   clear-cache - Clear Redis cache on remote server
 # =============================================================================
 
 set -e
@@ -29,6 +31,8 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 COMPOSE_FILE="${PROJECT_ROOT}/docker/docker-compose.lab.yml"
 PYPNM_REPO="/home/svdleer/docker/PyPNM"
 GUI_REPO="/opt/pypnm-gui-lab"
+REMOTE_SERVER="access-engineering.nl"
+REMOTE_PROJECT_DIR="/opt/pypnm-gui-lab"
 
 # Colors for output
 RED='\033[0;31m'
@@ -263,7 +267,57 @@ show_logs() {
 
 # Full deploy
 full_deploy() {
-    log_info "Starting full deployment..."
+    log_info "Starting full deployment to remote server..."
+    
+    log_info "Connecting to ${REMOTE_SERVER} and deploying..."
+    
+    ssh "${REMOTE_SERVER}" << 'ENDSSH'
+        set -e
+        
+        echo "[INFO] Changing to project directory..."
+        cd /opt/pypnm-gui-lab/
+        
+        echo "[INFO] Pulling latest code..."
+        git pull
+        
+        echo "[INFO] Stopping containers..."
+        docker compose -f docker/docker-compose.lab.yml down
+        
+        echo "[INFO] Pruning Docker system..."
+        docker system prune -f
+        
+        echo "[INFO] Building images with no cache..."
+        docker compose -f docker/docker-compose.lab.yml build --no-cache
+        
+        echo "[INFO] Starting containers..."
+        docker compose -f docker/docker-compose.lab.yml up -d
+        
+        echo "[SUCCESS] Deployment complete!"
+        
+        echo ""
+        echo "Waiting for services to start..."
+        sleep 10
+        
+        echo ""
+        echo "Container status:"
+        docker compose -f docker/docker-compose.lab.yml ps
+ENDSSH
+    
+    if [ $? -eq 0 ]; then
+        log_success "Remote deployment complete!"
+        echo ""
+        echo "Services should be available at:"
+        echo "  - GUI: http://${REMOTE_SERVER}:5050"
+        echo "  - API: http://${REMOTE_SERVER}:8000/docs"
+    else
+        log_error "Remote deployment failed!"
+        exit 1
+    fi
+}
+
+# Local deploy (original behavior)
+local_deploy() {
+    log_info "Starting local deployment..."
     
     stop_all
     pull_code
@@ -273,7 +327,7 @@ full_deploy() {
     echo ""
     show_status
     
-    log_success "Deployment complete!"
+    log_success "Local deployment complete!"
 }
 
 # Restart all properly
@@ -386,10 +440,39 @@ health_check() {
     fi
 }
 
+# Clear Redis cache
+clear_cache() {
+    log_info "Clearing Redis cache on remote server..."
+    
+    ssh "${REMOTE_SERVER}" << 'ENDSSH'
+        set -e
+        
+        echo "[INFO] Flushing Redis cache..."
+        docker exec eve-li-redis-lab redis-cli FLUSHALL
+        
+        if [ $? -eq 0 ]; then
+            echo "[SUCCESS] Redis cache cleared!"
+        else
+            echo "[ERROR] Failed to clear Redis cache"
+            exit 1
+        fi
+ENDSSH
+    
+    if [ $? -eq 0 ]; then
+        log_success "Redis cache cleared successfully!"
+    else
+        log_error "Failed to clear Redis cache!"
+        exit 1
+    fi
+}
+
 # Main
 case "${1:-status}" in
     deploy)
         full_deploy
+        ;;
+    local)
+        local_deploy
         ;;
     start)
         start_all
@@ -419,20 +502,25 @@ case "${1:-status}" in
     health)
         health_check
         ;;
+    clear-cache)
+        clear_cache
+        ;;
     *)
-        echo "Usage: $0 {deploy|start|stop|restart|status|logs|pull|build|fix|health}"
+        echo "Usage: $0 {deploy|local|start|stop|restart|status|logs|pull|build|fix|health|clear-cache}"
         echo ""
         echo "Commands:"
-        echo "  deploy   - Full deployment (pull, build, start)"
-        echo "  start    - Start all containers"
-        echo "  stop     - Stop all containers"
-        echo "  restart  - Restart all containers"
-        echo "  status   - Show status"
-        echo "  logs     - Show logs (optionally: logs <container>)"
-        echo "  pull     - Pull latest code"
-        echo "  build    - Rebuild images"
-        echo "  fix      - Emergency fix (stop, clean, rebuild, start)"
-        echo "  health   - Run health checks"
+        echo "  deploy      - Remote deployment to ${REMOTE_SERVER} (pull local, then ssh and deploy)"
+        echo "  local       - Local deployment (pull, build, start)"
+        echo "  start       - Start all containers"
+        echo "  stop        - Stop all containers"
+        echo "  restart     - Restart all containers"
+        echo "  status      - Show status"
+        echo "  logs        - Show logs (optionally: logs <container>)"
+        echo "  pull        - Pull latest code"
+        echo "  build       - Rebuild images"
+        echo "  fix         - Emergency fix (stop, clean, rebuild, start)"
+        echo "  health      - Run health checks"
+        echo "  clear-cache - Clear Redis cache on remote server"
         exit 1
         ;;
 esac

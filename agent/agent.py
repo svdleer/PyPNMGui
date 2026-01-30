@@ -1680,32 +1680,40 @@ class PyPNMAgent:
                                 try:
                                     parts = line.split('=')
                                     oid_part = parts[0].strip()
-                                    # OID format: .1.3.6.1.4.1.4491.2.1.28.1.5.1.1.<cmIndex>.<ofdmaIfIndex>
-                                    if f'.{cm_index}.' in oid_part:
-                                        oid_parts = oid_part.split('.')
-                                        # Find the index after cm_index
-                                        for i, p in enumerate(oid_parts):
-                                            if p == str(cm_index) and i + 1 < len(oid_parts):
-                                                ofdma_ifindex = int(oid_parts[i + 1])
-                                                # OFDMA ifindexes are typically large numbers (843087xxx range)
-                                                if ofdma_ifindex > 1000:
-                                                    # Get description for this interface
-                                                    desc_result = self._query_cmts_direct(
-                                                        cmts_ip, f"{OID_IF_DESCR}.{ofdma_ifindex}", community, walk=False
-                                                    )
-                                                    description = ""
-                                                    if desc_result.get('success') and desc_result.get('output'):
-                                                        desc_parts = desc_result.get('output', '').split('=')
-                                                        if len(desc_parts) > 1:
-                                                            description = desc_parts[1].strip().strip('"')
-                                                    
-                                                    ofdma_channels.append({
-                                                        'index': cm_index,
-                                                        'ifindex': ofdma_ifindex,
-                                                        'description': description
-                                                    })
-                                                    self.logger.info(f"Found OFDMA ifIndex {ofdma_ifindex} for CM {cm_mac}")
-                                                break
+                                    # OID format: iso.3.6.1.4.1.4491.2.1.28.1.5.1.1.<cmIndex>.<ofdmaIfIndex>
+                                    # or .1.3.6.1.4.1.4491.2.1.28.1.5.1.1.<cmIndex>.<ofdmaIfIndex>
+                                    # Extract the last two components which are cmIndex and ofdmaIfIndex
+                                    oid_parts = oid_part.replace('iso', '').split('.')
+                                    # Filter out empty strings
+                                    oid_parts = [p for p in oid_parts if p]
+                                    
+                                    # The OID should be: 1.3.6.1.4.1.4491.2.1.28.1.5.1.1.<cmIndex>.<ofdmaIfIndex>
+                                    # So we need at least 13 parts (11 fixed + 2 variable)
+                                    if len(oid_parts) >= 13:
+                                        # Check if this matches the base OID pattern
+                                        base_oid = '.'.join(oid_parts[:11])
+                                        if base_oid == '1.3.6.1.4.1.4491.2.1.28.1.5':
+                                            found_cm_index = int(oid_parts[11])
+                                            ofdma_ifindex = int(oid_parts[12])
+                                            
+                                            # Check if this is for our CM
+                                            if found_cm_index == cm_index and ofdma_ifindex > 1000:
+                                                # Get description for this interface
+                                                desc_result = self._query_cmts_direct(
+                                                    cmts_ip, f"{OID_IF_DESCR}.{ofdma_ifindex}", community, walk=False
+                                                )
+                                                description = ""
+                                                if desc_result.get('success') and desc_result.get('output'):
+                                                    desc_parts = desc_result.get('output', '').split('=')
+                                                    if len(desc_parts) > 1:
+                                                        description = desc_parts[1].strip().strip('"')
+                                                
+                                                ofdma_channels.append({
+                                                    'index': cm_index,
+                                                    'ifindex': ofdma_ifindex,
+                                                    'description': description
+                                                })
+                                                self.logger.info(f"Found OFDMA ifIndex {ofdma_ifindex} for CM {cm_mac}")
                                 except Exception as e:
                                     self.logger.debug(f"Error parsing OFDMA line: {e}")
                                     pass
