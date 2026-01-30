@@ -4,6 +4,7 @@
 const { createApp } = Vue;
 
 const API_BASE = '/api';
+const PYPNM_API_BASE = 'http://localhost:8000';  // PyPNM API endpoint
 
 createApp({
     data() {
@@ -14,6 +15,7 @@ createApp({
             // API Status
             apiStatus: 'mock',
             pypnmHealthy: false,
+            pypnmApiUrl: PYPNM_API_BASE,  // PyPNM API base URL
             
             // Loading state
             isLoading: false,
