@@ -1,7 +1,6 @@
 venv/
 
-# Postmortem and archived files
-postmortem/
+# Archived files (test scripts, postmortems, old docs)
 archive/
 
 # Lab config files
