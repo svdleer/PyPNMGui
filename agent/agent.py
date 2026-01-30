@@ -1631,36 +1631,109 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            # Get upstream RF ports (ifTable for US ports)
+            # OIDs for OFDMA channel discovery
             OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
-            OID_IF_TYPE = '1.3.6.1.2.1.2.2.1.3'   # ifType
-            
-            # Query upstream OFDMA channels
-            OID_OFDMA_IFINDEX = '1.3.6.1.4.1.4491.2.1.28.1.14.1.1'  # docsIf31CmtsUsOfdmaChannelIfIndex
-            OID_OFDMA_CENTER_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.14.1.3'  # CenterFrequency
-            OID_OFDMA_SUBCARRIER_SPACING = '1.3.6.1.4.1.4491.2.1.28.1.14.1.4'  # SubcarrierSpacing
-            
-            # Get OFDMA channels
-            result = self._query_cmts_direct(cmts_ip, OID_OFDMA_IFINDEX, community, walk=True)
+            # Use docsIf31CmtsCmUsOfdmaChannelStatusTable to find OFDMA channels per CM
+            OID_CM_OFDMA_STATUS = '1.3.6.1.4.1.4491.2.1.28.1.5.1.1'  # docsIf31CmtsCmUsOfdmaChannelStatus
+            # CM registration table to find CM index from MAC
+            OID_CM_REG_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
             
             ofdma_channels = []
-            if result.get('success'):
-                for line in result.get('output', '').split('\n'):
-                    if '=' in line and 'INTEGER' in line:
-                        try:
-                            parts = line.split('=')
-                            idx = parts[0].strip().split('.')[-1]
-                            ifindex = int(parts[1].split(':')[-1].strip())
-                            ofdma_channels.append({
-                                'index': idx,
-                                'ifindex': ifindex
-                            })
-                        except:
-                            pass
+            cm_index = None
+            
+            # If we have a CM MAC, find its OFDMA channel(s)
+            if cm_mac:
+                # First find the CM index from MAC address
+                mac_normalized = cm_mac.replace(':', '').replace('-', '').lower()
+                result = self._query_cmts_direct(cmts_ip, OID_CM_REG_MAC, community, walk=True)
+                
+                if result.get('success'):
+                    for line in result.get('output', '').split('\n'):
+                        if '=' in line and ('Hex-STRING' in line or 'STRING' in line):
+                            try:
+                                parts = line.split('=')
+                                oid_part = parts[0].strip()
+                                # Extract MAC from the SNMP response
+                                mac_part = parts[1].strip()
+                                # Handle Hex-STRING format: "AA BB CC DD EE FF"
+                                if 'Hex-STRING' in mac_part:
+                                    mac_hex = mac_part.split(':')[-1].strip().replace(' ', '').lower()
+                                else:
+                                    mac_hex = mac_part.replace(' ', '').replace(':', '').lower()
+                                
+                                if mac_normalized in mac_hex or mac_hex in mac_normalized:
+                                    # Found the CM - extract index from OID
+                                    cm_index = int(oid_part.split('.')[-1])
+                                    self.logger.info(f"Found CM index {cm_index} for MAC {cm_mac}")
+                                    break
+                            except Exception as e:
+                                self.logger.debug(f"Error parsing MAC line: {e}")
+                                pass
+                
+                # Now find OFDMA channels for this CM
+                if cm_index:
+                    result = self._query_cmts_direct(cmts_ip, OID_CM_OFDMA_STATUS, community, walk=True)
+                    
+                    if result.get('success'):
+                        for line in result.get('output', '').split('\n'):
+                            if '=' in line:
+                                try:
+                                    parts = line.split('=')
+                                    oid_part = parts[0].strip()
+                                    # OID format: .1.3.6.1.4.1.4491.2.1.28.1.5.1.1.<cmIndex>.<ofdmaIfIndex>
+                                    if f'.{cm_index}.' in oid_part:
+                                        oid_parts = oid_part.split('.')
+                                        # Find the index after cm_index
+                                        for i, p in enumerate(oid_parts):
+                                            if p == str(cm_index) and i + 1 < len(oid_parts):
+                                                ofdma_ifindex = int(oid_parts[i + 1])
+                                                # OFDMA ifindexes are typically large numbers (843087xxx range)
+                                                if ofdma_ifindex > 1000:
+                                                    # Get description for this interface
+                                                    desc_result = self._query_cmts_direct(
+                                                        cmts_ip, f"{OID_IF_DESCR}.{ofdma_ifindex}", community, walk=False
+                                                    )
+                                                    description = ""
+                                                    if desc_result.get('success') and desc_result.get('output'):
+                                                        desc_parts = desc_result.get('output', '').split('=')
+                                                        if len(desc_parts) > 1:
+                                                            description = desc_parts[1].strip().strip('"')
+                                                    
+                                                    ofdma_channels.append({
+                                                        'index': cm_index,
+                                                        'ifindex': ofdma_ifindex,
+                                                        'description': description
+                                                    })
+                                                    self.logger.info(f"Found OFDMA ifIndex {ofdma_ifindex} for CM {cm_mac}")
+                                                break
+                                except Exception as e:
+                                    self.logger.debug(f"Error parsing OFDMA line: {e}")
+                                    pass
+            
+            # If no CM-specific OFDMA found, try to get all OFDMA channels from CMTS
+            if not ofdma_channels:
+                # Fallback: try docsIf31CmtsUsOfdmaChannelTable
+                OID_OFDMA_CHAN_IFINDEX = '1.3.6.1.4.1.4491.2.1.28.1.14.1.1'  # docsIf31CmtsUsOfdmaChannelIfIndex
+                result = self._query_cmts_direct(cmts_ip, OID_OFDMA_CHAN_IFINDEX, community, walk=True)
+                
+                if result.get('success'):
+                    for line in result.get('output', '').split('\n'):
+                        if '=' in line and ('INTEGER' in line or 'Gauge' in line):
+                            try:
+                                parts = line.split('=')
+                                idx = parts[0].strip().split('.')[-1]
+                                value_part = parts[1].strip()
+                                ifindex = int(value_part.split(':')[-1].strip())
+                                if ifindex > 1000:
+                                    ofdma_channels.append({
+                                        'index': idx,
+                                        'ifindex': ifindex
+                                    })
+                            except:
+                                pass
             
             # Get SC-QAM upstream channels
             OID_US_CHANNEL = '1.3.6.1.2.1.10.127.1.1.2.1.1'  # docsIfUpChannelId
-            OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'     # docsIfUpChannelFrequency
             
             result = self._query_cmts_direct(cmts_ip, OID_US_CHANNEL, community, walk=True)
             
@@ -1679,20 +1752,13 @@ class PyPNMAgent:
                         except:
                             pass
             
-            # If we have a CM MAC, get its TCS (Transmission Channel Set)
-            cm_tcs = None
-            if cm_mac:
-                # docsIf3CmtsCmUsStatusTable shows which US channels a CM uses
-                OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4'
-                # TODO: Query modem's specific US channel assignments
-            
             return {
                 'success': True,
                 'cmts_ip': cmts_ip,
                 'ofdma_channels': ofdma_channels,
                 'scqam_channels': scqam_channels,
                 'cm_mac': cm_mac,
-                'cm_tcs': cm_tcs
+                'cm_index': cm_index
             }
             
         except Exception as e:
