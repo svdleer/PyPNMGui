@@ -4,7 +4,6 @@
 # This agent runs on the Jump Server and connects OUT to the GUI Server
 # via WebSocket. It executes SNMP/SSH commands and returns results.
 
-import asyncio
 import json
 import logging
 import os
@@ -35,32 +34,6 @@ except ImportError:
     redis = None
     print("INFO: redis not installed. Caching disabled. Run: pip install redis")
 
-try:
-    from pypnm.lib.inet_utils import InetGenerate
-    PYPNM_INET_AVAILABLE = True
-except ImportError:
-    InetGenerate = None
-    PYPNM_INET_AVAILABLE = False
-    print("INFO: pypnm not installed. Using manual IP conversion.")
-
-try:
-    from pysnmp.hlapi.v1arch.asyncio import (
-        SnmpDispatcher,
-        CommunityData,
-        UdpTransportTarget,
-        ObjectType,
-        ObjectIdentity,
-        Integer,
-        OctetString,
-        get_cmd,
-        set_cmd,
-        bulk_cmd
-    )
-    PYSNMP_AVAILABLE = True
-except ImportError:
-    PYSNMP_AVAILABLE = False
-    print("WARNING: pysnmp not installed. SNMP operations will fail.")
-
 
 # Configure logging
 logging.basicConfig(
@@ -89,13 +62,14 @@ class AgentConfig:
     
     # CMTS Access (can be direct SNMP or via SSH)
     cmts_snmp_direct: bool = True
-    cmts_community: str = os.environ.get('CMTS_SNMP_COMMUNITY', 'public')
-    cmts_write_community: Optional[str] = os.environ.get('CMTS_SNMP_WRITE_COMMUNITY')
+    cmts_community: str = 'public'  # Read community
+    cmts_write_community: Optional[str] = None  # Write community for SNMP SET (upstream PNM)
     cmts_ssh_enabled: bool = False
     cmts_ssh_user: Optional[str] = None
     cmts_ssh_key: Optional[str] = None
     
     # CM Proxy - Server with connectivity to Cable Modems
+    # SNMP commands to modems are executed on this server via SSH
     cm_proxy_host: Optional[str] = None
     cm_proxy_port: int = 22
     cm_proxy_user: Optional[str] = None
@@ -103,7 +77,7 @@ class AgentConfig:
     
     # CM Direct - Direct SNMP access to modems (no proxy)
     cm_direct_enabled: bool = False
-    cm_direct_community: str = os.environ.get('CM_DIRECT_COMMUNITY', 'public')
+    cm_direct_community: str = 'm0d3m1nf0'
     
     # Equalizer Server - for SNMP queries via SSH (has best CMTS connectivity)
     equalizer_host: Optional[str] = None
@@ -287,104 +261,16 @@ class SSHProxyExecutor:
 
 
 class SNMPExecutor:
-    """Executes SNMP commands using pysnmp library."""
+    """Executes SNMP commands, optionally through SSH proxy."""
+    
+    # Allowed SNMP commands (whitelist for security)
+    ALLOWED_COMMANDS = {
+        'snmpget', 'snmpwalk', 'snmpbulkget', 'snmpbulkwalk', 'snmpset'
+    }
     
     def __init__(self, ssh_proxy: Optional[SSHProxyExecutor] = None):
         self.ssh_proxy = ssh_proxy
         self.logger = logging.getLogger(f'{__name__}.SNMP')
-        
-        if PYSNMP_AVAILABLE:
-            self.logger.info("SNMP Executor: using pysnmp v7 async API")
-        else:
-            self.logger.warning("SNMP Executor: pysnmp not available, SNMP operations will fail")
-    
-    def execute_snmp_get(self,
-                        target_ip: str,
-                        oid: str,
-                        community: str = 'private',
-                        timeout: int = 5) -> dict:
-        """Execute SNMP GET using pysnmp."""
-        if not PYSNMP_AVAILABLE:
-            return {'success': False, 'error': 'pysnmp not available'}
-        
-        try:
-            # Run async operation in sync context
-            result = asyncio.run(self._async_snmp_get(target_ip, oid, community, timeout))
-            return result
-        except Exception as e:
-            self.logger.error(f"SNMP GET error: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    async def _async_snmp_get(self, target_ip: str, oid: str, community: str, timeout: int) -> dict:
-        """Async SNMP GET implementation."""
-        snmpDispatcher = SnmpDispatcher()
-        try:
-            errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
-                snmpDispatcher,
-                CommunityData(community),
-                await UdpTransportTarget.create((target_ip, 161), timeout=timeout),
-                ObjectType(ObjectIdentity(oid))
-            )
-            
-            if errorIndication:
-                return {'success': False, 'error': str(errorIndication)}
-            elif errorStatus:
-                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
-            else:
-                for varBind in varBinds:
-                    return {
-                        'success': True,
-                        'output': str(varBind[1]),
-                        'oid': str(varBind[0]),
-                        'command': 'snmpget'
-                    }
-        finally:
-            snmpDispatcher.transport_dispatcher.close_dispatcher()
-    
-    def execute_snmp_set(self,
-                        target_ip: str,
-                        oid: str,
-                        value: int,
-                        community: str = 'private',
-                        timeout: int = 5) -> dict:
-        """Execute SNMP SET using pysnmp."""
-        if not PYSNMP_AVAILABLE:
-            return {'success': False, 'error': 'pysnmp not available'}
-        
-        try:
-            # Run async operation in sync context
-            result = asyncio.run(self._async_snmp_set(target_ip, oid, value, community, timeout))
-            return result
-        except Exception as e:
-            self.logger.error(f"SNMP SET error: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    async def _async_snmp_set(self, target_ip: str, oid: str, value: int, community: str, timeout: int) -> dict:
-        """Async SNMP SET implementation."""
-        snmpDispatcher = SnmpDispatcher()
-        try:
-            errorIndication, errorStatus, errorIndex, varBinds = await set_cmd(
-                snmpDispatcher,
-                CommunityData(community),
-                await UdpTransportTarget.create((target_ip, 161), timeout=timeout),
-                ObjectType(ObjectIdentity(oid), Integer(value))
-            )
-            
-            if errorIndication:
-                return {'success': False, 'error': str(errorIndication)}
-            elif errorStatus:
-                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
-            else:
-                for varBind in varBinds:
-                    return {
-                        'success': True,
-                        'output': f'Set {varBind[0]} = {varBind[1]}',
-                        'oid': str(varBind[0]),
-                        'value': str(varBind[1]),
-                        'command': 'snmpset'
-                    }
-        finally:
-            snmpDispatcher.transport_dispatcher.close_dispatcher()
     
     def execute_snmp(self, 
                      command: str,
@@ -394,144 +280,52 @@ class SNMPExecutor:
                      version: str = '2c',
                      timeout: int = 5,
                      retries: int = 1) -> dict:
-        """Execute SNMP command (backward compatibility wrapper)."""
+        """Execute SNMP command."""
         
-        # For snmpget
-        if command == 'snmpget':
-            return self.execute_snmp_get(target_ip, oid, community, timeout)
+        # Validate command
+        if command not in self.ALLOWED_COMMANDS:
+            return {
+                'success': False,
+                'error': f'Command not allowed: {command}'
+            }
         
-        # For snmpset (parse oid with type and value)
-        elif command == 'snmpset':
-            # Parse "oid type value" format
-            parts = oid.split()
-            if len(parts) >= 3:
-                oid_only = parts[0]
-                value_type = parts[1]  # 'i' for integer, etc
-                value = int(parts[2])  # Assuming integer for now
-                return self.execute_snmp_set(target_ip, oid_only, value, community, timeout)
-            else:
-                return {'success': False, 'error': 'Invalid snmpset format'}
+        # Build SNMP command
+        snmp_cmd = f"{command} -v{version} -c {community} -t {timeout} -r {retries} {target_ip} {oid}"
         
-        # For snmpbulkwalk and snmpwalk
-        elif command in ('snmpbulkwalk', 'snmpwalk'):
-            return self.execute_snmp_bulk_walk(target_ip, oid, community, timeout)
+        self.logger.info(f"Executing: {snmp_cmd}")
         
-        # For other commands
+        if self.ssh_proxy:
+            # Execute through SSH proxy
+            exit_code, stdout, stderr = self.ssh_proxy.execute(snmp_cmd)
         else:
-            return {'success': False, 'error': f'Command not implemented in pysnmp: {command}'}
-    
-    def execute_snmp_bulk_walk(self,
-                              target_ip: str,
-                              oid: str,
-                              community: str = 'private',
-                              timeout: int = 30) -> dict:
-        """Execute SNMP BULK WALK using pysnmp."""
-        if not PYSNMP_AVAILABLE:
-            return {'success': False, 'error': 'pysnmp not available'}
-        
-        try:
-            # Run async operation in sync context
-            result = asyncio.run(self._async_snmp_bulk_walk(target_ip, oid, community, timeout))
-            return result
-        except Exception as e:
-            self.logger.error(f"SNMP BULK WALK error: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    async def _async_snmp_bulk_walk(self, target_ip: str, oid: str, community: str, timeout: int) -> dict:
-        """Async SNMP BULK WALK implementation."""
-        snmpDispatcher = SnmpDispatcher()
-        output_lines = []
-        base_oid = oid
-        
-        try:
-            transport = await UdpTransportTarget.create((target_ip, 161), timeout=timeout)
-            
-            # BULK WALK loop
-            while True:
-                errorIndication, errorStatus, errorIndex, varBinds = await bulk_cmd(
-                    snmpDispatcher,
-                    CommunityData(community),
-                    transport,
-                    0, 50,  # nonRepeaters, maxRepetitions
-                    ObjectType(ObjectIdentity(oid))
+            # Execute locally
+            try:
+                result = subprocess.run(
+                    snmp_cmd.split(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout + 5
                 )
-                
-                if errorIndication:
-                    if len(output_lines) > 0:
-                        # Got some results before error
-                        break
-                    return {'success': False, 'error': str(errorIndication)}
-                elif errorStatus:
-                    if len(output_lines) > 0:
-                        break
-                    return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
-                else:
-                    for varBind in varBinds:
-                        oid_str = str(varBind[0])
-                        value = varBind[1]
-                        
-                        # Check if we're still in the subtree
-                        if not oid_str.startswith(base_oid):
-                            # Finished walking this subtree
-                            break
-                        
-                        # Format output similar to net-snmp tools
-                        value_str = str(value)
-                        type_name = type(value).__name__
-                        
-                        if 'OctetString' in type_name:
-                            # Check if printable
-                            try:
-                                raw_bytes = bytes(value)
-                                if all(32 <= b < 127 or b in (9, 10, 13) for b in raw_bytes):
-                                    output_lines.append(f"{oid_str} = STRING: {value_str}")
-                                else:
-                                    hex_str = ' '.join(f'{b:02X}' for b in raw_bytes)
-                                    output_lines.append(f"{oid_str} = Hex-STRING: {hex_str}")
-                            except:
-                                output_lines.append(f"{oid_str} = STRING: {value_str}")
-                        elif 'Integer' in type_name:
-                            output_lines.append(f"{oid_str} = INTEGER: {value_str}")
-                        elif 'IpAddress' in type_name:
-                            # Format IpAddress as dotted decimal using PyPNM utilities
-                            try:
-                                raw_bytes = bytes(value)
-                                if PYPNM_INET_AVAILABLE:
-                                    # Use PyPNM's built-in IP conversion
-                                    ip_str = InetGenerate.binary_to_inet(raw_bytes)
-                                    if ip_str:
-                                        output_lines.append(f"{oid_str} = IpAddress: {ip_str}")
-                                    else:
-                                        output_lines.append(f"{oid_str} = IpAddress: {value_str}")
-                                elif len(raw_bytes) == 4:
-                                    # Fallback: manual conversion for IPv4
-                                    ip_str = '.'.join(str(b) for b in raw_bytes)
-                                    output_lines.append(f"{oid_str} = IpAddress: {ip_str}")
-                                else:
-                                    output_lines.append(f"{oid_str} = IpAddress: {value_str}")
-                            except:
-                                output_lines.append(f"{oid_str} = IpAddress: {value_str}")
-                        elif 'Counter' in type_name or 'Gauge' in type_name:
-                            output_lines.append(f"{oid_str} = {type_name}: {value_str}")
-                        else:
-                            output_lines.append(f"{oid_str} = {value_str}")
-                        
-                        # Update OID for next iteration
-                        oid = oid_str
-                    else:
-                        # Continue loop if we got results
-                        continue
-                    # Break if we exited the for loop early (out of subtree)
-                    break
-            
+                exit_code = result.returncode
+                stdout = result.stdout
+                stderr = result.stderr
+            except subprocess.TimeoutExpired:
+                return {'success': False, 'error': 'Command timeout'}
+            except FileNotFoundError:
+                return {'success': False, 'error': f'{command} not found'}
+        
+        if exit_code == 0:
             return {
                 'success': True,
-                'output': '\n'.join(output_lines),
-                'count': len(output_lines),
-                'command': 'snmpbulkwalk'
+                'output': stdout.strip(),
+                'command': command
             }
-        finally:
-            snmpDispatcher.transport_dispatcher.close_dispatcher()
+        else:
+            return {
+                'success': False,
+                'error': stderr.strip() or f'Exit code: {exit_code}',
+                'output': stdout.strip()
+            }
 
 
 class TFTPExecutor:
@@ -1670,7 +1464,6 @@ class PyPNMAgent:
         except Exception as e:
             self.logger.error(f"OFDM capture error: {e}")
             return {'success': False, 'error': str(e)}
-    
     def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
         """Get OFDM RxMER data via cm_proxy SNMP walk."""
         modem_ip = params.get('modem_ip')
@@ -1790,54 +1583,46 @@ class PyPNMAgent:
             full_cmd = f"{cmd} -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid}"
             
             self.logger.info(f"CMTS SNMP: {cmd} {cmts_ip} {oid}")
-            # Use longer timeout for walks (can return 1000+ lines)
-            timeout = 120 if walk else 30
             result = subprocess.run(
                 full_cmd.split(),
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=30
             )
             
             if result.returncode != 0:
-                self.logger.warning(f"CMTS SNMP failed rc={result.returncode}: {result.stderr[:200] if result.stderr else 'no stderr'}")
                 return {'success': False, 'error': result.stderr or 'SNMP query failed'}
             
-            self.logger.debug(f"CMTS SNMP OK: {len(result.stdout)} bytes stdout")
             return {'success': True, 'output': result.stdout}
         except subprocess.TimeoutExpired:
-            self.logger.error("CMTS SNMP timeout")
             return {'success': False, 'error': 'SNMP timeout'}
         except Exception as e:
-            self.logger.error(f"CMTS SNMP exception: {e}")
             return {'success': False, 'error': str(e)}
     
     def _set_cmts_direct(self, cmts_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
-        """Set SNMP value on CMTS directly using pysnmp."""
+        """Set SNMP value on CMTS directly."""
         try:
+            full_cmd = f"snmpset -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid} {value_type} {value}"
+            
             self.logger.info(f"CMTS SNMP SET: {cmts_ip} {oid} = {value}")
-            
-            # Convert value to integer (assuming 'i' type for now)
-            int_value = int(value)
-            
-            # Use SNMPExecutor's pysnmp implementation
-            result = self.snmp_executor.execute_snmp_set(
-                target_ip=cmts_ip,
-                oid=oid,
-                value=int_value,
-                community=community,
-                timeout=10
+            result = subprocess.run(
+                full_cmd.split(),
+                capture_output=True,
+                text=True,
+                timeout=30
             )
             
-            return result
-        except ValueError as e:
-            return {'success': False, 'error': f'Invalid integer value: {value}'}
+            if result.returncode != 0:
+                return {'success': False, 'error': result.stderr or 'SNMP set failed'}
+            
+            return {'success': True, 'output': result.stdout}
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'SNMP timeout'}
         except Exception as e:
-            self.logger.error(f"CMTS SNMP SET error: {e}")
             return {'success': False, 'error': str(e)}
     
     def _handle_pnm_us_get_interfaces(self, params: dict) -> dict:
-        """Get upstream RF port interfaces from CMTS for UTSC."""
+        """Get upstream interface information from CMTS for a specific modem."""
         cmts_ip = params.get('cmts_ip')
         cm_mac = params.get('cm_mac_address')
         community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
@@ -1846,130 +1631,68 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            import re
-            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'
+            # Get upstream RF ports (ifTable for US ports)
+            OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
+            OID_IF_TYPE = '1.3.6.1.2.1.2.2.1.3'   # ifType
             
-            self.logger.info(f"Querying us-conn RF ports from {cmts_ip}")
-            result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
+            # Query upstream OFDMA channels
+            OID_OFDMA_IFINDEX = '1.3.6.1.4.1.4491.2.1.28.1.14.1.1'  # docsIf31CmtsUsOfdmaChannelIfIndex
+            OID_OFDMA_CENTER_FREQ = '1.3.6.1.4.1.4491.2.1.28.1.14.1.3'  # CenterFrequency
+            OID_OFDMA_SUBCARRIER_SPACING = '1.3.6.1.4.1.4491.2.1.28.1.14.1.4'  # SubcarrierSpacing
             
-            # Parse all us-conn ports and build blade mapping
-            all_rf_ports = []
-            blade_to_ports = {}  # blade_slot -> [(ifindex, descr), ...]
+            # Get OFDMA channels
+            result = self._query_cmts_direct(cmts_ip, OID_OFDMA_IFINDEX, community, walk=True)
             
+            ofdma_channels = []
             if result.get('success'):
-                output = result.get('output', '')
-                for line in output.split('\n'):
-                    if 'us-conn' not in line.lower():
-                        continue
-                    try:
-                        parts = line.split('=', 1)
-                        oid_part = parts[0].strip()
-                        ifindex = int(oid_part.split('.')[-1])
-                        descr = parts[1].split(':', 1)[-1].strip().strip('"')
-                        
-                        all_rf_ports.append({'ifindex': ifindex, 'description': descr})
-                        
-                        # Extract blade slot (e.g., "1" from "RPS01-1")
-                        blade_match = re.search(r'RPS\d+-(\d+)', descr)
-                        if blade_match:
-                            blade_slot = int(blade_match.group(1))
-                            if blade_slot not in blade_to_ports:
-                                blade_to_ports[blade_slot] = []
-                            blade_to_ports[blade_slot].append((ifindex, descr))
-                    except:
-                        pass
+                for line in result.get('output', '').split('\n'):
+                    if '=' in line and 'INTEGER' in line:
+                        try:
+                            parts = line.split('=')
+                            idx = parts[0].strip().split('.')[-1]
+                            ifindex = int(parts[1].split(':')[-1].strip())
+                            ofdma_channels.append({
+                                'index': idx,
+                                'ifindex': ifindex
+                            })
+                        except:
+                            pass
             
-            all_rf_ports.sort(key=lambda x: x['ifindex'])
-            self.logger.info(f"Found {len(all_rf_ports)} us-conn RF ports")
-
-            # Find modem's specific RF port
-            modem_rf_port = None
-            modem_ofdma_ifindex = None
-            cm_index = None
+            # Get SC-QAM upstream channels
+            OID_US_CHANNEL = '1.3.6.1.2.1.10.127.1.1.2.1.1'  # docsIfUpChannelId
+            OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'     # docsIfUpChannelFrequency
             
+            result = self._query_cmts_direct(cmts_ip, OID_US_CHANNEL, community, walk=True)
+            
+            scqam_channels = []
+            if result.get('success'):
+                for line in result.get('output', '').split('\n'):
+                    if '=' in line and 'INTEGER' in line:
+                        try:
+                            parts = line.split('=')
+                            ifindex = int(parts[0].strip().split('.')[-1])
+                            channel_id = int(parts[1].split(':')[-1].strip())
+                            scqam_channels.append({
+                                'ifindex': ifindex,
+                                'channel_id': channel_id
+                            })
+                        except:
+                            pass
+            
+            # If we have a CM MAC, get its TCS (Transmission Channel Set)
+            cm_tcs = None
             if cm_mac:
-                # Step 1: Find CM index from MAC address
-                OID_CM_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'
-                cm_result = self._query_cmts_direct(cmts_ip, OID_CM_MAC, community, walk=True)
-                
-                mac_normalized = cm_mac.lower().replace('-', ':')
-                mac_hex = ' '.join([b.upper() for b in mac_normalized.split(':')])
-                self.logger.info(f"Looking for CM MAC: {mac_normalized} or hex: {mac_hex}")
-                
-                if cm_result.get('success'):
-                    for line in cm_result.get('output', '').split('\n'):
-                        if mac_hex in line or mac_normalized in line.lower():
-                            try:
-                                oid_part = line.split('=')[0].strip()
-                                cm_index = int(oid_part.split('.')[-1])
-                            except:
-                                pass
-                            self.logger.info(f"Found CM index: {cm_index}")
-                            break
-                
-                if cm_index:
-                    # Step 2: Find modem's OFDMA channel
-                    OID_CM_OFDMA_STATUS = '1.3.6.1.4.1.4491.2.1.28.1.5.1.1'
-                    ofdma_result = self._query_cmts_direct(cmts_ip, OID_CM_OFDMA_STATUS, community, walk=True)
-                    
-                    if ofdma_result.get('success'):
-                        for line in ofdma_result.get('output', '').split('\n'):
-                            if f'.{cm_index}.' in line:
-                                try:
-                                    parts = line.split('=')[0].strip().split('.')
-                                    for i, part in enumerate(parts):
-                                        if part == str(cm_index) and i+1 < len(parts):
-                                            ofdma_ifindex = int(parts[i+1])
-                                            if ofdma_ifindex >= 843087000:
-                                                modem_ofdma_ifindex = ofdma_ifindex
-                                                self.logger.info(f"Found modem OFDMA ifindex: {ofdma_ifindex}")
-                                                break
-                                except:
-                                    pass
-                            if modem_ofdma_ifindex:
-                                break
-                    
-                    # Step 3: Get OFDMA channel ifDescr and find physical port
-                    if modem_ofdma_ifindex:
-                        descr_result = self._query_cmts_direct(
-                            cmts_ip, f"{OID_IF_DESCR}.{modem_ofdma_ifindex}", community, walk=False
-                        )
-                        if descr_result.get('success'):
-                            ofdma_descr = descr_result.get('output', '')
-                            self.logger.info(f"OFDMA channel description: {ofdma_descr}")
-                            
-                            # Extract slot from "cable-us-ofdma 1/ofd/4.0" -> slot 1
-                            slot_match = re.search(r'cable-us(?:-ofdma)?\s+(\d+)/', ofdma_descr)
-                            if not slot_match:
-                                slot_match = re.search(r'(\d+)/', ofdma_descr)
-                            
-                            if slot_match:
-                                slot = slot_match.group(1)
-                                self.logger.info(f"Modem is on slot {slot}")
-                                
-                                # Find us-conn port matching this slot in description
-                                # e.g., slot "1" matches "MNDGT0002RPS01-0 us-conn 0" (the "1" in RPS01)
-                                for rf_port in all_rf_ports:
-                                    port_descr = rf_port.get('description', '')
-                                    if slot in port_descr and 'us-conn 0' in port_descr.lower():
-                                        modem_rf_port = rf_port
-                                        self.logger.info(f"Found modem's RF port: {port_descr} ({rf_port['ifindex']})")
-                                        break
-                else:
-                    self.logger.warning(f"CM index not found for MAC: {mac_normalized}")
-            
-            # Return modem's specific port if found, otherwise all ports
-            rf_ports = [modem_rf_port] if modem_rf_port else all_rf_ports
+                # docsIf3CmtsCmUsStatusTable shows which US channels a CM uses
+                OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4'
+                # TODO: Query modem's specific US channel assignments
             
             return {
                 'success': True,
                 'cmts_ip': cmts_ip,
-                'rf_ports': rf_ports,
-                'all_rf_ports': all_rf_ports,  # All ports for reference
+                'ofdma_channels': ofdma_channels,
+                'scqam_channels': scqam_channels,
                 'cm_mac': cm_mac,
-                'cm_index': cm_index,
-                'modem_ofdma_ifindex': modem_ofdma_ifindex,
-                'modem_rf_port': modem_rf_port
+                'cm_tcs': cm_tcs
             }
             
         except Exception as e:
@@ -2041,20 +1764,11 @@ class PyPNMAgent:
             
             # For FreeRunning mode, set repeat period and duration
             if trigger_mode == 2:
-                # Convert ms to microseconds for RepeatPeriod (OID expects microseconds)
-                repeat_period_ms = params.get('repeat_period_ms', 0)
-                repeat_period_us = repeat_period_ms * 1000
-                self.logger.info(f"Setting RepeatPeriod={repeat_period_ms}ms ({repeat_period_us}us)")
-                result = self._set_cmts_direct(cmts_ip, f"{base}.18{idx}", str(repeat_period_us), 'u', community)
+                repeat_period = params.get('repeat_period_ms', 0)
+                result = self._set_cmts_direct(cmts_ip, f"{base}.18{idx}", str(repeat_period), 'u', community)
                 
-                # FreeRunDuration is in milliseconds
                 freerun_duration = params.get('freerun_duration_ms', 1000)
-                self.logger.info(f"Agent received freerun_duration_ms={freerun_duration} from params, sending to CMTS")
                 result = self._set_cmts_direct(cmts_ip, f"{base}.19{idx}", str(freerun_duration), 'u', community)
-                if result.get('success'):
-                    self.logger.info(f"Successfully set FreeRunDuration={freerun_duration}ms on CMTS")
-                else:
-                    self.logger.error(f"Failed to set FreeRunDuration: {result.get('error')}")
             
             return {
                 'success': True,
@@ -2078,11 +1792,8 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
         
         try:
-            # docsPnmCmtsUtscCtrlInitiateTest - Use correct OID branch
-            # Different vendors use different table structures:
-            # - Arris E6000: .3.10.3.1.1.{rfPort}.1
-            # - Commscope: .3.10.3.1.1.{rfPort}.1  
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+            # docsPnmCmtsUtscCtrlInitiateTest
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.2.1.1.{rf_port_ifindex}.1"
             
             result = self._set_cmts_direct(cmts_ip, oid, '1', 'i', community)  # 1 = true
             
@@ -2109,9 +1820,8 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and rf_port_ifindex required'}
         
         try:
-            # docsPnmCmtsUtscCtrlInitiateTest (1=true/start, 2=false/stop)
-            # Use same OID as start, but with value 2
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+            # docsPnmCmtsUtscCtrlInitiateTest
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.2.1.1.{rf_port_ifindex}.1"
             
             result = self._set_cmts_direct(cmts_ip, oid, '2', 'i', community)  # 2 = false
             
@@ -2380,29 +2090,28 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip, ofdma_ifindex, and cm_mac_address required'}
         
         try:
-            # docsPnmCmtsUsOfdmaRxMerTable OIDs (1.3.6.1.4.1.4491.2.1.27.1.3.7.1)
-            # .1 = Enable, .2 = PreEq, .3 = NumAvgs, .4 = MeasStatus, .5 = DestIndex, .6 = FileName, .7 = CmMac
-            base = '1.3.6.1.4.1.4491.2.1.27.1.3.7.1'
+            # docsPnmCmtsUsOfdmaRxMerTable OIDs
+            base = '1.3.6.1.4.1.4491.2.1.27.1.3.8.1'
             idx = f".{ofdma_ifindex}"
             
-            # Set CM MAC address FIRST (CMTS uses this to identify the modem)
-            mac = cm_mac.replace(':', '').replace('-', '').upper()
-            mac_hex = ' '.join([mac[i:i+2] for i in range(0, 12, 2)])
-            result = self._set_cmts_direct(cmts_ip, f"{base}.7{idx}", mac_hex, 'x', community)
-            if not result.get('success'):
-                return {'success': False, 'error': f"Failed to set CM MAC: {result.get('error')}"}
-            
-            # Set filename (column .6)
+            # Set filename first
             filename = params.get('filename', 'us_rxmer')
-            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", filename, 's', community)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.5{idx}", filename, 's', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
             
-            # Set pre-equalization option (column .2: 1=true, 2=false)
-            pre_eq = 1 if params.get('pre_eq', True) else 2
+            # Set CM MAC address
+            mac = cm_mac.replace(':', '').replace('-', '').upper()
+            mac_hex = ' '.join([mac[i:i+2] for i in range(0, 12, 2)])
+            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", mac_hex, 'x', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set CM MAC: {result.get('error')}"}
+            
+            # Set pre-equalization option
+            pre_eq = 1 if params.get('pre_eq', True) else 2  # 1=true, 2=false
             result = self._set_cmts_direct(cmts_ip, f"{base}.2{idx}", str(pre_eq), 'i', community)
             
-            # Enable measurement (column .1: 1=true)
+            # Enable measurement (1 = true)
             result = self._set_cmts_direct(cmts_ip, f"{base}.1{idx}", '1', 'i', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to start US RxMER: {result.get('error')}"}
@@ -2429,8 +2138,8 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and ofdma_ifindex required'}
         
         try:
-            # docsPnmCmtsUsOfdmaRxMerMeasStatus (column .4 of table .3.7.1)
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.7.1.4.{ofdma_ifindex}"
+            # docsPnmCmtsUsOfdmaRxMerMeasStatus
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.8.1.4.{ofdma_ifindex}"
             
             result = self._query_cmts_direct(cmts_ip, oid, community, walk=False)
             
@@ -2449,20 +2158,7 @@ class PyPNMAgent:
                 except:
                     pass
             
-            # Also read the filename from CMTS (column .6) - it may have timestamp appended
-            filename = None
-            try:
-                fn_oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.7.1.6.{ofdma_ifindex}"
-                fn_result = self._query_cmts_direct(cmts_ip, fn_oid, community, walk=False)
-                if fn_result.get('success'):
-                    fn_output = fn_result.get('output', '')
-                    if 'STRING' in fn_output:
-                        # Extract string value
-                        filename = fn_output.split('STRING:')[-1].strip().strip('"')
-            except:
-                pass
-            
-            response = {
+            return {
                 'success': True,
                 'ofdma_ifindex': ofdma_ifindex,
                 'meas_status': status_value,
@@ -2471,11 +2167,6 @@ class PyPNMAgent:
                 'is_busy': status_value == 3,
                 'is_error': status_value == 5
             }
-            
-            if filename:
-                response['filename'] = filename
-            
-            return response
             
         except Exception as e:
             self.logger.error(f"US RxMER status error: {e}")

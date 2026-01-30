@@ -1,6 +1,5 @@
 // PyPNM Web GUI - Main Application
 // SPDX-License-Identifier: Apache-2.0
-// Version: 2026-01-26-20:30 CACHE_BUST_V4
 
 const { createApp } = Vue;
 
@@ -50,7 +49,7 @@ createApp({
             
             // PNM Measurement selection
             pnmMeasurementType: 'rxmer',
-            pnmOutputType: 'archive',  // archive (with plots) or json - default to archive for PyPNM plots
+            pnmOutputType: 'archive',  // archive (with plots) or json
             showRawData: false,
             selectedMeasurementData: null,
             
@@ -58,54 +57,31 @@ createApp({
             upstreamInterfaces: {
                 loading: false,
                 scqamChannels: [],   // SC-QAM upstream channels [{ifindex, channel_id, frequency_mhz}]
-                ofdmaChannels: [],   // OFDMA upstream channels [{ifindex, index}]
-                rfPorts: [],    // us-conn RF ports for UTSC [{ifindex, description}]
-                allRfPorts: [],  // All us-conn RF ports
-                modemRfPort: null  // Detected RF port for the modem
+                ofdmaChannels: []    // OFDMA upstream channels [{ifindex, index}]
             },
             utscConfig: {
-                triggerMode: 2,  // 2=FreeRunning (timed captures), 6=CM_MAC (per-transmission), 5=IdleSID
-                centerFreqMhz: 50,  // Center for 80 MHz span: 10-90 MHz = center 50
-                spanMhz: 80,  // E6000 valid spans: 40, 80, 160, 320 MHz (non-TimeIQ)
-                numBins: 800,  // E6000 valid bins: 200, 400, 800, 1600, 3200 (non-TimeIQ)
+                triggerMode: 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
+                centerFreqMhz: 30,
+                spanMhz: 80,
+                numBins: 800,
                 rfPortIfindex: null,
-                repeatPeriodMs: 100,  // 100ms - fast capture rate, E6000 supports 50-1000ms
-                freerunDurationMs: 60000  // 60 seconds - full duration for maximum file generation
-                // triggerCount removed - notWritable on E6000 in FreeRunning mode
+                repeatPeriodMs: 0,
+                freerunDurationMs: 1000
             },
             usRxmerConfig: {
                 ofdmaIfindex: null,
-                preEq: true,
-                lastFilename: null  // Store filename from start response
+                preEq: true
             },
             runningUtsc: false,
             runningUsRxmer: false,
             utscStatus: null,
             usRxmerStatus: null,
             utscSpectrumData: null,
-            utscPlotImage: null,  // Matplotlib plot data
             usRxmerSpectrumData: null,
             utscChartInstance: null,
             usRxmerChartInstance: null,
-            utscLiveMode: false,
-            utscLiveInterval: null,
-            utscWebSocket: null,  // WebSocket for live UTSC streaming
-            utscRefreshRate: 500,  // 0.5 seconds between updates (streaming rate)
-            utscDuration: 120,  // Duration in seconds (default 2 minutes, max 5 minutes)
-            utscBufferSize: 0,  // Current buffer size from backend
-            utscInteractive: true,  // Always use interactive spectrum analyzer
-            utscLastUpdateTime: 0,  // Throttle rapid updates
-            utscUpdateThrottle: 100,  // Min 100ms between updates
             
             // Housekeeping
-            // Upstream PNM persistent WebSocket
-            utscWs: null,  // Persistent WebSocket connection
-            utscWsStatus: 'disconnected',  // disconnected, connecting, connected
-            utscStreaming: false,  // Currently streaming data
-            utscDataCount: 0,  // Number of spectrum samples received
-            utscStartTime: null,  // Stream start timestamp
-            utscTimeRemaining: 120,  // Seconds remaining in freerun (max 300)
-            utscDurationTimer: null,  // Interval timer for countdown
             housekeepingDays: 7,
             housekeepingDryRun: true,
             housekeepingResult: null,
@@ -138,9 +114,6 @@ createApp({
         // Load CMTS list
         await this.loadCmtsList();
         
-        // Clean up old PNM files on page load (non-blocking)
-        this.cleanupOldPnmFiles();
-        
         // Don't load mock modems - only show live data from CMTS
         // await this.searchModems();
     },
@@ -155,47 +128,22 @@ createApp({
             const parts = cleanName.split('_');
             
             // Extract meaningful parts
-            // Find channel number (1-3 digits, less than 200)
-            const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
-            
             if (cleanName.includes('rxmer')) {
+                const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
                 return channel ? `RxMER - Channel ${channel}` : 'RxMER';
             } else if (cleanName.includes('modulation_count')) {
+                const channel = parts.find(p => p.match(/^\d{1,3}$/) && parseInt(p) < 200);
                 return channel ? `Modulation Profile - Channel ${channel}` : 'Modulation Profile';
             } else if (cleanName.includes('signal_aggregate')) {
                 return 'Signal Aggregate (All Channels)';
-            } else if (cleanName.includes('channel_est') || cleanName.includes('chanest')) {
-                return channel ? `Channel Estimation - Channel ${channel}` : 'Channel Estimation Coefficients';
+            } else if (cleanName.includes('channel_est')) {
+                return 'Channel Estimation Coefficients';
             } else if (cleanName.includes('spectrum')) {
                 return 'Spectrum Analyzer';
-            } else if (cleanName.includes('constdisplay') || cleanName.includes('constellation')) {
-                return channel ? `Constellation Display - Channel ${channel}` : 'Constellation Display';
-            } else if (cleanName.includes('preeq') || cleanName.includes('pre_eq')) {
-                return channel ? `Pre-Equalizer - Channel ${channel}` : 'Pre-Equalizer';
-            } else if (cleanName.includes('histogram')) {
-                return channel ? `Histogram - Channel ${channel}` : 'Histogram';
             }
             
-            // Fallback: extract just the measurement type part (last meaningful word before extension)
-            // Skip MAC address (hex), model name, timestamp (all digits)
-            const meaningfulParts = parts.filter(p => {
-                // Skip MAC addresses (12 hex chars)
-                if (p.match(/^[0-9a-f]{12}$/i)) return false;
-                // Skip timestamps (10 digits)
-                if (p.match(/^\d{10}$/)) return false;
-                // Skip channel numbers
-                if (p.match(/^\d{1,3}$/) && parseInt(p) < 200) return false;
-                // Skip model names (alphanumeric strings that look like model numbers)
-                if (p.match(/^[a-z]+\d+[a-z]*$/i)) return false;
-                return true;
-            });
-            
-            if (meaningfulParts.length > 0) {
-                const title = meaningfulParts.join(' ').replace(/\b\w/g, l => l.toUpperCase());
-                return channel ? `${title} - Channel ${channel}` : title;
-            }
-            
-            return channel ? `Measurement - Channel ${channel}` : 'PNM Measurement';
+            // Fallback: clean up the filename
+            return cleanName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
         },
         
         // ============== API Calls ==============
@@ -236,19 +184,10 @@ createApp({
                     }));
                     this.cmtsListFull = cmtsList;
                     this.cmtsList = cmtsList;
+                    console.log(`Loaded ${this.cmtsList.length} CMTS systems from appdb`);
                 }
             } catch (error) {
                 console.error('Failed to load CMTS list:', error);
-            }
-        },
-        
-        async cleanupOldPnmFiles() {
-            try {
-                await fetch(`${API_BASE}/pypnm/cleanup`, {
-                    method: 'POST'
-                });
-            } catch (error) {
-                // Silent fail - cleanup is not critical
             }
         },
         
@@ -347,8 +286,6 @@ createApp({
                         docsis_version: m.docsis_version || 'Unknown',
                         cmts: data.cmts_hostname,
                         cmts_ip: data.cmts_ip,  // For upstream PNM
-                        cmts_community: data.cmts_community || 'Z1gg0Sp3c1@l',  // SNMP write community for PNM
-                        tftp_ip: data.tftp_ip || data.cmts_ip,  // TFTP server IP
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || ''
                     }));
@@ -388,7 +325,7 @@ createApp({
             this.showRawData = false;
             
             // Reset upstream interfaces
-            this.upstreamInterfaces = { loading: false, scqamChannels: [], ofdmaChannels: [], rfPorts: [], allRfPorts: [], modemRfPort: null };
+            this.upstreamInterfaces = { loading: false, scqamChannels: [], ofdmaChannels: [] };
             this.utscConfig.rfPortIfindex = null;
             this.usRxmerConfig.ofdmaIfindex = null;
             
@@ -401,8 +338,10 @@ createApp({
                     this.loadChannelStats()
                 ];
                 
-                // Always try to load upstream interfaces - getCmtsIpForModem() handles fallback
-                promises.push(this.loadUpstreamInterfaces());
+                // Also load upstream interfaces if CMTS IP is available (for upstream PNM)
+                if (modem.cmts_ip) {
+                    promises.push(this.loadUpstreamInterfaces());
+                }
                 
                 await Promise.all(promises);
             } catch (error) {
@@ -695,121 +634,49 @@ createApp({
         
         // ============== Upstream PNM Methods (CMTS-side) ==============
         
-        getCmtsIpForModem() {
-            // First try to get from modem object (set by getLiveModems)
-            if (this.selectedModem?.cmts_ip) {
-                return this.selectedModem.cmts_ip;
-            }
-            
-            // Fallback: look up CMTS IP from selectedCmts hostname
-            if (this.selectedCmts && this.cmtsListFull) {
-                const cmts = this.cmtsListFull.find(c => c.name === this.selectedCmts);
-                if (cmts?.ip) {
-                    return cmts.ip;
-                }
-            }
-            
-            return null;
-        },
-        
         async loadUpstreamInterfaces() {
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!this.selectedModem || !cmtsIp) {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 return;
             }
             
             this.upstreamInterfaces.loading = true;
-            
             try {
-                const macAddress = this.selectedModem.mac_address.replace(/[^a-fA-F0-9:]/g, "").toLowerCase();
-                
-                // Run both discoveries in parallel: RF port for UTSC and OFDMA for US RxMER
-                const [rfPortResponse, ofdmaResponse] = await Promise.all([
-                    // RF port discovery for UTSC
-                    fetch(`/api/pypnm/upstream/discover-rf-port/${macAddress}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ cmts_ip: cmtsIp })
-                    }),
-                    // OFDMA channel discovery using PyPNM pysnmp
-                    fetch(`/api/pypnm/cmts/ofdma/discover/${macAddress}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ cmts_ip: cmtsIp })
+                const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip
                     })
-                ]);
+                });
                 
-                // Process RF port result (for UTSC)
-                const rfResult = await rfPortResponse.json();
-                if (rfResult.success) {
-                    this.selectedModem.cmts_ip = cmtsIp;
-                    this.utscConfig.rfPortIfindex = rfResult.rf_port_ifindex;
-                    this.upstreamInterfaces.rfPorts = [{
-                        ifindex: rfResult.rf_port_ifindex,
-                        description: rfResult.rf_port_description,
-                        name: rfResult.rf_port_description
-                    }];
-                    this.upstreamInterfaces.modemRfPort = {
-                        ifindex: rfResult.rf_port_ifindex,
-                        description: rfResult.rf_port_description
-                    };
-                    console.log(`[UTSC] RF port discovered: ${rfResult.rf_port_description}`);
-                } else {
-                    console.warn('[UTSC] RF port discovery failed:', rfResult.error);
-                }
-                
-                // Process OFDMA result (for US RxMER)
-                const ofdmaResult = await ofdmaResponse.json();
-                if (ofdmaResult.success) {
-                    this.usRxmerConfig.ofdmaIfindex = ofdmaResult.ofdma_ifindex;
-                    this.upstreamInterfaces.ofdmaChannels = [{
-                        ifindex: ofdmaResult.ofdma_ifindex,
-                        description: ofdmaResult.ofdma_description || `OFDMA ${ofdmaResult.ofdma_ifindex}`,
-                        cm_index: ofdmaResult.cm_index
-                    }];
-                    console.log(`[US RxMER] OFDMA ifIndex discovered: ${ofdmaResult.ofdma_ifindex}`);
-                    this.$toast?.success(`OFDMA channel discovered: ${ofdmaResult.ofdma_description || ofdmaResult.ofdma_ifindex}`);
-                } else {
-                    console.warn('[US RxMER] OFDMA discovery failed:', ofdmaResult.error);
-                    // Modem may not have OFDMA channel (DOCSIS 3.0 modem)
-                    this.upstreamInterfaces.ofdmaChannels = [];
-                    if (ofdmaResult.error && !ofdmaResult.error.includes('No OFDMA')) {
-                        this.$toast?.warning(ofdmaResult.error || 'OFDMA discovery failed');
+                const result = await response.json();
+                if (result.success) {
+                    this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
+                    this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
+                    
+                    // Auto-select first SC-QAM channel for UTSC if available
+                    if (this.upstreamInterfaces.scqamChannels.length > 0 && !this.utscConfig.rfPortIfindex) {
+                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
                     }
+                    
+                    // Auto-select first OFDMA channel for RxMER if available
+                    if (this.upstreamInterfaces.ofdmaChannels.length > 0 && !this.usRxmerConfig.ofdmaIfindex) {
+                        this.usRxmerConfig.ofdmaIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
+                    }
+                    
+                    console.log('Loaded upstream interfaces:', this.upstreamInterfaces);
+                } else {
+                    console.error('Failed to load upstream interfaces:', result.error);
                 }
-                
-                // Show success toast only if RF port was found
-                if (rfResult.success) {
-                    this.$toast?.success(`RF port discovered: ${rfResult.rf_port_description}`);
-                }
-                
             } catch (error) {
-                console.error('[Upstream] Discovery error:', error);
-                this.$toast?.error('Upstream discovery failed: ' + error.message);
+                console.error('Failed to load upstream interfaces:', error);
             } finally {
                 this.upstreamInterfaces.loading = false;
             }
         },
         
-        applyFreqPreset(event) {
-            const preset = event.target.value;
-            // E6000 valid spans: 40, 80, 160, 320 MHz (non-TimeIQ) or 102.4, 204.8 MHz (TimeIQ)
-            const presets = {
-                'docsis30': { center: 50, span: 80 },     // DOCSIS 3.0: 10-90 MHz covered with 80 MHz span
-                'docsis31-low': { center: 100, span: 160 },  // DOCSIS 3.1 low: 20-180 MHz with 160 MHz span
-                'docsis31-full': { center: 160, span: 320 }  // DOCSIS 3.1 full: 0-320 MHz with 320 MHz span
-            };
-            
-            if (presets[preset]) {
-                this.utscConfig.centerFreqMhz = presets[preset].center;
-                this.utscConfig.spanMhz = presets[preset].span;
-            }
-            // For 'custom', do nothing - let user manually adjust
-        },
-        
         async configureUtsc() {
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!this.selectedModem || !cmtsIp) {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 this.$toast?.error('No CMTS IP available for this modem');
                 return;
             }
@@ -824,7 +691,7 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
+                        cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         trigger_mode: this.utscConfig.triggerMode,
                         center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
@@ -849,107 +716,8 @@ createApp({
             }
         },
         
-        // Unified Start/Stop for UTSC live monitoring
-        async startUtscLive() {
-            if (this.utscLiveMode) {
-                // Stop mode
-                this.stopUtscLive();
-                return;
-            }
-            
-            // Start mode
-            if (!this.selectedModem) {
-                this.$toast?.warning('Please select a modem first');
-                return;
-            }
-            if (!this.utscConfig.rfPortIfindex) {
-                this.$toast?.warning('Please select an RF Port');
-                return;
-            }
-            
-            // Set live mode immediately
-            this.utscLiveMode = true;
-            this.utscPlotImage = null;
-            this.utscSpectrumData = null;
-            
-            
-            // Wait for DOM to render
-            await this.$nextTick();
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Initialize spectrum analyzer if not already done
-            if (!this.spectrumState) {
-                await this.$nextTick();
-                await this.initUtscSpectrumAnalyzer();
-                
-                if (!this.spectrumState) {
-                    console.error('[UTSC] Spectrum analyzer initialization FAILED!');
-                    this.$toast?.error('Failed to initialize spectrum analyzer');
-                    this.utscLiveMode = false;
-                    return;
-                }
-            } else {
-            }
-            
-            // Use new flow: WebSocket FIRST, then API trigger
-            await this.startUtscWebSocketAndTrigger();
-            
-            // Wait for WebSocket to connect (max 5 seconds)
-            const wsReady = await new Promise(resolve => {
-                let attempts = 0;
-                const checkWs = setInterval(() => {
-                    attempts++;
-                    if (this.utscWebSocket && this.utscWebSocket.readyState === WebSocket.OPEN) {
-                        clearInterval(checkWs);
-                        resolve(true);
-                    } else if (attempts > 50) {  // 5 seconds
-                        clearInterval(checkWs);
-                        resolve(false);
-                    }
-                }, 100);
-            });
-            
-            if (!wsReady) {
-                console.error('[UTSC] WebSocket failed to connect');
-                this.$toast?.error('Failed to connect WebSocket');
-                this.stopUtscWebSocket();
-                this.utscLiveMode = false;
-                return;
-            }
-            
-            this.$toast?.success('Live monitoring started - buffering data...');
-        },
-        
-        stopUtscLive() {
-            this.utscLiveMode = false;
-            this.runningUtsc = false;
-            this.$toast?.info('Live monitoring stopped');
-            this.stopUtscWebSocket();
-            
-            // Also stop UTSC on CMTS (don't wait for result)
-            const cmtsIpForStop = this.getCmtsIpForModem();
-            if (this.selectedModem && cmtsIpForStop && this.utscConfig.rfPortIfindex) {
-                this.stopUtsc();
-            }
-            
-            // Reset buffer size display
-            this.utscBufferSize = 0;
-        },
-        
         async startUtsc() {
-            if (!this.selectedModem) {
-                this.$toast?.warning('Please select a modem first');
-                return;
-            }
-            if (!this.utscConfig.rfPortIfindex) {
-                this.$toast?.warning('Please select an RF Port');
-                return;
-            }
-            
-            // Get CMTS IP using helper
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!cmtsIp) {
-                this.$toast?.error('CMTS IP not available');
+            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
                 return;
             }
             
@@ -957,51 +725,24 @@ createApp({
             this.utscStatus = null;
             
             try {
-                // Show progress message
-                this.$toast?.info('UTSC capture in progress - this may take up to 2 minutes...');
-                
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
-                
-                // Build request body - omit trigger_count for FreeRunning mode (E6000 firmware limitation)
-                const requestBody = {
-                    cmts_ip: cmtsIp,
-                    rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                    community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
-                    tftp_ip: this.selectedModem.tftp_ip,
-                    trigger_mode: this.utscConfig.triggerMode,
-                    center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
-                    span_hz: this.utscConfig.spanMhz * 1000000,
-                    num_bins: this.utscConfig.numBins,
-                    repeat_period_ms: this.utscConfig.repeatPeriodMs || 1000,
-                    freerun_duration_ms: this.utscConfig.freerunDurationMs || 55000  // 55s max for E6000
-                };
-                
-                // Only include trigger_count for non-FreeRunning modes (E6000 rejects it in FreeRunning mode)
-                if (this.utscConfig.triggerMode !== 2) {
-                    requestBody.trigger_count = this.utscConfig.triggerCount || 10;
-                }
+                // First configure, then start
+                await this.configureUtsc();
                 
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestBody),
-                    signal: controller.signal
+                    body: JSON.stringify({
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
+                    })
                 });
-                
-                clearTimeout(timeoutId);
                 
                 const result = await response.json();
                 if (result.success) {
-                    const message = result.data?.message || 'UTSC completed';
-                    this.$toast?.info(`${message} - fetching spectrum data...`);
-                    
-                    // Wait a moment for files to be written, then fetch the data
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    await this.fetchUtscData();
-                    
-                    // Measurement started successfully, reset runningUtsc so we can start again
-                    this.runningUtsc = false;
+                    this.$toast?.success('UTSC test started');
+                    // Poll for status
+                    this.pollUtscStatus();
                 } else {
                     this.$toast?.error(result.error || 'Failed to start UTSC');
                     this.runningUtsc = false;
@@ -1014,41 +755,28 @@ createApp({
         },
         
         async stopUtsc() {
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!this.selectedModem || !cmtsIp || !this.utscConfig.rfPortIfindex) {
-                this.$toast?.warning('No active UTSC session to stop');
+            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.utscConfig.rfPortIfindex) {
                 return;
             }
             
             try {
-                this.$toast?.info('Stopping UTSC capture...');
-                
                 const response = await fetch(`/api/pypnm/upstream/utsc/stop/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
+                        cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
                 });
                 
                 const result = await response.json();
                 this.runningUtsc = false;
-                
                 if (result.success) {
-                    this.$toast?.success('UTSC capture stopped');
-                    // Stop live monitoring
-                    if (this.utscLiveMode) {
-                        this.utscLiveMode = false;
-                        this.stopUtscWebSocket();
-                    }
-                } else {
-                    this.$toast?.error(result.message || 'Failed to stop UTSC');
+                    this.$toast?.success('UTSC test stopped');
                 }
             } catch (error) {
                 console.error('Stop UTSC error:', error);
-                this.$toast?.error('Failed to stop UTSC');
                 this.runningUtsc = false;
             }
         },
@@ -1056,13 +784,12 @@ createApp({
         async pollUtscStatus() {
             if (!this.runningUtsc) return;
             
-            const cmtsIp = this.getCmtsIpForModem();
             try {
                 const response = await fetch(`/api/pypnm/upstream/utsc/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
+                        cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
@@ -1090,8 +817,7 @@ createApp({
         },
         
         async startUsRxmer() {
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!this.selectedModem || !cmtsIp || !this.usRxmerConfig.ofdmaIfindex) {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.usRxmerConfig.ofdmaIfindex) {
                 this.$toast?.error('CMTS IP and OFDMA ifIndex required');
                 return;
             }
@@ -1100,25 +826,20 @@ createApp({
             this.usRxmerStatus = null;
             
             try {
-                // Use PyPNM pysnmp-based endpoint for US RxMER
-                const response = await fetch(`/api/pypnm/cmts/ofdma/rxmer/start/${this.selectedModem.mac_address}`, {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
+                        cmts_ip: this.selectedModem.cmts_ip,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
                         pre_eq: this.usRxmerConfig.preEq,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
                 });
                 
                 const result = await response.json();
                 if (result.success) {
-                    // Save filename for later retrieval
-                    this.usRxmerConfig.lastFilename = result.filename;
-                    console.log('US RxMER started, filename:', result.filename);
-                    this.$toast?.success('US RxMER measurement started - waiting for completion...');
-                    // Start polling status - do NOT fetch plot yet
+                    this.$toast?.success('US RxMER measurement started');
                     this.pollUsRxmerStatus();
                 } else {
                     this.$toast?.error(result.error || 'Failed to start US RxMER');
@@ -1134,44 +855,29 @@ createApp({
         async pollUsRxmerStatus() {
             if (!this.runningUsRxmer) return;
             
-            const cmtsIp = this.getCmtsIpForModem();
             try {
-                // Use PyPNM pysnmp-based endpoint for status polling
-                const response = await fetch(`/api/pypnm/cmts/ofdma/rxmer/status/${this.selectedModem.mac_address}`, {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/status/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
+                        cmts_ip: this.selectedModem.cmts_ip,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
                 });
                 
                 const result = await response.json();
                 this.usRxmerStatus = result;
                 
-                console.log('US RxMER status poll result:', result);
-                
                 if (result.is_ready) {
                     this.runningUsRxmer = false;
-                    // **FIX: Update filename from status response (has timestamp)**
-                    if (result.filename) {
-                        this.usRxmerConfig.lastFilename = result.filename;
-                        console.log('Updated filename from status:', result.filename);
-                    }
-                    this.$toast?.success('US RxMER complete - fetching plot...');
-                    console.log('Status is READY, fetching data with filename:', this.usRxmerConfig.lastFilename);
+                    this.$toast?.success('US RxMER complete - fetching data...');
                     // Auto-fetch RxMER data
                     await this.fetchUsRxmerData();
                 } else if (result.is_error) {
                     this.runningUsRxmer = false;
                     this.$toast?.error('US RxMER measurement failed');
                 } else if (result.is_busy) {
-                    console.log('Status is BUSY, polling again in 2s');
-                    setTimeout(() => this.pollUsRxmerStatus(), 2000);
-                } else {
-                    // Status is inactive or other, keep polling for a bit
-                    console.log('Status is unknown/inactive, polling again in 2s');
                     setTimeout(() => this.pollUsRxmerStatus(), 2000);
                 }
             } catch (error) {
@@ -1181,9 +887,7 @@ createApp({
         },
         
         async fetchUtscData() {
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!this.selectedModem || !cmtsIp) {
-                this.runningUtsc = false;
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 return;
             }
             
@@ -1192,9 +896,9 @@ createApp({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts_ip: cmtsIp,
+                        cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l'
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
                 });
                 
@@ -1202,947 +906,42 @@ createApp({
                 
                 if (result.success && result.data) {
                     this.utscSpectrumData = result.data;
-                    // Force Vue reactivity by creating new object reference
-                    this.utscPlotImage = result.plot ? { ...result.plot, _timestamp: Date.now() } : null;
-                    
-                    // Initialize Spectrum Analyzer immediately when data first loads
-                    if (!this.spectrumState) {
-                        this.$nextTick(async () => {
-                            await this.initUtscSpectrumAnalyzer();
-                            // Display initial data
-                            if (result.data.raw_data) {
-                                this.handleSpectrumData(result.data.raw_data);
-                            }
-                        });
-                    }
-                    
-                    if (!this.utscLiveMode) {
-                        this.$toast?.success('UTSC spectrum data loaded');
-                    }
+                    this.$toast?.success('UTSC spectrum data loaded');
+                    // Wait for DOM to update, then render chart
+                    this.$nextTick(() => this.renderUtscChart());
                 } else {
-                    this.$toast?.error(result.message || result.error || 'Failed to fetch UTSC data');
+                    this.$toast?.error(result.error || 'Failed to fetch UTSC data');
                 }
             } catch (error) {
                 console.error('Fetch UTSC data error:', error);
-                if (!this.utscLiveMode) {
-                    this.$toast?.error('Failed to fetch UTSC data');
-                }
-            } finally {
-                this.runningUtsc = false;
-            }
-        },
-        
-        async toggleUtscLiveMode() {
-            this.utscLiveMode = !this.utscLiveMode;
-            
-            if (this.utscLiveMode) {
-                
-                // Spectrum analyzer should already be initialized from first measurement
-                // If not, initialize it now
-                if (!this.spectrumState) {
-                    await this.$nextTick();
-                    await new Promise(resolve => setTimeout(resolve, 150));
-                    await this.initUtscSpectrumAnalyzer();
-                }
-                
-                // Verify spectrum analyzer is ready
-                if (!this.spectrumState) {
-                    console.error('[UTSC] Spectrum analyzer failed to initialize, aborting live mode');
-                    this.$toast?.error('Failed to initialize spectrum analyzer');
-                    this.utscLiveMode = false;
-                    return;
-                }
-                
-                this.$toast?.success('Live monitoring started - continuous streaming');
-                // Connect WebSocket FIRST, then trigger UTSC API after WS opens
-                await this.startUtscWebSocketAndTrigger();
-                
-                // WebSocket backend automatically maintains continuous streaming
-                // by re-triggering UTSC when buffer gets low (no frontend timer needed)
-                
-            } else {
-                this.$toast?.info('Live monitoring stopped');
-                this.stopUtscWebSocket();
-                
-                // Clear auto-restart interval
-                if (this.utscAutoRestartInterval) {
-                    clearInterval(this.utscAutoRestartInterval);
-                    this.utscAutoRestartInterval = null;
-                }
-            }
-        },
-        
-        startUtscWebSocket() {
-            if (!this.selectedModem) return;
-            
-            // Close existing connection
-            this.stopUtscWebSocket();
-            
-            const mac = this.selectedModem.mac_address;
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Pass refresh rate (ms) and duration (s) as query params
-            const refreshMs = this.utscRefreshRate;
-            // WebSocket duration matches UTSC freerun duration
-            const durationS = this.utscDuration;
-            const rfPort = this.utscConfig.rfPortIfindex;
-            const cmtsIp = this.getCmtsIpForModem();
-            const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
-            
-            
-            try {
-                window.utscWebSocket = new WebSocket(wsUrl);
-                this.utscWebSocket = window.utscWebSocket;
-                
-                this.utscWebSocket.onopen = () => {
-                    this.$toast?.success(`UTSC stream: ${(refreshMs/1000).toFixed(1)}s refresh, ${durationS}s duration`);
-                };
-                
-                this.utscWebSocket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        
-                        // Only process real spectrum frames
-                        if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
-                            
-                            // Update buffer size display
-                            if (data.buffer_size !== undefined) {
-                                this.utscBufferSize = data.buffer_size;
-                            }
-                            
-                            // UNWRAP raw_data (THIS IS THE CRITICAL STEP)
-                            const frame = {
-                                freq_start_hz: data.raw_data.freq_start_hz,
-                                freq_step_hz: data.raw_data.freq_step_hz,
-                                bins: data.raw_data.bins
-                            };
-                            
-                            // DEBUG (verify unwrapping worked)
-                            console.log('🟡 ANALYZER FRAME (unwrapped):', {
-                                freq_start_hz: frame.freq_start_hz,
-                                freq_step_hz: frame.freq_step_hz,
-                                bins_length: frame.bins.length,
-                                first_bin: frame.bins[0]
-                            });
-                            
-                            // >>> FEED TO SPECTRUM ANALYZER <<<
-                            try {
-                                this.handleSpectrumData(frame);
-                                console.log('✅ handleSpectrumData called successfully');
-                            } catch (specError) {
-                                console.error('❌ [UTSC] ERROR in handleSpectrumData:', specError);
-                            }
-                        }
-                        
-                        // Handle other message types
-                        if (data.type === 'buffering') {
-                            // Show buffering progress
-                            if (data.buffer_size !== undefined) {
-                                this.utscBufferSize = data.buffer_size;
-                            }
-                            if (data.message) {
-                            }
-                        } else if (data.type === 'buffering_complete') {
-                            // Buffering complete, stream starting
-                            this.$toast?.success(data.message);
-                        } else if (data.type === 'heartbeat') {
-                            // Update buffer size from heartbeat
-                            if (data.buffer_size !== undefined) {
-                                this.utscBufferSize = data.buffer_size;
-                            }
-                        } else if (data.type === 'error') {
-                            console.error('[UTSC] Stream error:', data.message);
-                        } else if (data.type === 'connected') {
-                        }
-                    } catch (e) {
-                        console.error('[UTSC] Failed to parse message:', e);
-                    }
-                };
-                
-                this.utscWebSocket.onerror = (error) => {
-                    console.error('[UTSC] WebSocket error:', error);
-                    this.$toast?.error('UTSC stream error');
-                };
-                
-                this.utscWebSocket.onclose = () => {
-                    // Don't auto-reconnect - session duration has completed
-                    // User needs to manually restart if they want to continue
-                    if (this.utscLiveMode) {
-                        this.utscLiveMode = false;
-                        this.$toast?.info('UTSC session complete');
-                    }
-                };
-            } catch (e) {
-                console.error('[UTSC] Failed to create WebSocket:', e);
-                this.$toast?.error('Failed to connect UTSC stream');
-            }
-        },
-        
-        async restartUtscSession() {
-            // Restart UTSC session by calling start API then reconnecting WebSocket
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!cmtsIp || !this.selectedModem || !this.utscConfig.rfPortIfindex) {
-                console.error('[UTSC] Cannot restart: missing config');
-                this.utscLiveMode = false;
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip: cmtsIp,
-                        rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.selectedModem.cmts_community || 'Z1gg0Sp3c1@l',
-                        tftp_ip: this.selectedModem.tftp_ip,
-                        trigger_mode: this.utscConfig.triggerMode,
-                        center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
-                        span_hz: this.utscConfig.spanMhz * 1000000,
-                        num_bins: this.utscConfig.numBins,
-                        repeat_period_ms: this.utscConfig.repeatPeriodMs,
-                        freerun_duration_ms: this.utscConfig.freerunDurationMs
-                    })
-                });
-                
-                const result = await response.json();
-                if (result.success) {
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    this.startUtscWebSocket();
-                } else {
-                    console.error('[UTSC] Restart failed:', result.error);
-                    this.$toast?.error('Failed to restart UTSC session');
-                    this.utscLiveMode = false;
-                }
-            } catch (error) {
-                console.error('[UTSC] Restart error:', error);
-                this.$toast?.error('Failed to restart UTSC');
-                this.utscLiveMode = false;
-            }
-        },
-        
-        async startUtscWebSocketAndTrigger() {
-            // Connect WebSocket FIRST, wait for it to open, THEN trigger UTSC API
-            // This ensures WebSocket is ready to receive files as they're generated
-            return new Promise((resolve, reject) => {
-                const mac = this.selectedModem.mac_address;
-                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const refreshMs = this.utscRefreshRate;
-                const durationS = this.utscDuration;
-                const rfPort = this.utscConfig.rfPortIfindex;
-                const cmtsIp = this.getCmtsIpForModem();
-                const community = this.selectedModem.cmts_community || this.snmpCommunityRW || 'Z1gg0Sp3c1@l';
-                const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${mac}?refresh=${refreshMs}&duration=${durationS}&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(community)}`;
-                
-                this.stopUtscWebSocket(); // Close any existing connection
-                
-                try {
-                    window.utscWebSocket = new WebSocket(wsUrl);
-                    this.utscWebSocket = window.utscWebSocket;
-                    
-                    this.utscWebSocket.onopen = async () => {
-                        
-                        // Now that WebSocket is ready, trigger the UTSC API
-                        try {
-                            const response = await fetch(`/api/pypnm/upstream/utsc/start/${mac}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    cmts_ip: cmtsIp,
-                                    rf_port_ifindex: rfPort,
-                                    community: community,
-                                    tftp_ip: this.selectedModem.tftp_ip,
-                                    trigger_mode: this.utscConfig.triggerMode,
-                                    center_freq_hz: this.utscConfig.centerFreqMhz * 1000000,
-                                    span_hz: this.utscConfig.spanMhz * 1000000,
-                                    num_bins: this.utscConfig.numBins,
-                                    repeat_period_ms: this.utscConfig.repeatPeriodMs,
-                                    freerun_duration_ms: this.utscConfig.freerunDurationMs
-                                })
-                            });
-                            
-                            const result = await response.json();
-                            if (result.success) {
-                                resolve();
-                            } else {
-                                console.error('[UTSC] API trigger failed:', result.error);
-                                this.$toast?.error(result.error || 'Failed to start UTSC');
-                                this.stopUtscWebSocket();
-                                reject(new Error(result.error));
-                            }
-                        } catch (error) {
-                            console.error('[UTSC] API trigger error:', error);
-                            this.$toast?.error('Failed to trigger UTSC');
-                            this.stopUtscWebSocket();
-                            reject(error);
-                        }
-                    };
-                    
-                    this.utscWebSocket.onerror = (error) => {
-                        console.error('[UTSC] WebSocket error:', error);
-                        this.$toast?.error('WebSocket connection failed');
-                        reject(error);
-                    };
-                    
-                    this.utscWebSocket.onclose = () => {
-                    };
-                    
-                    // Set the comprehensive message handler (handles ALL types including spectrum)
-                    this.utscWebSocket.onmessage = (event) => {
-                        try {
-                            const data = JSON.parse(event.data);
-
-                            // ========== SPECTRUM FRAMES ==========
-                            if (data.type === 'spectrum' && data.raw_data && data.raw_data.bins) {
-
-                                if (data.buffer_size !== undefined) {
-                                    this.utscBufferSize = data.buffer_size;
-                                }
-
-                                const frame = {
-                                    freq_start_hz: data.raw_data.freq_start_hz,
-                                    freq_step_hz:  data.raw_data.freq_step_hz,
-                                    bins:          data.raw_data.bins
-                                };
-
-                                console.log('🟡 ANALYZER FRAME:', {
-                                    bins: frame.bins.length,
-                                    first: frame.bins[0],
-                                    start: frame.freq_start_hz,
-                                    step: frame.freq_step_hz
-                                });
-
-                                // >>> THIS IS THE ONLY FEED POINT <<<
-                                this.handleSpectrumData(frame);
-                                return;
-                            }
-
-                            // ========== CONTROL / STATUS FRAMES ==========
-                            if (data.type === 'buffering') {
-                                this.utscBufferSize = data.buffer_size || 0;
-                            }
-                            else if (data.type === 'buffering_complete') {
-                                this.$toast?.success(data.message);
-                            }
-                            else if (data.type === 'connected') {
-                            }
-                            else if (data.type === 'heartbeat') {
-                                this.utscBufferSize = data.buffer_size || this.utscBufferSize;
-                            }
-                            else if (data.type === 'error') {
-                                console.error('[UTSC] Stream error:', data.message);
-                                this.$toast?.error(data.message);
-                            }
-
-                        } catch (e) {
-                            console.error('[UTSC] Parse error:', e);
-                        }
-                    };
-                } catch (error) {
-                    console.error('[UTSC] WebSocket creation error:', error);
-                    reject(error);
-                }
-            });
-        },
-        
-        stopUtscWebSocket() {
-            if (this.utscWebSocket) {
-                this.utscWebSocket.close();
-                this.utscWebSocket = null;
-            }
-            // Also stop any polling fallback
-            if (this.utscLiveInterval) {
-                clearInterval(this.utscLiveInterval);
-                this.utscLiveInterval = null;
-            }
-            // Don't destroy SciChart - let it persist for reuse
-            // Chart will be destroyed in stopUtscLiveMode() when user explicitly stops
-        },
-        
-        async initUtscSpectrumAnalyzer() {
-            // Initialize professional spectrum analyzer
-            
-            // Initialize spectrum analyzer state if not exists
-            if (!this.spectrumState) {
-                this.spectrumState = {
-                    bins: [],
-                    freqStart: 0,
-                    freqStep: 1,
-                    maxHold: [],
-                    freezeA: null,
-                    freezeB: null,
-                    paused: false,
-                    holdMode: 'max',
-                    decayRate: 0.992,
-                    scaleMode: 'auto',
-                    impulseOn: true,
-                    viewStart: 0,
-                    viewEnd: null,
-                    wfRows: 240,
-                    wfBuffer: []
-                };
-            }
-            
-            // Get canvas elements
-            const specCanvas = document.getElementById('specCanvas');
-            const wfCanvas = document.getElementById('waterfallCanvas');
-            
-            if (!specCanvas || !wfCanvas) {
-                console.error('[Spectrum] Canvas elements not found');
-                return;
-            }
-            
-            // Setup canvases
-            this.setupSpectrumCanvases(specCanvas, wfCanvas);
-            
-            // Setup controls
-            this.setupSpectrumControls();
-            
-        },
-        
-        setupSpectrumCanvases(specCanvas, wfCanvas) {
-            const dpr = window.devicePixelRatio || 1;
-            
-            const resizeCanvas = (canvas) => {
-                const rect = canvas.getBoundingClientRect();
-                canvas.width = Math.round(rect.width * dpr);
-                canvas.height = Math.round(rect.height * dpr);
-                const ctx = canvas.getContext('2d');
-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            };
-            
-            resizeCanvas(specCanvas);
-            resizeCanvas(wfCanvas);
-            
-            // Store contexts
-            this.specCtx = specCanvas.getContext('2d');
-            this.wfCtx = wfCanvas.getContext('2d');
-            
-            // Mouse tracking for cursor info
-            specCanvas.addEventListener('mousemove', (e) => {
-                if (!this.spectrumState.bins.length) return;
-                const rect = specCanvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const s = this.spectrumState;
-                const idx = Math.round(s.viewStart + x/rect.width * (s.viewEnd - s.viewStart));
-                const f = (s.freqStart + idx * s.freqStep) / 1e6;
-                const v = s.bins[idx];
-                const cursorEl = document.getElementById('specCursor');
-                if (cursorEl) {
-                    cursorEl.textContent = `${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV\nBin ${idx}`;
-                }
-            });
-            
-            // Zoom with mouse wheel
-            specCanvas.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                const s = this.spectrumState;
-                if (!s.bins.length) return;
-                
-                const span = s.viewEnd - s.viewStart;
-                const center = s.viewStart + span / 2;
-                const factor = e.deltaY > 0 ? 1.2 : 0.8;
-                let newSpan = Math.max(50, Math.min(s.bins.length, span * factor));
-                s.viewStart = Math.max(0, Math.floor(center - newSpan / 2));
-                s.viewEnd = Math.min(s.bins.length - 1, Math.floor(center + newSpan / 2));
-                this.drawSpectrum();
-            });
-            
-            // Handle window resize
-            window.addEventListener('resize', () => {
-                resizeCanvas(specCanvas);
-                resizeCanvas(wfCanvas);
-                this.drawSpectrum();
-                this.drawWaterfall();
-            });
-        },
-        
-        setupSpectrumControls() {
-            document.getElementById('resetMax')?.addEventListener('click', () => {
-                this.spectrumState.maxHold = this.spectrumState.bins.slice();
-                this.drawSpectrum();
-            });
-            
-            document.getElementById('clearWf')?.addEventListener('click', () => {
-                this.spectrumState.wfBuffer = [];
-                this.drawWaterfall();
-            });
-            
-            document.getElementById('pauseBtn')?.addEventListener('click', (e) => {
-                this.spectrumState.paused = !this.spectrumState.paused;
-                e.target.innerHTML = this.spectrumState.paused ? 
-                    '<i class="bi bi-play-fill me-1"></i>Resume' : 
-                    '<i class="bi bi-pause-fill me-1"></i>Pause';
-            });
-            
-            document.getElementById('scalePreset')?.addEventListener('change', (e) => {
-                this.spectrumState.scaleMode = e.target.value;
-                this.drawSpectrum();
-            });
-            
-            document.getElementById('holdMode')?.addEventListener('change', (e) => {
-                this.spectrumState.holdMode = e.target.value;
-            });
-            
-            document.getElementById('impulse')?.addEventListener('change', (e) => {
-                this.spectrumState.impulseOn = e.target.checked;
-                this.drawSpectrum();
-            });
-            
-            document.getElementById('freezeA')?.addEventListener('click', () => {
-                this.spectrumState.freezeA = this.spectrumState.bins.slice();
-            });
-            
-            document.getElementById('freezeB')?.addEventListener('click', () => {
-                this.spectrumState.freezeB = this.spectrumState.bins.slice();
-            });
-            
-            document.getElementById('zoomOut')?.addEventListener('click', () => {
-                const s = this.spectrumState;
-                s.viewStart = 0;
-                s.viewEnd = s.bins.length - 1;
-                this.drawSpectrum();
-            });
-        },
-        
-        handleSpectrumData(rawData) {
-            if (!rawData) return;
-            if (this.spectrumState?.paused) return;
-            
-            // Support two formats:
-            // 1. {frequencies: [...], amplitudes: [...]} (old format)
-            // 2. {freq_start_hz: X, freq_step_hz: Y, bins: [...]} (new format - preferred)
-            let bins, freqStart, freqStep;
-            
-            if (rawData.bins && rawData.freq_start_hz !== undefined && rawData.freq_step_hz !== undefined) {
-                // New format (UTSC uses this)
-                bins = rawData.bins;
-                freqStart = rawData.freq_start_hz;
-                freqStep = rawData.freq_step_hz;
-            } else if (rawData.frequencies && rawData.amplitudes) {
-                // Old format (backward compatibility)
-                bins = rawData.amplitudes;
-                freqStart = rawData.frequencies[0];
-                freqStep = rawData.frequencies[1] - rawData.frequencies[0];
-            } else {
-                console.warn('[Spectrum] Data format not recognized, returning');
-                return; // Missing required fields
-            }
-            
-            const s = this.spectrumState;
-            
-            // Update data
-            s.bins = bins.slice();
-            s.freqStart = freqStart;
-            s.freqStep = freqStep;
-            
-            // Initialize view if needed
-            if (s.viewEnd === null) {
-                s.viewStart = 0;
-                s.viewEnd = s.bins.length - 1;
-            }
-            
-            // Initialize max hold
-            if (s.maxHold.length !== s.bins.length) {
-                s.maxHold = s.bins.slice();
-            }
-            
-            // Update max hold
-            if (s.holdMode === 'max') {
-                for (let i = 0; i < s.bins.length; i++) {
-                    if (s.bins[i] > s.maxHold[i]) s.maxHold[i] = s.bins[i];
-                }
-            } else {
-                for (let i = 0; i < s.bins.length; i++) {
-                    if (s.bins[i] > s.maxHold[i]) s.maxHold[i] = s.bins[i];
-                    else s.maxHold[i] = s.maxHold[i] * s.decayRate + s.bins[i] * (1 - s.decayRate);
-                }
-            }
-            
-            // Update waterfall
-            s.wfBuffer.unshift(s.bins.slice());
-            if (s.wfBuffer.length > s.wfRows) s.wfBuffer.pop();
-            
-            // Update info
-            const freqEnd = s.freqStart + s.freqStep * (s.bins.length - 1);
-            const specInfoEl = document.getElementById('specInfo');
-            if (specInfoEl) {
-                specInfoEl.textContent = 
-                    `Bins: ${s.bins.length} — ${(s.freqStart/1e6).toFixed(2)} MHz → ${(freqEnd/1e6).toFixed(2)} MHz`;
-            }
-            
-            // Draw
-            this.drawSpectrum();
-            this.drawWaterfall();
-        },
-        
-        drawSpectrum() {
-            if (!this.specCtx) return;
-            
-            const canvas = document.getElementById('specCanvas');
-            if (!canvas) return;
-            
-            const w = canvas.width / (window.devicePixelRatio || 1);
-            const h = canvas.height / (window.devicePixelRatio || 1);
-            const ctx = this.specCtx;
-            const s = this.spectrumState;
-            
-            // Clear
-            ctx.fillStyle = '#071028';
-            ctx.fillRect(0, 0, w, h);
-            
-            // Draw grid
-            ctx.save();
-            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-            for (let i = 0; i <= 6; i++) {
-                const y = (h / 6) * i;
-                ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(w, y);
-                ctx.stroke();
-            }
-            ctx.restore();
-            
-            if (!s.bins.length) return;
-            
-            // Plot margins for axes and labels
-            const plotLeft = 85;      // Space for Y-axis labels + title
-            const plotBottom = 50;    // Space for X-axis labels + title (avoid waterfall overlap)
-            const plotTop = 20;       // Lower the analyzer slightly
-            const plotRight = 10;
-            const plotW = w - plotLeft - plotRight;
-            const plotH = h - plotTop - plotBottom;
-            
-            // Get slice of data to display
-            const lo = s.viewStart, hi = s.viewEnd;
-            const slice = s.bins.slice(lo, hi + 1);
-            const sliceHold = s.maxHold.slice(lo, hi + 1);
-            
-            // Calculate scale
-            let minV = Infinity, maxV = -Infinity;
-            for (let v of slice.concat(sliceHold, s.freezeA || [], s.freezeB || [])) {
-                if (isFinite(v)) {
-                    if (v < minV) minV = v;
-                    if (v > maxV) maxV = v;
-                }
-            }
-            
-            if (s.scaleMode !== 'auto') {
-                const p = s.scaleMode.split(',');
-                minV = parseFloat(p[0]);
-                maxV = parseFloat(p[1]);
-            } else {
-                const pad = (maxV - minV) * 0.08 || 1;
-                maxV += pad;
-                minV -= pad;
-            }
-            
-            const valToY = v => (plotTop + plotH) - ((v - minV) / (maxV - minV)) * plotH;
-            const pxStep = plotW / (slice.length - 1);
-            
-            // Draw axes
-            ctx.strokeStyle = 'rgba(200,200,255,0.4)';
-            ctx.lineWidth = 1;
-            // Y axis
-            ctx.beginPath();
-            ctx.moveTo(plotLeft, plotTop);
-            ctx.lineTo(plotLeft, plotTop + plotH);
-            ctx.stroke();
-            // X axis
-            ctx.beginPath();
-            ctx.moveTo(plotLeft, plotTop + plotH);
-            ctx.lineTo(plotLeft + plotW, plotTop + plotH);
-            ctx.stroke();
-            
-            // Y ticks and labels
-            ctx.fillStyle = 'rgba(200,200,255,0.8)';
-            ctx.font = '12px system-ui';
-            for (let i = 0; i <= 5; i++) {
-                const v = minV + (maxV - minV) * (i / 5);
-                const y = valToY(v);
-                ctx.beginPath();
-                ctx.moveTo(plotLeft - 5, y);
-                ctx.lineTo(plotLeft, y);
-                ctx.stroke();
-                ctx.fillText(v.toFixed(1), plotLeft - 50, y + 4);
-            }
-            
-            // X ticks and labels
-            const xTicks = 6;
-            for (let i = 0; i <= xTicks; i++) {
-                const idx = Math.floor(lo + (hi - lo) * (i / xTicks));
-                const x = plotLeft + (idx - lo) / (hi - lo) * plotW;
-                const f = (s.freqStart + idx * s.freqStep) / 1e6;
-                ctx.beginPath();
-                ctx.moveTo(x, plotTop + plotH);
-                ctx.lineTo(x, plotTop + plotH + 5);
-                ctx.stroke();
-                ctx.fillText(f.toFixed(2) + ' MHz', x - 20, plotTop + plotH + 20);
-            }
-            
-            // Axis titles
-            ctx.save();
-            ctx.fillStyle = 'rgba(220,220,255,0.9)';
-            ctx.font = '13px system-ui';
-            // X-axis title (below tick labels, well above waterfall)
-            ctx.fillText('Frequency (MHz)', plotLeft + plotW / 2 - 50, h - 5);
-            // Y-axis title (rotated, positioned left of tick labels)
-            ctx.translate(10, plotTop + plotH / 2);
-            ctx.rotate(-Math.PI / 2);
-            ctx.fillText('Level (dBmV / MHz)', -60, 0);  // Centered text
-            ctx.restore();
-            
-            // Draw live trace
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(140,200,255,0.95)';
-            ctx.lineWidth = 1.4;
-            for (let i = 0; i < slice.length; i++) {
-                const x = plotLeft + i * pxStep, y = valToY(slice[i]);
-                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-            }
-            ctx.stroke();
-            
-            // Draw max hold
-            ctx.beginPath();
-            ctx.setLineDash([6, 4]);
-            ctx.strokeStyle = 'rgba(255,200,120,0.95)';
-            for (let i = 0; i < sliceHold.length; i++) {
-                const x = plotLeft + i * pxStep, y = valToY(sliceHold[i]);
-                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-            }
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Draw freeze overlays
-            if (document.getElementById('showFreeze')?.checked) {
-                if (s.freezeA) {
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(0,255,160,0.9)';
-                    for (let i = lo; i <= hi; i++) {
-                        const x = plotLeft + (i - lo) * pxStep, y = valToY(s.freezeA[i]);
-                        i === lo ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-                    }
-                    ctx.stroke();
-                }
-                if (s.freezeB) {
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(255,100,180,0.9)';
-                    for (let i = lo; i <= hi; i++) {
-                        const x = plotLeft + (i - lo) * pxStep, y = valToY(s.freezeB[i]);
-                        i === lo ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-                    }
-                    ctx.stroke();
-                }
-            }
-            
-            // Draw impulse markers
-            if (s.impulseOn) {
-                for (let i = 1; i < slice.length - 1; i++) {
-                    const v = slice[i];
-                    const avg = (slice[i - 1] + slice[i + 1]) / 2;
-                    if (v - avg > 6) { // >6 dB spike
-                        const x = plotLeft + i * pxStep, y = valToY(v);
-                        ctx.fillStyle = 'red';
-                        ctx.beginPath();
-                        ctx.arc(x, y, 3, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                }
-            }
-        },
-        
-        drawWaterfall() {
-            if (!this.wfCtx) return;
-            
-            const canvas = document.getElementById('waterfallCanvas');
-            if (!canvas) return;
-            
-            const w = canvas.width / (window.devicePixelRatio || 1);
-            const h = canvas.height / (window.devicePixelRatio || 1);
-            const ctx = this.wfCtx;
-            const s = this.spectrumState;
-            
-            ctx.clearRect(0, 0, w, h);
-            if (!s.wfBuffer.length) return;
-            
-            // Calculate scale
-            let minV = Infinity, maxV = -Infinity;
-            for (let v of s.bins) {
-                if (v < minV) minV = v;
-                if (v > maxV) maxV = v;
-            }
-            const pad = (maxV - minV) * 0.1 || 1;
-            maxV += pad;
-            minV -= pad;
-            
-            // Color map
-            const colorMap = (v) => {
-                const t = Math.max(0, Math.min(1, (v - minV) / (maxV - minV)));
-                const r = Math.floor(255 * Math.min(1, Math.max(0, (t - 0.5) * 2)));
-                const g = Math.floor(255 * Math.min(1, Math.max(0, 1 - Math.abs(t - 0.5) * 2)));
-                const b = Math.floor(255 * Math.min(1, Math.max(0, (0.5 - t) * 2)));
-                return `rgb(${r},${g},${b})`;
-            };
-            
-            const rowH = h / s.wfRows;
-            const pxStep = w / (s.bins.length - 1);
-            
-            for (let r = 0; r < s.wfBuffer.length; r++) {
-                const row = s.wfBuffer[r];
-                const y = r * rowH;
-                for (let i = 0; i < row.length; i++) {
-                    ctx.fillStyle = colorMap(row[i]);
-                    ctx.fillRect(i * pxStep, y, pxStep + 1, rowH + 1);
-                }
-            }
-        },
-        
-        updateUtscFallbackChart(rawData) {
-            try {
-                if (!rawData || !rawData.frequencies || !rawData.amplitudes) {
-                    return;
-                }
-                
-                // Create canvas if needed
-                let canvas = document.getElementById('utscFallbackCanvas');
-                if (!canvas) {
-                    const chartDiv = document.getElementById('utscSciChart');
-                    if (!chartDiv) return;
-                    
-                    canvas = document.createElement('canvas');
-                    canvas.id = 'utscFallbackCanvas';
-                    canvas.width = chartDiv.offsetWidth;
-                    canvas.height = chartDiv.offsetHeight;
-                    chartDiv.innerHTML = '';
-                    chartDiv.appendChild(canvas);
-                }
-                
-                // Convert frequencies to MHz
-                const freqMHz = rawData.frequencies.map(f => f / 1e6);
-                
-                // Destroy old chart if exists
-                if (this.utscFallbackChart) {
-                    this.utscFallbackChart.destroy();
-                }
-                
-                // Create new Chart.js chart
-                const ctx = canvas.getContext('2d');
-                this.utscFallbackChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: freqMHz,
-                        datasets: [{
-                            label: 'UTSC Spectrum',
-                            data: rawData.amplitudes,
-                            borderColor: '#00aaff',
-                            backgroundColor: 'rgba(0, 170, 255, 0.1)',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            tension: 0.1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        animation: false,
-                        scales: {
-                            x: {
-                                title: { display: true, text: 'Frequency (MHz)' },
-                                ticks: { maxTicksLimit: 10 }
-                            },
-                            y: {
-                                title: { display: true, text: 'Power (dBmV)' }
-                            }
-                        },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: { enabled: false }
-                        }
-                    }
-                });
-                
-            } catch (error) {
-                console.error('[Chart] Fallback chart failed:', error);
-            }
-        },
-        
-        // Legacy polling methods (kept as fallback)
-        startUtscLiveMonitoring() {
-            if (this.utscLiveInterval) {
-                clearInterval(this.utscLiveInterval);
-            }
-            
-            // Fetch immediately
-            this.fetchUtscData();
-            
-            // Then fetch at regular intervals
-            this.utscLiveInterval = setInterval(() => {
-                if (this.utscLiveMode && this.selectedModem && this.utscConfig.rfPortIfindex) {
-                    this.fetchUtscData();
-                } else {
-                    this.stopUtscLiveMonitoring();
-                }
-            }, this.utscRefreshRate);
-        },
-        
-        stopUtscLiveMonitoring() {
-            if (this.utscLiveInterval) {
-                clearInterval(this.utscLiveInterval);
-                this.utscLiveInterval = null;
-            }
-        },
-        
-        restartUtscLiveMonitoring() {
-            // Restart with new refresh rate if live mode is active
-            if (this.utscLiveMode) {
-                this.startUtscLiveMonitoring();
+                this.$toast?.error('Failed to fetch UTSC data');
             }
         },
         
         async fetchUsRxmerData() {
-            const cmtsIp = this.getCmtsIpForModem();
-            if (!this.selectedModem || !cmtsIp) {
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
                 return;
             }
             
             try {
-                // Get the filename from config (saved from start response)
-                const filename = this.usRxmerConfig.lastFilename;
-                
-                if (!filename) {
-                    this.$toast?.error('No filename available for US RxMER capture');
-                    console.error('US RxMER filename not found');
-                    return;
-                }
-                
-                console.log('Fetching US RxMER plot for filename:', filename);
-                
-                // Fetch the plot image from PyPNM API via backend
-                const response = await fetch(`/api/pypnm/upstream/rxmer/plot/${this.selectedModem.mac_address}`, {
+                const response = await fetch(`/api/pypnm/upstream/rxmer/data/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        filename: filename
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
+                        community: this.selectedModem.cmts_community || 'Z1gg0@LL'
                     })
                 });
                 
-                if (response.ok && response.headers.get('Content-Type')?.startsWith('image/')) {
-                    // Convert to blob and create object URL
-                    const blob = await response.blob();
-                    const imageUrl = URL.createObjectURL(blob);
-                    
-                    // Store plot image data
-                    this.usRxmerSpectrumData = {
-                        plotUrl: imageUrl,
-                        filename: filename,
-                        ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex
-                    };
-                    
-                    this.$toast?.success('US RxMER plot loaded');
-                    this.$nextTick(() => this.renderUsRxmerPlot());
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    this.usRxmerSpectrumData = result.data;
+                    this.$toast?.success('US RxMER data loaded');
+                    this.$nextTick(() => this.renderUsRxmerChart());
                 } else {
-                    const result = await response.json();
-                    this.$toast?.error(result.message || result.error || 'Failed to fetch US RxMER plot');
+                    this.$toast?.error(result.error || 'Failed to fetch US RxMER data');
                 }
             } catch (error) {
                 console.error('Fetch US RxMER data error:', error);
@@ -2150,18 +949,67 @@ createApp({
             }
         },
         
-        renderUsRxmerPlot() {
-            // Display the matplotlib plot image
-            const container = document.getElementById('usRxmerPlotContainer');
-            if (!container || !this.usRxmerSpectrumData?.plotUrl) return;
+        renderUtscChart() {
+            const canvas = document.getElementById('utscChart');
+            if (!canvas || !this.utscSpectrumData) return;
             
-            container.innerHTML = `<img src="${this.usRxmerSpectrumData.plotUrl}" 
-                alt="US OFDMA RxMER Plot" 
-                style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">`;
+            // Destroy existing chart
+            if (this.utscChartInstance) {
+                this.utscChartInstance.destroy();
+            }
+            
+            const data = this.utscSpectrumData;
+            const ctx = canvas.getContext('2d');
+            
+            this.utscChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.frequencies_mhz || [],
+                    datasets: [{
+                        label: 'Power (dBmV)',
+                        data: data.amplitudes_dbmv || [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        borderWidth: 1,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Frequency (MHz)'
+                            },
+                            ticks: {
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Power (dBmV)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        title: {
+                            display: true,
+                            text: `Upstream Spectrum - Channel ${data.channel_id || 'N/A'}`
+                        }
+                    }
+                }
+            });
         },
         
         renderUsRxmerChart() {
-            // Legacy Chart.js rendering - now using matplotlib plot instead
             const canvas = document.getElementById('usRxmerChart');
             if (!canvas || !this.usRxmerSpectrumData) return;
             
@@ -2224,7 +1072,6 @@ createApp({
         
         closeUtscSpectrum() {
             this.utscSpectrumData = null;
-            this.utscPlotImage = null;
             if (this.utscChartInstance) {
                 this.utscChartInstance.destroy();
                 this.utscChartInstance = null;
@@ -2268,6 +1115,15 @@ createApp({
                 
                 const data = await response.json();
                 
+                console.log('=== PNM Measurement Response ===');
+                console.log('Status:', data.status);
+                console.log('Has data field:', !!data.data);
+                console.log('data.data:', data.data);
+                console.log('Measurement type:', measurementType);
+                console.log('Output type:', this.pnmOutputType);
+                console.log('Plots:', data.plots);
+                console.log('Plots count:', data.plots ? data.plots.length : 0);
+                console.log('================================');
                 
                 if (data.status === 0) {
                     // Store data in the appropriate variable
@@ -2276,12 +1132,9 @@ createApp({
                     // Map to legacy variables for compatibility
                     if (measurementType === 'rxmer') {
                         this.rxmerData = data;
-                        // Only draw charts if we don't have matplotlib plots
-                        if (!data.plots || data.plots.length === 0) {
-                            this.$nextTick(() => {
-                                this.drawRxmerCharts();
-                            });
-                        }
+                        this.$nextTick(() => {
+                            this.drawRxmerCharts();
+                        });
                     } else if (measurementType === 'spectrum') {
                         this.spectrumData = data;
                     } else if (measurementType === 'fec_summary') {
@@ -2296,13 +1149,14 @@ createApp({
                     const hasMatplotlibPlots = data.plots && data.plots.length > 0;
                     
                     if (hasJsonData && !hasMatplotlibPlots) {
+                        console.log('Will call drawMeasurementCharts with:', measurementType, data);
                         this.$nextTick(() => {
                             this.drawMeasurementCharts(measurementType, data);
                         });
                     } else if (hasMatplotlibPlots) {
-                        console.log('Matplotlib plots available:', data.plots.length);
+                        console.log(`Using ${data.plots.length} matplotlib plot(s) for ${measurementType}`);
                     } else {
-                        console.log('No data or plots to display');
+                        console.log('Skipping chart draw - no JSON data available. Output type:', this.pnmOutputType);
                     }
                     
                     const typeNames = {
@@ -2478,16 +1332,16 @@ createApp({
             if (!container) {
                 console.warn('Chart container not found');
                 return;
-            }t
+            }
             
             // Clear old charts
             container.innerHTML = '';
             
             console.log('Drawing charts for type:', type, 'with data:', data);
             
-            // SKIP Chart.js for spectrum and constellation - we use matplotlib PNG plots instead
-            if (type === 'spectrum' || type === 'constellation') {
-                console.log(`${type} uses matplotlib plots - skipping Chart.js`);
+            // SKIP Chart.js for spectrum - we use matplotlib PNG plots instead
+            if (type === 'spectrum') {
+                console.log('Spectrum uses matplotlib plots - skipping Chart.js');
                 return;
             }
             
@@ -2501,6 +1355,8 @@ createApp({
                 this.drawFecSummaryCharts(data.data);
             } else if (type === 'histogram' && data.data) {
                 this.drawHistogramCharts(data.data);
+            } else if (type === 'constellation' && data.data) {
+                this.drawConstellationCharts(data.data);
             } else if (type === 'us_pre_eq') {
                 this.drawPreEqCharts();
             } else {
@@ -3116,197 +1972,6 @@ createApp({
                 timer: 5000,
                 timerProgressBar: true
             });
-        },
-        
-        // Upstream PNM Tab - Persistent WebSocket Control Channel
-        onUpstreamPnmTabClick() {
-            // Connect persistent WebSocket when tab is opened
-            if (!this.utscWs || this.utscWsStatus !== 'connected') {
-                this.connectUtscWebSocket();
-            }
-            // Initialize chart if needed
-            if (!this.utscChartInstance && window.Plotly) {
-                this.$nextTick(() => this.initUtscChart());
-            }
-        },
-        
-        connectUtscWebSocket() {
-            if (!this.selectedModem) {
-                console.warn('No modem selected');
-                return;
-            }
-            
-            if (this.utscWs && this.utscWsStatus === 'connected') {
-                console.log('WebSocket already connected');
-                return;
-            }
-            
-            const macAddress = this.selectedModem.mac_address;
-            const rfPort = this.utscConfig.rfPortIfindex || this.upstreamInterfaces.modemRfPort;
-            const cmtsIp = this.selectedCmts;
-            
-            if (!rfPort) {
-                this.showError('Config Error', 'RF port not configured');
-                return;
-            }
-            
-            this.utscWsStatus = 'connecting';
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/utsc/${macAddress}?refresh_ms=500&duration_s=60&rf_port=${rfPort}&cmts_ip=${cmtsIp}&community=${encodeURIComponent(this.snmpCommunityRW)}`;
-            
-            window.utscWebSocket = new WebSocket(wsUrl);
-            this.utscWs = window.utscWebSocket;
-            
-            this.utscWs.onopen = () => {
-                this.utscWsStatus = 'connected';
-                this.showSuccess('WebSocket Connected', 'Control channel ready');
-            };
-            
-            this.utscWs.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    this.handleUtscWebSocketMessage(data);
-                } catch (error) {
-                    console.error('[UTSC] Parse error:', error);
-                }
-            };
-            
-            this.utscWs.onerror = (error) => {
-                console.error('[UTSC] WebSocket error:', error);
-                console.error('[UTSC] URL was:', wsUrl);
-                this.utscWsStatus = 'error';
-                this.showError('WebSocket Error', 'Connection failed - check console');
-            };
-            
-            this.utscWs.onclose = () => {
-                this.utscWsStatus = 'disconnected';
-                // Auto-reconnect after 3 seconds
-                setTimeout(() => {
-                    if (this.utscWsStatus === 'disconnected') {
-                        this.connectUtscWebSocket();
-                    }
-                }, 3000);
-            };
-        },
-        
-        handleUtscWebSocketMessage(data) {
-            const msgType = data.type;
-            
-            if (msgType === 'connected') {
-            } else if (msgType === 'buffering') {
-            } else if (msgType === 'buffering_complete') {
-            } else if (msgType === 'spectrum_data' || msgType === 'spectrum') {
-                this.utscDataCount++;
-                this.updateUtscChart(data);
-            } else if (msgType === 'status') {
-            }
-        },
-        
-        async startUtscStream() {
-            if (!this.selectedModem || this.utscStreaming) {
-                return;
-            }
-            
-            const macAddress = this.selectedModem.mac_address;
-            const payload = {
-                cmts_ip: this.selectedCmts,
-                rf_port_ifindex: this.utscConfig.rfPortIfindex || this.upstreamInterfaces.modemRfPort,
-                community: this.snmpCommunityRW,
-                tftp_ip: '172.16.6.101',
-                repeat_period_ms: this.utscConfig.repeatPeriodMs,
-                freerun_duration_ms: this.utscConfig.freerunDurationMs
-            };
-            
-            this.utscStreaming = true;
-            this.utscDataCount = 0;
-            this.utscStartTime = Date.now();
-            // Enforce 5-minute maximum (300 seconds)
-            const maxDuration = Math.min(this.utscDuration, 300);
-            this.utscTimeRemaining = maxDuration;
-            
-            // Start countdown timer
-            this.utscDurationTimer = setInterval(() => {
-                const elapsed = (Date.now() - this.utscStartTime) / 1000;
-                this.utscTimeRemaining = Math.max(0, Math.floor(maxDuration - elapsed));
-                
-                if (this.utscTimeRemaining === 0) {
-                    this.stopUtscStream();
-                }
-            }, 1000);
-            
-            try {
-                const response = await fetch(`/api/pypnm/upstream/utsc/start/${macAddress}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                
-                const result = await response.json();
-                if (result.success) {
-                    this.showSuccess('UTSC Started', `${maxDuration} second capture initiated`);
-                } else {
-                    this.showError('UTSC Failed', result.error || 'Unknown error');
-                    this.stopUtscStream();
-                }
-            } catch (error) {
-                console.error('[UTSC] Start failed:', error);
-                this.showError('UTSC Failed', error.message);
-                this.stopUtscStream();
-            }
-        },
-        
-        stopUtscStream() {
-            this.utscStreaming = false;
-            
-            if (this.utscDurationTimer) {
-                clearInterval(this.utscDurationTimer);
-                this.utscDurationTimer = null;
-            }
-            
-            this.showSuccess('UTSC Stopped', `Captured ${this.utscDataCount} samples`);
-        },
-        
-        initUtscChart() {
-            const chartDiv = document.getElementById('utsc-chart');
-            if (!chartDiv) return;
-            
-            const layout = {
-                title: 'UTSC Spectrum',
-                xaxis: { title: 'Frequency (MHz)', color: '#fff' },
-                yaxis: { title: 'Amplitude (dBmV)', color: '#fff' },
-                paper_bgcolor: '#000',
-                plot_bgcolor: '#000',
-                font: { color: '#fff' }
-            };
-            
-            const trace = {
-                x: [],
-                y: [],
-                type: 'scatter',
-                mode: 'lines',
-                line: { color: '#00ff00', width: 2 }
-            };
-            
-            Plotly.newPlot(chartDiv, [trace], layout, { responsive: true });
-            this.utscChartInstance = chartDiv;
-        },
-        
-        updateUtscChart(data) {
-            if (!this.utscChartInstance) {
-                this.initUtscChart();
-            }
-            
-            if (!data.amplitudes || !data.frequencies_hz) return;
-            
-            const freqsMhz = data.frequencies_hz.map(f => f / 1e6);
-            
-            Plotly.react(this.utscChartInstance, [{
-                x: freqsMhz,
-                y: data.amplitudes,
-                type: 'scatter',
-                mode: 'lines',
-                line: { color: '#00ff00', width: 2 }
-            }], this.utscChartInstance.layout);
         }
     }
 }).mount('#app');

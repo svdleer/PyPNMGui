@@ -9,7 +9,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Custom Spectrum Analyzer (no external dependencies) -->
     <!-- Custom CSS -->
     <link href="/static/css/style.css" rel="stylesheet">
 </head>
@@ -906,12 +905,9 @@
                         <div class="row">
                             <!-- PNM Measurement Controls -->
                             <div class="col-12 mb-4">
-                                <div class="card shadow-sm border-primary">
-                                    <div class="card-header bg-primary bg-opacity-10">
-                                        <h5 class="mb-0 text-primary">
-                                            <i class="bi bi-arrow-down-circle me-2"></i>Downstream PNM (Modem-side)
-                                            <span class="badge bg-primary text-white ms-2">DOCSIS 3.0/3.1</span>
-                                        </h5>
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>PNM Measurements</h5>
                                     </div>
                                     <div class="card-body">
                                         <div class="row g-3 mb-3">
@@ -1008,15 +1004,6 @@
                                                                 <option :value="6">CM MAC (This Modem)</option>
                                                             </select>
                                                         </div>
-                                                        <div class="mb-2">
-                                                            <label class="form-label form-label-sm">Frequency Range Preset</label>
-                                                            <select @change="applyFreqPreset($event)" class="form-select form-select-sm">
-                                                                <option value="20-200">20-200 MHz (Full Range - Default)</option>
-                                                                <option value="18-65">18-65 MHz (Low Band)</option>
-                                                                <option value="60-200">60-200 MHz (High Band)</option>
-                                                                <option value="custom">Custom</option>
-                                                            </select>
-                                                        </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">Center Freq (MHz)</label>
@@ -1025,21 +1012,19 @@
                                                             <div class="col-6">
                                                                 <label class="form-label form-label-sm">Span (MHz)</label>
                                                                 <select v-model.number="utscConfig.spanMhz" class="form-select form-select-sm">
-                                                                    <option :value="40">40 MHz (NB)</option>
+                                                                    <option :value="40">40 MHz</option>
                                                                     <option :value="80">80 MHz</option>
                                                                     <option :value="160">160 MHz</option>
-                                                                    <option :value="180">180 MHz</option>
-                                                                    <option :value="320">320 MHz (WB)</option>
                                                                 </select>
                                                             </div>
                                                         </div>
                                                         <div class="row g-2 mb-2">
                                                             <div class="col-6">
-                                                                <label class="form-label form-label-sm">RF Port (us-conn)</label>
+                                                                <label class="form-label form-label-sm">RF Port / US Channel</label>
                                                                 <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : ((upstreamInterfaces.rfPorts && upstreamInterfaces.rfPorts.length) ? 'Select RF port' : 'No RF ports') }}</option>
-                                                                    <option v-for="port in upstreamInterfaces.rfPorts" :key="port.ifindex" :value="port.ifindex">
-                                                                        {{ port.description }} ({{ port.ifindex }})
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select channel' }}</option>
+                                                                    <option v-for="ch in upstreamInterfaces.scqamChannels" :key="ch.ifindex" :value="ch.ifindex">
+                                                                        Ch {{ ch.channel_id }} (ifIndex {{ ch.ifindex }})
                                                                     </option>
                                                                 </select>
                                                             </div>
@@ -1050,55 +1035,20 @@
                                                                     <option :value="400">400</option>
                                                                     <option :value="800">800</option>
                                                                     <option :value="1600">1600</option>
-                                                                    <option :value="3200">3200</option>
                                                                 </select>
                                                             </div>
                                                         </div>
-                                                        <div class="d-flex gap-2 mb-2">
-                                                            <button @click="configureUtsc" class="btn btn-sm btn-outline-secondary flex-grow-1" :disabled="runningUtsc || utscLiveMode">
+                                                        <div class="d-flex gap-2">
+                                                            <button @click="configureUtsc" class="btn btn-sm btn-outline-secondary flex-grow-1" :disabled="runningUtsc">
                                                                 <i class="bi bi-gear me-1"></i>Configure
                                                             </button>
-                                                            <button @click="startUtscLive" class="btn btn-sm flex-grow-1" 
-                                                                    :class="utscLiveMode ? 'btn-danger' : 'btn-success'" 
-                                                                    :disabled="!utscConfig.rfPortIfindex">
-                                                                <span v-if="runningUtsc"><i class="bi bi-arrow-repeat spin me-1"></i>Starting...</span>
-                                                                <span v-else-if="utscLiveMode"><i class="bi bi-stop-fill me-1"></i>Stop</span>
+                                                            <button @click="startUtsc" class="btn btn-sm btn-success flex-grow-1" :disabled="runningUtsc || !utscConfig.rfPortIfindex">
+                                                                <span v-if="runningUtsc"><i class="bi bi-arrow-repeat spin me-1"></i>Running</span>
                                                                 <span v-else><i class="bi bi-play-fill me-1"></i>Start</span>
                                                             </button>
-                                                        </div>
-                                                        <div class="mt-2">
-                                                            <label class="form-label small mb-1">
-                                                                Refresh Rate: {{ (utscRefreshRate/1000).toFixed(1) }}s
-                                                            </label>
-                                                            <input type="range" v-model.number="utscRefreshRate" 
-                                                                   class="form-range" 
-                                                                   min="200" max="5000" step="100" 
-                                                                   title="Stream refresh interval">
-                                                        </div>
-                                                        <div class="mt-2">
-                                                            <label class="form-label small mb-1">
-                                                                Duration: {{ Math.floor(utscDuration / 60) }}m {{ utscDuration % 60 }}s
-                                                            </label>
-                                                            <input type="range" v-model.number="utscDuration" 
-                                                                   class="form-range" 
-                                                                   min="30" max="300" step="30" 
-                                                                   title="Test duration (max 5 minutes)">
-                                                        </div>
-                                                        <div v-if="utscLiveMode" class="mt-2">
-                                                            <div class="d-flex align-items-center gap-2">
-                                                                <small class="text-muted">
-                                                                    <i class="bi bi-layers me-1"></i><strong>{{ utscBufferSize || 0 }}/20</strong> captures
-                                                                </small>
-                                                                <span v-if="utscBufferSize < 20" class="badge bg-warning text-dark">
-                                                                    <i class="bi bi-hourglass-split me-1"></i>Buffering {{ Math.round((utscBufferSize / 20) * 100) }}%
-                                                                </span>
-                                                                <span v-else-if="utscBufferSize <= 10" class="badge bg-info">
-                                                                    <i class="bi bi-arrow-repeat spin me-1"></i>Live
-                                                                </span>
-                                                                <span v-else class="badge bg-success">
-                                                                    <i class="bi bi-check-circle me-1"></i>Ready
-                                                                </span>
-                                                            </div>
+                                                            <button @click="stopUtsc" class="btn btn-sm btn-danger" :disabled="!runningUtsc">
+                                                                <i class="bi bi-stop-fill"></i>
+                                                            </button>
                                                         </div>
                                                         <div v-if="utscStatus" class="mt-2">
                                                             <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">
@@ -1119,7 +1069,7 @@
                                                         <div class="mb-2">
                                                             <label class="form-label form-label-sm">OFDMA Channel</label>
                                                             <select v-model.number="usRxmerConfig.ofdmaIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
-                                                                <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : ((upstreamInterfaces.ofdmaChannels && upstreamInterfaces.ofdmaChannels.length) ? 'Select channel' : 'No OFDMA channels') }}</option>
+                                                                <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
                                                                 <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
                                                                     OFDMA {{ ch.index }} (ifIndex {{ ch.ifindex }})
                                                                 </option>
@@ -1154,57 +1104,18 @@
                                         </div>
                                         
                                         <!-- Spectrum Charts Row -->
-                                        <div class="row mt-4" v-show="utscSpectrumData || usRxmerSpectrumData || utscLiveMode">
+                                        <div class="row mt-4" v-if="utscSpectrumData || usRxmerSpectrumData">
                                             <!-- UTSC Spectrum Chart -->
-                                            <div class="col-12" v-show="utscSpectrumData || utscLiveMode">
+                                            <div class="col-12" v-if="utscSpectrumData">
                                                 <div class="card mb-3">
-                                                    <div class="card-header bg-primary bg-opacity-10">
-                                                        <div class="d-flex justify-content-between align-items-center mb-2">
-                                                            <h6 class="mb-0">
-                                                                <i class="bi bi-graph-up me-2"></i>UTSC Live Spectrum Analyzer
-                                                            </h6>
-                                                            <button @click="closeUtscSpectrum" class="btn btn-sm btn-outline-secondary">
-                                                                <i class="bi bi-x"></i>
-                                                            </button>
-                                                        </div>
-                                                        <!-- Spectrum Analyzer Controls -->
-                                                        <div id="spectrumControls" class="d-flex gap-2 flex-wrap align-items-center mt-2">
-                                                            <button id="resetMax" class="btn btn-sm btn-secondary"><i class="bi bi-arrow-repeat me-1"></i>Reset Max</button>
-                                                            <button id="clearWf" class="btn btn-sm btn-secondary"><i class="bi bi-trash me-1"></i>Clear WF</button>
-                                                            <button id="pauseBtn" class="btn btn-sm btn-warning"><i class="bi bi-pause-fill me-1"></i>Pause</button>
-                                                            <select id="scalePreset" class="form-select form-select-sm" style="width: auto;">
-                                                                <option value="auto">Auto Scale</option>
-                                                                <option value="-60,0">Return Path (‑60..0)</option>
-                                                                <option value="-70,-20">High Sens (‑70..‑20)</option>
-                                                            </select>
-                                                            <select id="holdMode" class="form-select form-select-sm" style="width: auto;">
-                                                                <option value="max">Max Hold</option>
-                                                                <option value="decay">Decay</option>
-                                                            </select>
-                                                            <button id="freezeA" class="btn btn-sm btn-info">Freeze A</button>
-                                                            <button id="freezeB" class="btn btn-sm btn-info">Freeze B</button>
-                                                            <label class="form-check-label small ms-2">
-                                                                <input id="showFreeze" type="checkbox" class="form-check-input" checked> Show A/B
-                                                            </label>
-                                                            <label class="form-check-label small ms-2">
-                                                                <input id="impulse" type="checkbox" class="form-check-input" checked> Impulse
-                                                            </label>
-                                                            <button id="zoomOut" class="btn btn-sm btn-outline-light"><i class="bi bi-zoom-out"></i></button>
-                                                        </div>
+                                                    <div class="card-header bg-primary bg-opacity-10 d-flex justify-content-between align-items-center">
+                                                        <h6 class="mb-0"><i class="bi bi-graph-up me-2"></i>UTSC Spectrum</h6>
+                                                        <button @click="closeUtscSpectrum" class="btn btn-sm btn-outline-secondary">
+                                                            <i class="bi bi-x"></i>
+                                                        </button>
                                                     </div>
-                                                    <div class="card-body p-2" style="background: #0b1020;">
-                                                        <!-- Spectrum & Waterfall Canvases -->
-                                                        <div style="position: relative;">
-                                                            <canvas id="specCanvas" style="width: 100%; height: 300px; display: block; border-radius: 6px; background: #071028;"></canvas>
-                                                            <canvas id="waterfallCanvas" style="width: 100%; height: 250px; display: block; border-radius: 6px; background: #071028; margin-top: 6px;"></canvas>
-                                                            <div id="specStatus" style="position: absolute; left: 10px; top: 10px; background: rgba(7,16,40,0.7); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: #dfe7ff;">
-                                                                Status: idle
-                                                            </div>
-                                                            <div id="specCursor" style="position: absolute; right: 10px; top: 10px; background: rgba(7,16,40,0.7); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: #dfe7ff; text-align: right; white-space: pre;">
-                                                                —
-                                                            </div>
-                                                        </div>
-                                                        <div class="mt-2 text-light small" id="specInfo">Bins: 0</div>
+                                                    <div class="card-body">
+                                                        <canvas id="utscChart" style="height: 300px;"></canvas>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1218,14 +1129,8 @@
                                                             <i class="bi bi-x"></i>
                                                         </button>
                                                     </div>
-                                                    <div class="card-body text-center">
-                                                        <!-- Matplotlib plot container -->
-                                                        <div id="usRxmerPlotContainer" v-if="usRxmerSpectrumData.plotUrl">
-                                                            <img :src="usRxmerSpectrumData.plotUrl" alt="US OFDMA RxMER Plot" 
-                                                                style="max-width: 100%; height: auto; border-radius: 8px;">
-                                                        </div>
-                                                        <!-- Fallback to Chart.js canvas if no plot URL -->
-                                                        <canvas v-else id="usRxmerChart" style="height: 300px;"></canvas>
+                                                    <div class="card-body">
+                                                        <canvas id="usRxmerChart" style="height: 300px;"></canvas>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1254,7 +1159,7 @@
                                                 <h6 class="text-primary border-bottom pb-2">
                                                     <i class="bi bi-arrow-down-circle me-1"></i>Downstream
                                                 </h6>
-                                                <div v-if="channelStats.downstream && channelStats.downstream.scqam && channelStats.downstream.scqam.count > 0" class="mb-3">
+                                                <div v-if="channelStats.downstream.scqam.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.downstream.scqam.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1267,7 +1172,7 @@
                                                         </small>
                                                     </div>
                                                 </div>
-                                                <div v-if="channelStats.downstream && channelStats.downstream.ofdm && channelStats.downstream.ofdm.count > 0" class="mb-3">
+                                                <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.downstream.ofdm.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1288,7 +1193,7 @@
                                                 <h6 class="text-success border-bottom pb-2">
                                                     <i class="bi bi-arrow-up-circle me-1"></i>Upstream
                                                 </h6>
-                                                <div v-if="channelStats.upstream && channelStats.upstream.atdma && channelStats.upstream.atdma.count > 0" class="mb-3">
+                                                <div v-if="channelStats.upstream.atdma.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.upstream.atdma.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1301,7 +1206,7 @@
                                                         </small>
                                                     </div>
                                                 </div>
-                                                <div v-if="channelStats.upstream && channelStats.upstream.ofdma && channelStats.upstream.ofdma.count > 0" class="mb-3">
+                                                <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3">
                                                     <small class="text-muted">{{ channelStats.upstream.ofdma.type }}</small>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
@@ -1451,7 +1356,7 @@
                             </div>
 
                             <!-- No Results -->
-                            <div class="col-12" v-if="!rxmerData && !spectrumData && !fecData && !preEqData && !selectedMeasurementData">
+                            <div class="col-12" v-if="!rxmerData && !spectrumData && !fecData && !preEqData">
                                 <div class="card shadow-sm">
                                     <div class="card-body text-center py-5">
                                         <i class="bi bi-graph-up text-muted" style="font-size: 4rem;"></i>
@@ -1599,11 +1504,6 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Application JS -->
-    <script>
-        // Cache busting - append timestamp to ensure fresh JS load
-        const script = document.createElement('script');
-        script.src = '/static/js/app.js?v=' + Date.now();
-        document.body.appendChild(script);
-    </script>
+    <script src="/static/js/app.js"></script>
 </body>
 </html>
