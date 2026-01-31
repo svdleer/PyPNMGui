@@ -1144,6 +1144,7 @@ def start_us_rxmer(mac_address):
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', 'Z1gg0@LL')
+    write_community = data.get('write_community', 'Z1gg0Sp3c1@l')  # RW community
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1155,7 +1156,8 @@ def start_us_rxmer(mac_address):
         response = requests.post(pypnm_url, json={
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community
+                "community": community,
+                "write_community": write_community
             },
             "ofdma_ifindex": ofdma_ifindex,
             "cm_mac_address": mac_address,
