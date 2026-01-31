@@ -1161,7 +1161,7 @@ def start_us_rxmer(mac_address):
             "cm_mac_address": mac_address,
             "pre_eq": data.get('pre_eq', True),
             "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}')
-        }, timeout=60)
+        }, timeout=180)  # 3 minutes timeout for measurement
         
         if response.status_code == 200:
             result = response.json()
