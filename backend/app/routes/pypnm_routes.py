@@ -1363,12 +1363,9 @@ def get_us_rxmer_data(mac_address):
         response = requests.post(pypnm_url, json=payload, timeout=120)
         
         if response.status_code == 200:
-            result = response.json()
-            return jsonify({
-                "success": result.get('success', False),
-                "mac_address": mac_address,
-                **result
-            })
+            # PyPNM returns PNG image directly, not JSON
+            from flask import Response
+            return Response(response.content, mimetype='image/png')
         else:
             return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
             
