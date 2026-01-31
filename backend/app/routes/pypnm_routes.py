@@ -1143,7 +1143,7 @@ def start_us_rxmer(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', 'Z1gg0Sp3c1@l')  # Use WRITE community for SET operations
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1164,7 +1164,7 @@ def start_us_rxmer(mac_address):
                 "cm_mac_address": mac_address,
                 "pre_eq": data.get('pre_eq', True),
                 "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
-                "community": community
+                "community": community  # WRITE community
             },
             timeout=60
         )
