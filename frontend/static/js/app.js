@@ -4,7 +4,6 @@
 const { createApp } = Vue;
 
 const API_BASE = '/api';
-const PYPNM_API_BASE = 'http://localhost:8000';  // PyPNM API endpoint
 
 createApp({
     data() {
@@ -15,7 +14,6 @@ createApp({
             // API Status
             apiStatus: 'mock',
             pypnmHealthy: false,
-            pypnmApiUrl: PYPNM_API_BASE,  // PyPNM API base URL
             
             // Loading state
             isLoading: false,
@@ -643,43 +641,39 @@ createApp({
             
             this.upstreamInterfaces.loading = true;
             try {
-                // In lab mode with cm_direct, call PyPNM API directly
-                // Call PyPNM API to discover OFDMA channel for this modem
-                const response = await fetch(`${this.pypnmApiUrl}/docs/pnm/us/ofdma/rxmer/discover`, {
+                const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        cmts: {
-                            cmts_ip: this.selectedModem.cmts_ip,
-                            community: "Z1gg0@LL"
-                        },
-                        cm_mac_address: this.selectedModem.mac_address
+                        cmts_ip: this.selectedModem.cmts_ip
                     })
                 });
                 
                 const result = await response.json();
-                
-                if (result.success && result.ofdma_ifindex) {
-                    // Build OFDMA channel info
-                    this.upstreamInterfaces.ofdmaChannels = [{
-                        ifindex: result.ofdma_ifindex,
-                        index: result.cm_index,
-                        description: result.ofdma_description || `OFDMA Channel (ifIndex ${result.ofdma_ifindex})`
-                    }];
+                if (result.success) {
+                    this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
+                    this.upstreamInterfaces.ofdmaChannels = result.ofdma_channels || [];
                     
-                    // Auto-select OFDMA channel for RxMER
-                    if (!this.usRxmerConfig.ofdmaIfindex) {
-                        this.usRxmerConfig.ofdmaIfindex = result.ofdma_ifindex;
+                    // Auto-select first SC-QAM channel for UTSC if available
+                    if (this.upstreamInterfaces.scqamChannels.length > 0 && !this.utscConfig.rfPortIfindex) {
+                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
                     }
                     
-                    console.log('Discovered OFDMA channel:', this.upstreamInterfaces.ofdmaChannels[0]);
+                    // Auto-select first OFDMA channel for RxMER if available
+                    if (this.upstreamInterfaces.ofdmaChannels.length > 0 && !this.usRxmerConfig.ofdmaIfindex) {
+                        this.usRxmerConfig.ofdmaIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
+                    }
+                    
+                    console.log('Loaded upstream interfaces:', this.upstreamInterfaces);
                 } else {
-                    console.warn('No OFDMA channel found for this modem:', result.error || 'Unknown error');
-                    this.upstreamInterfaces.ofdmaChannels = [];
+                    console.error('Failed to load upstream interfaces:', result.error);
                 }
-                
-                // Note: SC-QAM channels for UTSC would require a separate discovery
-                // For now, leave empty - UTSC discovery is separate
+            } catch (error) {
+                console.error('Failed to load upstream interfaces:', error);
+            } finally {
+                this.upstreamInterfaces.loading = false;
+            }
+        },
                 this.upstreamInterfaces.scqamChannels = [];
                 
             } catch (error) {
