@@ -1224,11 +1224,6 @@ def get_us_rxmer_status(mac_address):
     except Exception as e:
         logger.error(f"Get US RxMER status failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-        })
-        
-    except Exception as e:
-        logger.error(f"Get US RxMER status failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @pypnm_bp.route('/upstream/utsc/data/<mac_address>', methods=['POST'])
