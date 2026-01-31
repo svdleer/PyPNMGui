@@ -1162,7 +1162,8 @@ def start_us_rxmer(mac_address):
             "ofdma_ifindex": ofdma_ifindex,
             "cm_mac_address": mac_address,
             "pre_eq": data.get('pre_eq', True),
-            "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}')
+            "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
+            "destination_index": data.get('destination_index', 1)  # Use bulk dest 1 for TFTP upload
         }, timeout=180)  # 3 minutes timeout for measurement
         
         if response.status_code == 200:
