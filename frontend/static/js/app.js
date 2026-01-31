@@ -674,16 +674,6 @@ createApp({
                 this.upstreamInterfaces.loading = false;
             }
         },
-                this.upstreamInterfaces.scqamChannels = [];
-                
-            } catch (error) {
-                console.error('Failed to discover OFDMA channel:', error);
-                this.upstreamInterfaces.ofdmaChannels = [];
-                this.upstreamInterfaces.scqamChannels = [];
-            } finally {
-                this.upstreamInterfaces.loading = false;
-            }
-        },
         
         async configureUtsc() {
             if (!this.selectedModem || !this.selectedModem.cmts_ip) {
