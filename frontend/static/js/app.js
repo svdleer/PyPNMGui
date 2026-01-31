@@ -1015,9 +1015,25 @@ createApp({
             
             if (this.usRxmerChartInstance) {
                 this.usRxmerChartInstance.destroy();
+                this.usRxmerChartInstance = null;
             }
             
             const data = this.usRxmerSpectrumData;
+            
+            // If data is base64 image, display it directly
+            if (typeof data === 'string' && data.length > 100) {
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                };
+                img.src = 'data:image/png;base64,' + data;
+                return;
+            }
+            
+            // Otherwise render as Chart.js chart
             const ctx = canvas.getContext('2d');
             
             this.usRxmerChartInstance = new Chart(ctx, {
