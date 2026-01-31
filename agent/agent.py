@@ -2164,28 +2164,29 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip, ofdma_ifindex, and cm_mac_address required'}
         
         try:
-            # docsPnmCmtsUsOfdmaRxMerTable OIDs
-            base = '1.3.6.1.4.1.4491.2.1.27.1.3.8.1'
+            # docsPnmCmtsUsOfdmaRxMerTable OIDs (1.3.6.1.4.1.4491.2.1.27.1.3.7.1)
+            # Column order: .1=Enable, .2=CmMac, .3=PreEq, .4=NumAvgs, .5=MeasStatus, .6=FileName, .7=DestIdx
+            base = '1.3.6.1.4.1.4491.2.1.27.1.3.7.1'
             idx = f".{ofdma_ifindex}"
             
-            # Set filename first
-            filename = params.get('filename', 'us_rxmer')
-            result = self._set_cmts_direct(cmts_ip, f"{base}.5{idx}", filename, 's', community)
-            if not result.get('success'):
-                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
-            
-            # Set CM MAC address
+            # Set CM MAC address first
             mac = cm_mac.replace(':', '').replace('-', '').upper()
             mac_hex = ' '.join([mac[i:i+2] for i in range(0, 12, 2)])
-            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", mac_hex, 'x', community)
+            result = self._set_cmts_direct(cmts_ip, f"{base}.2{idx}", mac_hex, 'x', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to set CM MAC: {result.get('error')}"}
             
-            # Set pre-equalization option
-            pre_eq = 1 if params.get('pre_eq', True) else 2  # 1=true, 2=false
-            result = self._set_cmts_direct(cmts_ip, f"{base}.2{idx}", str(pre_eq), 'i', community)
+            # Set filename
+            filename = params.get('filename', 'us_rxmer')
+            result = self._set_cmts_direct(cmts_ip, f"{base}.6{idx}", filename, 's', community)
+            if not result.get('success'):
+                return {'success': False, 'error': f"Failed to set filename: {result.get('error')}"}
             
-            # Enable measurement (1 = true)
+            # Set pre-equalization option (.3)
+            pre_eq = 1 if params.get('pre_eq', True) else 2  # 1=true, 2=false
+            result = self._set_cmts_direct(cmts_ip, f"{base}.3{idx}", str(pre_eq), 'i', community)
+            
+            # Enable measurement (.1 = 1 = true)
             result = self._set_cmts_direct(cmts_ip, f"{base}.1{idx}", '1', 'i', community)
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to start US RxMER: {result.get('error')}"}
@@ -2212,8 +2213,8 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip and ofdma_ifindex required'}
         
         try:
-            # docsPnmCmtsUsOfdmaRxMerMeasStatus
-            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.8.1.4.{ofdma_ifindex}"
+            # docsPnmCmtsUsOfdmaRxMerMeasStatus (.5)
+            oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.7.1.5.{ofdma_ifindex}"
             
             result = self._query_cmts_direct(cmts_ip, oid, community, walk=False)
             
