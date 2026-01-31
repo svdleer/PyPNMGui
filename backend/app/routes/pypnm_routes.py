@@ -1186,7 +1186,7 @@ def start_us_rxmer(mac_address):
 @pypnm_bp.route('/upstream/rxmer/status/<mac_address>', methods=['POST'])
 def get_us_rxmer_status(mac_address):
     """Get Upstream RxMER measurement status."""
-    from app.core.simple_ws import get_simple_agent_manager
+    import requests
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1197,37 +1197,33 @@ def get_us_rxmer_status(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_status') if agent_manager else None
+        # Call PyPNM API directly
+        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/status"
         
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for US RxMER"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_us_rxmer_status',
-            params={
+        response = requests.post(pypnm_url, json={
+            "cmts": {
                 "cmts_ip": cmts_ip,
-                "ofdma_ifindex": ofdma_ifindex,
                 "community": community
             },
-            timeout=60
-        )
+            "ofdma_ifindex": ofdma_ifindex
+        }, timeout=30)
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        return jsonify({
-            "success": task_result.get('success', False),
-            "mac_address": mac_address,
-            **task_result
+        if response.status_code == 200:
+            result = response.json()
+            return jsonify({
+                "success": result.get('success', False),
+                "mac_address": mac_address,
+                **result
+            })
+        else:
+            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to call PyPNM API: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as e:
+        logger.error(f"Get US RxMER status failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
         })
         
     except Exception as e:
@@ -1315,51 +1311,47 @@ def get_us_rxmer_data(mac_address):
     
     Returns RxMER per subcarrier for graphing.
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    import requests
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', 'Z1gg0@LL')
+    filename = data.get('filename')
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_data') if agent_manager else None
+        # Call PyPNM API directly
+        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/data"
         
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for US RxMER data"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_us_rxmer_data',
-            params={
+        payload = {
+            "cmts": {
                 "cmts_ip": cmts_ip,
-                "ofdma_ifindex": ofdma_ifindex,
-                "filename": data.get('filename'),
                 "community": community
             },
-            timeout=120
-        )
+            "ofdma_ifindex": ofdma_ifindex
+        }
         
-        result = agent_manager.wait_for_task(task_id, timeout=120)
+        if filename:
+            payload["filename"] = filename
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        response = requests.post(pypnm_url, json=payload, timeout=120)
         
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        return jsonify({
-            "success": task_result.get('success', False),
-            "mac_address": mac_address,
-            **task_result
-        })
-        
+        if response.status_code == 200:
+            result = response.json()
+            return jsonify({
+                "success": result.get('success', False),
+                "mac_address": mac_address,
+                **result
+            })
+        else:
+            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to call PyPNM API: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
     except Exception as e:
         logger.error(f"Get US RxMER data failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
