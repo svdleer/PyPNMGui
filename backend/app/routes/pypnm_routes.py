@@ -1355,7 +1355,10 @@ def get_us_rxmer_data(mac_address):
         }
         
         if filename:
-            payload["filename"] = filename
+            # Strip path prefix if present (CMTS returns /pnm/mer/filename)
+            import os
+            basename = os.path.basename(filename)
+            payload["filename"] = basename
         
         response = requests.post(pypnm_url, json=payload, timeout=120)
         
