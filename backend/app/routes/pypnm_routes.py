@@ -1145,12 +1145,36 @@ def start_us_rxmer(mac_address):
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', 'Z1gg0@LL')
     write_community = data.get('write_community', 'Z1gg0Sp3c1@l')  # RW community for SNMP SET
+    tftp_server = data.get('tftp_server', '172.16.6.3')  # Default TFTP server from config
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
-        # Call PyPNM API directly
+        # First, ensure TFTP bulk destination exists on CMTS
+        dest_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/destinations/create"
+        dest_response = requests.post(dest_url, json={
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community,
+                "write_community": write_community
+            },
+            "tftp_ip": tftp_server,
+            "port": 69,
+            "local_store": True  # Keep copy locally AND upload to TFTP
+        }, timeout=30)
+        
+        # Get destination index (created or existing)
+        destination_index = 1  # Default
+        if dest_response.status_code == 200:
+            dest_result = dest_response.json()
+            if dest_result.get('success'):
+                destination_index = dest_result.get('dest_index', 1)
+                logger.info(f"Using bulk destination {destination_index} -> {tftp_server}")
+        else:
+            logger.warning(f"Failed to create/verify bulk destination: {dest_response.status_code}")
+        
+        # Now start the measurement with the destination index
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/start"
         
         response = requests.post(pypnm_url, json={
@@ -1163,7 +1187,7 @@ def start_us_rxmer(mac_address):
             "cm_mac_address": mac_address,
             "pre_eq": data.get('pre_eq', True),
             "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
-            "destination_index": data.get('destination_index', 1)  # Use bulk dest 1 for TFTP upload
+            "destination_index": destination_index  # Use discovered/created destination
         }, timeout=180)  # 3 minutes timeout for measurement
         
         if response.status_code == 200:
