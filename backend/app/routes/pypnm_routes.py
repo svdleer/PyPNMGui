@@ -1319,7 +1319,7 @@ def get_us_rxmer_data(mac_address):
     
     try:
         # Call PyPNM API directly
-        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/data"
+        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/getCapture"
         
         payload = {
             "cmts": {
