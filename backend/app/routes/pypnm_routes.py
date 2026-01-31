@@ -1339,26 +1339,41 @@ def get_us_rxmer_data(mac_address):
     community = data.get('community', 'Z1gg0@LL')
     filename = data.get('filename')
     
-    if not cmts_ip:
-        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
-        # Call PyPNM API directly
+        import os
+        
+        # If no filename provided, get it from status
+        if not filename:
+            status_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/status"
+            status_response = requests.post(status_url, json={
+                "cmts": {
+                    "cmts_ip": cmts_ip,
+                    "community": community
+                },
+                "ofdma_ifindex": ofdma_ifindex
+            }, timeout=30)
+            
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                filename = status_data.get('filename')
+                if not filename:
+                    return jsonify({"success": False, "error": "No filename in status response - measurement not ready?"}), 400
+            else:
+                return jsonify({"success": False, "error": "Failed to get measurement status"}), 500
+        
+        # Strip path prefix if present (CMTS returns /pnm/mer/filename)
+        basename = os.path.basename(filename)
+        
+        # Call PyPNM API getCapture
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/getCapture"
         
         payload = {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community
-            },
-            "ofdma_ifindex": ofdma_ifindex
+            "filename": basename,
+            "tftp_path": "/var/lib/tftpboot"
         }
-        
-        if filename:
-            # Strip path prefix if present (CMTS returns /pnm/mer/filename)
-            import os
-            basename = os.path.basename(filename)
-            payload["filename"] = basename
         
         response = requests.post(pypnm_url, json=payload, timeout=120)
         
