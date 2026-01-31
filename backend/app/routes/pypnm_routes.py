@@ -1337,40 +1337,20 @@ def get_us_rxmer_data(mac_address):
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', 'Z1gg0@LL')
-    filename = data.get('filename')
     
-    if not cmts_ip or not ofdma_ifindex:
-        return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
+    if not cmts_ip:
+        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # If no filename provided, get it from status
-        if not filename:
-            status_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/status"
-            status_response = requests.post(status_url, json={
-                "cmts": {
-                    "cmts_ip": cmts_ip,
-                    "community": community
-                },
-                "ofdma_ifindex": ofdma_ifindex
-            }, timeout=30)
-            
-            if status_response.status_code == 200:
-                status_data = status_response.json()
-                filename = status_data.get('filename')
-                if not filename:
-                    return jsonify({"success": False, "error": "No filename in status response"}), 400
-            else:
-                return jsonify({"success": False, "error": "Failed to get status"}), 500
+        # Construct filename from MAC address (CMTS adds timestamp, glob will find it)
+        mac_clean = mac_address.replace(':', '').replace('-', '').lower()
+        filename = f"usrxmer_{mac_clean}"
         
-        # Strip path prefix if present (CMTS returns /pnm/mer/filename)
-        import os
-        basename = os.path.basename(filename)
-        
-        # Call PyPNM API getCapture
+        # Call PyPNM API directly
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/getCapture"
         
         payload = {
-            "filename": basename,
+            "filename": filename,
             "tftp_path": "/var/lib/tftpboot"
         }
         
