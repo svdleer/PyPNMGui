@@ -1343,9 +1343,7 @@ def get_us_rxmer_data(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
-        import os
-        
-        # If no filename provided, get it from status
+        # If no filename provided, get it from status first
         if not filename:
             status_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/status"
             status_response = requests.post(status_url, json={
@@ -1358,16 +1356,18 @@ def get_us_rxmer_data(mac_address):
             
             if status_response.status_code == 200:
                 status_data = status_response.json()
-                filename = status_data.get('filename')
-                if not filename:
-                    return jsonify({"success": False, "error": "No filename in status response - measurement not ready?"}), 400
+                if status_data.get('success') and status_data.get('filename'):
+                    filename = status_data['filename']
+                else:
+                    return jsonify({"success": False, "error": "Measurement not ready or filename not available"}), 400
             else:
                 return jsonify({"success": False, "error": "Failed to get measurement status"}), 500
         
         # Strip path prefix if present (CMTS returns /pnm/mer/filename)
+        import os
         basename = os.path.basename(filename)
         
-        # Call PyPNM API getCapture
+        # Now call getCapture with the filename
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/getCapture"
         
         payload = {
