@@ -1277,8 +1277,8 @@ def pypnm_health():
     try:
         agent_manager = get_simple_agent_manager()
         if agent_manager:
-            agents = agent_manager.get_connected_agents()
-            snmp_capable = [a for a in agents if 'snmp_get' in a.get('capabilities', [])]
+            agents = agent_manager.get_available_agents()
+            snmp_capable = [a for a in agents if 'snmp_get' in a.capabilities]
             
             return jsonify({
                 "status": "ok",
