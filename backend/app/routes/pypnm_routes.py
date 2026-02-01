@@ -835,37 +835,72 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Call PyPNM API directly
-        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/discover"
+        # Call both PyPNM APIs for RF port and OFDMA discovery
+        scqam_channels = []
+        ofdma_channels = []
         
-        response = requests.post(pypnm_url, json={
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community
-            },
-            "cm_mac_address": mac_address
-        }, timeout=30)
+        # 1. Discover RF ports for UTSC using discoverRfPort endpoint
+        try:
+            utsc_url = "http://localhost:8000/docs/pnm/us/spectrumAnalyzer/discoverRfPort"
+            utsc_response = requests.post(utsc_url, json={
+                "cmts": {
+                    "cmts_ip": cmts_ip,
+                    "community": community
+                },
+                "cm_mac_address": mac_address
+            }, timeout=30)
+            
+            if utsc_response.status_code == 200:
+                utsc_result = utsc_response.json()
+                if utsc_result.get('success') and utsc_result.get('rf_port_ifindex'):
+                    scqam_channels.append({
+                        'ifindex': utsc_result['rf_port_ifindex'],
+                        'channel_id': utsc_result.get('logical_channel'),
+                        'description': utsc_result.get('rf_port_description', f"RF Port {utsc_result['rf_port_ifindex']}")
+                    })
+        except Exception as e:
+            logger.warning(f"UTSC RF port discovery failed: {e}")
         
-        if response.status_code == 200:
-            result = response.json()
+        # 2. Get OFDMA channel stats for RxMER
+        try:
+            pypnm_url = "http://localhost:8000/docs/if31/us/ofdma/channel/stats"
             
-            ofdma_channels = []
-            if result.get('success') and result.get('ofdma_ifindex'):
-                ofdma_channels.append({
-                    'ifindex': result['ofdma_ifindex'],
-                    'index': result.get('cm_index'),
-                    'description': result.get('ofdma_description', f"OFDMA Channel (ifIndex {result['ofdma_ifindex']})")
-                })
+            response = requests.post(pypnm_url, json={
+                "cable_modem": {
+                    "mac_address": mac_address,
+                    "snmp": {
+                        "snmpV2C": {
+                            "community": community
+                        }
+                    }
+                }
+            }, timeout=30)
             
-            return jsonify({
-                "success": True,
-                "mac_address": mac_address,
-                "cmts_ip": cmts_ip,
-                "scqam_channels": [],  # TODO: Implement SC-QAM discovery if needed
-                "ofdma_channels": ofdma_channels
-            })
-        else:
-            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
+            if response.status_code == 200:
+                result = response.json()
+                
+                if result.get('status') == 0 and result.get('results'):
+                    for ofdma_ch in result['results']:
+                        index = ofdma_ch.get('index')
+                        channel_id = ofdma_ch.get('channel_id')
+                        
+                        if index and channel_id:
+                            ofdma_channels.append({
+                                'ifindex': index,
+                                'index': index,
+                                'channel_id': channel_id,
+                                'description': f"OFDMA Channel {channel_id} (ifIndex {index})"
+                            })
+        except Exception as e:
+            logger.warning(f"OFDMA channel stats failed: {e}")
+        
+        return jsonify({
+            "success": True,
+            "mac_address": mac_address,
+            "cmts_ip": cmts_ip,
+            "scqam_channels": scqam_channels,
+            "ofdma_channels": ofdma_channels
+        })
             
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to call PyPNM API: {e}")
