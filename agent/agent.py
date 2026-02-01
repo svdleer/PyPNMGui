@@ -2499,22 +2499,15 @@ class PyPNMAgent:
             # docsPnmCmtsUsOfdmaRxMerMeasStatus (.5)
             oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.7.1.5.{ofdma_ifindex}"
             
-            result = self._query_cmts_direct(cmts_ip, oid, community, walk=False)
+            result = self._snmp_get(cmts_ip, oid, community)
             
-            if not result.get('success'):
+            if not result.get('success') or not result.get('results'):
                 return {'success': False, 'error': f"Failed to get status: {result.get('error')}"}
             
-            # Parse status value
-            status_value = 1
-            status_name = 'unknown'
-            output = result.get('output', '')
-            if 'INTEGER' in output:
-                try:
-                    status_value = int(output.split(':')[-1].strip().split('(')[0])
-                    status_names = {1: 'other', 2: 'inactive', 3: 'busy', 4: 'sampleReady', 5: 'error'}
-                    status_name = status_names.get(status_value, 'unknown')
-                except:
-                    pass
+            # Parse status value from pysnmp result
+            status_value = int(result['results'][0].get('value', 1))
+            status_names = {1: 'other', 2: 'inactive', 3: 'busy', 4: 'sampleReady', 5: 'error'}
+            status_name = status_names.get(status_value, 'unknown')
             
             return {
                 'success': True,
