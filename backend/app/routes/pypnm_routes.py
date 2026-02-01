@@ -838,7 +838,8 @@ def discover_rf_port(mac_address):
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', get_default_community())
+    # CMTS queries need CMTS community string (Z1gg0@LL for read), not modem community
+    cmts_community = data.get('community', 'Z1gg0@LL')
     
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
@@ -852,7 +853,7 @@ def discover_rf_port(mac_address):
         response = requests.post(pypnm_url, json={
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community
+                "community": cmts_community
             },
             "cm_mac_address": mac_address
         }, timeout=90)
