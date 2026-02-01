@@ -818,7 +818,7 @@ def discover_rf_port(mac_address):
     """
     Fast discovery of the correct UTSC RF port for a modem.
     For E6000, UTSC can be configured on logical OFDMA channels directly.
-    Returns the OFDMA channel ifindex to use as rf_port_ifindex.
+    Returns ALL OFDMA channel ifindexes to use for UTSC.
     
     POST body:
     {
@@ -829,9 +829,11 @@ def discover_rf_port(mac_address):
     Returns:
     {
         "success": true,
-        "rf_port_ifindex": 843087883,  // OFDMA logical channel ifindex
-        "rf_port_description": "cable-us-ofdma 1/ofd/4.0",
-        "logical_channel": 843087883
+        "ofdma_channels": [
+            {"ifindex": 843087883, "description": "cable-us-ofdma 1/ofd/4.0"}
+        ],
+        "rf_port_ifindex": 843087883,  // First OFDMA channel (for backward compat)
+        "us_channels": [843087883]
     }
     """
     import requests
@@ -844,37 +846,37 @@ def discover_rf_port(mac_address):
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
     
-    logger.info(f"RF port discovery for {mac_address} on CMTS {cmts_ip} - using OFDMA channel")
+    logger.info(f"RF port discovery for {mac_address} on CMTS {cmts_ip} - using OFDMA channels")
     
     try:
-        # Get OFDMA channels - these can be used directly for UTSC on E6000
-        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/discover"
+        # Use the interfaces endpoint which returns ALL OFDMA channels
+        interfaces_url = f"http://localhost:5050/api/pypnm/upstream/interfaces/{mac_address}"
         
-        response = requests.post(pypnm_url, json={
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": cmts_community
-            },
-            "cm_mac_address": mac_address
+        response = requests.post(interfaces_url, json={
+            "cmts_ip": cmts_ip,
+            "community": cmts_community
         }, timeout=90)
         
         if response.status_code == 200:
             result = response.json()
-            if result.get('success') and result.get('ofdma_channels'):
-                # Use first OFDMA channel as rf_port_ifindex
-                ofdma_ch = result['ofdma_channels'][0]
+            ofdma_channels = result.get('ofdma_channels', [])
+            
+            if result.get('success') and ofdma_channels:
+                # Return all OFDMA channels
+                us_channels = [ch['ifindex'] for ch in ofdma_channels]
                 return jsonify({
                     "success": True,
-                    "rf_port_ifindex": ofdma_ch['ifindex'],
-                    "rf_port_description": ofdma_ch.get('description', 'OFDMA Channel'),
-                    "logical_channel": ofdma_ch['ifindex'],
+                    "ofdma_channels": ofdma_channels,
+                    "rf_port_ifindex": ofdma_channels[0]['ifindex'],  # First for backward compat
+                    "rf_port_description": ofdma_channels[0].get('description', 'OFDMA Channel'),
+                    "logical_channel": ofdma_channels[0]['ifindex'],
                     "cm_index": result.get('cm_index'),
-                    "us_channels": [ofdma_ch['ifindex']]
+                    "us_channels": us_channels
                 })
             else:
                 return jsonify({"success": False, "error": "No OFDMA channels found"}), 404
         else:
-            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
+            return jsonify({"success": False, "error": f"Interfaces API returned {response.status_code}"}), 500
             
     except Exception as e:
         logger.error(f"RF port discovery failed: {e}")
