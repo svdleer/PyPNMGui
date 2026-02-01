@@ -701,7 +701,7 @@ class PyPNMAgent:
         
         # Use cm_proxy if configured
         if self.config.cm_proxy_host:
-            return self._query_modem_via_cm_proxy(target_ip, oid, community, walk=False)
+            return self._query_modem(target_ip, oid, community, walk=False)
         
         # Fallback to direct SNMP
         return self.snmp_executor.execute_snmp(
@@ -722,7 +722,7 @@ class PyPNMAgent:
         
         # Use cm_proxy if configured
         if self.config.cm_proxy_host:
-            return self._query_modem_via_cm_proxy(target_ip, oid, community, walk=True)
+            return self._query_modem(target_ip, oid, community, walk=True)
         
         # Fallback to direct SNMP
         return self.snmp_executor.execute_snmp(
@@ -885,7 +885,7 @@ class PyPNMAgent:
     def _get_cm_proxy_ssh(self):
         """Get or create a persistent SSH connection to cm_proxy."""
         if not hasattr(self, '_cm_proxy_ssh') or self._cm_proxy_ssh is None:
-            if not self.config.cm_proxy_host:
+            if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
                 return None
             try:
                 ssh = paramiko.SSHClient()
@@ -923,7 +923,35 @@ class PyPNMAgent:
         
         return self._cm_proxy_ssh
     
-    def _query_modem_via_cm_proxy(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+    def _query_modem_direct(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+        """Query a modem directly via SNMP (when cm_direct is enabled)."""
+        try:
+            import subprocess
+            cmd = 'snmpwalk' if walk else 'snmpget'
+            snmp_cmd = [cmd, '-v2c', '-c', community, '-t', '10', '-r', '1', modem_ip, oid]
+            
+            result = subprocess.run(snmp_cmd, capture_output=True, text=True, timeout=60)
+            
+            return {
+                'success': result.returncode == 0 or 'No Such Object' not in result.stderr,
+                'output': result.stdout,
+                'error': result.stderr if result.stderr else None
+            }
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'SNMP timeout'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _query_modem(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+        """Query a modem via cm_proxy or cm_direct depending on config."""
+        if self.config.cm_direct_enabled:
+            return self._query_modem_direct(modem_ip, oid, community, walk)
+        elif self.config.cm_proxy_host:
+            return self._query_modem(modem_ip, oid, community, walk)
+        else:
+            return {'success': False, 'error': 'Neither cm_proxy nor cm_direct configured'}
+    
+    def _query_modem(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
         """Query a modem via cm_proxy using persistent SSH connection."""
         ssh = self._get_cm_proxy_ssh()
         if not ssh:
@@ -972,7 +1000,7 @@ class PyPNMAgent:
     
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
         """Query multiple OIDs using EXACT same paramiko method as _enrich_modems_parallel."""
-        if not self.config.cm_proxy_host:
+        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
@@ -1050,7 +1078,7 @@ class PyPNMAgent:
         OID_OFDM_POWER = '1.3.6.1.4.1.4491.2.1.28.1.5'  # docsIf31CmDsOfdmChannelPowerTable
         OID_DS_MER = '1.3.6.1.4.1.4491.2.1.20.1.24.1.1'  # docsIf3CmStatusUsTxPower (for reference)
         
-        result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_POWER, community, walk=True)
+        result = self._query_modem(modem_ip, OID_OFDM_POWER, community, walk=True)
         
         if not result.get('success'):
             return {'success': False, 'error': result.get('error', 'SNMP query failed')}
@@ -1103,9 +1131,9 @@ class PyPNMAgent:
         OID_US_FREQ = '1.3.6.1.2.1.10.127.1.1.2.1.2'  # docsIfUpChannelFrequency
         OID_US_POWER = '1.3.6.1.4.1.4491.2.1.20.1.2.1.1'  # docsIf3CmStatusUsTxPower
         
-        ds_freq_result = self._query_modem_via_cm_proxy(modem_ip, OID_DS_FREQ, community, walk=True)
-        ds_power_result = self._query_modem_via_cm_proxy(modem_ip, OID_DS_POWER, community, walk=True)
-        us_power_result = self._query_modem_via_cm_proxy(modem_ip, OID_US_POWER, community, walk=True)
+        ds_freq_result = self._query_modem(modem_ip, OID_DS_FREQ, community, walk=True)
+        ds_power_result = self._query_modem(modem_ip, OID_DS_POWER, community, walk=True)
+        us_power_result = self._query_modem(modem_ip, OID_US_POWER, community, walk=True)
         
         ds_channels = []
         us_channels = []
@@ -1176,10 +1204,10 @@ class PyPNMAgent:
         OID_UNCORRECTABLE = '1.3.6.1.2.1.10.127.1.1.4.1.4'  # docsIfSigQUncorrectables
         OID_SNR = '1.3.6.1.2.1.10.127.1.1.4.1.5'  # docsIfSigQSignalNoise
         
-        unerrored = self._query_modem_via_cm_proxy(modem_ip, OID_UNERRORED, community, walk=True)
-        corrected = self._query_modem_via_cm_proxy(modem_ip, OID_CORRECTED, community, walk=True)
-        uncorrectable = self._query_modem_via_cm_proxy(modem_ip, OID_UNCORRECTABLE, community, walk=True)
-        snr = self._query_modem_via_cm_proxy(modem_ip, OID_SNR, community, walk=True)
+        unerrored = self._query_modem(modem_ip, OID_UNERRORED, community, walk=True)
+        corrected = self._query_modem(modem_ip, OID_CORRECTED, community, walk=True)
+        uncorrectable = self._query_modem(modem_ip, OID_UNCORRECTABLE, community, walk=True)
+        snr = self._query_modem(modem_ip, OID_SNR, community, walk=True)
         
         def parse_values(result):
             values = {}
@@ -1235,7 +1263,7 @@ class PyPNMAgent:
         # DOCSIS Pre-equalization OID
         OID_PRE_EQ = '1.3.6.1.4.1.4491.2.1.20.1.2.1.5'  # docsIf3CmStatusUsEqData
         
-        result = self._query_modem_via_cm_proxy(modem_ip, OID_PRE_EQ, community, walk=True)
+        result = self._query_modem(modem_ip, OID_PRE_EQ, community, walk=True)
         
         if not result.get('success'):
             return {'success': False, 'error': result.get('error', 'SNMP query failed')}
@@ -1278,7 +1306,7 @@ class PyPNMAgent:
         self.logger.info(f"Getting channel info for modem {modem_ip} via cm_proxy, community={community}")
         
         # Check if cm_proxy is configured
-        if not self.config.cm_proxy_host:
+        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
             return {'success': False, 'error': 'cm_proxy not configured in agent_config.json'}
         
         self.logger.info(f"cm_proxy config: host={self.config.cm_proxy_host}, user={self.config.cm_proxy_user}")
@@ -1362,7 +1390,7 @@ class PyPNMAgent:
         OID_EVENT_TIME = '1.3.6.1.2.1.69.1.5.8.1.6'  # docsDevEvLastTime
         OID_EVENT_LEVEL = '1.3.6.1.2.1.69.1.5.8.1.4'  # docsDevEvLevel
         
-        text_result = self._query_modem_via_cm_proxy(modem_ip, OID_EVENT_TEXT, community, walk=True)
+        text_result = self._query_modem(modem_ip, OID_EVENT_TEXT, community, walk=True)
         
         events = []
         for line in text_result.get('output', '').split('\n'):
@@ -1394,7 +1422,7 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        if not self.config.cm_proxy_host:
+        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
@@ -1402,7 +1430,7 @@ class PyPNMAgent:
             OID_OFDM_CHAN_ID = '1.3.6.1.4.1.4491.2.1.28.1.9.1.1'  # docsIf31CmDsOfdmChanChannelId
             
             self.logger.info(f"Querying OFDM channels for {modem_ip}")
-            result = self._query_modem_via_cm_proxy(modem_ip, OID_OFDM_CHAN_ID, community, walk=True)
+            result = self._query_modem(modem_ip, OID_OFDM_CHAN_ID, community, walk=True)
             self.logger.info(f"OFDM query result: success={result.get('success')}")
             
             if not result.get('success'):
@@ -1438,7 +1466,7 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        if not self.config.cm_proxy_host:
+        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
@@ -1465,21 +1493,18 @@ class PyPNMAgent:
             self.logger.error(f"OFDM capture error: {e}")
             return {'success': False, 'error': str(e)}
     def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
-        """Get OFDM RxMER data via cm_proxy SNMP walk."""
+        """Get OFDM RxMER data via SNMP walk (cm_direct or cm_proxy)."""
         modem_ip = params.get('modem_ip')
         community = params.get('community', 'm0d3m1nf0')
         
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        if not self.config.cm_proxy_host:
-            return {'success': False, 'error': 'cm_proxy not configured'}
-        
         try:
             # docsPnmCmDsOfdmRxMerMean OID (MER values per subcarrier)
             OID_RXMER_MEAN = '1.3.6.1.4.1.4491.2.1.27.1.2.5.1.3'
             
-            result = self._query_modem_via_cm_proxy(modem_ip, OID_RXMER_MEAN, community, walk=True)
+            result = self._query_modem(modem_ip, OID_RXMER_MEAN, community, walk=True)
             
             if not result.get('success'):
                 return {'success': False, 'error': 'No RxMER data available'}
