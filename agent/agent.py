@@ -2382,23 +2382,43 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            # Construct full path on TFTP server
-            tftp_path = self.config.tftp_path or '/tftpboot'
-            cmts_name = cmts_ip.replace('.', '_')
-            full_path = f"{tftp_path}/pnm/rxmer/{cmts_name}/{filename}"
+            import os
+            import glob
             
-            self.logger.info(f"Fetching US RxMER data from: {full_path}")
+            tftp_path = self.config.tftp_path or '/tftpboot'
+            
+            # Search for the file - CMTS may write to different locations
+            # Try multiple patterns:
+            # 1. Direct in tftp root: /tftpboot/usrxmer_<mac>*
+            # 2. Organized: /tftpboot/pnm/rxmer/<cmts>/filename
+            # 3. Access folder: /tftpboot/access/config/ccap/pnm/*
+            
+            search_patterns = [
+                f"{tftp_path}/{filename}*",
+                f"{tftp_path}/pnm/rxmer/*/{filename}*",
+                f"{tftp_path}/access/config/ccap/pnm/{filename}*",
+            ]
+            
+            found_file = None
+            for pattern in search_patterns:
+                matches = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+                if matches:
+                    found_file = matches[0]  # Most recent match
+                    break
+            
+            self.logger.info(f"Searching for US RxMER file: {filename}")
             
             binary_data = None
             
             # Try local file first (if TFTP is mounted)
-            import os
-            if os.path.exists(full_path):
-                self.logger.info(f"Reading from local mount: {full_path}")
-                with open(full_path, 'rb') as f:
+            if found_file and os.path.exists(found_file):
+                self.logger.info(f"Reading from local mount: {found_file}")
+                with open(found_file, 'rb') as f:
                     binary_data = f.read()
             elif self.config.tftp_ssh_host:
                 # Fall back to SSH if configured
+                cmts_name = cmts_ip.replace('.', '_')
+                full_path = f"{tftp_path}/pnm/rxmer/{cmts_name}/{filename}"
                 binary_data = self._fetch_file_via_ssh(
                     self.config.tftp_ssh_host,
                     self.config.tftp_ssh_user,
@@ -2407,15 +2427,14 @@ class PyPNMAgent:
                     self.config.tftp_ssh_port
                 )
             else:
-                # List what files are available
-                rxmer_dir = f"{tftp_path}/pnm/rxmer/{cmts_name}"
-                if os.path.exists(rxmer_dir):
-                    files = os.listdir(rxmer_dir)
-                    return {'success': False, 'error': f'File not found: {filename}. Available: {files[:10]}'}
-                return {'success': False, 'error': f'TFTP path not found: {rxmer_dir}'}
+                # List what files match the pattern
+                all_matches = glob.glob(f"{tftp_path}/*{filename}*") + glob.glob(f"{tftp_path}/**/*{filename}*", recursive=True)
+                if all_matches:
+                    return {'success': False, 'error': f'File not found for: {filename}. Similar: {[os.path.basename(f) for f in all_matches[:5]]}'}
+                return {'success': False, 'error': f'No files matching: {filename}'}
             
             if not binary_data:
-                return {'success': False, 'error': f'Could not fetch file: {full_path}'}
+                return {'success': False, 'error': f'Could not fetch file: {filename}'}
             
             # Parse the RxMER data - usually simple binary format
             # Each value is typically a 2-byte signed integer representing dB * 10
