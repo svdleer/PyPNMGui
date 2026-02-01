@@ -32,6 +32,9 @@ services:
       
       # Logs (optional, for persistence)
       - ./agent-logs:/app/logs
+      
+      # TFTP folder for PNM data files (mount your TFTP server path)
+      - /var/lib/tftpboot:/tftpboot:ro
     
     environment:
       - PYTHONUNBUFFERED=1

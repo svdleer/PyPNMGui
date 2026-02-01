@@ -82,6 +82,7 @@ services:
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
+      - /var/lib/tftpboot:/tftpboot:ro
     restart: unless-stopped
     depends_on:
       - gui-server-lab
