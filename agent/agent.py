@@ -74,24 +74,19 @@ class AgentConfig:
     pypnm_tunnel_local_port: int = 8080
     pypnm_tunnel_remote_port: int = 8080
     
-    # CMTS Access (can be direct SNMP or via SSH)
-    cmts_snmp_direct: bool = True
-    cmts_community: str = 'public'  # Read community
-    cmts_write_community: Optional[str] = None  # Write community for SNMP SET (upstream PNM)
-    cmts_ssh_enabled: bool = False
-    cmts_ssh_user: Optional[str] = None
-    cmts_ssh_key: Optional[str] = None
+    # CMTS Access - for SNMP to CMTS devices
+    cmts_enabled: bool = True
+    cmts_community: str = 'public'
+    cmts_write_community: Optional[str] = None
     
-    # CM Proxy - Server with connectivity to Cable Modems
-    # SNMP commands to modems are executed on this server via SSH
+    # CM Access - for SNMP to Cable Modems
+    cm_enabled: bool = False
+    cm_community: str = 'm0d3m1nf0'
+    # Optional: SSH proxy to reach CMs (if not directly reachable)
     cm_proxy_host: Optional[str] = None
     cm_proxy_port: int = 22
     cm_proxy_user: Optional[str] = None
     cm_proxy_key: Optional[str] = None
-    
-    # CM Direct - Direct SNMP access to modems (no proxy)
-    cm_direct_enabled: bool = False
-    cm_direct_community: str = 'm0d3m1nf0'
     
     # Equalizer Server - for SNMP queries via SSH (has best CMTS connectivity)
     equalizer_host: Optional[str] = None
@@ -125,9 +120,18 @@ class AgentConfig:
         server_config = data.get('pypnm_server') or data.get('gui_server', {})
         tunnel_config = data.get('pypnm_ssh_tunnel') or data.get('gui_ssh_tunnel', {})
         
+        # CMTS access config
         cmts = data.get('cmts_access', {})
-        cm_proxy = data.get('cm_proxy', {})
+        
+        # CM access config - support both old and new format
+        cm_access = data.get('cm_access', {})
+        cm_proxy = cm_access.get('proxy', {}) or data.get('cm_proxy', {})  # New or old format
+        
+        # Backward compat: cm_direct -> cm_access
         cm_direct = data.get('cm_direct', {})
+        cm_enabled = cm_access.get('enabled', cm_direct.get('enabled', False))
+        cm_community = cm_access.get('community', cm_direct.get('community', 'm0d3m1nf0'))
+        
         equalizer = data.get('equalizer', {})
         redis_config = data.get('redis', {})
         tftp = data.get('tftp_server', {})
@@ -135,7 +139,7 @@ class AgentConfig:
         return cls(
             agent_id=data['agent_id'],
             pypnm_server_url=server_config['url'],
-            auth_token=server_config['auth_token'],
+            auth_token=server_config.get('auth_token', 'dev-token'),
             reconnect_interval=server_config.get('reconnect_interval', 5),
             # SSH Tunnel to PyPNM Server
             pypnm_ssh_tunnel_enabled=tunnel_config.get('enabled', False),
@@ -146,20 +150,16 @@ class AgentConfig:
             pypnm_tunnel_local_port=tunnel_config.get('local_port', 8080),
             pypnm_tunnel_remote_port=tunnel_config.get('remote_port', 8080),
             # CMTS Access
-            cmts_snmp_direct=cmts.get('snmp_direct', True),
+            cmts_enabled=cmts.get('enabled', cmts.get('snmp_direct', True)),  # Backward compat
             cmts_community=cmts.get('community', 'public'),
             cmts_write_community=cmts.get('write_community'),
-            cmts_ssh_enabled=cmts.get('ssh_enabled', False),
-            cmts_ssh_user=cmts.get('ssh_user'),
-            cmts_ssh_key=expand_path(cmts.get('ssh_key_file')),
-            # CM Proxy (for reaching modems)
+            # CM Access
+            cm_enabled=cm_enabled,
+            cm_community=cm_community,
             cm_proxy_host=cm_proxy.get('host'),
             cm_proxy_port=cm_proxy.get('port', 22),
-            cm_proxy_user=cm_proxy.get('username'),
+            cm_proxy_user=cm_proxy.get('username') or cm_proxy.get('user'),
             cm_proxy_key=expand_path(cm_proxy.get('key_file')),
-            # CM Direct (for direct SNMP to modems)
-            cm_direct_enabled=cm_direct.get('enabled', False),
-            cm_direct_community=cm_direct.get('community', 'm0d3m1nf0'),
             # Equalizer (for CMTS SNMP via SSH)
             equalizer_host=equalizer.get('host'),
             equalizer_port=equalizer.get('port', 22),
@@ -196,12 +196,11 @@ class AgentConfig:
             pypnm_ssh_key=expand_path(os.environ.get('PYPNM_SSH_KEY')),
             pypnm_tunnel_local_port=int(os.environ.get('PYPNM_LOCAL_PORT', '8080')),
             pypnm_tunnel_remote_port=int(os.environ.get('PYPNM_REMOTE_PORT', '8080')),
-            # CMTS
-            cmts_snmp_direct=os.environ.get('PYPNM_CMTS_SNMP_DIRECT', 'true').lower() == 'true',
-            cmts_ssh_enabled=os.environ.get('PYPNM_CMTS_SSH_ENABLED', 'false').lower() == 'true',
-            cmts_ssh_user=os.environ.get('PYPNM_CMTS_SSH_USER'),
-            cmts_ssh_key=expand_path(os.environ.get('PYPNM_CMTS_SSH_KEY')),
-            # CM Proxy
+            # CMTS Access
+            cmts_enabled=os.environ.get('PYPNM_CMTS_ENABLED', 'true').lower() == 'true',
+            # CM Access
+            cm_enabled=os.environ.get('PYPNM_CM_ENABLED', 'false').lower() == 'true',
+            cm_community=os.environ.get('PYPNM_CM_COMMUNITY', 'm0d3m1nf0'),
             cm_proxy_host=os.environ.get('PYPNM_CM_PROXY_HOST'),
             cm_proxy_port=int(os.environ.get('PYPNM_CM_PROXY_PORT', '22')),
             cm_proxy_user=os.environ.get('PYPNM_CM_PROXY_USER'),
@@ -441,7 +440,7 @@ class PyPNMAgent:
         
         # SSH executor for CMTS (if SSH access enabled)
         self.cmts_ssh: Optional[SSHProxyExecutor] = None
-        if config.cmts_ssh_enabled and config.cmts_ssh_user:
+        if config.cmts_enabled and config.cmts_ssh_user:
             self.logger.info("CMTS SSH access enabled")
         
         # Command handlers
@@ -631,22 +630,16 @@ class PyPNMAgent:
             caps.append('cm_proxy')
             caps.append('cm_reachable')  # Can reach modems via proxy
         
-        if self.config.cm_direct_enabled:
-            caps.append('cm_direct')
+        if self.config.cm_enabled:
             caps.append('cm_reachable')  # Can reach modems directly
         
         # CMTS reachability  
-        if self.config.cmts_snmp_direct:
+        if self.config.cmts_enabled:
             caps.append('cmts_reachable')  # Can reach CMTS
-            caps.append('cmts_snmp_direct')
+            caps.append('cmts_snmp_direct')  # Backward compat
             caps.append('cmts_get_modems')
             caps.append('cmts_get_modem_info')
             caps.append('enrich_modems')
-        
-        if self.config.cmts_ssh_enabled:
-            caps.append('cmts_command')
-            if 'cmts_reachable' not in caps:
-                caps.append('cmts_reachable')
         
         if self.tftp_ssh:
             caps.append('tftp_get')
@@ -660,7 +653,7 @@ class PyPNMAgent:
         caps.extend(['pnm_channel_info', 'pnm_event_log'])
         
         # Upstream PNM capabilities (requires cmts_reachable)
-        if self.config.cmts_snmp_direct:
+        if self.config.cmts_enabled:
             caps.extend([
                 'pnm_utsc_configure', 'pnm_utsc_start', 'pnm_utsc_stop', 'pnm_utsc_status', 'pnm_utsc_data',
                 'pnm_us_rxmer_start', 'pnm_us_rxmer_status', 'pnm_us_rxmer_data', 'pnm_us_get_interfaces'
@@ -863,7 +856,7 @@ class PyPNMAgent:
         if not cmts_host or not command:
             return {'success': False, 'error': 'cmts_host and command required'}
         
-        if not self.config.cmts_ssh_enabled:
+        if not self.config.cmts_enabled:
             return {'success': False, 'error': 'CMTS SSH not enabled'}
         
         # Create temporary SSH executor for this CMTS
@@ -917,7 +910,7 @@ class PyPNMAgent:
     def _get_cm_proxy_ssh(self):
         """Get or create a persistent SSH connection to cm_proxy."""
         if not hasattr(self, '_cm_proxy_ssh') or self._cm_proxy_ssh is None:
-            if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
+            if not self.config.cm_proxy_host and not self.config.cm_enabled:
                 return None
             try:
                 ssh = paramiko.SSHClient()
@@ -1287,7 +1280,7 @@ class PyPNMAgent:
     
     def _query_modem(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
         """Query a modem via cm_proxy or cm_direct depending on config."""
-        if self.config.cm_direct_enabled:
+        if self.config.cm_enabled:
             return self._query_modem_direct(modem_ip, oid, community, walk)
         elif self.config.cm_proxy_host:
             return self._query_modem_via_cm_proxy(modem_ip, oid, community, walk)
@@ -1343,7 +1336,7 @@ class PyPNMAgent:
     
     def _batch_query_modem(self, modem_ip: str, oids: dict, community: str) -> dict:
         """Query multiple OIDs using EXACT same paramiko method as _enrich_modems_parallel."""
-        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
+        if not self.config.cm_proxy_host and not self.config.cm_enabled:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
@@ -1876,7 +1869,7 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
+        if not self.config.cm_proxy_host and not self.config.cm_enabled:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
@@ -1920,7 +1913,7 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
+        if not self.config.cm_proxy_host and not self.config.cm_enabled:
             return {'success': False, 'error': 'cm_proxy not configured'}
         
         try:
@@ -2982,7 +2975,7 @@ class PyPNMAgent:
         modem_community = params.get('modem_community', 'm0d3m1nf0')
         
         # Check if we can reach modems - either via cm_proxy or cm_direct
-        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
+        if not self.config.cm_proxy_host and not self.config.cm_enabled:
             self.logger.error("Neither cm_proxy_host nor cm_direct configured!")
             return {
                 'success': False,
@@ -2998,7 +2991,7 @@ class PyPNMAgent:
         
         try:
             # Use cm_direct if enabled (direct SNMP to modems), otherwise use cm_proxy
-            if self.config.cm_direct_enabled:
+            if self.config.cm_enabled:
                 enriched = self._enrich_modems_direct(modems, modem_community, max_workers=50)
             else:
                 enriched = self._enrich_modems_parallel(modems, modem_community, max_workers=50)
@@ -3532,8 +3525,8 @@ def main():
     if config.pypnm_ssh_tunnel_enabled:
         logger.info(f"  SSH Host: {config.pypnm_ssh_host}")
     logger.info(f"CM Proxy: {config.cm_proxy_host or 'not configured'}")
-    logger.info(f"CMTS SNMP Direct: {config.cmts_snmp_direct}")
-    if config.cmts_snmp_direct:
+    logger.info(f"CMTS SNMP Direct: {config.cmts_enabled}")
+    if config.cmts_enabled:
         logger.info(f"  CMTS Read Community: {config.cmts_community}")
         logger.info(f"  CMTS Write Community: {'configured' if config.cmts_write_community else 'not configured (upstream PNM disabled)'}")
     logger.info(f"TFTP SSH: {config.tftp_ssh_host or 'not configured'}")
@@ -3744,7 +3737,7 @@ def main():
     if config.pypnm_ssh_tunnel_enabled:
         logger.info(f"  SSH Host: {config.pypnm_ssh_host}")
     logger.info(f"CM Proxy: {config.cm_proxy_host or 'not configured'}")
-    logger.info(f"CMTS SNMP Direct: {config.cmts_snmp_direct}")
+    logger.info(f"CMTS SNMP Direct: {config.cmts_enabled}")
     logger.info(f"TFTP SSH: {config.tftp_ssh_host or 'not configured'}")
     
     # Start agent
