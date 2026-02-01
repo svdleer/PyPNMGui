@@ -652,7 +652,7 @@ class PyPNMAgent:
         caps.append('execute_pnm')
         
         # OFDM capture capabilities (requires CM access)
-        caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer', 'pnm_set_tftp'])
+        caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer', 'pnm_set_tftp', 'pnm_spectrum'])
         
         # Modem SNMP capabilities (requires cm_reachable)
         caps.extend(['pnm_channel_info', 'pnm_event_log'])
