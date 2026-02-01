@@ -641,6 +641,9 @@ class PyPNMAgent:
         # OFDM capture capabilities (requires PyPNM integration)
         caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer', 'pnm_set_tftp'])
         
+        # Modem SNMP capabilities
+        caps.extend(['pnm_channel_info', 'pnm_event_log'])
+        
         # Upstream PNM capabilities (CMTS-side measurements)
         if self.config.cmts_snmp_direct:
             caps.extend([
