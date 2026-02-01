@@ -289,63 +289,74 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
 
 
 def _transform_pypnm_rxmer_response(pypnm_response: dict, mac_address: str) -> dict:
-    """Transform PyPNM RxMER response to frontend expected format."""
+    """Transform PyPNM RxMER file analysis response to frontend expected format.
     
-    # PyPNM returns data with 'data' containing parsed PNM file info
-    data = pypnm_response.get('data', pypnm_response)
+    PyPNM returns:
+    {
+        "mac_address": "...",
+        "pnm_file_type": "RECEIVE_MODULATION_ERROR_RATIO",
+        "status": "success",
+        "analysis": {
+            "channel_id": 34,
+            "subcarrier_spacing": 50000,
+            "subcarrier_zero_frequency": 1019600000,
+            "first_active_subcarrier_index": 148,
+            "carrier_values": {
+                "magnitude": [42.5, 43.0, ...],  # Per-subcarrier MER in dB
+                "frequency": [...]
+            },
+            "modulation_statistics": {...}
+        }
+    }
+    """
+    # Get analysis data from PyPNM response
+    analysis = pypnm_response.get('analysis', pypnm_response)
     
     rxmer_measurements = []
     
-    # Check for measurement_stats from PyPNM
-    measurement_stats = data.get('measurement_stats', [])
+    # Extract carrier values (per-subcarrier MER)
+    carrier_values = analysis.get('carrier_values', {})
+    magnitudes = carrier_values.get('magnitude', [])
+    frequencies = carrier_values.get('frequency', [])
     
-    # Also check for direct values array (per-subcarrier data)
-    values = data.get('values', [])
-    
-    if measurement_stats:
-        # PyPNM returns measurement_stats with channel info
-        for stat in measurement_stats:
-            entry = stat.get('entry', stat)
-            rxmer_measurements.append({
-                'channel_id': stat.get('channel_id', stat.get('index', 0)),
-                'subcarrier_zero_freq': data.get('subcarrier_zero_frequency', 0),
-                'subcarrier_spacing_khz': data.get('subcarrier_spacing', 50000) // 1000,
-                'average_mer_db': entry.get('docsPnmCmDsOfdmRxMerMean', 0),
-                'percentile_mer_db': entry.get('docsPnmCmDsOfdmRxMerPercentile', 0),
-                'std_dev': entry.get('docsPnmCmDsOfdmRxMerStdDev', 0),
-            })
-    
-    if values:
-        # Per-subcarrier MER values from parsed PNM file
-        subcarrier_samples = []
-        first_idx = data.get('first_active_subcarrier_index', 0)
-        zero_freq = data.get('subcarrier_zero_frequency', 0)
-        spacing = data.get('subcarrier_spacing', 50000)
+    if magnitudes:
+        first_idx = analysis.get('first_active_subcarrier_index', 0)
+        zero_freq = analysis.get('subcarrier_zero_frequency', 0)
+        spacing = analysis.get('subcarrier_spacing', 50000)
+        channel_id = analysis.get('channel_id', 1)
         
-        for i, mer in enumerate(values):
+        # Build subcarrier samples for graphing
+        subcarrier_samples = []
+        for i, mer in enumerate(magnitudes):
+            freq = frequencies[i] if i < len(frequencies) else (zero_freq + (first_idx + i) * spacing)
             subcarrier_samples.append({
                 'subcarrier_index': first_idx + i,
-                'frequency_hz': zero_freq + (first_idx + i) * spacing,
+                'frequency_hz': freq,
                 'mer_db': mer
             })
         
-        # Add as measurement with subcarrier samples
-        if rxmer_measurements:
-            rxmer_measurements[0]['subcarrier_samples'] = subcarrier_samples
-            rxmer_measurements[0]['subcarrier_count'] = len(values)
-        else:
-            rxmer_measurements.append({
-                'channel_id': data.get('channel_id', 1),
-                'subcarrier_samples': subcarrier_samples,
-                'subcarrier_count': len(values),
-                'average_mer_db': sum(values) / len(values) if values else 0
-            })
+        # Calculate statistics
+        avg_mer = sum(magnitudes) / len(magnitudes) if magnitudes else 0
+        min_mer = min(magnitudes) if magnitudes else 0
+        max_mer = max(magnitudes) if magnitudes else 0
+        
+        rxmer_measurements.append({
+            'channel_id': channel_id,
+            'subcarrier_zero_freq': zero_freq,
+            'subcarrier_spacing_khz': spacing // 1000,
+            'subcarrier_count': len(magnitudes),
+            'first_active_subcarrier': first_idx,
+            'average_mer_db': round(avg_mer, 2),
+            'min_mer_db': round(min_mer, 2),
+            'max_mer_db': round(max_mer, 2),
+            'subcarrier_samples': subcarrier_samples
+        })
     
     return {
         'mac_address': mac_address,
         'rxmer_measurements': rxmer_measurements,
-        'signal_statistics': data.get('signal_statistics', {}),
-        'modulation_statistics': data.get('modulation_statistics', {})
+        'signal_statistics': analysis.get('regression', {}),
+        'modulation_statistics': analysis.get('modulation_statistics', {})
     }
 
 
