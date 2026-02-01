@@ -1320,9 +1320,8 @@ def pypnm_health():
 
 @api_bp.route('/pypnm/modem/<mac_address>/rxmer', methods=['POST'])
 def pypnm_rxmer(mac_address):
-    """Get RxMER capture via agent (pysnmp)."""
-    from app.core.simple_ws import get_simple_agent_manager
-    import os
+    """Get RxMER capture via PyPNM API (localhost:8000)."""
+    import requests
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
@@ -1332,26 +1331,26 @@ def pypnm_rxmer(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_ofdm_rxmer') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_ofdm_rxmer',
-            params={"modem_ip": modem_ip, "mac_address": mac_address, "community": community},
-            timeout=120
+        # Call PyPNM API directly
+        response = requests.post(
+            'http://localhost:8000/docs/pnm/ds/ofdm/rxMer/getCapture',
+            json={
+                "cable_modem": {
+                    "mac_address": mac_address,
+                    "ip_address": modem_ip,
+                    "community": community
+                },
+                "output_type": "json"
+            },
+            timeout=180
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=120)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Timeout"}), 504
-        
-        task_result = result.get('result', {})
-        return jsonify({"status": 0 if task_result.get('success') else 1, **task_result})
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({"status": "error", "message": f"PyPNM returned {response.status_code}"}), 500
+    except requests.exceptions.RequestException as e:
+        return jsonify({"status": "error", "message": f"PyPNM API error: {e}"}), 500
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
