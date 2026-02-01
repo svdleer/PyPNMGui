@@ -78,7 +78,7 @@ services:
     environment:
       - AGENT_ID=lab-agent-local
       - SERVER_URL=ws://localhost:5051/ws/agent
-      - AGENT_CAPABILITIES=snmp_get,snmp_walk,snmp_set,snmp_bulk_get,cmts_snmp_direct,cmts_get_modems,cmts_get_modem_info,enrich_modems,execute_pnm,pnm_ofdm_channels,pnm_ofdm_capture,pnm_ofdm_rxmer,pnm_set_tftp,pnm_utsc_configure,pnm_utsc_start,pnm_utsc_stop,pnm_utsc_status,pnm_utsc_data,pnm_us_rxmer_start,pnm_us_rxmer_status,pnm_us_rxmer_data,pnm_us_get_interfaces
+      - AGENT_CAPABILITIES=snmp_get,snmp_walk,snmp_set,snmp_bulk_get,cmts_snmp_direct,cmts_get_modems,cmts_get_modem_info,enrich_modems,execute_pnm,pnm_ofdm_channels,pnm_ofdm_capture,pnm_ofdm_rxmer,pnm_set_tftp,pnm_utsc_configure,pnm_utsc_start,pnm_utsc_stop,pnm_utsc_status,pnm_utsc_data,pnm_us_rxmer_start,pnm_us_rxmer_status,pnm_us_rxmer_data,pnm_us_get_interfaces,pnm_channel_info,pnm_event_log
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
