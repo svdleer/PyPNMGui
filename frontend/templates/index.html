@@ -1130,7 +1130,7 @@
                                                         </button>
                                                     </div>
                                                     <div class="card-body">
-                                                        <canvas id="usRxmerChart" style="height: 300px;"></canvas>
+                                                        <img v-if="usRxmerSpectrumData" :src="'data:image/png;base64,' + usRxmerSpectrumData" class="img-fluid border rounded shadow-sm" alt="Upstream OFDMA RxMER">
                                                     </div>
                                                 </div>
                                             </div>
