@@ -1279,12 +1279,16 @@ def pypnm_health():
         if agent_manager:
             agents = agent_manager.get_available_agents()
             snmp_capable = [a for a in agents if 'snmp_get' in a.get('capabilities', [])]
+            cm_capable = [a for a in agents if 'cm_reachable' in a.get('capabilities', [])]
+            cmts_capable = [a for a in agents if 'cmts_reachable' in a.get('capabilities', [])]
             
             return jsonify({
                 "status": "ok",
                 "agent_mode": True,
                 "connected_agents": len(agents),
                 "snmp_capable_agents": len(snmp_capable),
+                "cm_capable_agents": len(cm_capable),
+                "cmts_capable_agents": len(cmts_capable),
                 "healthy": len(snmp_capable) > 0
             })
         else:
@@ -1465,10 +1469,13 @@ def pypnm_channel_stats(mac_address):
     
     try:
         agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_channel_info') if agent_manager else None
+        # Prefer agents that can reach cable modems
+        agent = agent_manager.get_agent_for_capability('cm_reachable') if agent_manager else None
+        if not agent:
+            agent = agent_manager.get_agent_for_capability('pnm_channel_info') if agent_manager else None
         
         if not agent:
-            return jsonify({"status": "error", "message": "No agent available"}), 503
+            return jsonify({"status": "error", "message": "No CM-capable agent available"}), 503
         
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
@@ -1607,10 +1614,13 @@ def pypnm_event_log(mac_address):
     
     try:
         agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_event_log') if agent_manager else None
+        # Prefer agents that can reach cable modems
+        agent = agent_manager.get_agent_for_capability('cm_reachable') if agent_manager else None
+        if not agent:
+            agent = agent_manager.get_agent_for_capability('pnm_event_log') if agent_manager else None
         
         if not agent:
-            return jsonify({"status": "error", "message": "No agent available"}), 503
+            return jsonify({"status": "error", "message": "No CM-capable agent available"}), 503
         
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,

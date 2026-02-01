@@ -618,33 +618,48 @@ class PyPNMAgent:
         self.logger.warning(f"Connection closed: {close_status_code} - {close_msg}")
     
     def _get_capabilities(self) -> list[str]:
-        """Return list of agent capabilities."""
+        """Return list of agent capabilities.
+        
+        Special tags:
+        - cm_reachable: Agent can reach cable modems directly (for modem SNMP)
+        - cmts_reachable: Agent can reach CMTS devices (for CMTS SNMP)
+        """
         caps = ['snmp_get', 'snmp_walk', 'snmp_set', 'snmp_bulk_get']
         
+        # CM (Cable Modem) reachability
         if self.cm_proxy:
             caps.append('cm_proxy')
+            caps.append('cm_reachable')  # Can reach modems via proxy
+        
+        if self.config.cm_direct_enabled:
+            caps.append('cm_direct')
+            caps.append('cm_reachable')  # Can reach modems directly
+        
+        # CMTS reachability  
+        if self.config.cmts_snmp_direct:
+            caps.append('cmts_reachable')  # Can reach CMTS
+            caps.append('cmts_snmp_direct')
+            caps.append('cmts_get_modems')
+            caps.append('cmts_get_modem_info')
+            caps.append('enrich_modems')
+        
+        if self.config.cmts_ssh_enabled:
+            caps.append('cmts_command')
+            if 'cmts_reachable' not in caps:
+                caps.append('cmts_reachable')
         
         if self.tftp_ssh:
             caps.append('tftp_get')
         
-        if self.config.cmts_ssh_enabled:
-            caps.append('cmts_command')
-        
-        if self.config.cmts_snmp_direct:
-            caps.append('cmts_snmp_direct')
-            caps.append('cmts_get_modems')  # SNMP-based modem discovery
-            caps.append('cmts_get_modem_info')
-            caps.append('enrich_modems')
-        
         caps.append('execute_pnm')
         
-        # OFDM capture capabilities (requires PyPNM integration)
+        # OFDM capture capabilities (requires CM access)
         caps.extend(['pnm_ofdm_channels', 'pnm_ofdm_capture', 'pnm_ofdm_rxmer', 'pnm_set_tftp'])
         
-        # Modem SNMP capabilities
+        # Modem SNMP capabilities (requires cm_reachable)
         caps.extend(['pnm_channel_info', 'pnm_event_log'])
         
-        # Upstream PNM capabilities (CMTS-side measurements)
+        # Upstream PNM capabilities (requires cmts_reachable)
         if self.config.cmts_snmp_direct:
             caps.extend([
                 'pnm_utsc_configure', 'pnm_utsc_start', 'pnm_utsc_stop', 'pnm_utsc_status', 'pnm_utsc_data',
