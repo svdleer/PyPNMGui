@@ -275,11 +275,16 @@ full_deploy() {
     ssh "${REMOTE_SERVER}" << 'ENDSSH'
         set -e
         
+        echo "[INFO] Pulling PyPNMGui..."
+        cd /opt/pypnm-gui-lab/
+        git pull
+        
+        echo "[INFO] Pulling pyPNMAgent..."
+        cd /home/svdleer/docker/pyPNMAgent/
+        git pull
+        
         echo "[INFO] Changing to project directory..."
         cd /opt/pypnm-gui-lab/
-        
-        echo "[INFO] Pulling latest code..."
-        git pull
         
         echo "[INFO] Stopping containers..."
         docker compose -f docker/docker-compose.lab.yml down
@@ -323,13 +328,16 @@ quick_deploy() {
     ssh "${REMOTE_SERVER}" << 'ENDSSH'
         set -e
         
-        echo "[INFO] Changing to project directory..."
+        echo "[INFO] Pulling PyPNMGui..."
         cd /opt/pypnm-gui-lab/
+        git pull
         
-        echo "[INFO] Pulling latest code..."
+        echo "[INFO] Pulling pyPNMAgent..."
+        cd /home/svdleer/docker/pyPNMAgent/
         git pull
         
         echo "[INFO] Restarting containers (no rebuild)..."
+        cd /opt/pypnm-gui-lab/
         docker compose -f docker/docker-compose.lab.yml restart
         
         echo "[SUCCESS] Quick deployment complete!"
