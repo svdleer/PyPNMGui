@@ -1023,9 +1023,16 @@
                                                                 <label class="form-label form-label-sm">RF Port / US Channel</label>
                                                                 <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
                                                                     <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select channel' }}</option>
-                                                                    <option v-for="ch in upstreamInterfaces.scqamChannels" :key="ch.ifindex" :value="ch.ifindex">
-                                                                        Ch {{ ch.channel_id }} (ifIndex {{ ch.ifindex }})
-                                                                    </option>
+                                                                    <optgroup v-if="upstreamInterfaces.ofdmaChannels.length > 0" label="OFDMA Channels">
+                                                                        <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="'ofdma-' + ch.ifindex" :value="ch.ifindex">
+                                                                            {{ ch.description || 'OFDMA ' + ch.index }} (ifIndex {{ ch.ifindex }})
+                                                                        </option>
+                                                                    </optgroup>
+                                                                    <optgroup v-if="upstreamInterfaces.scqamChannels.length > 0" label="SC-QAM Channels">
+                                                                        <option v-for="ch in upstreamInterfaces.scqamChannels" :key="'scqam-' + ch.ifindex" :value="ch.ifindex">
+                                                                            Ch {{ ch.channel_id }} (ifIndex {{ ch.ifindex }})
+                                                                        </option>
+                                                                    </optgroup>
                                                                 </select>
                                                             </div>
                                                             <div class="col-6">
