@@ -1022,12 +1022,18 @@ createApp({
             
             // If data is base64 image, display it directly
             if (typeof data === 'string' && data.length > 100) {
-                const ctx = canvas.getContext('2d');
                 const img = new Image();
                 img.onload = () => {
+                    // Set canvas to match image dimensions
                     canvas.width = img.width;
                     canvas.height = img.height;
+                    // Clear and draw
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
                     ctx.drawImage(img, 0, 0);
+                    // Update canvas style to scale properly within container
+                    canvas.style.width = '100%';
+                    canvas.style.height = 'auto';
                 };
                 img.src = 'data:image/png;base64,' + data;
                 return;
