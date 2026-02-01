@@ -2372,7 +2372,7 @@ class PyPNMAgent:
             return None
     
     def _handle_pnm_us_rxmer_data(self, params: dict) -> dict:
-        """Fetch and parse Upstream OFDMA RxMER data from TFTP server."""
+        """Fetch and parse Upstream OFDMA RxMER data from TFTP folder (mounted or via SSH)."""
         cmts_ip = params.get('cmts_ip')
         ofdma_ifindex = params.get('ofdma_ifindex')
         filename = params.get('filename', 'us_rxmer')
@@ -2389,16 +2389,30 @@ class PyPNMAgent:
             
             self.logger.info(f"Fetching US RxMER data from: {full_path}")
             
-            if not self.config.tftp_ssh_host:
-                return {'success': False, 'error': 'TFTP SSH not configured'}
+            binary_data = None
             
-            binary_data = self._fetch_file_via_ssh(
-                self.config.tftp_ssh_host,
-                self.config.tftp_ssh_user,
-                self.config.tftp_ssh_key,
-                full_path,
-                self.config.tftp_ssh_port
-            )
+            # Try local file first (if TFTP is mounted)
+            import os
+            if os.path.exists(full_path):
+                self.logger.info(f"Reading from local mount: {full_path}")
+                with open(full_path, 'rb') as f:
+                    binary_data = f.read()
+            elif self.config.tftp_ssh_host:
+                # Fall back to SSH if configured
+                binary_data = self._fetch_file_via_ssh(
+                    self.config.tftp_ssh_host,
+                    self.config.tftp_ssh_user,
+                    self.config.tftp_ssh_key,
+                    full_path,
+                    self.config.tftp_ssh_port
+                )
+            else:
+                # List what files are available
+                rxmer_dir = f"{tftp_path}/pnm/rxmer/{cmts_name}"
+                if os.path.exists(rxmer_dir):
+                    files = os.listdir(rxmer_dir)
+                    return {'success': False, 'error': f'File not found: {filename}. Available: {files[:10]}'}
+                return {'success': False, 'error': f'TFTP path not found: {rxmer_dir}'}
             
             if not binary_data:
                 return {'success': False, 'error': f'Could not fetch file: {full_path}'}
