@@ -28,12 +28,13 @@ except ImportError:
     paramiko = None
     print("WARNING: paramiko not installed. SSH proxy features disabled.")
 
-# pysnmp imports (pysnmp v7 uses snake_case and v1arch for sync)
+# pysnmp imports (pysnmp v7 uses v3arch.asyncio)
 try:
-    from pysnmp.hlapi.v1arch import (
-        get_cmd, set_cmd, next_cmd, walk_cmd,
-        SnmpDispatcher, CommunityData, UdpTransportTarget,
+    import asyncio
+    from pysnmp.hlapi.v3arch.asyncio import (
+        SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
         ObjectType, ObjectIdentity,
+        get_cmd, set_cmd, bulk_walk_cmd,
         Integer32, OctetString, Unsigned32, Counter32, Counter64, Gauge32, TimeTicks, IpAddress
     )
     PYSNMP_AVAILABLE = True
@@ -939,65 +940,29 @@ class PyPNMAgent:
     # ========== PYSNMP-BASED SNMP METHODS (pysnmp v7) ==========
     
     def _snmp_get(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
-        """SNMP GET using pysnmp v7."""
+        """SNMP GET using pysnmp v7 (async)."""
         if not PYSNMP_AVAILABLE:
             return self._snmp_get_fallback(host, oid, community)
         
-        try:
-            dispatcher = SnmpDispatcher()
-            
-            iterator = get_cmd(
-                dispatcher,
-                CommunityData(community),
-                UdpTransportTarget((host, 161), timeout=timeout, retries=1),
-                ObjectType(ObjectIdentity(oid))
-            )
-            
-            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
-            dispatcher.transport_dispatcher.close_dispatcher()
-            
-            if errorIndication:
-                return {'success': False, 'error': str(errorIndication)}
-            elif errorStatus:
-                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
-            else:
-                results = []
-                for varBind in varBinds:
-                    oid_str = str(varBind[0])
-                    value = varBind[1]
-                    results.append({
-                        'oid': oid_str,
-                        'value': self._parse_snmp_value(value),
-                        'type': type(value).__name__
-                    })
-                return {'success': True, 'results': results}
-        except Exception as e:
-            self.logger.error(f"SNMP GET error: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _snmp_walk(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
-        """SNMP WALK using pysnmp v7."""
-        if not PYSNMP_AVAILABLE:
-            return self._snmp_walk_fallback(host, oid, community)
-        
-        try:
-            dispatcher = SnmpDispatcher()
-            results = []
-            
-            for (errorIndication, errorStatus, errorIndex, varBinds) in walk_cmd(
-                dispatcher,
-                CommunityData(community),
-                UdpTransportTarget((host, 161), timeout=timeout, retries=1),
-                ObjectType(ObjectIdentity(oid))
-            ):
+        async def do_get():
+            try:
+                transport = await UdpTransportTarget.create((host, 161), timeout=timeout, retries=1)
+                result = await get_cmd(
+                    SnmpEngine(),
+                    CommunityData(community),
+                    transport,
+                    ContextData(),
+                    ObjectType(ObjectIdentity(oid))
+                )
+                
+                errorIndication, errorStatus, errorIndex, varBinds = result
+                
                 if errorIndication:
-                    if not results:  # Only error if no results yet
-                        dispatcher.transport_dispatcher.close_dispatcher()
-                        return {'success': False, 'error': str(errorIndication)}
-                    break
+                    return {'success': False, 'error': str(errorIndication)}
                 elif errorStatus:
-                    break
+                    return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
                 else:
+                    results = []
                     for varBind in varBinds:
                         oid_str = str(varBind[0])
                         value = varBind[1]
@@ -1006,42 +971,89 @@ class PyPNMAgent:
                             'value': self._parse_snmp_value(value),
                             'type': type(value).__name__
                         })
-            
-            dispatcher.transport_dispatcher.close_dispatcher()
-            return {'success': len(results) > 0, 'results': results}
-        except Exception as e:
-            self.logger.error(f"SNMP WALK error: {e}")
-            return {'success': False, 'error': str(e)}
+                    return {'success': True, 'results': results}
+            except Exception as e:
+                self.logger.error(f"SNMP GET error: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        return asyncio.run(do_get())
+    
+    def _snmp_walk(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
+        """SNMP WALK using pysnmp v7 (async)."""
+        if not PYSNMP_AVAILABLE:
+            return self._snmp_walk_fallback(host, oid, community)
+        
+        async def do_walk():
+            try:
+                transport = await UdpTransportTarget.create((host, 161), timeout=timeout, retries=1)
+                results = []
+                
+                async for (errorIndication, errorStatus, errorIndex, varBinds) in bulk_walk_cmd(
+                    SnmpEngine(),
+                    CommunityData(community),
+                    transport,
+                    ContextData(),
+                    0, 25,  # nonRepeaters, maxRepetitions
+                    ObjectType(ObjectIdentity(oid))
+                ):
+                    if errorIndication:
+                        if not results:  # Only error if no results yet
+                            return {'success': False, 'error': str(errorIndication)}
+                        break
+                    elif errorStatus:
+                        break
+                    else:
+                        for varBind in varBinds:
+                            oid_str = str(varBind[0])
+                            # Stop if we've walked past the requested OID tree
+                            if not oid_str.startswith(oid):
+                                return {'success': len(results) > 0, 'results': results}
+                            value = varBind[1]
+                            results.append({
+                                'oid': oid_str,
+                                'value': self._parse_snmp_value(value),
+                                'type': type(value).__name__
+                            })
+                
+                return {'success': len(results) > 0, 'results': results}
+            except Exception as e:
+                self.logger.error(f"SNMP WALK error: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        return asyncio.run(do_walk())
     
     def _snmp_set(self, host: str, oid: str, value: Any, value_type: str, community: str, timeout: int = 10) -> dict:
-        """SNMP SET using pysnmp v7."""
+        """SNMP SET using pysnmp v7 (async)."""
         if not PYSNMP_AVAILABLE:
             return self._snmp_set_fallback(host, oid, value, value_type, community)
         
-        try:
-            dispatcher = SnmpDispatcher()
-            # Convert value to appropriate pysnmp type
-            snmp_value = self._to_snmp_value(value, value_type)
-            
-            iterator = set_cmd(
-                dispatcher,
-                CommunityData(community),
-                UdpTransportTarget((host, 161), timeout=timeout, retries=1),
-                ObjectType(ObjectIdentity(oid), snmp_value)
-            )
-            
-            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
-            dispatcher.transport_dispatcher.close_dispatcher()
-            
-            if errorIndication:
-                return {'success': False, 'error': str(errorIndication)}
-            elif errorStatus:
-                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
-            else:
-                return {'success': True}
-        except Exception as e:
-            self.logger.error(f"SNMP SET error: {e}")
-            return {'success': False, 'error': str(e)}
+        async def do_set():
+            try:
+                transport = await UdpTransportTarget.create((host, 161), timeout=timeout, retries=1)
+                # Convert value to appropriate pysnmp type
+                snmp_value = self._to_snmp_value(value, value_type)
+                
+                result = await set_cmd(
+                    SnmpEngine(),
+                    CommunityData(community),
+                    transport,
+                    ContextData(),
+                    ObjectType(ObjectIdentity(oid), snmp_value)
+                )
+                
+                errorIndication, errorStatus, errorIndex, varBinds = result
+                
+                if errorIndication:
+                    return {'success': False, 'error': str(errorIndication)}
+                elif errorStatus:
+                    return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+                else:
+                    return {'success': True}
+            except Exception as e:
+                self.logger.error(f"SNMP SET error: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        return asyncio.run(do_set())
     
     def _parse_snmp_value(self, value) -> Any:
         """Parse pysnmp value to Python native type."""
