@@ -10,6 +10,7 @@
 #
 # Commands:
 #   deploy      - Full remote deployment (pull local, then ssh to remote and deploy)
+#   quick       - Quick remote deploy (pull + restart, no rebuild)
 #   local       - Local deployment (pull, build, start all)
 #   start       - Start all containers
 #   stop        - Stop all containers
@@ -315,6 +316,45 @@ ENDSSH
     fi
 }
 
+# Quick deploy - pull code and restart without rebuild
+quick_deploy() {
+    log_info "Starting quick deployment to remote server (no rebuild)..."
+    
+    ssh "${REMOTE_SERVER}" << 'ENDSSH'
+        set -e
+        
+        echo "[INFO] Changing to project directory..."
+        cd /opt/pypnm-gui-lab/
+        
+        echo "[INFO] Pulling latest code..."
+        git pull
+        
+        echo "[INFO] Restarting containers (no rebuild)..."
+        docker compose -f docker/docker-compose.lab.yml restart
+        
+        echo "[SUCCESS] Quick deployment complete!"
+        
+        echo ""
+        echo "Waiting for services to start..."
+        sleep 5
+        
+        echo ""
+        echo "Container status:"
+        docker compose -f docker/docker-compose.lab.yml ps
+ENDSSH
+    
+    if [ $? -eq 0 ]; then
+        log_success "Quick remote deployment complete!"
+        echo ""
+        echo "Services should be available at:"
+        echo "  - GUI: http://${REMOTE_SERVER}:5050"
+        echo "  - API: http://${REMOTE_SERVER}:8000/docs"
+    else
+        log_error "Quick remote deployment failed!"
+        exit 1
+    fi
+}
+
 # Local deploy (original behavior)
 local_deploy() {
     log_info "Starting local deployment..."
@@ -471,6 +511,9 @@ case "${1:-status}" in
     deploy)
         full_deploy
         ;;
+    quick|q)
+        quick_deploy
+        ;;
     local)
         local_deploy
         ;;
@@ -506,10 +549,11 @@ case "${1:-status}" in
         clear_cache
         ;;
     *)
-        echo "Usage: $0 {deploy|local|start|stop|restart|status|logs|pull|build|fix|health|clear-cache}"
+        echo "Usage: $0 {deploy|quick|local|start|stop|restart|status|logs|pull|build|fix|health|clear-cache}"
         echo ""
         echo "Commands:"
-        echo "  deploy      - Remote deployment to ${REMOTE_SERVER} (pull local, then ssh and deploy)"
+        echo "  deploy      - Full remote deployment (rebuild with --no-cache)"
+        echo "  quick (q)   - Quick remote deploy (pull + restart, NO rebuild)"
         echo "  local       - Local deployment (pull, build, start)"
         echo "  start       - Start all containers"
         echo "  stop        - Stop all containers"
