@@ -469,7 +469,7 @@ class PyPNMAgent:
     
     def _snmp_via_ssh(self, ssh_host: str, ssh_user: str, target_ip: str, oid: str, 
                        community: str, command: str = 'snmpbulkwalk') -> dict:
-        """Execute SNMP command via SSH to remote server (e.g., Equalizer)."""
+        """Execute SNMP command via SSH to remote server (e.g., modemserver)."""
         if not paramiko:
             return {'success': False, 'error': 'paramiko not installed'}
         
