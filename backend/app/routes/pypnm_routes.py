@@ -888,33 +888,7 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Call both PyPNM API endpoints for complete discovery
-        scqam_channels = []
-        ofdma_channels = []
-        
-        # 1. Discover RF port for UTSC (uses PyPNM's discoverRfPort)
-        try:
-            utsc_url = "http://localhost:8000/docs/pnm/us/spectrumAnalyzer/discoverRfPort"
-            utsc_response = requests.post(utsc_url, json={
-                "cmts": {
-                    "cmts_ip": cmts_ip,
-                    "community": community
-                },
-                "cm_mac_address": mac_address
-            }, timeout=30)
-            
-            if utsc_response.status_code == 200:
-                utsc_result = utsc_response.json()
-                if utsc_result.get('success') and utsc_result.get('rf_port_ifindex'):
-                    scqam_channels.append({
-                        'ifindex': utsc_result['rf_port_ifindex'],
-                        'channel_id': utsc_result.get('logical_channel'),
-                        'description': utsc_result.get('rf_port_description', f"RF Port {utsc_result['rf_port_ifindex']}")
-                    })
-        except Exception as e:
-            logger.warning(f"UTSC RF port discovery failed (non-fatal): {e}")
-        
-        # 2. Discover OFDMA channel for US RxMER (uses rxmer/discover)
+        # Call PyPNM API for OFDMA discovery
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/discover"
         
         response = requests.post(pypnm_url, json={
@@ -928,6 +902,7 @@ def get_upstream_interfaces(mac_address):
         if response.status_code == 200:
             result = response.json()
             
+            ofdma_channels = []
             if result.get('success') and result.get('ofdma_ifindex'):
                 ofdma_channels.append({
                     'ifindex': result['ofdma_ifindex'],
@@ -939,7 +914,7 @@ def get_upstream_interfaces(mac_address):
                 "success": True,
                 "mac_address": mac_address,
                 "cmts_ip": cmts_ip,
-                "scqam_channels": scqam_channels,
+                "scqam_channels": [],  # RF port discovery via separate endpoint
                 "ofdma_channels": ofdma_channels
             })
         else:
