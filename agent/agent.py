@@ -28,11 +28,11 @@ except ImportError:
     paramiko = None
     print("WARNING: paramiko not installed. SSH proxy features disabled.")
 
-# pysnmp imports
+# pysnmp imports (pysnmp v7 uses snake_case and v1arch for sync)
 try:
-    from pysnmp.hlapi import (
-        getCmd, setCmd, nextCmd, bulkCmd,
-        SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
+    from pysnmp.hlapi.v1arch import (
+        get_cmd, set_cmd, next_cmd, walk_cmd,
+        SnmpDispatcher, CommunityData, UdpTransportTarget,
         ObjectType, ObjectIdentity,
         Integer32, OctetString, Unsigned32, Counter32, Counter64, Gauge32, TimeTicks, IpAddress
     )
@@ -936,23 +936,25 @@ class PyPNMAgent:
         
         return self._cm_proxy_ssh
     
-    # ========== PYSNMP-BASED SNMP METHODS ==========
+    # ========== PYSNMP-BASED SNMP METHODS (pysnmp v7) ==========
     
     def _snmp_get(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
-        """SNMP GET using pysnmp."""
+        """SNMP GET using pysnmp v7."""
         if not PYSNMP_AVAILABLE:
             return self._snmp_get_fallback(host, oid, community)
         
         try:
-            iterator = getCmd(
-                SnmpEngine(),
+            dispatcher = SnmpDispatcher()
+            
+            iterator = get_cmd(
+                dispatcher,
                 CommunityData(community),
                 UdpTransportTarget((host, 161), timeout=timeout, retries=1),
-                ContextData(),
                 ObjectType(ObjectIdentity(oid))
             )
             
             errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            dispatcher.transport_dispatcher.close_dispatcher()
             
             if errorIndication:
                 return {'success': False, 'error': str(errorIndication)}
@@ -974,22 +976,23 @@ class PyPNMAgent:
             return {'success': False, 'error': str(e)}
     
     def _snmp_walk(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
-        """SNMP WALK using pysnmp."""
+        """SNMP WALK using pysnmp v7."""
         if not PYSNMP_AVAILABLE:
             return self._snmp_walk_fallback(host, oid, community)
         
         try:
+            dispatcher = SnmpDispatcher()
             results = []
-            for (errorIndication, errorStatus, errorIndex, varBinds) in nextCmd(
-                SnmpEngine(),
+            
+            for (errorIndication, errorStatus, errorIndex, varBinds) in walk_cmd(
+                dispatcher,
                 CommunityData(community),
                 UdpTransportTarget((host, 161), timeout=timeout, retries=1),
-                ContextData(),
-                ObjectType(ObjectIdentity(oid)),
-                lexicographicMode=False
+                ObjectType(ObjectIdentity(oid))
             ):
                 if errorIndication:
                     if not results:  # Only error if no results yet
+                        dispatcher.transport_dispatcher.close_dispatcher()
                         return {'success': False, 'error': str(errorIndication)}
                     break
                 elif errorStatus:
@@ -1004,29 +1007,31 @@ class PyPNMAgent:
                             'type': type(value).__name__
                         })
             
+            dispatcher.transport_dispatcher.close_dispatcher()
             return {'success': len(results) > 0, 'results': results}
         except Exception as e:
             self.logger.error(f"SNMP WALK error: {e}")
             return {'success': False, 'error': str(e)}
     
     def _snmp_set(self, host: str, oid: str, value: Any, value_type: str, community: str, timeout: int = 10) -> dict:
-        """SNMP SET using pysnmp."""
+        """SNMP SET using pysnmp v7."""
         if not PYSNMP_AVAILABLE:
             return self._snmp_set_fallback(host, oid, value, value_type, community)
         
         try:
+            dispatcher = SnmpDispatcher()
             # Convert value to appropriate pysnmp type
             snmp_value = self._to_snmp_value(value, value_type)
             
-            iterator = setCmd(
-                SnmpEngine(),
+            iterator = set_cmd(
+                dispatcher,
                 CommunityData(community),
                 UdpTransportTarget((host, 161), timeout=timeout, retries=1),
-                ContextData(),
                 ObjectType(ObjectIdentity(oid), snmp_value)
             )
             
             errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            dispatcher.transport_dispatcher.close_dispatcher()
             
             if errorIndication:
                 return {'success': False, 'error': str(errorIndication)}
