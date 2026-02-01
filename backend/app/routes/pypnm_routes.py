@@ -32,10 +32,11 @@ def get_default_tftp():
 @pypnm_bp.route('/measurements/<measurement_type>/<mac_address>', methods=['POST'])
 def pnm_measurement(measurement_type, mac_address):
     """
-    Unified PNM measurement endpoint.
+    Unified PNM measurement endpoint - routes through agent.
     
     Supported types:
-    - rxmer: RxMER per subcarrier
+    - rxmer: RxMER per subcarrier (uses pnm_ofdm_rxmer agent command)
+    - spectrum: Spectrum analyzer
     - channel_estimation: Channel estimation coefficients
     - modulation_profile: Modulation profile
     - fec_summary: FEC summary stats
@@ -52,289 +53,88 @@ def pnm_measurement(measurement_type, mac_address):
         "sample_duration": 60    # Only for histogram
     }
     """
-    from app.core.pypnm_client import PyPNMClient
+    from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', get_default_community())
-    tftp_ip = data.get('tftp_ip', get_default_tftp())
-    output_type = data.get('output_type', 'json')
-    
-    # Spectrum analyzer: always use JSON mode from PyPNM, then generate plots ourselves
-    if measurement_type == 'spectrum':
-        output_type = 'json'  # PyPNM returns JSON, we generate plots in backend
-        requested_archive = data.get('output_type') == 'archive'  # Track if user wanted archive
-    # PyPNM only supports json output currently - archive mode falls back to json
-    elif output_type == 'archive':
-        # Keep archive mode - PyPNM will return ZIP with plots
-        requested_archive = True
-    else:
-        requested_archive = False
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    client = PyPNMClient()
+    # Map measurement types to agent commands
+    agent_command_map = {
+        'rxmer': 'pnm_ofdm_rxmer',
+        'spectrum': 'pnm_spectrum',
+        'channel_estimation': 'pnm_ofdm_capture',
+        'modulation_profile': 'pnm_ofdm_capture',
+        'fec_summary': 'pnm_fec',
+        'histogram': 'pnm_spectrum',
+        'constellation': 'pnm_ofdm_capture',
+        'us_pre_eq': 'pnm_pre_eq',
+    }
     
-    # Route to appropriate method
+    agent_command = agent_command_map.get(measurement_type)
+    if not agent_command:
+        return jsonify({
+            "status": "error",
+            "message": f"Unknown measurement type: {measurement_type}"
+        }), 400
+    
     try:
-        if measurement_type == 'rxmer':
-            result = client.get_rxmer_capture(
-                mac_address, modem_ip, tftp_ip, community, 
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'spectrum':
-            result = client.get_spectrum_capture(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'channel_estimation':
-            result = client.get_channel_estimation(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'modulation_profile':
-            result = client.get_modulation_profile(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'fec_summary':
-            fec_type = data.get('fec_summary_type', 2)
-            result = client.get_fec_summary(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", fec_summary_type=fec_type, output_type=output_type
-            )
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability(agent_command) if agent_manager else None
+        
+        if not agent:
+            # Fallback: try any agent with cm_direct capability
+            agent = agent_manager.get_agent_for_capability('cm_direct') if agent_manager else None
+        
+        if not agent:
+            return jsonify({"status": "error", "message": f"No agent available for {measurement_type}"}), 503
+        
+        # Build params for agent
+        params = {
+            "modem_ip": modem_ip,
+            "mac_address": mac_address,
+            "community": community,
+            "measurement_type": measurement_type
+        }
+        
+        # Add measurement-specific params
+        if measurement_type == 'fec_summary':
+            params['fec_type'] = data.get('fec_summary_type', 2)
         elif measurement_type == 'histogram':
-            duration = data.get('sample_duration', 60)
-            result = client.get_histogram(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", sample_duration=duration, output_type=output_type
-            )
-        elif measurement_type == 'constellation':
-            result = client.get_constellation_display(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'us_pre_eq':
-            result = client.get_us_ofdma_pre_equalization(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
-        else:
-            return jsonify({
-                "status": "error",
-                "message": f"Unknown measurement type: {measurement_type}"
-            }), 400
+            params['sample_duration'] = data.get('sample_duration', 60)
         
-        # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
-        if requested_archive and isinstance(result, bytes):
-            # PyPNM returned binary ZIP file
-            import zipfile
-            import io
-            import base64
-            from datetime import datetime
-            
-            # Save ZIP file
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            zip_filename = f"{measurement_type}_{mac_address}_{timestamp}.zip"
-            zip_path = f"/app/data/{zip_filename}"
-            
-            with open(zip_path, 'wb') as f:
-                f.write(result)
-            
-            # Extract PNG images from ZIP
-            plots = []
-            try:
-                with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
-                    for filename in zf.namelist():
-                        if filename.endswith('.png'):
-                            img_data = zf.read(filename)
-                            plots.append({
-                                'filename': filename,
-                                'data': base64.b64encode(img_data).decode('utf-8')
-                            })
-            except Exception as e:
-                logger.error(f"Failed to extract plots from ZIP: {e}")
-            
-            return jsonify({
-                "status": 0,
-                "message": f"Measurement complete - {len(plots)} plots generated",
-                "output_type": "archive",
-                "zip_file": zip_filename,
-                "download_url": f"/api/pypnm/download/{zip_filename}",
-                "plots": plots,
-                "mac_address": mac_address
-            })
+        logger.info(f"Sending {agent_command} to agent {agent.agent_id} for {mac_address}")
         
-        # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
-        if requested_archive and result.get('status') == 0:
-            # PyPNM returns archive data, extract plots and save ZIP
-            import zipfile
-            import io
-            import base64
-            from datetime import datetime
-            
-            # Get the archive data from PyPNM
-            archive_data = result.get('archive_data')
-            if archive_data:
-                # Save ZIP and extract plot images
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                zip_filename = f"{measurement_type}_{mac_address}_{timestamp}.zip"
-                zip_path = f"/app/data/{zip_filename}"
-                
-                # Write ZIP file
-                with open(zip_path, 'wb') as f:
-                    f.write(base64.b64decode(archive_data) if isinstance(archive_data, str) else archive_data)
-                
-                # Extract PNG images from ZIP
-                plots = []
-                try:
-                    with zipfile.ZipFile(zip_path, 'r') as zf:
-                        for filename in zf.namelist():
-                            if filename.endswith('.png'):
-                                img_data = zf.read(filename)
-                                plots.append({
-                                    'filename': filename,
-                                    'data': base64.b64encode(img_data).decode('utf-8')
-                                })
-                except Exception as e:
-                    logger.error(f"Failed to extract plots: {e}")
-                
-                return jsonify({
-                    "status": 0,
-                    "message": result.get('message', 'Archive generated successfully'),
-                    "output_type": "archive",
-                    "zip_file": zip_filename,
-                    "download_url": f"/api/pypnm/download/{zip_filename}",
-                    "plots": plots,
-                    "data": result.get('data', {})
-                })
-            
-            # Archive data not available, return JSON
-            # But fetch matplotlib plots if they were generated
-            import glob
-            import os
-            import base64
-            import time
-            
-            logger.info(f"=== Plot Fetching Debug ===")
-            logger.info(f"requested_archive: {requested_archive}")
-            logger.info(f"result status: {result.get('status')}")
-            
-            plots = []
-            if result.get('status') == 0:
-                # Give PyPNM a moment to finish writing files
-                time.sleep(1)
-                
-                # Look for plots in /pypnm-data/png/
-                plot_dir = "/pypnm-data/png"
-                logger.info(f"Plot dir exists: {os.path.exists(plot_dir)}")
-                
-                if os.path.exists(plot_dir):
-                    # Find recent plots for this modem
-                    mac_clean = mac_address.replace(':', '')
-                    pattern = f"{plot_dir}/{mac_clean}*.png"
-                    plot_files = glob.glob(pattern)
-                    logger.info(f"Pattern: {pattern}")
-                    logger.info(f"Found {len(plot_files)} total files")
-                    
-                    # Get files modified in the last 60 seconds
-                    recent_time = time.time() - 60
-                    plot_files = [f for f in plot_files if os.path.getmtime(f) > recent_time]
-                    logger.info(f"Found {len(plot_files)} recent files (last 60s)")
-                    plot_files.sort(key=os.path.getmtime, reverse=True)
-                    
-                    for filepath in plot_files[:10]:  # Max 10 plots
-                        try:
-                            with open(filepath, 'rb') as f:
-                                img_data = f.read()
-                                plots.append({
-                                    'filename': os.path.basename(filepath),
-                                    'data': base64.b64encode(img_data).decode('utf-8')
-                                })
-                                logger.info(f"Added plot: {os.path.basename(filepath)}")
-                        except Exception as e:
-                            logger.error(f"Failed to read plot {filepath}: {e}")
-            
-            logger.info(f"Returning {len(plots)} plots")
-            
-            # For spectrum analyzer, generate matplotlib plots from the JSON data
-            if measurement_type == 'spectrum' and result.get('status') == 0:
-                spectrum_data = result.get('data', {})
-                if spectrum_data:
-                    logger.info(f"Generating spectrum plot for {mac_address}")
-                    try:
-                        spectrum_plot = generate_spectrum_plot_from_data(spectrum_data, mac_address)
-                        if spectrum_plot:
-                            plots.append(spectrum_plot)
-                            logger.info(f"Successfully generated spectrum plot: {spectrum_plot['filename']}")
-                    except Exception as e:
-                        logger.error(f"Failed to generate spectrum plot: {e}", exc_info=True)
-            
-            return jsonify({
-                "status": 0,
-                "message": result.get('message', 'Measurement complete'),
-                "plots": plots,  # Matplotlib PNG plots
-                "data": result.get('data', {})
-            })
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command=agent_command,
+            params=params,
+            timeout=120
+        )
         
-        # Handle errors
-        if result.get('status') != 0:
-            return jsonify(result), 500
+        result = agent_manager.wait_for_task(task_id, timeout=120)
         
-        # Fetch matplotlib plots for successful measurements (regardless of output_type)
-        import glob
-        import os
-        import base64
-        import time
+        if result is None:
+            return jsonify({"status": "error", "message": "Task timed out"}), 504
         
-        plots = []
-        plot_dir = "/pypnm-data/png"
-        if os.path.exists(plot_dir):
-            mac_clean = mac_address.replace(':', '')
-            pattern = f"{plot_dir}/{mac_clean}*.png"
-            plot_files = glob.glob(pattern)
-            
-            # Get files modified in the last 120 seconds
-            recent_time = time.time() - 120
-            plot_files = [f for f in plot_files if os.path.getmtime(f) > recent_time]
-            plot_files.sort(key=os.path.getmtime, reverse=True)
-            
-            for filepath in plot_files[:10]:
-                try:
-                    with open(filepath, 'rb') as f:
-                        img_data = f.read()
-                        plots.append({
-                            'filename': os.path.basename(filepath),
-                            'data': base64.b64encode(img_data).decode('utf-8')
-                        })
-                except Exception as e:
-                    logger.error(f"Failed to read plot {filepath}: {e}")
+        if result.get('error'):
+            return jsonify({"status": "error", "message": result.get('error')}), 500
         
-        # For spectrum analyzer, generate matplotlib plots from the JSON data
-        if measurement_type == 'spectrum' and result.get('status') == 0:
-            spectrum_data = result.get('data', {})
-            if spectrum_data:
-                logger.info(f"Generating spectrum plot for {mac_address}")
-                try:
-                    spectrum_plot = generate_spectrum_plot_from_data(spectrum_data, mac_address)
-                    if spectrum_plot:
-                        plots.append(spectrum_plot)
-                        logger.info(f"Successfully generated spectrum plot: {spectrum_plot['filename']}")
-                except Exception as e:
-                    logger.error(f"Failed to generate spectrum plot: {e}")
+        task_result = result.get('result', {})
         
-        # Add plots to result
-        result['plots'] = plots
-            
-        return jsonify(result)
+        return jsonify({
+            "status": 0 if task_result.get('success', False) else 1,
+            "message": task_result.get('message', 'Measurement complete'),
+            "results": task_result.get('data', task_result),
+            "mac_address": mac_address
+        })
         
     except Exception as e:
         logger.error(f"PNM measurement {measurement_type} failed: {e}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @pypnm_bp.route('/channel-stats/<mac_address>', methods=['POST'])
