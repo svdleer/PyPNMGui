@@ -1616,10 +1616,9 @@ class PyPNMAgent:
         }
     
     def _handle_pnm_channel_info(self, params: dict) -> dict:
-        """Get comprehensive channel info (DS/US power, frequency, modulation).
+        """Get comprehensive channel info (DS/US power, frequency, modulation) via pysnmp.
         
-        Requires cm_proxy configuration with SSH tunnel or socat to reach modem IPs.
-        Modems must be reachable via SNMP through the configured proxy.
+        Works with cm_direct (direct SNMP to modems) or cm_proxy SSH tunnel.
         """
         modem_ip = params.get('modem_ip')
         community = params.get('community', 'm0d3m1nf0')
@@ -1628,28 +1627,107 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        self.logger.info(f"Getting channel info for modem {modem_ip} via cm_proxy, community={community}")
+        self.logger.info(f"Getting channel info for modem {modem_ip} via pysnmp")
         
-        # Check if cm_proxy is configured
-        if not self.config.cm_proxy_host and not self.config.cm_direct_enabled:
-            return {'success': False, 'error': 'cm_proxy not configured in agent_config.json'}
-        
-        self.logger.info(f"cm_proxy config: host={self.config.cm_proxy_host}, user={self.config.cm_proxy_user}")
-        
-        # Define all OIDs to query
+        # Define OIDs for channel stats
         oids = {
-            'ds_freq': '1.3.6.1.2.1.10.127.1.1.1.1.2',   # docsIfDownChannelFrequency
-            'ds_power': '1.3.6.1.2.1.10.127.1.1.1.1.6',  # docsIfDownChannelPower
-            'ds_snr': '1.3.6.1.2.1.10.127.1.1.4.1.5',    # docsIfSigQSignalNoise
+            'ds_freq': '1.3.6.1.2.1.10.127.1.1.1.1.2',    # docsIfDownChannelFrequency
+            'ds_power': '1.3.6.1.2.1.10.127.1.1.1.1.6',   # docsIfDownChannelPower
+            'ds_snr': '1.3.6.1.2.1.10.127.1.1.4.1.5',     # docsIfSigQSignalNoise
             'us_power': '1.3.6.1.4.1.4491.2.1.20.1.2.1.1', # docsIf3CmStatusUsTxPower
+            'ds_ofdm_power': '1.3.6.1.4.1.4491.2.1.28.1.2.1.6',  # docsIf31CmDsOfdmChannelPowerRxPower
+            'us_ofdma_power': '1.3.6.1.4.1.4491.2.1.28.1.3.1.4', # docsIf31CmUsOfdmaChannelStatusTxPower
         }
         
-        self.logger.info(f"Calling _batch_query_modem for {modem_ip}")
+        # Use parallel walk for all OIDs at once
+        result = self._snmp_parallel_walk(modem_ip, list(oids.values()), community, timeout=15)
         
-        # Batch query all OIDs in single SSH command
+        if not result.get('success'):
+            # Try fallback via cm_proxy SSH if available
+            if self.config.cm_proxy_host:
+                self.logger.info("pysnmp failed, trying cm_proxy SSH fallback")
+                return self._handle_pnm_channel_info_ssh(params)
+            return {'success': False, 'error': result.get('error', 'SNMP query failed')}
+        
+        walk_results = result.get('results', {})
+        
+        def parse_oid_values(results_list, divisor=1):
+            """Parse OID results to dict of index -> value."""
+            values = {}
+            for r in results_list:
+                try:
+                    idx = r['oid'].split('.')[-1]
+                    val = r['value']
+                    if isinstance(val, (int, float)):
+                        values[idx] = val / divisor
+                    elif isinstance(val, str) and val.lstrip('-').isdigit():
+                        values[idx] = int(val) / divisor
+                except:
+                    pass
+            return values
+        
+        ds_freq_map = parse_oid_values(walk_results.get(oids['ds_freq'], []))
+        ds_power_map = parse_oid_values(walk_results.get(oids['ds_power'], []), 10)
+        ds_snr_map = parse_oid_values(walk_results.get(oids['ds_snr'], []), 10)
+        us_power_map = parse_oid_values(walk_results.get(oids['us_power'], []), 10)
+        ds_ofdm_power_map = parse_oid_values(walk_results.get(oids['ds_ofdm_power'], []), 10)
+        us_ofdma_power_map = parse_oid_values(walk_results.get(oids['us_ofdma_power'], []), 10)
+        
+        downstream = []
+        for idx in ds_freq_map:
+            downstream.append({
+                'channel_id': int(idx),
+                'type': 'SC-QAM',
+                'frequency_mhz': ds_freq_map[idx] / 1000000,
+                'power_dbmv': ds_power_map.get(idx, 0),
+                'snr_db': ds_snr_map.get(idx, 0)
+            })
+        
+        for idx in ds_ofdm_power_map:
+            downstream.append({
+                'channel_id': int(idx),
+                'type': 'OFDM',
+                'power_dbmv': ds_ofdm_power_map[idx]
+            })
+        
+        upstream = []
+        for idx in us_power_map:
+            upstream.append({
+                'channel_id': int(idx),
+                'type': 'ATDMA',
+                'power_dbmv': us_power_map[idx]
+            })
+        
+        for idx in us_ofdma_power_map:
+            upstream.append({
+                'channel_id': int(idx),
+                'type': 'OFDMA',
+                'power_dbmv': us_ofdma_power_map[idx]
+            })
+        
+        return {
+            'success': True,
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'timestamp': datetime.now().isoformat(),
+            'downstream': sorted(downstream, key=lambda x: x['channel_id']),
+            'upstream': sorted(upstream, key=lambda x: x['channel_id'])
+        }
+    
+    def _handle_pnm_channel_info_ssh(self, params: dict) -> dict:
+        """Fallback: Get channel info via cm_proxy SSH (old method)."""
+        modem_ip = params.get('modem_ip')
+        community = params.get('community', 'm0d3m1nf0')
+        mac_address = params.get('mac_address')
+        
+        oids = {
+            'ds_freq': '1.3.6.1.2.1.10.127.1.1.1.1.2',
+            'ds_power': '1.3.6.1.2.1.10.127.1.1.1.1.6',
+            'ds_snr': '1.3.6.1.2.1.10.127.1.1.4.1.5',
+            'us_power': '1.3.6.1.4.1.4491.2.1.20.1.2.1.1',
+        }
+        
         batch_result = self._batch_query_modem(modem_ip, oids, community)
-        
-        self.logger.info(f"_batch_query_modem returned: success={batch_result.get('success')}")
         
         if not batch_result.get('success'):
             return {'success': False, 'error': batch_result.get('error', 'Batch query failed')}
@@ -1700,7 +1778,7 @@ class PyPNMAgent:
         }
     
     def _handle_pnm_event_log(self, params: dict) -> dict:
-        """Get event log from modem."""
+        """Get event log from modem via pysnmp."""
         modem_ip = params.get('modem_ip')
         community = params.get('community', 'm0d3m1nf0')
         mac_address = params.get('mac_address')
@@ -1708,34 +1786,67 @@ class PyPNMAgent:
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        self.logger.info(f"Getting event log for modem {modem_ip}")
+        self.logger.info(f"Getting event log for modem {modem_ip} via pysnmp")
         
         # DOCSIS Event Log OIDs
-        OID_EVENT_TEXT = '1.3.6.1.2.1.69.1.5.8.1.7'  # docsDevEvText
-        OID_EVENT_TIME = '1.3.6.1.2.1.69.1.5.8.1.6'  # docsDevEvLastTime
+        OID_EVENT_TEXT = '1.3.6.1.2.1.69.1.5.8.1.7'   # docsDevEvText
+        OID_EVENT_TIME = '1.3.6.1.2.1.69.1.5.8.1.6'   # docsDevEvLastTime
         OID_EVENT_LEVEL = '1.3.6.1.2.1.69.1.5.8.1.4'  # docsDevEvLevel
         
-        text_result = self._query_modem(modem_ip, OID_EVENT_TEXT, community, walk=True)
+        result = self._snmp_parallel_walk(modem_ip, [OID_EVENT_TEXT, OID_EVENT_TIME, OID_EVENT_LEVEL], community, timeout=15)
+        
+        if not result.get('success'):
+            return {'success': False, 'error': result.get('error', 'SNMP query failed')}
+        
+        walk_results = result.get('results', {})
+        
+        # Parse text entries
+        text_map = {}
+        for r in walk_results.get(OID_EVENT_TEXT, []):
+            try:
+                idx = r['oid'].split('.')[-1]
+                text_map[idx] = r['value']
+            except:
+                pass
+        
+        # Parse time entries
+        time_map = {}
+        for r in walk_results.get(OID_EVENT_TIME, []):
+            try:
+                idx = r['oid'].split('.')[-1]
+                time_map[idx] = r['value']
+            except:
+                pass
+        
+        # Parse level entries
+        level_map = {}
+        level_names = {1: 'emergency', 2: 'alert', 3: 'critical', 4: 'error', 5: 'warning', 6: 'notice', 7: 'info', 8: 'debug'}
+        for r in walk_results.get(OID_EVENT_LEVEL, []):
+            try:
+                idx = r['oid'].split('.')[-1]
+                level_val = int(r['value']) if isinstance(r['value'], (int, str)) else 7
+                level_map[idx] = level_names.get(level_val, 'unknown')
+            except:
+                pass
         
         events = []
-        for line in text_result.get('output', '').split('\n'):
-            if '=' in line and 'STRING' in line:
-                try:
-                    idx = line.split('=')[0].strip().split('.')[-1]
-                    text = line.split('STRING:')[-1].strip().strip('"')
-                    events.append({
-                        'id': int(idx),
-                        'text': text
-                    })
-                except:
-                    pass
+        for idx in text_map:
+            events.append({
+                'id': int(idx),
+                'text': text_map[idx],
+                'time': time_map.get(idx, ''),
+                'level': level_map.get(idx, 'info')
+            })
+        
+        # Sort by ID descending (newest first)
+        events.sort(key=lambda x: x['id'], reverse=True)
         
         return {
             'success': True,
             'mac_address': mac_address,
             'modem_ip': modem_ip,
             'timestamp': datetime.now().isoformat(),
-            'events': events[-50:],  # Last 50 events
+            'events': events[:50],  # Last 50 events
             'total_events': len(events)
         }
 

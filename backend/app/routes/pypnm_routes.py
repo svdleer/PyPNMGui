@@ -140,14 +140,13 @@ def pnm_measurement(measurement_type, mac_address):
 @pypnm_bp.route('/channel-stats/<mac_address>', methods=['POST'])
 def channel_stats(mac_address):
     """
-    Get comprehensive channel statistics with profile information.
+    Get comprehensive channel statistics via agent.
     
     Returns DS/US channel info including:
     - Channel type (SC-QAM, OFDM, ATDMA, OFDMA)
-    - Active profiles
     - Signal quality metrics
     """
-    from app.core.pypnm_client import PyPNMClient
+    from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
@@ -156,39 +155,64 @@ def channel_stats(mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    client = PyPNMClient()
-    
     try:
-        # Get all channel stats
-        ds_scqam = client.get_ds_scqam_stats(mac_address, modem_ip, community)
-        ds_ofdm = client.get_ds_ofdm_stats(mac_address, modem_ip, community)
-        us_atdma = client.get_us_atdma_stats(mac_address, modem_ip, community)
-        us_ofdma = client.get_us_ofdma_stats(mac_address, modem_ip, community)
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability('pnm_channel_info') if agent_manager else None
         
-        # Process and enhance data with profile info
+        if not agent:
+            return jsonify({"status": "error", "message": "No agent available for channel stats"}), 503
+        
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_channel_info',
+            params={
+                "modem_ip": modem_ip,
+                "mac_address": mac_address,
+                "community": community
+            },
+            timeout=60
+        )
+        
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        
+        if result is None:
+            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        
+        if result.get('error'):
+            return jsonify({"status": "error", "message": result.get('error')}), 500
+        
+        task_result = result.get('result', {})
+        
+        if not task_result.get('success'):
+            return jsonify({"status": "error", "message": task_result.get('error', 'Query failed')}), 500
+        
+        # Transform agent result to expected format
+        ds_channels = task_result.get('downstream', [])
+        us_channels = task_result.get('upstream', [])
+        
         downstream = {
             "scqam": {
                 "type": "SC-QAM (DOCSIS 3.0)",
-                "channels": _extract_scqam_channels(ds_scqam),
-                "count": len(_extract_scqam_channels(ds_scqam))
+                "channels": [c for c in ds_channels if c.get('type') == 'SC-QAM'],
+                "count": len([c for c in ds_channels if c.get('type') == 'SC-QAM'])
             },
             "ofdm": {
                 "type": "OFDM (DOCSIS 3.1)",
-                "channels": _extract_ofdm_channels(ds_ofdm),
-                "count": len(_extract_ofdm_channels(ds_ofdm))
+                "channels": [c for c in ds_channels if c.get('type') == 'OFDM'],
+                "count": len([c for c in ds_channels if c.get('type') == 'OFDM'])
             }
         }
         
         upstream = {
             "atdma": {
                 "type": "ATDMA (DOCSIS 3.0)",
-                "channels": _extract_atdma_channels(us_atdma),
-                "count": len(_extract_atdma_channels(us_atdma))
+                "channels": [c for c in us_channels if c.get('type') == 'ATDMA'],
+                "count": len([c for c in us_channels if c.get('type') == 'ATDMA'])
             },
             "ofdma": {
                 "type": "OFDMA (DOCSIS 3.1)",
-                "channels": _extract_ofdma_channels(us_ofdma),
-                "count": len(_extract_ofdma_channels(us_ofdma))
+                "channels": [c for c in us_channels if c.get('type') == 'OFDMA'],
+                "count": len([c for c in us_channels if c.get('type') == 'OFDMA'])
             }
         }
         
