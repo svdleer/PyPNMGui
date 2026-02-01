@@ -151,13 +151,15 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
     
     Flow:
     1. Agent triggers SNMP capture (modem uploads file to TFTP)
-    2. PyPNM parses the file from TFTP directory
+    2. Upload file to PyPNM and get transaction_id
+    3. Call PyPNM getAnalysis to parse and get data + plot
     """
-    import requests
     import time
+    import requests
     from app.core.simple_ws import get_simple_agent_manager
     
     pypnm_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000'))
+    tftp_dir = '/var/lib/tftpboot'  # PyPNM container has this mounted
     
     try:
         # Step 1: Have agent trigger SNMP capture
@@ -192,99 +194,95 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
             return jsonify({"status": "error", "message": f"Capture trigger failed: {error}"}), 500
         
         logger.info(f"Agent triggered RxMER capture, waiting for file upload...")
+        agent_result = trigger_result.get('result', {})
+        channels = agent_result.get('channels', [])
         
-        # Step 2: Wait for modem to upload file and call PyPNM to parse
-        # The modem uploads to TFTP, PyPNM monitors or we search for files
-        time.sleep(5)  # Give modem time to upload
+        # Step 2: Wait for modem to upload file to TFTP
+        time.sleep(5)
         
-        # Step 3: Call PyPNM to get the RxMER data
-        # Try the capture endpoint - PyPNM should find the uploaded file
-        try:
-            response = requests.post(
-                f"{pypnm_url}/docs/pnm/ds/ofdm/rxMer/getCapture",
-                json={
-                    "cable_modem": {
-                        "mac_address": mac_address,
-                        "ip_address": modem_ip,
-                        "snmp": {
-                            "community": community
+        # Step 3: Upload each file to PyPNM and get analysis
+        all_channel_data = []
+        
+        for channel in channels:
+            filename = channel.get('filename')
+            if not filename:
+                continue
+            
+            filepath = f"{tftp_dir}/{filename}"
+            logger.info(f"Processing RxMER file: {filename}")
+            
+            try:
+                # Upload file to PyPNM (reads from container's mounted TFTP dir)
+                # Note: GUI container can call PyPNM API, PyPNM reads file from its own mount
+                upload_response = requests.post(
+                    f"{pypnm_url}/docs/pnm/files/upload",
+                    files={'file': (filename, open(filepath, 'rb'), 'application/octet-stream')},
+                    timeout=30
+                )
+                
+                if upload_response.status_code not in [200, 201]:
+                    logger.warning(f"File upload failed: {upload_response.status_code}")
+                    continue
+                
+                upload_result = upload_response.json()
+                tx_id = upload_result.get('transaction_id')
+                
+                if not tx_id:
+                    logger.warning(f"No transaction_id in upload response")
+                    continue
+                
+                logger.info(f"File uploaded, transaction_id: {tx_id}")
+                
+                # Get analysis
+                analysis_response = requests.post(
+                    f"{pypnm_url}/docs/pnm/files/getAnalysis",
+                    json={
+                        "search": {"transaction_id": tx_id},
+                        "analysis": {
+                            "type": "basic",
+                            "output": {"type": "json"},
+                            "plot": {"ui": {"theme": "light"}}
                         }
                     },
-                    "analysis": {
-                        "output": {
-                            "type": "json"
-                        }
-                    }
-                },
-                timeout=120
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                rxmer_data = _transform_pypnm_rxmer_response(result, mac_address)
+                    timeout=60
+                )
                 
-                return jsonify({
-                    "status": 0,
-                    "message": "RxMER capture complete",
-                    "data": rxmer_data,
-                    "mac_address": mac_address
-                })
-            else:
-                logger.warning(f"PyPNM API returned {response.status_code}, trying file search...")
-        except Exception as e:
-            logger.warning(f"PyPNM capture API failed: {e}, trying file search...")
-        
-        # Fallback: Search for recently uploaded files by MAC
-        try:
-            mac_clean = mac_address.replace(':', '').lower()
-            search_response = requests.get(
-                f"{pypnm_url}/docs/pnm/files/searchFiles/{mac_address}",
-                timeout=30
-            )
-            
-            if search_response.status_code == 200:
-                files = search_response.json()
-                # Find most recent RxMER file
-                rxmer_files = [f for f in files.get('files', []) if 'rxmer' in f.get('filename', '').lower()]
-                if rxmer_files:
-                    # Analyze the most recent file
-                    latest = sorted(rxmer_files, key=lambda x: x.get('timestamp', 0), reverse=True)[0]
-                    tx_id = latest.get('transaction_id')
+                if analysis_response.status_code == 200:
+                    result = analysis_response.json()
+                    channel_data = _transform_pypnm_rxmer_response(result, mac_address)
+                    channel_data['channel_index'] = channel.get('channel_index')
+                    channel_data['if_index'] = channel.get('if_index')
+                    all_channel_data.append(channel_data)
+                    logger.info(f"Analysis complete for channel {channel.get('channel_index')}")
+                else:
+                    logger.warning(f"Analysis failed: {analysis_response.status_code}")
                     
-                    if tx_id:
-                        analysis_response = requests.post(
-                            f"{pypnm_url}/docs/pnm/files/getAnalysis",
-                            json={"transaction_id": tx_id, "output_type": "json"},
-                            timeout=60
-                        )
-                        
-                        if analysis_response.status_code == 200:
-                            result = analysis_response.json()
-                            rxmer_data = _transform_pypnm_rxmer_response(result, mac_address)
-                            
-                            return jsonify({
-                                "status": 0,
-                                "message": "RxMER analysis complete",
-                                "data": rxmer_data,
-                                "mac_address": mac_address
-                            })
-        except Exception as e:
-            logger.warning(f"File search fallback failed: {e}")
+            except FileNotFoundError:
+                logger.warning(f"File not found: {filepath} - modem may not have uploaded yet")
+            except Exception as e:
+                logger.warning(f"Failed to process file {filename}: {e}")
         
-        # If all else fails, return the trigger result
+        if all_channel_data:
+            # Merge all channel data into unified response
+            return jsonify({
+                "status": 0,
+                "message": "RxMER capture complete",
+                "data": {
+                    "channels": all_channel_data,
+                    "mac_address": mac_address,
+                    "modem_ip": modem_ip
+                },
+                "mac_address": mac_address
+            })
+        
+        # Fallback: Return trigger result with file info
         return jsonify({
             "status": 0,
             "message": "RxMER capture triggered - file pending upload",
-            "data": trigger_result.get('result', {}),
+            "data": agent_result,
             "mac_address": mac_address
         })
             
-    except requests.exceptions.Timeout:
-        logger.error("PyPNM API timeout")
-        return jsonify({"status": "error", "message": "PyPNM API timeout"}), 504
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"PyPNM not reachable: {e}")
-        return jsonify({"status": "error", "message": f"PyPNM not reachable at {pypnm_url}"}), 503
     except Exception as e:
         logger.error(f"RxMER measurement failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
