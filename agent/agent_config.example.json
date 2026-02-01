@@ -7,7 +7,10 @@
     "cmts_access": {
         "enabled": true,
         "community": "public",
-        "write_community": "private"
+        "write_community": "private",
+        "ssh_enabled": false,
+        "ssh_user": "admin",
+        "ssh_key_file": "~/.ssh/id_ed25519"
     },
     "cm_access": {
         "enabled": true,

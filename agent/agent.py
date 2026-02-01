@@ -78,6 +78,10 @@ class AgentConfig:
     cmts_enabled: bool = True
     cmts_community: str = 'public'
     cmts_write_community: Optional[str] = None
+    # Optional: SSH to CMTS for CLI commands
+    cmts_ssh_enabled: bool = False
+    cmts_ssh_user: Optional[str] = None
+    cmts_ssh_key: Optional[str] = None
     
     # CM Access - for SNMP to Cable Modems
     cm_enabled: bool = False
@@ -153,6 +157,9 @@ class AgentConfig:
             cmts_enabled=cmts.get('enabled', cmts.get('snmp_direct', True)),  # Backward compat
             cmts_community=cmts.get('community', 'public'),
             cmts_write_community=cmts.get('write_community'),
+            cmts_ssh_enabled=cmts.get('ssh_enabled', False),
+            cmts_ssh_user=cmts.get('ssh_user'),
+            cmts_ssh_key=expand_path(cmts.get('ssh_key_file')),
             # CM Access
             cm_enabled=cm_enabled,
             cm_community=cm_community,
@@ -438,11 +445,6 @@ class PyPNMAgent:
             )
             self.logger.info(f"TFTP SSH configured: {config.tftp_ssh_host}")
         
-        # SSH executor for CMTS (if SSH access enabled)
-        self.cmts_ssh: Optional[SSHProxyExecutor] = None
-        if config.cmts_enabled and config.cmts_ssh_user:
-            self.logger.info("CMTS SSH access enabled")
-        
         # Command handlers
         self.handlers: dict[str, Callable] = {
             'ping': self._handle_ping,
@@ -640,6 +642,9 @@ class PyPNMAgent:
             caps.append('cmts_get_modems')
             caps.append('cmts_get_modem_info')
             caps.append('enrich_modems')
+        
+        if self.config.cmts_ssh_enabled:
+            caps.append('cmts_command')  # Can execute CMTS CLI commands via SSH
         
         if self.tftp_ssh:
             caps.append('tftp_get')
@@ -850,38 +855,56 @@ class PyPNMAgent:
     
     def _handle_cmts_command(self, params: dict) -> dict:
         """Execute command on CMTS via SSH."""
-        cmts_host = params.get('cmts_host')
+        cmts_host = params.get('cmts_host') or params.get('cmts_ip')
         command = params.get('command')
+        username = params.get('username') or self.config.cmts_ssh_user
+        key_file = params.get('key_file') or self.config.cmts_ssh_key
         
         if not cmts_host or not command:
             return {'success': False, 'error': 'cmts_host and command required'}
         
-        if not self.config.cmts_enabled:
-            return {'success': False, 'error': 'CMTS SSH not enabled'}
+        if not self.config.cmts_ssh_enabled:
+            return {'success': False, 'error': 'CMTS SSH not enabled in agent config'}
         
-        # Create temporary SSH executor for this CMTS
-        cmts_ssh = SSHProxyExecutor(
-            host=cmts_host,
-            port=22,
-            username=self.config.cmts_ssh_user,
-            key_file=self.config.cmts_ssh_key
-        )
+        if not username:
+            return {'success': False, 'error': 'CMTS SSH user not configured'}
         
         try:
-            if not cmts_ssh.connect():
-                return {'success': False, 'error': f'Failed to connect to CMTS {cmts_host}'}
+            import paramiko
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
-            exit_code, stdout, stderr = cmts_ssh.execute(command, timeout=30)
+            connect_kwargs = {
+                'hostname': cmts_host,
+                'username': username,
+                'timeout': 30
+            }
+            
+            if key_file:
+                key_file = os.path.expanduser(key_file)
+                connect_kwargs['key_filename'] = key_file
+            
+            self.logger.info(f"Connecting to CMTS {cmts_host} via SSH")
+            ssh.connect(**connect_kwargs)
+            
+            stdin, stdout, stderr = ssh.exec_command(command, timeout=60)
+            output = stdout.read().decode('utf-8', errors='replace')
+            error = stderr.read().decode('utf-8', errors='replace')
+            exit_code = stdout.channel.recv_exit_status()
+            
+            ssh.close()
             
             return {
                 'success': exit_code == 0,
-                'cmts_host': cmts_host,
-                'command': command,
-                'output': stdout,
-                'error': stderr if exit_code != 0 else None
+                'output': output,
+                'error': error if error else None,
+                'exit_code': exit_code,
+                'cmts_host': cmts_host
             }
-        finally:
-            cmts_ssh.close()
+            
+        except Exception as e:
+            self.logger.error(f"CMTS SSH command failed: {e}")
+            return {'success': False, 'error': str(e)}
     
     def _handle_pnm_command(self, params: dict) -> dict:
         """Handle PyPNM-specific commands (trigger PNM tests via SNMP)."""
