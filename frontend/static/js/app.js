@@ -1287,8 +1287,17 @@ createApp({
             
             console.log('Drawing charts for type:', type, 'with data:', data);
             
-            // SKIP Chart.js for spectrum - we use matplotlib PNG plots instead
-            if (type === 'spectrum') {
+            // Check if we have matplotlib plots - if so, those are shown separately
+            const hasPlots = data.plots && data.plots.length > 0;
+            
+            // For spectrum without matplotlib plots, draw from channel data
+            if (type === 'spectrum' && !hasPlots && data.data) {
+                this.drawSpectrumFromChannels(data.data);
+                return;
+            }
+            
+            // SKIP Chart.js if we have matplotlib plots
+            if (type === 'spectrum' && hasPlots) {
                 console.log('Spectrum uses matplotlib plots - skipping Chart.js');
                 return;
             }
@@ -1632,6 +1641,110 @@ createApp({
                     }
                 });
             });
+        },
+        
+        drawSpectrumFromChannels(data) {
+            // Draw spectrum chart from channel-based data (agent pnm_spectrum result)
+            const container = document.getElementById('measurement-charts-container');
+            if (!container) return;
+            
+            const dsChannels = data.downstream_channels || [];
+            const usChannels = data.upstream_channels || [];
+            
+            if (dsChannels.length === 0 && usChannels.length === 0) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No channel data available.</div>';
+                return;
+            }
+            
+            // Sort channels by frequency
+            dsChannels.sort((a, b) => (a.frequency_hz || 0) - (b.frequency_hz || 0));
+            
+            // Create DS chart
+            if (dsChannels.length > 0) {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'mb-4';
+                chartDiv.innerHTML = `
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-white">
+                            <h6 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Downstream Channel Power (${dsChannels.length} channels)</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="ds-spectrum-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(chartDiv);
+                
+                const canvas = chartDiv.querySelector('canvas');
+                const labels = dsChannels.map(c => (c.frequency_hz / 1e6).toFixed(1) + ' MHz');
+                const powerData = dsChannels.map(c => c.power_dbmv);
+                
+                new Chart(canvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Power (dBmV)',
+                            data: powerData,
+                            backgroundColor: powerData.map(p => 
+                                p < -10 ? 'rgba(220, 53, 69, 0.7)' :  // Red - too low
+                                p > 10 ? 'rgba(255, 193, 7, 0.7)' :   // Yellow - too high
+                                'rgba(40, 167, 69, 0.7)'              // Green - good
+                            ),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: { display: true, text: 'DS Channel Power by Frequency' }
+                        },
+                        scales: {
+                            x: { title: { display: true, text: 'Frequency' } },
+                            y: { 
+                                title: { display: true, text: 'Power (dBmV)' },
+                                min: -20,
+                                max: 20
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Create US power table
+            if (usChannels.length > 0) {
+                const tableDiv = document.createElement('div');
+                tableDiv.className = 'mt-4';
+                tableDiv.innerHTML = `
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-success text-white">
+                            <h6 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>Upstream TX Power (${usChannels.length} channels)</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped">
+                                    <thead><tr><th>Channel</th><th>TX Power (dBmV)</th><th>Status</th></tr></thead>
+                                    <tbody>
+                                        ${usChannels.map(c => `
+                                            <tr>
+                                                <td>${c.channel_id}</td>
+                                                <td>${c.power_dbmv.toFixed(1)}</td>
+                                                <td>${c.power_dbmv >= 35 && c.power_dbmv <= 51 ? 
+                                                    '<span class="badge bg-success">Good</span>' : 
+                                                    c.power_dbmv > 51 ? '<span class="badge bg-warning">High</span>' :
+                                                    '<span class="badge bg-danger">Low</span>'}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(tableDiv);
+            }
         },
         
         drawRxmerCharts() {

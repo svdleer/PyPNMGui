@@ -66,13 +66,17 @@ def pnm_measurement(measurement_type, mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    # Special handling for RxMER - use PyPNM API
+    # Special handling for RxMER - use PyPNM API for parsing
     if measurement_type == 'rxmer':
         return _handle_rxmer_measurement(mac_address, modem_ip, community)
     
+    # Special handling for Spectrum - trigger via agent, parse via PyPNM
+    if measurement_type == 'spectrum':
+        return _handle_spectrum_measurement(mac_address, modem_ip, community)
+    
     # Map measurement types to agent commands
     agent_command_map = {
-        'spectrum': 'pnm_spectrum',
+        'channel_power': 'pnm_channel_power',  # Basic channel info (not full spectrum)
         'channel_estimation': 'pnm_ofdm_capture',
         'modulation_profile': 'pnm_ofdm_capture',
         'fec_summary': 'pnm_fec',
@@ -191,6 +195,16 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
         if not trigger_result or not trigger_result.get('result', {}).get('success'):
             error = trigger_result.get('result', {}).get('error', 'Agent trigger failed') if trigger_result else 'Timeout'
             logger.error(f"Agent RxMER trigger failed: {error}")
+            
+            # Check for DOCSIS 3.0 modems (no OFDM)
+            if 'No OFDM channels' in error or 'DOCSIS 3.0' in error:
+                return jsonify({
+                    "status": "error", 
+                    "message": "This modem does not support OFDM RxMER measurements",
+                    "error_type": "docsis_30",
+                    "details": "RxMER per-subcarrier measurements require DOCSIS 3.1 OFDM channels. This modem appears to be DOCSIS 3.0 or has no OFDM channels configured."
+                }), 400
+            
             return jsonify({"status": "error", "message": f"Capture trigger failed: {error}"}), 500
         
         logger.info(f"Agent triggered RxMER capture, waiting for file upload...")
@@ -335,6 +349,173 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
             
     except Exception as e:
         logger.error(f"RxMER measurement failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str):
+    """
+    Handle Spectrum Analyzer (Full Band Capture) measurement.
+    
+    Flow:
+    1. Agent triggers SNMP capture (modem uploads file to TFTP)
+    2. Upload file to PyPNM and get transaction_id
+    3. Call PyPNM getAnalysis to parse and get data + plot
+    """
+    import time
+    import requests
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    pypnm_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000'))
+    tftp_dir = '/var/lib/tftpboot'
+    
+    try:
+        # Step 1: Have agent trigger spectrum capture
+        logger.info(f"Triggering Spectrum capture via agent for {mac_address} ({modem_ip})")
+        
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability('pnm_spectrum') if agent_manager else None
+        
+        if not agent:
+            return jsonify({"status": "error", "message": "No agent available for spectrum capture"}), 503
+        
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_spectrum',
+            params={
+                "modem_ip": modem_ip,
+                "mac_address": mac_address,
+                "community": community
+            },
+            timeout=60
+        )
+        
+        trigger_result = agent_manager.wait_for_task(task_id, timeout=60)
+        
+        if not trigger_result or not trigger_result.get('result', {}).get('success'):
+            error = trigger_result.get('result', {}).get('error', 'Agent trigger failed') if trigger_result else 'Timeout'
+            logger.error(f"Agent Spectrum trigger failed: {error}")
+            
+            if 'No OFDM channels' in error or 'DOCSIS 3.0' in error:
+                return jsonify({
+                    "status": "error", 
+                    "message": "This modem does not support Spectrum Analyzer (DOCSIS 3.0)",
+                    "error_type": "docsis_30"
+                }), 400
+            
+            return jsonify({"status": "error", "message": f"Capture trigger failed: {error}"}), 500
+        
+        logger.info(f"Agent triggered Spectrum capture, waiting for file upload...")
+        agent_result = trigger_result.get('result', {})
+        channels = agent_result.get('channels', [])
+        
+        # Step 2: Wait for modem to upload file to TFTP
+        time.sleep(5)
+        
+        # Step 3: Upload each file to PyPNM and get analysis
+        all_plots = []
+        
+        for channel in channels:
+            filename = channel.get('filename')
+            if not filename:
+                continue
+            
+            # Try to find the file (modem may add extension)
+            import glob
+            matches = glob.glob(f"{tftp_dir}/{filename}*")
+            if not matches:
+                logger.warning(f"Spectrum file not found: {filename}")
+                continue
+            
+            filepath = matches[0]
+            actual_filename = os.path.basename(filepath)
+            logger.info(f"Processing Spectrum file: {actual_filename}")
+            
+            try:
+                # Upload file to PyPNM
+                upload_response = requests.post(
+                    f"{pypnm_url}/docs/pnm/files/upload",
+                    files={'file': (actual_filename, open(filepath, 'rb'), 'application/octet-stream')},
+                    timeout=30
+                )
+                
+                if upload_response.status_code not in [200, 201]:
+                    logger.warning(f"Spectrum file upload failed: {upload_response.status_code}")
+                    continue
+                
+                upload_result = upload_response.json()
+                tx_id = upload_result.get('transaction_id')
+                
+                if not tx_id:
+                    logger.warning(f"No transaction_id in spectrum upload response")
+                    continue
+                
+                logger.info(f"Spectrum file uploaded, transaction_id: {tx_id}")
+                
+                # Get analysis with archive output (includes PNG plots)
+                analysis_response = requests.post(
+                    f"{pypnm_url}/docs/pnm/files/getAnalysis",
+                    json={
+                        "search": {"transaction_id": tx_id},
+                        "analysis": {
+                            "type": "basic",
+                            "output": {"type": "archive"},
+                            "plot": {"ui": {"theme": "light"}}
+                        }
+                    },
+                    timeout=60
+                )
+                
+                if analysis_response.status_code == 200:
+                    import zipfile
+                    import io
+                    import base64
+                    
+                    archive_data = analysis_response.content
+                    
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(archive_data), 'r') as zf:
+                            for name in zf.namelist():
+                                if name.endswith('.png'):
+                                    png_data = zf.read(name)
+                                    all_plots.append({
+                                        'filename': name,
+                                        'data': base64.b64encode(png_data).decode('utf-8'),
+                                        'type': 'spectrum',
+                                        'channel_index': channel.get('channel_index')
+                                    })
+                            logger.info(f"Spectrum analysis complete with {len(all_plots)} plots")
+                    except zipfile.BadZipFile:
+                        logger.warning("Spectrum analysis returned non-archive response")
+                else:
+                    logger.warning(f"Spectrum analysis failed: {analysis_response.status_code}")
+                    
+            except FileNotFoundError:
+                logger.warning(f"Spectrum file not found: {filepath}")
+            except Exception as e:
+                logger.warning(f"Failed to process spectrum file {filename}: {e}")
+        
+        if all_plots:
+            return jsonify({
+                "status": 0,
+                "message": "Spectrum capture complete",
+                "data": {
+                    "mac_address": mac_address,
+                    "modem_ip": modem_ip
+                },
+                "plots": all_plots,
+                "mac_address": mac_address
+            })
+        
+        # Fallback: Return trigger result
+        return jsonify({
+            "status": 0,
+            "message": "Spectrum capture triggered - file pending",
+            "data": agent_result,
+            "mac_address": mac_address
+        })
+            
+    except Exception as e:
+        logger.error(f"Spectrum measurement failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
