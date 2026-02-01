@@ -1987,15 +1987,19 @@ class PyPNMAgent:
                     result = self._query_cmts_direct(cmts_ip, OID_CM_OFDMA_STATUS, community, walk=True)
                     
                     if result.get('success') and result.get('results'):
+                        seen_ifindexes = set()
                         for r in result['results']:
                             try:
-                                # OID format: ...1.5.1.1.<cmIndex>.<ofdmaIfIndex>
+                                # OID format: ...1.5.1.<column>.<cmIndex>.<ofdmaIfIndex>.<metric>
+                                # We want column 1 (status), and extract cmIndex and ofdmaIfIndex
                                 oid_parts = r['oid'].split('.')
-                                if len(oid_parts) >= 2:
-                                    found_cm_index = int(oid_parts[-2])
-                                    ofdma_ifindex = int(oid_parts[-1])
+                                if len(oid_parts) >= 3:
+                                    # Last 3 parts: cmIndex, ofdmaIfIndex, metric
+                                    found_cm_index = int(oid_parts[-3])
+                                    ofdma_ifindex = int(oid_parts[-2])
                                     
-                                    if found_cm_index == cm_index and ofdma_ifindex > 1000:
+                                    if found_cm_index == cm_index and ofdma_ifindex > 1000 and ofdma_ifindex not in seen_ifindexes:
+                                        seen_ifindexes.add(ofdma_ifindex)
                                         # Get interface description
                                         desc_result = self._snmp_get(cmts_ip, f"{OID_IF_DESCR}.{ofdma_ifindex}", community)
                                         description = ""
