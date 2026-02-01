@@ -1282,8 +1282,8 @@
                                 </div>
                             </div>
 
-                            <!-- RxMER Results (existing)-->
-                            <div class="col-12 mb-4" v-if="rxmerData">
+                            <!-- RxMER Results (only show when no matplotlib plots available) -->
+                            <div class="col-12 mb-4" v-if="rxmerData && !(selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length)">
                                 <div class="card shadow-sm border-success">
                                     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>RxMER Measurement Results</h5>
