@@ -23,6 +23,18 @@ def get_cmts_community():
     return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
 
 
+def get_cm_capable_agent():
+    """Get an agent that can reach cable modems (cm_reachable or cm_proxy)."""
+    agent_manager = get_simple_agent_manager()
+    if not agent_manager:
+        return None
+    # Try cm_reachable (direct) first, then cm_proxy
+    agent = agent_manager.get_agent_for_capability('cm_reachable')
+    if not agent:
+        agent = get_cm_capable_agent()
+    return agent
+
+
 # Redis for caching modem data
 try:
     import redis
@@ -203,7 +215,7 @@ def get_system_info(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -232,7 +244,7 @@ def get_uptime(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -280,7 +292,7 @@ def get_ds_channels(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -316,7 +328,7 @@ def get_us_channels(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -352,7 +364,7 @@ def get_interface_stats(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -393,7 +405,7 @@ def get_rxmer(mac_address):
     if not agent_manager:
         return jsonify({"status": "error", "message": "Agent manager not initialized"}), 503
     
-    agent = agent_manager.get_agent_for_capability('cm_proxy')
+    agent = get_cm_capable_agent()
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
     
@@ -429,7 +441,7 @@ def get_spectrum(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -465,7 +477,7 @@ def get_fec_summary(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -501,7 +513,7 @@ def get_pre_eq(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -537,7 +549,7 @@ def get_channel_info(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -575,7 +587,7 @@ def get_event_log(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -757,7 +769,7 @@ def get_cmts_modems(hostname):
                 logging.getLogger(__name__).warning(f"Redis cache write error: {e}")
         
         # Start background enrichment if requested - enrich ALL modems in batches
-        enrich_agent = agent_manager.get_agent_for_capability('enrich_modems') or agent_manager.get_agent_for_capability('cm_proxy')
+        enrich_agent = agent_manager.get_agent_for_capability('enrich_modems') or get_cm_capable_agent()
         logging.getLogger(__name__).info(f"Enrich check: enrich={enrich}, enrich_agent={enrich_agent is not None}")
         if enrich and enrich_agent:
             import threading
@@ -1067,7 +1079,7 @@ def trigger_ofdm_capture():
         return jsonify({"status": "error", "message": "modem_ip and mac_address required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -1165,7 +1177,7 @@ def get_ofdm_channels():
         return jsonify({"status": "error", "message": "modem_ip and mac_address required"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -1228,7 +1240,7 @@ def get_ofdm_rxmer_data(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required (provide as query param)"}), 400
     
     agent_manager = get_simple_agent_manager()
-    agent = agent_manager.get_agent_for_capability('cm_proxy') if agent_manager else None
+    agent = get_cm_capable_agent()
     
     if not agent:
         return jsonify({"status": "error", "message": "No agent available"}), 503
