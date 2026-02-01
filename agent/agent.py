@@ -28,6 +28,19 @@ except ImportError:
     paramiko = None
     print("WARNING: paramiko not installed. SSH proxy features disabled.")
 
+# pysnmp imports
+try:
+    from pysnmp.hlapi import (
+        getCmd, setCmd, nextCmd, bulkCmd,
+        SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
+        ObjectType, ObjectIdentity,
+        Integer32, OctetString, Unsigned32, Counter32, Counter64, Gauge32, TimeTicks, IpAddress
+    )
+    PYSNMP_AVAILABLE = True
+except ImportError:
+    PYSNMP_AVAILABLE = False
+    print("WARNING: pysnmp not installed. Using net-snmp fallback.")
+
 try:
     import redis
 except ImportError:
@@ -923,24 +936,197 @@ class PyPNMAgent:
         
         return self._cm_proxy_ssh
     
-    def _query_modem_direct(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
-        """Query a modem directly via SNMP (when cm_direct is enabled)."""
+    # ========== PYSNMP-BASED SNMP METHODS ==========
+    
+    def _snmp_get(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
+        """SNMP GET using pysnmp."""
+        if not PYSNMP_AVAILABLE:
+            return self._snmp_get_fallback(host, oid, community)
+        
         try:
-            import subprocess
-            cmd = 'snmpwalk' if walk else 'snmpget'
-            snmp_cmd = [cmd, '-v2c', '-c', community, '-t', '10', '-r', '1', modem_ip, oid]
+            iterator = getCmd(
+                SnmpEngine(),
+                CommunityData(community),
+                UdpTransportTarget((host, 161), timeout=timeout, retries=1),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid))
+            )
             
-            result = subprocess.run(snmp_cmd, capture_output=True, text=True, timeout=60)
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
             
-            return {
-                'success': result.returncode == 0 or 'No Such Object' not in result.stderr,
-                'output': result.stdout,
-                'error': result.stderr if result.stderr else None
-            }
-        except subprocess.TimeoutExpired:
-            return {'success': False, 'error': 'SNMP timeout'}
+            if errorIndication:
+                return {'success': False, 'error': str(errorIndication)}
+            elif errorStatus:
+                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            else:
+                results = []
+                for varBind in varBinds:
+                    oid_str = str(varBind[0])
+                    value = varBind[1]
+                    results.append({
+                        'oid': oid_str,
+                        'value': self._parse_snmp_value(value),
+                        'type': type(value).__name__
+                    })
+                return {'success': True, 'results': results}
+        except Exception as e:
+            self.logger.error(f"SNMP GET error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _snmp_walk(self, host: str, oid: str, community: str, timeout: int = 10) -> dict:
+        """SNMP WALK using pysnmp."""
+        if not PYSNMP_AVAILABLE:
+            return self._snmp_walk_fallback(host, oid, community)
+        
+        try:
+            results = []
+            for (errorIndication, errorStatus, errorIndex, varBinds) in nextCmd(
+                SnmpEngine(),
+                CommunityData(community),
+                UdpTransportTarget((host, 161), timeout=timeout, retries=1),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid)),
+                lexicographicMode=False
+            ):
+                if errorIndication:
+                    if not results:  # Only error if no results yet
+                        return {'success': False, 'error': str(errorIndication)}
+                    break
+                elif errorStatus:
+                    break
+                else:
+                    for varBind in varBinds:
+                        oid_str = str(varBind[0])
+                        value = varBind[1]
+                        results.append({
+                            'oid': oid_str,
+                            'value': self._parse_snmp_value(value),
+                            'type': type(value).__name__
+                        })
+            
+            return {'success': len(results) > 0, 'results': results}
+        except Exception as e:
+            self.logger.error(f"SNMP WALK error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _snmp_set(self, host: str, oid: str, value: Any, value_type: str, community: str, timeout: int = 10) -> dict:
+        """SNMP SET using pysnmp."""
+        if not PYSNMP_AVAILABLE:
+            return self._snmp_set_fallback(host, oid, value, value_type, community)
+        
+        try:
+            # Convert value to appropriate pysnmp type
+            snmp_value = self._to_snmp_value(value, value_type)
+            
+            iterator = setCmd(
+                SnmpEngine(),
+                CommunityData(community),
+                UdpTransportTarget((host, 161), timeout=timeout, retries=1),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid), snmp_value)
+            )
+            
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            
+            if errorIndication:
+                return {'success': False, 'error': str(errorIndication)}
+            elif errorStatus:
+                return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+            else:
+                return {'success': True}
+        except Exception as e:
+            self.logger.error(f"SNMP SET error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _parse_snmp_value(self, value) -> Any:
+        """Parse pysnmp value to Python native type."""
+        if hasattr(value, 'prettyPrint'):
+            # Try to get numeric value first
+            if hasattr(value, '__int__'):
+                return int(value)
+            elif hasattr(value, '__float__'):
+                return float(value)
+            else:
+                return value.prettyPrint()
+        return str(value)
+    
+    def _to_snmp_value(self, value: Any, value_type: str):
+        """Convert Python value to pysnmp type."""
+        type_map = {
+            'i': Integer32,      # INTEGER
+            'u': Unsigned32,     # Unsigned32
+            's': OctetString,    # STRING
+            'x': OctetString,    # Hex-STRING (we'll convert)
+            'a': IpAddress,      # IpAddress
+            'c': Counter32,      # Counter32
+            'g': Gauge32,        # Gauge32
+            't': TimeTicks,      # TimeTicks
+        }
+        
+        if value_type == 'x':
+            # Hex string - convert to bytes
+            if isinstance(value, str):
+                # Remove spaces and convert hex to bytes
+                hex_clean = value.replace(' ', '').replace(':', '')
+                value = bytes.fromhex(hex_clean)
+            return OctetString(value)
+        
+        snmp_type = type_map.get(value_type, OctetString)
+        return snmp_type(value)
+    
+    # Fallback methods using subprocess (for systems without pysnmp)
+    def _snmp_get_fallback(self, host: str, oid: str, community: str) -> dict:
+        """Fallback SNMP GET using net-snmp."""
+        try:
+            result = subprocess.run(
+                ['snmpget', '-v2c', '-c', community, '-t', '10', '-r', '1', host, oid],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                return {'success': True, 'output': result.stdout}
+            return {'success': False, 'error': result.stderr}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+    
+    def _snmp_walk_fallback(self, host: str, oid: str, community: str) -> dict:
+        """Fallback SNMP WALK using net-snmp."""
+        try:
+            result = subprocess.run(
+                ['snmpwalk', '-v2c', '-c', community, '-t', '10', '-r', '1', host, oid],
+                capture_output=True, text=True, timeout=60
+            )
+            return {'success': result.returncode == 0, 'output': result.stdout, 'error': result.stderr}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _snmp_set_fallback(self, host: str, oid: str, value: Any, value_type: str, community: str) -> dict:
+        """Fallback SNMP SET using net-snmp."""
+        try:
+            result = subprocess.run(
+                ['snmpset', '-v2c', '-c', community, '-t', '10', '-r', '1', host, oid, value_type, str(value)],
+                capture_output=True, text=True, timeout=30
+            )
+            return {'success': result.returncode == 0, 'error': result.stderr if result.returncode != 0 else None}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    # ========== CONVENIENCE METHODS ==========
+    
+    def _query_modem_direct(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+        """Query a modem directly via pysnmp (when cm_direct is enabled)."""
+        if walk:
+            result = self._snmp_walk(modem_ip, oid, community)
+        else:
+            result = self._snmp_get(modem_ip, oid, community)
+        
+        # Convert to old format for backward compatibility
+        if result.get('success') and 'results' in result:
+            # Build output string like old snmpwalk format
+            lines = []
+            for r in result['results']:
+                lines.append(f"{r['oid']} = {r['type']}: {r['value']}")
+            result['output'] = '\n'.join(lines)
+        return result
     
     def _query_modem(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
         """Query a modem via cm_proxy or cm_direct depending on config."""
@@ -1492,8 +1678,9 @@ class PyPNMAgent:
         except Exception as e:
             self.logger.error(f"OFDM capture error: {e}")
             return {'success': False, 'error': str(e)}
+    
     def _handle_pnm_ofdm_rxmer(self, params: dict) -> dict:
-        """Get OFDM RxMER data via SNMP walk (cm_direct or cm_proxy)."""
+        """Get OFDM RxMER data via pysnmp SNMP walk."""
         modem_ip = params.get('modem_ip')
         community = params.get('community', 'm0d3m1nf0')
         
@@ -1501,35 +1688,29 @@ class PyPNMAgent:
             return {'success': False, 'error': 'modem_ip required'}
         
         try:
-            # docsPnmCmDsOfdmRxMerMean OID (MER values per subcarrier)
+            # docsPnmCmDsOfdmRxMerMean OID (MER values per channel)
             OID_RXMER_MEAN = '1.3.6.1.4.1.4491.2.1.27.1.2.5.1.3'
             
-            result = self._query_modem(modem_ip, OID_RXMER_MEAN, community, walk=True)
+            result = self._snmp_walk(modem_ip, OID_RXMER_MEAN, community)
             
-            if not result.get('success'):
+            if not result.get('success') or not result.get('results'):
                 return {'success': False, 'error': 'No RxMER data available'}
             
             subcarriers = []
             mer_values = []
             
-            for line in result.get('output', '').split('\n'):
-                if '=' in line and ('INTEGER' in line or 'Gauge32' in line):
-                    try:
-                        parts = line.split('=')[0].strip().split('.')
-                        subcarrier_idx = int(parts[-1])
-                        # Parse both INTEGER: and Gauge32: formats
-                        if 'INTEGER:' in line:
-                            mer_raw = int(line.split('INTEGER:')[-1].strip())
-                        elif 'Gauge32:' in line:
-                            mer_raw = int(line.split('Gauge32:')[-1].strip())
-                        else:
-                            continue
-                        mer_db = mer_raw / 100.0  # Convert to dB (value is in 1/100 dB)
-                        
-                        subcarriers.append(subcarrier_idx)
-                        mer_values.append(mer_db)
-                    except:
-                        pass
+            for r in result['results']:
+                try:
+                    # Extract channel index from OID (last element)
+                    oid_parts = r['oid'].split('.')
+                    channel_idx = int(oid_parts[-1])
+                    mer_raw = int(r['value'])
+                    mer_db = mer_raw / 100.0  # Convert to dB (value is in 1/100 dB)
+                    
+                    subcarriers.append(channel_idx)
+                    mer_values.append(mer_db)
+                except (ValueError, IndexError):
+                    pass
             
             if not subcarriers:
                 return {'success': False, 'error': 'No RxMER data available'}
@@ -1627,11 +1808,12 @@ class PyPNMAgent:
     def _set_cmts_direct(self, cmts_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
         """Set SNMP value on CMTS directly."""
         try:
-            full_cmd = f"snmpset -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid} {value_type} {value}"
+            # Build command as list to handle values with spaces properly
+            cmd = ['snmpset', '-v2c', '-c', community, '-t', '10', '-r', '2', cmts_ip, oid, value_type, value]
             
             self.logger.info(f"CMTS SNMP SET: {cmts_ip} {oid} = {value}")
             result = subprocess.run(
-                full_cmd.split(),
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=30
