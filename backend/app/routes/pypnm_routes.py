@@ -32,10 +32,13 @@ def get_default_tftp():
 @pypnm_bp.route('/measurements/<measurement_type>/<mac_address>', methods=['POST'])
 def pnm_measurement(measurement_type, mac_address):
     """
-    Unified PNM measurement endpoint - routes through agent.
+    Unified PNM measurement endpoint.
+    
+    For RxMER: Agent triggers SNMP capture, then calls PyPNM API to get parsed data.
+    For others: Routes through agent.
     
     Supported types:
-    - rxmer: RxMER per subcarrier (uses pnm_ofdm_rxmer agent command)
+    - rxmer: RxMER per subcarrier (agent triggers, PyPNM parses)
     - spectrum: Spectrum analyzer
     - channel_estimation: Channel estimation coefficients
     - modulation_profile: Modulation profile
@@ -53,6 +56,7 @@ def pnm_measurement(measurement_type, mac_address):
         "sample_duration": 60    # Only for histogram
     }
     """
+    import requests
     from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
@@ -62,9 +66,12 @@ def pnm_measurement(measurement_type, mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
+    # Special handling for RxMER - use PyPNM API
+    if measurement_type == 'rxmer':
+        return _handle_rxmer_measurement(mac_address, modem_ip, community)
+    
     # Map measurement types to agent commands
     agent_command_map = {
-        'rxmer': 'pnm_ofdm_rxmer',
         'spectrum': 'pnm_spectrum',
         'channel_estimation': 'pnm_ofdm_capture',
         'modulation_profile': 'pnm_ofdm_capture',
@@ -125,16 +132,223 @@ def pnm_measurement(measurement_type, mac_address):
         
         task_result = result.get('result', {})
         
+        # Return 'data' field for frontend compatibility
         return jsonify({
             "status": 0 if task_result.get('success', False) else 1,
             "message": task_result.get('message', 'Measurement complete'),
-            "results": task_result.get('data', task_result),
+            "data": task_result.get('data', task_result),
             "mac_address": mac_address
         })
         
     except Exception as e:
         logger.error(f"PNM measurement {measurement_type} failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
+    """
+    Handle RxMER measurement.
+    
+    Flow:
+    1. Agent triggers SNMP capture (modem uploads file to TFTP)
+    2. PyPNM parses the file from TFTP directory
+    """
+    import requests
+    import time
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    pypnm_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000'))
+    
+    try:
+        # Step 1: Have agent trigger SNMP capture
+        logger.info(f"Triggering RxMER capture via agent for {mac_address} ({modem_ip})")
+        
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability('pnm_ofdm_rxmer') if agent_manager else None
+        
+        if not agent:
+            agent = agent_manager.get_agent_for_capability('cm_direct') if agent_manager else None
+        
+        if not agent:
+            return jsonify({"status": "error", "message": "No agent available for RxMER capture"}), 503
+        
+        # Trigger capture via agent
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_ofdm_rxmer',
+            params={
+                "modem_ip": modem_ip,
+                "mac_address": mac_address,
+                "community": community
+            },
+            timeout=60
+        )
+        
+        trigger_result = agent_manager.wait_for_task(task_id, timeout=60)
+        
+        if not trigger_result or not trigger_result.get('result', {}).get('success'):
+            error = trigger_result.get('result', {}).get('error', 'Agent trigger failed') if trigger_result else 'Timeout'
+            logger.error(f"Agent RxMER trigger failed: {error}")
+            return jsonify({"status": "error", "message": f"Capture trigger failed: {error}"}), 500
+        
+        logger.info(f"Agent triggered RxMER capture, waiting for file upload...")
+        
+        # Step 2: Wait for modem to upload file and call PyPNM to parse
+        # The modem uploads to TFTP, PyPNM monitors or we search for files
+        time.sleep(5)  # Give modem time to upload
+        
+        # Step 3: Call PyPNM to get the RxMER data
+        # Try the capture endpoint - PyPNM should find the uploaded file
+        try:
+            response = requests.post(
+                f"{pypnm_url}/docs/pnm/ds/ofdm/rxMer/getCapture",
+                json={
+                    "cable_modem": {
+                        "mac_address": mac_address,
+                        "ip_address": modem_ip,
+                        "snmp": {
+                            "community": community
+                        }
+                    },
+                    "analysis": {
+                        "output": {
+                            "type": "json"
+                        }
+                    }
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                rxmer_data = _transform_pypnm_rxmer_response(result, mac_address)
+                
+                return jsonify({
+                    "status": 0,
+                    "message": "RxMER capture complete",
+                    "data": rxmer_data,
+                    "mac_address": mac_address
+                })
+            else:
+                logger.warning(f"PyPNM API returned {response.status_code}, trying file search...")
+        except Exception as e:
+            logger.warning(f"PyPNM capture API failed: {e}, trying file search...")
+        
+        # Fallback: Search for recently uploaded files by MAC
+        try:
+            mac_clean = mac_address.replace(':', '').lower()
+            search_response = requests.get(
+                f"{pypnm_url}/docs/pnm/files/searchFiles/{mac_address}",
+                timeout=30
+            )
+            
+            if search_response.status_code == 200:
+                files = search_response.json()
+                # Find most recent RxMER file
+                rxmer_files = [f for f in files.get('files', []) if 'rxmer' in f.get('filename', '').lower()]
+                if rxmer_files:
+                    # Analyze the most recent file
+                    latest = sorted(rxmer_files, key=lambda x: x.get('timestamp', 0), reverse=True)[0]
+                    tx_id = latest.get('transaction_id')
+                    
+                    if tx_id:
+                        analysis_response = requests.post(
+                            f"{pypnm_url}/docs/pnm/files/getAnalysis",
+                            json={"transaction_id": tx_id, "output_type": "json"},
+                            timeout=60
+                        )
+                        
+                        if analysis_response.status_code == 200:
+                            result = analysis_response.json()
+                            rxmer_data = _transform_pypnm_rxmer_response(result, mac_address)
+                            
+                            return jsonify({
+                                "status": 0,
+                                "message": "RxMER analysis complete",
+                                "data": rxmer_data,
+                                "mac_address": mac_address
+                            })
+        except Exception as e:
+            logger.warning(f"File search fallback failed: {e}")
+        
+        # If all else fails, return the trigger result
+        return jsonify({
+            "status": 0,
+            "message": "RxMER capture triggered - file pending upload",
+            "data": trigger_result.get('result', {}),
+            "mac_address": mac_address
+        })
+            
+    except requests.exceptions.Timeout:
+        logger.error("PyPNM API timeout")
+        return jsonify({"status": "error", "message": "PyPNM API timeout"}), 504
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"PyPNM not reachable: {e}")
+        return jsonify({"status": "error", "message": f"PyPNM not reachable at {pypnm_url}"}), 503
+    except Exception as e:
+        logger.error(f"RxMER measurement failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _transform_pypnm_rxmer_response(pypnm_response: dict, mac_address: str) -> dict:
+    """Transform PyPNM RxMER response to frontend expected format."""
+    
+    # PyPNM returns data with 'data' containing parsed PNM file info
+    data = pypnm_response.get('data', pypnm_response)
+    
+    rxmer_measurements = []
+    
+    # Check for measurement_stats from PyPNM
+    measurement_stats = data.get('measurement_stats', [])
+    
+    # Also check for direct values array (per-subcarrier data)
+    values = data.get('values', [])
+    
+    if measurement_stats:
+        # PyPNM returns measurement_stats with channel info
+        for stat in measurement_stats:
+            entry = stat.get('entry', stat)
+            rxmer_measurements.append({
+                'channel_id': stat.get('channel_id', stat.get('index', 0)),
+                'subcarrier_zero_freq': data.get('subcarrier_zero_frequency', 0),
+                'subcarrier_spacing_khz': data.get('subcarrier_spacing', 50000) // 1000,
+                'average_mer_db': entry.get('docsPnmCmDsOfdmRxMerMean', 0),
+                'percentile_mer_db': entry.get('docsPnmCmDsOfdmRxMerPercentile', 0),
+                'std_dev': entry.get('docsPnmCmDsOfdmRxMerStdDev', 0),
+            })
+    
+    if values:
+        # Per-subcarrier MER values from parsed PNM file
+        subcarrier_samples = []
+        first_idx = data.get('first_active_subcarrier_index', 0)
+        zero_freq = data.get('subcarrier_zero_frequency', 0)
+        spacing = data.get('subcarrier_spacing', 50000)
+        
+        for i, mer in enumerate(values):
+            subcarrier_samples.append({
+                'subcarrier_index': first_idx + i,
+                'frequency_hz': zero_freq + (first_idx + i) * spacing,
+                'mer_db': mer
+            })
+        
+        # Add as measurement with subcarrier samples
+        if rxmer_measurements:
+            rxmer_measurements[0]['subcarrier_samples'] = subcarrier_samples
+            rxmer_measurements[0]['subcarrier_count'] = len(values)
+        else:
+            rxmer_measurements.append({
+                'channel_id': data.get('channel_id', 1),
+                'subcarrier_samples': subcarrier_samples,
+                'subcarrier_count': len(values),
+                'average_mer_db': sum(values) / len(values) if values else 0
+            })
+    
+    return {
+        'mac_address': mac_address,
+        'rxmer_measurements': rxmer_measurements,
+        'signal_statistics': data.get('signal_statistics', {}),
+        'modulation_statistics': data.get('modulation_statistics', {})
+    }
 
 
 @pypnm_bp.route('/channel-stats/<mac_address>', methods=['POST'])
