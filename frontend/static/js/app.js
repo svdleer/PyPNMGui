@@ -658,6 +658,10 @@ createApp({
                     if (this.upstreamInterfaces.scqamChannels.length > 0 && !this.utscConfig.rfPortIfindex) {
                         this.utscConfig.rfPortIfindex = this.upstreamInterfaces.scqamChannels[0].ifindex;
                     }
+                    // E6000 UTSC also accepts OFDMA logical channels - use if no SC-QAM
+                    if (!this.utscConfig.rfPortIfindex && this.upstreamInterfaces.ofdmaChannels.length > 0) {
+                        this.utscConfig.rfPortIfindex = this.upstreamInterfaces.ofdmaChannels[0].ifindex;
+                    }
                     
                     // Auto-select first OFDMA channel for RxMER if available
                     if (this.upstreamInterfaces.ofdmaChannels.length > 0 && !this.usRxmerConfig.ofdmaIfindex) {
@@ -665,6 +669,7 @@ createApp({
                     }
                     
                     console.log('Loaded upstream interfaces:', this.upstreamInterfaces);
+                    console.log('UTSC rfPortIfindex set to:', this.utscConfig.rfPortIfindex);
                 } else {
                     console.error('Failed to load upstream interfaces:', result.error);
                 }
