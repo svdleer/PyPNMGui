@@ -2436,32 +2436,49 @@ class PyPNMAgent:
             if not binary_data:
                 return {'success': False, 'error': f'Could not fetch file: {filename}'}
             
-            # Parse the RxMER data - usually simple binary format
-            # Each value is typically a 2-byte signed integer representing dB * 10
-            import struct
+            # Parse the RxMER data - E6000 ARRIS/CommScope format
+            # Header: "PNNi" magic bytes, then metadata, MER data starts around offset 0x128
+            # Each MER value is a single byte, representing dB * 4 (so 0xa6 = 166 → 41.5 dB)
+            # 0xff is used for excluded subcarriers
+            
             rxmer_values = []
             subcarriers = []
             
-            # Skip header if present (check file type byte)
+            # Find the MER data section
+            # Look for the pattern after MAC address (6 bytes) + some metadata
             offset = 0
-            if len(binary_data) > 4 and binary_data[0:2] == b'PM':  # PNM header
-                # Skip PNM header - typically 20+ bytes
-                offset = 24  # Adjust based on actual header size
             
-            idx = 0
-            while offset + 2 <= len(binary_data):
-                val = struct.unpack('>h', binary_data[offset:offset+2])[0]
-                rxmer_values.append(val / 10.0)  # Convert to dB
-                subcarriers.append(idx)
-                idx += 1
-                offset += 2
+            if len(binary_data) > 4 and binary_data[0:4] == b'PNNi':
+                # E6000 US RxMER format - data starts after header (~0x128)
+                offset = 0x128
+                
+                idx = 0
+                while offset < len(binary_data):
+                    val = binary_data[offset]
+                    if val != 0xff:  # 0xff = excluded subcarrier
+                        mer_db = val / 4.0  # Convert to dB (value is in 0.25 dB units)
+                        rxmer_values.append(mer_db)
+                        subcarriers.append(idx)
+                    idx += 1
+                    offset += 1
+            else:
+                # Generic 2-byte format fallback
+                import struct
+                idx = 0
+                while offset + 2 <= len(binary_data):
+                    val = struct.unpack('>h', binary_data[offset:offset+2])[0]
+                    rxmer_values.append(val / 10.0)
+                    subcarriers.append(idx)
+                    idx += 1
+                    offset += 2
             
             return {
                 'success': True,
                 'data': {
                     'subcarriers': subcarriers,
                     'rxmer_values': rxmer_values,
-                    'ofdma_ifindex': ofdma_ifindex
+                    'ofdma_ifindex': ofdma_ifindex,
+                    'found_file': found_file
                 }
             }
             
