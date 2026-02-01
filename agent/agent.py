@@ -1524,7 +1524,7 @@ class PyPNMAgent:
                             mer_raw = int(line.split('Gauge32:')[-1].strip())
                         else:
                             continue
-                        mer_db = mer_raw / 10.0  # Convert to dB
+                        mer_db = mer_raw / 100.0  # Convert to dB (value is in 1/100 dB)
                         
                         subcarriers.append(subcarrier_idx)
                         mer_values.append(mer_db)
