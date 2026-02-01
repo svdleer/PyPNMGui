@@ -947,11 +947,11 @@ class PyPNMAgent:
         if self.config.cm_direct_enabled:
             return self._query_modem_direct(modem_ip, oid, community, walk)
         elif self.config.cm_proxy_host:
-            return self._query_modem(modem_ip, oid, community, walk)
+            return self._query_modem_via_cm_proxy(modem_ip, oid, community, walk)
         else:
             return {'success': False, 'error': 'Neither cm_proxy nor cm_direct configured'}
     
-    def _query_modem(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
+    def _query_modem_via_cm_proxy(self, modem_ip: str, oid: str, community: str, walk: bool = False) -> dict:
         """Query a modem via cm_proxy using persistent SSH connection."""
         ssh = self._get_cm_proxy_ssh()
         if not ssh:
