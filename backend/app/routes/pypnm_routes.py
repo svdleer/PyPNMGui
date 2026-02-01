@@ -848,10 +848,8 @@ def discover_rf_port(mac_address):
         pypnm_url = "http://localhost:8000/docs/pnm/us/spectrumAnalyzer/discoverRfPort"
         
         response = requests.post(pypnm_url, json={
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community
-            },
+            "cmts_ip": cmts_ip,
+            "community": community,
             "cm_mac_address": mac_address
         }, timeout=30)
         
