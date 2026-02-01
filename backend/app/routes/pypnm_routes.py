@@ -303,6 +303,15 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
                 logger.warning(f"Failed to process file {filename}: {e}")
         
         if all_channel_data:
+            # Collect all plots from all channels for top-level access
+            all_plots = []
+            for channel in all_channel_data:
+                channel_plots = channel.get('plots', [])
+                # Add channel_index to each plot for identification
+                for plot in channel_plots:
+                    plot['channel_index'] = channel.get('channel_index')
+                all_plots.extend(channel_plots)
+            
             # Merge all channel data into unified response
             return jsonify({
                 "status": 0,
@@ -312,6 +321,7 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
                     "mac_address": mac_address,
                     "modem_ip": modem_ip
                 },
+                "plots": all_plots,  # Top-level for frontend compatibility
                 "mac_address": mac_address
             })
         
