@@ -813,6 +813,59 @@ def get_plots(mac_address):
 
 # ============== Upstream PNM Routes ==============
 
+@pypnm_bp.route('/upstream/discover-rf-port/<mac_address>', methods=['POST'])
+def discover_rf_port(mac_address):
+    """
+    Fast discovery of the correct UTSC RF port for a modem.
+    Calls PyPNM API discoverRfPort endpoint.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "community": "optional"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "rf_port_ifindex": 1078534144,
+        "rf_port_description": "MND-GT02-1 us-conn 0",
+        "logical_channel": 3
+    }
+    """
+    import requests
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    community = data.get('community', 'Z1gg0@LL')
+    
+    if not cmts_ip:
+        return jsonify({"success": False, "error": "cmts_ip required"}), 400
+    
+    logger.info(f"RF port discovery for {mac_address} on CMTS {cmts_ip}")
+    
+    try:
+        pypnm_url = "http://localhost:8000/docs/pnm/us/spectrumAnalyzer/discoverRfPort"
+        
+        response = requests.post(pypnm_url, json={
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community
+            },
+            "cm_mac_address": mac_address
+        }, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            return jsonify(result)
+        else:
+            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
+            
+    except Exception as e:
+        logger.error(f"RF port discovery failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @pypnm_bp.route('/upstream/interfaces/<mac_address>', methods=['POST'])
 def get_upstream_interfaces(mac_address):
     """
@@ -835,7 +888,33 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Call PyPNM API directly
+        # Call both PyPNM API endpoints for complete discovery
+        scqam_channels = []
+        ofdma_channels = []
+        
+        # 1. Discover RF port for UTSC (uses PyPNM's discoverRfPort)
+        try:
+            utsc_url = "http://localhost:8000/docs/pnm/us/spectrumAnalyzer/discoverRfPort"
+            utsc_response = requests.post(utsc_url, json={
+                "cmts": {
+                    "cmts_ip": cmts_ip,
+                    "community": community
+                },
+                "cm_mac_address": mac_address
+            }, timeout=30)
+            
+            if utsc_response.status_code == 200:
+                utsc_result = utsc_response.json()
+                if utsc_result.get('success') and utsc_result.get('rf_port_ifindex'):
+                    scqam_channels.append({
+                        'ifindex': utsc_result['rf_port_ifindex'],
+                        'channel_id': utsc_result.get('logical_channel'),
+                        'description': utsc_result.get('rf_port_description', f"RF Port {utsc_result['rf_port_ifindex']}")
+                    })
+        except Exception as e:
+            logger.warning(f"UTSC RF port discovery failed (non-fatal): {e}")
+        
+        # 2. Discover OFDMA channel for US RxMER (uses rxmer/discover)
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/discover"
         
         response = requests.post(pypnm_url, json={
@@ -849,7 +928,6 @@ def get_upstream_interfaces(mac_address):
         if response.status_code == 200:
             result = response.json()
             
-            ofdma_channels = []
             if result.get('success') and result.get('ofdma_ifindex'):
                 ofdma_channels.append({
                     'ifindex': result['ofdma_ifindex'],
@@ -861,7 +939,7 @@ def get_upstream_interfaces(mac_address):
                 "success": True,
                 "mac_address": mac_address,
                 "cmts_ip": cmts_ip,
-                "scqam_channels": [],  # TODO: Implement SC-QAM discovery if needed
+                "scqam_channels": scqam_channels,
                 "ofdma_channels": ofdma_channels
             })
         else:
