@@ -686,7 +686,7 @@ def discover_rf_port(mac_address):
 @pypnm_bp.route('/upstream/interfaces/<mac_address>', methods=['POST'])
 def get_upstream_interfaces(mac_address):
     """
-    Get upstream interface information for a modem from CMTS.
+    Get upstream interface information for a modem from CMTS via agent.
     Returns OFDMA channels and SC-QAM channels available.
     
     POST body:
@@ -695,7 +695,7 @@ def get_upstream_interfaces(mac_address):
         "community": "optional"
     }
     """
-    import requests
+    from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -705,41 +705,41 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Call PyPNM API for OFDMA discovery
-        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/discover"
+        agent_manager = get_simple_agent_manager()
+        agent = agent_manager.get_agent_for_capability('pnm_us_get_interfaces') if agent_manager else None
         
-        response = requests.post(pypnm_url, json={
-            "cmts": {
+        if not agent:
+            return jsonify({"success": False, "error": "No agent available for OFDMA discovery"}), 503
+        
+        task_id = agent_manager.send_task_sync(
+            agent_id=agent.agent_id,
+            command='pnm_us_get_interfaces',
+            params={
                 "cmts_ip": cmts_ip,
+                "cm_mac_address": mac_address,
                 "community": community
             },
-            "cm_mac_address": mac_address
-        }, timeout=30)
+            timeout=60
+        )
         
-        if response.status_code == 200:
-            result = response.json()
+        result = agent_manager.wait_for_task(task_id, timeout=60)
+        
+        if result is None:
+            return jsonify({"success": False, "error": "Task timed out"}), 504
+        
+        if result.get('error'):
+            return jsonify({"success": False, "error": result.get('error')}), 500
+        
+        task_result = result.get('result', {})
+        
+        return jsonify({
+            "success": task_result.get('success', False),
+            "mac_address": mac_address,
+            "cmts_ip": cmts_ip,
+            "scqam_channels": task_result.get('scqam_channels', []),
+            "ofdma_channels": task_result.get('ofdma_channels', [])
+        })
             
-            ofdma_channels = []
-            if result.get('success') and result.get('ofdma_ifindex'):
-                ofdma_channels.append({
-                    'ifindex': result['ofdma_ifindex'],
-                    'index': result.get('cm_index'),
-                    'description': result.get('ofdma_description', f"OFDMA Channel (ifIndex {result['ofdma_ifindex']})")
-                })
-            
-            return jsonify({
-                "success": True,
-                "mac_address": mac_address,
-                "cmts_ip": cmts_ip,
-                "scqam_channels": [],  # RF port discovery via separate endpoint
-                "ofdma_channels": ofdma_channels
-            })
-        else:
-            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
-            
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to call PyPNM API: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
     except Exception as e:
         logger.error(f"Get upstream interfaces failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

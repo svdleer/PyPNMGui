@@ -1899,50 +1899,28 @@ class PyPNMAgent:
     # ============== Upstream PNM Handlers (CMTS-side) ==============
     
     def _query_cmts_direct(self, cmts_ip: str, oid: str, community: str, walk: bool = False) -> dict:
-        """Query CMTS directly via SNMP (not through cm_proxy)."""
-        try:
-            cmd = 'snmpwalk' if walk else 'snmpget'
-            full_cmd = f"{cmd} -v2c -c {community} -t 10 -r 2 {cmts_ip} {oid}"
-            
-            self.logger.info(f"CMTS SNMP: {cmd} {cmts_ip} {oid}")
-            result = subprocess.run(
-                full_cmd.split(),
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode != 0:
-                return {'success': False, 'error': result.stderr or 'SNMP query failed'}
-            
-            return {'success': True, 'output': result.stdout}
-        except subprocess.TimeoutExpired:
-            return {'success': False, 'error': 'SNMP timeout'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Query CMTS directly via pysnmp SNMP."""
+        self.logger.info(f"CMTS SNMP {'WALK' if walk else 'GET'}: {cmts_ip} {oid}")
+        if walk:
+            result = self._snmp_walk(cmts_ip, oid, community, timeout=15)
+            # Convert to old format for compatibility
+            if result.get('success') and result.get('results'):
+                output_lines = []
+                for r in result['results']:
+                    output_lines.append(f"{r['oid']} = {r['type']}: {r['value']}")
+                return {'success': True, 'output': '\n'.join(output_lines), 'results': result['results']}
+            return result
+        else:
+            result = self._snmp_get(cmts_ip, oid, community, timeout=15)
+            if result.get('success') and result.get('results'):
+                r = result['results'][0]
+                return {'success': True, 'output': f"{r['oid']} = {r['type']}: {r['value']}", 'results': result['results']}
+            return result
     
     def _set_cmts_direct(self, cmts_ip: str, oid: str, value: str, value_type: str, community: str) -> dict:
-        """Set SNMP value on CMTS directly."""
-        try:
-            # Build command as list to handle values with spaces properly
-            cmd = ['snmpset', '-v2c', '-c', community, '-t', '10', '-r', '2', cmts_ip, oid, value_type, value]
-            
-            self.logger.info(f"CMTS SNMP SET: {cmts_ip} {oid} = {value}")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode != 0:
-                return {'success': False, 'error': result.stderr or 'SNMP set failed'}
-            
-            return {'success': True, 'output': result.stdout}
-        except subprocess.TimeoutExpired:
-            return {'success': False, 'error': 'SNMP timeout'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Set SNMP value on CMTS directly via pysnmp."""
+        self.logger.info(f"CMTS SNMP SET: {cmts_ip} {oid} = {value} (type={value_type})")
+        return self._snmp_set(cmts_ip, oid, value, value_type, community, timeout=15)
     
     def _handle_pnm_us_get_interfaces(self, params: dict) -> dict:
         """Get upstream interface information from CMTS for a specific modem."""
