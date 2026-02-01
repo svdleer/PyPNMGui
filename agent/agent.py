@@ -1055,6 +1055,105 @@ class PyPNMAgent:
         
         return asyncio.run(do_set())
     
+    def _snmp_bulk_get(self, host: str, oids: list, community: str, timeout: int = 10) -> dict:
+        """SNMP BULK GET - fetch multiple OIDs in one request using pysnmp v7."""
+        if not PYSNMP_AVAILABLE:
+            # Fallback: do individual gets
+            results = []
+            for oid in oids:
+                r = self._snmp_get_fallback(host, oid, community)
+                if r.get('success') and r.get('results'):
+                    results.extend(r['results'])
+            return {'success': len(results) > 0, 'results': results}
+        
+        async def do_bulk_get():
+            try:
+                from pysnmp.hlapi.v3arch.asyncio import bulk_cmd
+                transport = await UdpTransportTarget.create((host, 161), timeout=timeout, retries=1)
+                
+                # Create ObjectType for each OID
+                obj_types = [ObjectType(ObjectIdentity(oid)) for oid in oids]
+                
+                result = await bulk_cmd(
+                    SnmpEngine(),
+                    CommunityData(community),
+                    transport,
+                    ContextData(),
+                    0, len(oids),  # nonRepeaters=0, maxRepetitions=len(oids)
+                    *obj_types
+                )
+                
+                errorIndication, errorStatus, errorIndex, varBinds = result
+                
+                if errorIndication:
+                    return {'success': False, 'error': str(errorIndication)}
+                elif errorStatus:
+                    return {'success': False, 'error': f'{errorStatus.prettyPrint()} at {errorIndex}'}
+                else:
+                    results = []
+                    for varBind in varBinds:
+                        oid_str = str(varBind[0])
+                        value = varBind[1]
+                        results.append({
+                            'oid': oid_str,
+                            'value': self._parse_snmp_value(value),
+                            'type': type(value).__name__
+                        })
+                    return {'success': True, 'results': results}
+            except Exception as e:
+                self.logger.error(f"SNMP BULK GET error: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        return asyncio.run(do_bulk_get())
+    
+    def _snmp_parallel_walk(self, host: str, oids: list, community: str, timeout: int = 10) -> dict:
+        """SNMP parallel walk - walk multiple OID trees concurrently using asyncio."""
+        if not PYSNMP_AVAILABLE:
+            # Fallback: do sequential walks
+            all_results = {}
+            for oid in oids:
+                r = self._snmp_walk_fallback(host, oid, community)
+                all_results[oid] = r.get('results', []) if r.get('success') else []
+            return {'success': any(len(v) > 0 for v in all_results.values()), 'results': all_results}
+        
+        async def do_parallel_walk():
+            try:
+                async def walk_one(oid):
+                    transport = await UdpTransportTarget.create((host, 161), timeout=timeout, retries=1)
+                    results = []
+                    async for (errorIndication, errorStatus, errorIndex, varBinds) in bulk_walk_cmd(
+                        SnmpEngine(),
+                        CommunityData(community),
+                        transport,
+                        ContextData(),
+                        0, 25,
+                        ObjectType(ObjectIdentity(oid))
+                    ):
+                        if errorIndication or errorStatus:
+                            break
+                        for varBind in varBinds:
+                            oid_str = str(varBind[0])
+                            if not oid_str.startswith(oid):
+                                return results
+                            results.append({
+                                'oid': oid_str,
+                                'value': self._parse_snmp_value(varBind[1]),
+                                'type': type(varBind[1]).__name__
+                            })
+                    return results
+                
+                # Run all walks concurrently
+                tasks = [walk_one(oid) for oid in oids]
+                results_list = await asyncio.gather(*tasks)
+                
+                all_results = dict(zip(oids, results_list))
+                return {'success': any(len(v) > 0 for v in all_results.values()), 'results': all_results}
+            except Exception as e:
+                self.logger.error(f"SNMP parallel walk error: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        return asyncio.run(do_parallel_walk())
+    
     def _parse_snmp_value(self, value) -> Any:
         """Parse pysnmp value to Python native type."""
         if hasattr(value, 'prettyPrint'):
