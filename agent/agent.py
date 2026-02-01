@@ -1156,15 +1156,38 @@ class PyPNMAgent:
     
     def _parse_snmp_value(self, value) -> Any:
         """Parse pysnmp value to Python native type."""
-        if hasattr(value, 'prettyPrint'):
-            # Try to get numeric value first
-            if hasattr(value, '__int__'):
+        try:
+            # Check the actual pysnmp type name
+            type_name = type(value).__name__
+            
+            # For OctetString (may contain binary data like MAC addresses)
+            if type_name == 'OctetString':
+                raw = bytes(value)
+                # Try to decode as UTF-8 string first
+                try:
+                    return raw.decode('utf-8')
+                except:
+                    # Return as hex string for binary data (like MAC addresses)
+                    return ':'.join(f'{b:02x}' for b in raw)
+            
+            # For integer types
+            if type_name in ('Integer', 'Integer32', 'Unsigned32', 'Counter32', 'Counter64', 'Gauge32', 'TimeTicks'):
                 return int(value)
-            elif hasattr(value, '__float__'):
-                return float(value)
-            else:
+            
+            # For IpAddress
+            if type_name == 'IpAddress':
                 return value.prettyPrint()
-        return str(value)
+            
+            # Fallback to prettyPrint
+            if hasattr(value, 'prettyPrint'):
+                return value.prettyPrint()
+            
+            return str(value)
+        except Exception as e:
+            # Ultimate fallback
+            if hasattr(value, 'prettyPrint'):
+                return value.prettyPrint()
+            return str(value)
     
     def _to_snmp_value(self, value: Any, value_type: str):
         """Convert Python value to pysnmp type."""
