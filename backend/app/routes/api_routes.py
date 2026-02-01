@@ -1589,6 +1589,8 @@ def pypnm_sysdescr(mac_address):
             "mac_address": mac_address,
             "results": {"sysDescr": parsed}
         })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/pypnm/modem/<mac_address>/event-log', methods=['POST'])
