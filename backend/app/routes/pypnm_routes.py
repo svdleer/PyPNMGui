@@ -851,7 +851,7 @@ def discover_rf_port(mac_address):
             "cmts_ip": cmts_ip,
             "community": community,
             "cm_mac_address": mac_address
-        }, timeout=30)
+        }, timeout=90)
         
         if response.status_code == 200:
             result = response.json()
