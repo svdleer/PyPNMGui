@@ -233,14 +233,14 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
                 
                 logger.info(f"File uploaded, transaction_id: {tx_id}")
                 
-                # Get analysis
+                # Get analysis with archive output (includes PNG plots)
                 analysis_response = requests.post(
                     f"{pypnm_url}/docs/pnm/files/getAnalysis",
                     json={
                         "search": {"transaction_id": tx_id},
                         "analysis": {
                             "type": "basic",
-                            "output": {"type": "json"},
+                            "output": {"type": "archive"},
                             "plot": {"ui": {"theme": "light"}}
                         }
                     },
@@ -248,12 +248,52 @@ def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
                 )
                 
                 if analysis_response.status_code == 200:
-                    result = analysis_response.json()
-                    channel_data = _transform_pypnm_rxmer_response(result, mac_address)
-                    channel_data['channel_index'] = channel.get('channel_index')
-                    channel_data['if_index'] = channel.get('if_index')
+                    # Archive is a ZIP file containing JSON + PNG plots
+                    import zipfile
+                    import io
+                    import base64
+                    import json as json_module
+                    
+                    archive_data = analysis_response.content
+                    channel_data = {'channel_index': channel.get('channel_index'), 'if_index': channel.get('if_index')}
+                    
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(archive_data), 'r') as zf:
+                            plots = []
+                            json_data = None
+                            
+                            for name in zf.namelist():
+                                if name.endswith('.png'):
+                                    # Extract PNG and convert to base64
+                                    png_data = zf.read(name)
+                                    plots.append({
+                                        'filename': name,
+                                        'data': base64.b64encode(png_data).decode('utf-8'),
+                                        'type': 'rxmer' if 'rxmer' in name.lower() else 'modulation' if 'modulation' in name.lower() else 'aggregate'
+                                    })
+                                elif name.endswith('.json'):
+                                    # Parse JSON for measurement data
+                                    json_content = zf.read(name).decode('utf-8')
+                                    json_data = json_module.loads(json_content)
+                            
+                            # Transform JSON data if available
+                            if json_data:
+                                transformed = _transform_pypnm_rxmer_response({'analysis': json_data}, mac_address)
+                                channel_data.update(transformed)
+                            
+                            channel_data['plots'] = plots
+                            channel_data['mac_address'] = mac_address
+                            
+                    except zipfile.BadZipFile:
+                        # Fallback: try as JSON
+                        logger.warning("Archive not a valid ZIP, trying as JSON")
+                        result = analysis_response.json()
+                        channel_data = _transform_pypnm_rxmer_response(result, mac_address)
+                        channel_data['channel_index'] = channel.get('channel_index')
+                        channel_data['if_index'] = channel.get('if_index')
+                    
                     all_channel_data.append(channel_data)
-                    logger.info(f"Analysis complete for channel {channel.get('channel_index')}")
+                    logger.info(f"Analysis complete for channel {channel.get('channel_index')} with {len(channel_data.get('plots', []))} plots")
                 else:
                     logger.warning(f"Analysis failed: {analysis_response.status_code}")
                     
