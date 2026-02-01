@@ -835,72 +835,37 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Call both PyPNM APIs for RF port and OFDMA discovery
-        scqam_channels = []
-        ofdma_channels = []
+        # Call PyPNM API directly
+        pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/discover"
         
-        # 1. Discover RF ports for UTSC using discoverRfPort endpoint
-        try:
-            utsc_url = "http://localhost:8000/docs/pnm/us/spectrumAnalyzer/discoverRfPort"
-            utsc_response = requests.post(utsc_url, json={
-                "cmts": {
-                    "cmts_ip": cmts_ip,
-                    "community": community
-                },
-                "cm_mac_address": mac_address
-            }, timeout=30)
-            
-            if utsc_response.status_code == 200:
-                utsc_result = utsc_response.json()
-                if utsc_result.get('success') and utsc_result.get('rf_port_ifindex'):
-                    scqam_channels.append({
-                        'ifindex': utsc_result['rf_port_ifindex'],
-                        'channel_id': utsc_result.get('logical_channel'),
-                        'description': utsc_result.get('rf_port_description', f"RF Port {utsc_result['rf_port_ifindex']}")
-                    })
-        except Exception as e:
-            logger.warning(f"UTSC RF port discovery failed: {e}")
+        response = requests.post(pypnm_url, json={
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community
+            },
+            "cm_mac_address": mac_address
+        }, timeout=30)
         
-        # 2. Get OFDMA channel stats for RxMER
-        try:
-            pypnm_url = "http://localhost:8000/docs/if31/us/ofdma/channel/stats"
+        if response.status_code == 200:
+            result = response.json()
             
-            response = requests.post(pypnm_url, json={
-                "cable_modem": {
-                    "mac_address": mac_address,
-                    "snmp": {
-                        "snmpV2C": {
-                            "community": community
-                        }
-                    }
-                }
-            }, timeout=30)
+            ofdma_channels = []
+            if result.get('success') and result.get('ofdma_ifindex'):
+                ofdma_channels.append({
+                    'ifindex': result['ofdma_ifindex'],
+                    'index': result.get('cm_index'),
+                    'description': result.get('ofdma_description', f"OFDMA Channel (ifIndex {result['ofdma_ifindex']})")
+                })
             
-            if response.status_code == 200:
-                result = response.json()
-                
-                if result.get('status') == 0 and result.get('results'):
-                    for ofdma_ch in result['results']:
-                        index = ofdma_ch.get('index')
-                        channel_id = ofdma_ch.get('channel_id')
-                        
-                        if index and channel_id:
-                            ofdma_channels.append({
-                                'ifindex': index,
-                                'index': index,
-                                'channel_id': channel_id,
-                                'description': f"OFDMA Channel {channel_id} (ifIndex {index})"
-                            })
-        except Exception as e:
-            logger.warning(f"OFDMA channel stats failed: {e}")
-        
-        return jsonify({
-            "success": True,
-            "mac_address": mac_address,
-            "cmts_ip": cmts_ip,
-            "scqam_channels": scqam_channels,
-            "ofdma_channels": ofdma_channels
-        })
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "cmts_ip": cmts_ip,
+                "scqam_channels": [],  # TODO: Implement SC-QAM discovery if needed
+                "ofdma_channels": ofdma_channels
+            })
+        else:
+            return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
             
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to call PyPNM API: {e}")
@@ -1372,33 +1337,37 @@ def get_us_rxmer_data(mac_address):
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', 'Z1gg0@LL')
+    filename = data.get('filename')
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Construct filename from MAC address (CMTS adds timestamp, glob will find it)
-        mac_clean = mac_address.replace(':', '').replace('-', '').lower()
-        filename = f"usrxmer_{mac_clean}"
-        
         # Call PyPNM API directly
         pypnm_url = "http://localhost:8000/docs/pnm/us/ofdma/rxmer/getCapture"
         
         payload = {
-            "filename": filename,
-            "tftp_path": "/var/lib/tftpboot"
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community
+            },
+            "ofdma_ifindex": ofdma_ifindex
         }
+        
+        if filename:
+            # Strip path prefix if present (CMTS returns /pnm/mer/filename)
+            import os
+            basename = os.path.basename(filename)
+            payload["filename"] = basename
         
         response = requests.post(pypnm_url, json=payload, timeout=120)
         
         if response.status_code == 200:
-            # PyPNM returns PNG image - encode as base64 for JSON response
-            import base64
-            image_data = base64.b64encode(response.content).decode('utf-8')
+            result = response.json()
             return jsonify({
-                "success": True,
+                "success": result.get('success', False),
                 "mac_address": mac_address,
-                "data": image_data
+                **result
             })
         else:
             return jsonify({"success": False, "error": f"PyPNM API returned {response.status_code}"}), 500
