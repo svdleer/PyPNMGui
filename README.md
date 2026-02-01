@@ -2,100 +2,81 @@
 
 A modern web-based graphical user interface for [PyPNM](https://github.com/PyPNMApps/PyPNM) - the Proactive Network Maintenance toolkit for DOCSIS cable modems.
 
-## ⚠️ Important: Understanding This Project
-
-**This project is a Web GUI frontend for PyPNM. It does NOT replace PyPNM.**
-
-PyPNM is a complete, standalone FastAPI server that provides all PNM (Proactive Network Maintenance) functionality for DOCSIS cable modems. This Web GUI project provides a modern browser-based interface to interact with PyPNM's API.
-
-### Architecture
+## Architecture
 
 ```
 ┌────────────────────────────────────┐
-│  PyPNM Server (Separate Install)  │
-│  FastAPI on port 8000              │
-│  - SNMP operations                 │
-│  - PNM measurements                │
-│  - Data processing                 │
-└──────────────▲─────────────────────┘
-               │ HTTP API
-┌──────────────┴─────────────────────┐
 │  PyPNM Web GUI (This Project)      │
 │  Flask on port 5050                │
 │  - Modern Vue.js interface         │
-│  - Proxies PyPNM API               │
+│  - WebSocket agent management      │
 │  - CMTS management                 │
 └──────────────▲─────────────────────┘
-               │ Browser
-          ┌────┴────┐
-          │  User   │
-          └─────────┘
+               │ WebSocket
+┌──────────────┴─────────────────────┐
+│  PyPNM Agent (Separate Repo)       │
+│  github.com/svdleer/pyPNMAgent     │
+│  - SNMP operations via pysnmp      │
+│  - Network access to CMTS/modems   │
+│  - PNM measurements                │
+└──────────────▲─────────────────────┘
+               │ SNMP
+       ┌───────┴───────┐
+       │  CMTS/Modems  │
+       └───────────────┘
 ```
+
+## Components
+
+| Component | Repository | Purpose |
+|-----------|------------|---------|
+| **PyPNM GUI** | This repo | Web interface + API server |
+| **PyPNM Agent** | [github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent) | Remote SNMP agent |
+| **PyPNM** | [github.com/PyPNMApps/PyPNM](https://github.com/PyPNMApps/PyPNM) | PNM library (optional) |
 
 ## Prerequisites
 
-1. **Python 3.10+**
-2. **PyPNM installed and running** - See [PyPNM Installation](#pypnm-installation)
-3. **Network access to cable modems** (or remote agent setup)
+1. **Python 3.10+** (or Docker)
+2. **PyPNM Agent** deployed on a server with network access to CMTS/modems
 
-## PyPNM Installation
+## Quick Start
 
-Before using this Web GUI, you MUST install and run PyPNM:
+### Docker (Recommended)
 
 ```bash
-# Install PyPNM (in a separate directory)
-git clone https://github.com/PyPNMApps/PyPNM.git
-cd PyPNM
-./install.sh
+# Clone both repos
+git clone https://github.com/svdleer/PyPNMGui.git
+git clone https://github.com/svdleer/pyPNMAgent.git
 
-# Start PyPNM server
-./scripts/pypnm-cli.sh start
+# Start GUI server
+cd PyPNMGui
+docker compose -f docker/docker-compose.yml up -d
 
-# Verify PyPNM is running
-# Open http://127.0.0.1:8000/docs in your browser
+# Configure and start agent (on jump server)
+cd ../pyPNMAgent
+cp agent_config.example.json config/agent_config.json
+# Edit config/agent_config.json with your CMTS details
+docker compose up -d
 ```
 
-**For detailed PyPNM installation instructions, see:**
-- Official Docs: https://www.pypnm.io/
-- Installation Guide: https://www.pypnm.io/docker/install/
-- GitHub README: https://github.com/PyPNMApps/PyPNM
+### Manual Installation
 
-## Quick Start (Web GUI)
-1. Clone or navigate to this repository:
 ```bash
-cd /Users/silvester/PythonDev/Git/PyPNMGui
-```
-
-2. Create and activate a virtual environment:
-```bash
+# 1. Start the GUI server
+cd PyPNMGui
 python3 -m venv venv
-source venv/bin/activate  # On macOS/Linux
-# or
-venv\Scripts\activate     # On Windows
-```
-
-3. Install Python dependencies:
-```bash
+source venv/bin/activate
 pip install -r backend/requirements.txt
+cd backend && python run.py
+
+# 2. Start the agent (on jump server)
+cd pyPNMAgent
+pip install -r requirements.txt
+cp agent_config.example.json agent_config.json
+python agent.py -c agent_config.json
 ```
 
-4. Configure PyPNM server URL (optional, defaults to http://127.0.0.1:8000):
-```bash
-export PYPNM_BASE_URL=http://127.0.0.1:8000
-```
-
-5. Run the Web GUI:
-```bash
-./start.sh
-# or manually:
-cd backend
-python run.py
-```
-
-6. Open your browser:
-```
-http://localhost:5050
-```
+Open http://localhost:5050 in your browser.
 
 ## Features
 
@@ -143,11 +124,11 @@ PyPNMGui/
 │   │   ├── __init__.py          # Flask app factory
 │   │   ├── core/
 │   │   │   ├── config.py        # Configuration settings
-│   │   │   ├── pypnm_client.py  # PyPNM API client wrapper
+│   │   │   ├── simple_ws.py     # WebSocket agent manager
 │   │   │   └── cmts_provider.py # CMTS list provider
 │   │   └── routes/
 │   │       ├── main_routes.py   # Frontend serving
-│   │       └── api_routes.py    # API endpoints (proxies to PyPNM)
+│   │       └── api_routes.py    # API endpoints
 │   ├── run.py                   # Entry point
 │   └── requirements.txt         # Python dependencies
 ├── frontend/
@@ -158,14 +139,31 @@ PyPNMGui/
 │       │   └── style.css        # Custom styles
 │       └── js/
 │           └── app.js           # Vue.js application
-├── agent/                       # Optional: Remote agent for Jump Server
-│   └── ... (for environments where PyPNM can't reach modems directly)
-├── pypnm_integration/           # Reference: Files to integrate into PyPNM
-│   └── ... (for adding remote agent support TO PyPNM)
+├── docker/
+│   ├── docker-compose.yml       # Docker deployment
+│   └── Dockerfile               # GUI server image
+├── deploy/
+│   └── lab-deploy.sh            # Lab deployment script
 ├── docs/
-│   └── INTEGRATION_PLAN.md      # Detailed integration architecture
-├── README.md                    # This file
-└── start.sh                     # Quick start script
+│   └── ...                      # Documentation
+└── README.md                    # This file
+```
+
+## Agent Setup
+
+The PyPNM Agent runs on a jump server with network access to your DOCSIS equipment.
+
+See: **[github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent)**
+
+```bash
+# On your jump server
+git clone https://github.com/svdleer/pyPNMAgent.git
+cd pyPNMAgent
+cp agent_config.example.json agent_config.json
+# Edit agent_config.json with:
+#   - pypnm_server.url: ws://your-gui-server:5050/ws/agent
+#   - cmts_access.community: your-cmts-snmp-community
+docker compose up -d
 ```
 
 ## API Endpoints
