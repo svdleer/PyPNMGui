@@ -79,8 +79,8 @@ def pnm_measurement(measurement_type, mac_address):
     # Special handling for Spectrum - trigger via agent, parse via PyPNM
     # Spectrum needs SNMP SET commands, so use RW community
     if measurement_type == 'spectrum':
-        rw_community = os.environ.get('CM_DIRECT_COMMUNITY', 'Z1gg0Sp3c1@l')
-        return _handle_spectrum_measurement(mac_address, modem_ip, rw_community)
+        from config_lab import CM_RW_COMMUNITY
+        return _handle_spectrum_measurement(mac_address, modem_ip, CM_RW_COMMUNITY)
     
     # Map measurement types to agent commands
     agent_command_map = {
