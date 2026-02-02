@@ -562,11 +562,9 @@ createApp({
         async loadChannelStats() {
             if (!this.selectedModem) return;
             
-            this.runningTest = true;
-            
             try {
-                // Use PyPNM API for channel stats
-                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/channel-stats`, {
+                // Use PyPNM API for channel stats - correct URL
+                const response = await fetch(`${API_BASE}/pypnm/channel-stats/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -575,7 +573,17 @@ createApp({
                     })
                 });
                 
+                if (!response.ok) {
+                    console.warn('Channel stats endpoint not available');
+                    return;
+                }
+                
                 const data = await response.json();
+                
+                // Store full channel stats for computed properties
+                if (data.status === 0) {
+                    this.channelStats = data;
+                }
                 
                 // Process DS OFDM channels if available
                 if (data.downstream && data.downstream.ofdm) {
@@ -618,13 +626,9 @@ createApp({
                     }
                 }
                 
-                this.showSuccess('Channel Stats Loaded', 'Channel statistics have been retrieved successfully.');
-                
             } catch (error) {
-                console.error('Failed to load channel stats:', error);
-                this.showError('Failed to load channel stats', error.message);
-            } finally {
-                this.runningTest = false;
+                console.warn('Failed to load channel stats:', error);
+                // Don't show error to user, just skip channel stats
             }
         },
         
@@ -1165,35 +1169,6 @@ createApp({
         
         toggleRawData() {
             this.showRawData = !this.showRawData;
-        },
-        
-        async loadChannelStats() {
-            if (!this.selectedModem) return;
-            
-            try {
-                const response = await fetch(`${API_BASE}/pypnm/channel-stats/${this.selectedModem.mac_address}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
-                    })
-                });
-                
-                if (!response.ok) {
-                    console.warn('Channel stats endpoint not available');
-                    return;
-                }
-                
-                const data = await response.json();
-                
-                if (data.status === 0) {
-                    this.channelStats = data;
-                }
-            } catch (error) {
-                console.warn('Failed to load channel stats:', error);
-                // Don't show error to user, just skip channel stats
-            }
         },
         
         async runHousekeeping() {
