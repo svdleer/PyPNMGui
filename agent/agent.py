@@ -1481,38 +1481,19 @@ class PyPNMAgent:
         """
         modem_ip = params.get('modem_ip')
         mac_address = params.get('mac_address', '')
-        community = params.get('community', 'm0d3m1nf0')
+        community = self._get_cm_community()
         tftp_server = params.get('tftp_server', os.environ.get('TFTP_IPV4', '172.22.147.18'))
         
         if not modem_ip:
             return {'success': False, 'error': 'modem_ip required'}
         
-        self.logger.info(f"Triggering Spectrum Analyzer capture for {modem_ip}")
+        self.logger.info(f"Triggering Spectrum Analyzer capture for {modem_ip} (community: {community[:4]}...)")
         
         try:
-            # Step 1: Get OFDM channel indexes (need at least one OFDM channel)
-            OID_OFDM_CHAN_ID = '1.3.6.1.4.1.4491.2.1.28.1.1.1.1'
-            chan_result = self._snmp_walk(modem_ip, OID_OFDM_CHAN_ID, community)
-            
-            if not chan_result.get('success') or not chan_result.get('results'):
-                return {'success': False, 'error': 'No OFDM channels found - modem may be DOCSIS 3.0'}
-            
-            ofdm_indexes = []
-            for r in chan_result['results']:
-                try:
-                    oid_parts = r['oid'].split('.')
-                    idx = int(oid_parts[-1])
-                    ofdm_indexes.append(idx)
-                except (ValueError, IndexError):
-                    pass
-            
-            if not ofdm_indexes:
-                return {'success': False, 'error': 'No OFDM channel indexes found'}
-            
-            self.logger.info(f"Found OFDM channel indexes: {ofdm_indexes}")
-            
-            # Step 2: Set TFTP destination
+            # Step 1: Set TFTP/Bulk destination (from PyPNM setDocsPnmBulk)
+            # docsPnmBulkDestIpAddrType.0 = 1 (IPv4)
             OID_BULK_IP_TYPE = '1.3.6.1.4.1.4491.2.1.27.1.1.1.1.0'
+            # docsPnmBulkDestIpAddr.0 = IP as bytes  
             OID_BULK_IP_ADDR = '1.3.6.1.4.1.4491.2.1.27.1.1.1.2.0'
             
             self._snmp_set(modem_ip, OID_BULK_IP_TYPE, 1, 'i', community)
@@ -1520,27 +1501,37 @@ class PyPNMAgent:
             ip_hex = ''.join([f'{int(p):02x}' for p in ip_parts])
             self._snmp_set(modem_ip, OID_BULK_IP_ADDR, ip_hex, 'x', community)
             
-            # Step 3: Trigger spectrum capture for first OFDM channel
-            ofdm_idx = ofdm_indexes[0]
+            # Step 2: Configure Spectrum Analyzer (from PyPNM setDocsIf3CmSpectrumAnalysisCtrlCmd)
+            # These OIDs are from docsIf3CmSpectrumAnalysisCtrlCmd (1.3.6.1.4.1.4491.2.1.20.1.34)
             mac_clean = mac_address.replace(':', '').lower()
             timestamp = int(datetime.now().timestamp())
+            filename = f"spectrum_{mac_clean}_{timestamp}"
             
-            # Spectrum Analyzer OIDs (docsPnmCmDsOfdmSymbolCaptureFileName, docsPnmCmDsOfdmSymbolCaptureEnable)
-            # Actually use Full Band Capture OIDs
-            OID_FBC_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.6.1.7.{ofdm_idx}'
-            OID_FBC_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.6.1.1.{ofdm_idx}'
+            # docsIf3CmSpectrumAnalysisCtrlCmdFileName.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.12.0
+            OID_SPEC_FILENAME = '1.3.6.1.4.1.4491.2.1.20.1.34.12.0'
+            # docsIf3CmSpectrumAnalysisCtrlCmdFileEnable.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.10.0
+            OID_SPEC_FILE_ENABLE = '1.3.6.1.4.1.4491.2.1.20.1.34.10.0'
+            # docsIf3CmSpectrumAnalysisCtrlCmdEnable.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.1.0
+            OID_SPEC_ENABLE = '1.3.6.1.4.1.4491.2.1.20.1.34.1.0'
             
-            filename = f"spectrum_analyzer_{mac_clean}_{ofdm_idx}_{timestamp}"
-            
-            # Set filename
+            # Set filename first
             self.logger.info(f"Setting spectrum filename: {filename}")
-            result = self._snmp_set(modem_ip, OID_FBC_FILENAME, filename, 's', community)
+            result = self._snmp_set(modem_ip, OID_SPEC_FILENAME, filename, 's', community)
             if not result.get('success'):
                 self.logger.warning(f"Failed to set spectrum filename: {result.get('error')}")
             
-            # Trigger capture
-            self.logger.info(f"Triggering spectrum capture for channel {ofdm_idx}")
-            result = self._snmp_set(modem_ip, OID_FBC_ENABLE, 1, 'i', community)
+            # Disable first (toggle FALSE -> TRUE as per PyPNM)
+            self._snmp_set(modem_ip, OID_SPEC_ENABLE, 2, 'i', community)  # 2 = FALSE
+            
+            # Enable spectrum capture (triggers measurement)
+            self.logger.info(f"Enabling spectrum analyzer")
+            result = self._snmp_set(modem_ip, OID_SPEC_ENABLE, 1, 'i', community)  # 1 = TRUE
+            if not result.get('success'):
+                self.logger.warning(f"Failed to enable spectrum: {result.get('error')}")
+            
+            # Enable file output (triggers file upload to TFTP)
+            self.logger.info(f"Enabling spectrum file output")
+            result = self._snmp_set(modem_ip, OID_SPEC_FILE_ENABLE, 1, 'i', community)  # 1 = TRUE
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to trigger spectrum capture: {result.get('error')}"}
             
@@ -1549,10 +1540,7 @@ class PyPNMAgent:
                 'mac_address': mac_address,
                 'modem_ip': modem_ip,
                 'message': 'Spectrum capture triggered',
-                'channels': [{
-                    'channel_index': ofdm_idx,
-                    'filename': filename
-                }]
+                'filename': filename
             }
             
         except Exception as e:
