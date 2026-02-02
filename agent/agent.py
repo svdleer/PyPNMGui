@@ -1495,11 +1495,15 @@ class PyPNMAgent:
             OID_BULK_IP_TYPE = '1.3.6.1.4.1.4491.2.1.27.1.1.1.1.0'
             # docsPnmBulkDestIpAddr.0 = IP as bytes  
             OID_BULK_IP_ADDR = '1.3.6.1.4.1.4491.2.1.27.1.1.1.2.0'
+            # docsPnmBulkUploadControl.0 = 3 (AUTO_UPLOAD)
+            OID_BULK_UPLOAD_CTRL = '1.3.6.1.4.1.4491.2.1.27.1.1.1.4.0'
             
+            self.logger.info(f"Setting TFTP server: {tftp_server}")
             self._snmp_set(modem_ip, OID_BULK_IP_TYPE, 1, 'i', community)
             ip_parts = tftp_server.split('.')
             ip_hex = ''.join([f'{int(p):02x}' for p in ip_parts])
             self._snmp_set(modem_ip, OID_BULK_IP_ADDR, ip_hex, 'x', community)
+            self._snmp_set(modem_ip, OID_BULK_UPLOAD_CTRL, 3, 'i', community)  # 3 = AUTO_UPLOAD
             
             # Step 2: Configure Spectrum Analyzer (from PyPNM setDocsIf3CmSpectrumAnalysisCtrlCmd)
             # These OIDs are from docsIf3CmSpectrumAnalysisCtrlCmd (1.3.6.1.4.1.4491.2.1.20.1.34)
