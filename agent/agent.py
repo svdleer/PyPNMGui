@@ -1533,44 +1533,48 @@ class PyPNMAgent:
             
             self.logger.info(f"Found OFDM channel indexes: {ofdm_indexes}")
             
-            # Step 2: Set TFTP destination
+            # Step 2: Set TFTP/Bulk destination (from PyPNM setDocsPnmBulk)
+            # docsPnmBulkDestIpAddrType.0 = 1 (IPv4)
             OID_BULK_IP_TYPE = '1.3.6.1.4.1.4491.2.1.27.1.1.1.1.0'
+            # docsPnmBulkDestIpAddr.0 = IP as bytes
             OID_BULK_IP_ADDR = '1.3.6.1.4.1.4491.2.1.27.1.1.1.2.0'
+            # docsPnmBulkUploadControl.0 = 2 (auto upload)
+            OID_BULK_UPLOAD_CTRL = '1.3.6.1.4.1.4491.2.1.27.1.1.1.4.0'
             
             self._snmp_set(modem_ip, OID_BULK_IP_TYPE, 1, 'i', community)
             ip_parts = tftp_server.split('.')
             ip_hex = ''.join([f'{int(p):02x}' for p in ip_parts])
             self._snmp_set(modem_ip, OID_BULK_IP_ADDR, ip_hex, 'x', community)
+            self._snmp_set(modem_ip, OID_BULK_UPLOAD_CTRL, 2, 'i', community)  # AUTO_UPLOAD
             
-            # Step 3: Trigger spectrum capture for first OFDM channel
+            # Step 3: Trigger RxMER capture for first OFDM channel (from PyPNM setDocsPnmCmDsOfdmRxMer)
             ofdm_idx = ofdm_indexes[0]
             mac_clean = mac_address.replace(':', '').lower()
             timestamp = int(datetime.now().timestamp())
             
-            # Spectrum Analyzer OIDs (docsPnmCmDsOfdmSymbolCaptureFileName, docsPnmCmDsOfdmSymbolCaptureEnable)
-            # Actually use Full Band Capture OIDs
-            OID_FBC_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.6.1.7.{ofdm_idx}'
-            OID_FBC_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.6.1.1.{ofdm_idx}'
+            # docsPnmCmDsOfdmRxMerFileName.{ofdm_idx} and docsPnmCmDsOfdmRxMerFileEnable.{ofdm_idx}
+            OID_RXMER_FILENAME = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.8.{ofdm_idx}'
+            OID_RXMER_ENABLE = f'1.3.6.1.4.1.4491.2.1.27.1.2.5.1.1.{ofdm_idx}'
             
-            filename = f"spectrum_analyzer_{mac_clean}_{ofdm_idx}_{timestamp}"
+            filename = f"rxmer_{mac_clean}_{ofdm_idx}_{timestamp}"
             
             # Set filename
-            self.logger.info(f"Setting spectrum filename: {filename}")
-            result = self._snmp_set(modem_ip, OID_FBC_FILENAME, filename, 's', community)
+            self.logger.info(f"Setting RxMER filename: {filename}")
+            result = self._snmp_set(modem_ip, OID_RXMER_FILENAME, filename, 's', community)
             if not result.get('success'):
-                self.logger.warning(f"Failed to set spectrum filename: {result.get('error')}")
+                self.logger.warning(f"Failed to set RxMER filename: {result.get('error')}")
             
-            # Trigger capture
-            self.logger.info(f"Triggering spectrum capture for channel {ofdm_idx}")
-            result = self._snmp_set(modem_ip, OID_FBC_ENABLE, 1, 'i', community)
+            # Trigger capture by enabling file output
+            self.logger.info(f"Triggering RxMER capture for channel {ofdm_idx}")
+            result = self._snmp_set(modem_ip, OID_RXMER_ENABLE, 1, 'i', community)
             if not result.get('success'):
-                return {'success': False, 'error': f"Failed to trigger spectrum capture: {result.get('error')}"}
+                return {'success': False, 'error': f"Failed to trigger RxMER capture: {result.get('error')}"}
             
             return {
                 'success': True,
                 'mac_address': mac_address,
                 'modem_ip': modem_ip,
-                'message': 'Spectrum capture triggered',
+                'message': 'RxMER capture triggered',
                 'channels': [{
                     'channel_index': ofdm_idx,
                     'filename': filename
