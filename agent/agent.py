@@ -1496,12 +1496,12 @@ class PyPNMAgent:
         
         try:
             # Step 1: Get OFDM channel indexes - try multiple OIDs for compatibility
-            # Some modems don't have docsIf31CmDsOfdmChanChannelId, use StatusTable instead
+            # Some modems don't have docsIf31CmDsOfdmChanChannelId, use other OFDM tables
             ofdm_indexes = []
             
-            # Try docsIf31CmDsOfdmChanStatusPlcFreq first (more reliable)
-            OID_OFDM_CHAN_STATUS = '1.3.6.1.4.1.4491.2.1.28.1.13.1.2'
-            chan_result = self._snmp_walk(modem_ip, OID_OFDM_CHAN_STATUS, community)
+            # Try docsIf31CmDsOfdmProfileStatsConfigChangeCt first (.28.1.12.1.2 - most reliable)
+            OID_OFDM_PROFILE_STATS = '1.3.6.1.4.1.4491.2.1.28.1.12.1.2'
+            chan_result = self._snmp_walk(modem_ip, OID_OFDM_PROFILE_STATS, community)
             
             if chan_result.get('success') and chan_result.get('results'):
                 for r in chan_result['results']:
