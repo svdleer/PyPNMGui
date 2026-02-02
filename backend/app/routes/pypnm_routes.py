@@ -450,6 +450,7 @@ def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str
             upload_response = requests.post(
                 f"{pypnm_url}/docs/pnm/files/upload",
                 files={'file': (actual_filename, file_content, 'application/octet-stream')},
+                data={'pnm_file_type': 'FULL_BAND_CAPTURE'},  # Spectrum analyzer = full band capture
                 timeout=30
             )
             
