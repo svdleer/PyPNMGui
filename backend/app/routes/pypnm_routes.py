@@ -418,9 +418,8 @@ def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str
         if not filename:
             return jsonify({"status": "error", "message": "No filename returned from agent"}), 500
         
-        # Step 2: Wait for modem to write file to TFTP (mounted folder)
-        # Modem can take 30-60s after status=3 to actually write the file
-        time.sleep(20)
+        # Step 2: Agent polls TFTP for file, just add small buffer
+        time.sleep(2)
         
         # Step 3: Find and upload file to PyPNM
         import glob
