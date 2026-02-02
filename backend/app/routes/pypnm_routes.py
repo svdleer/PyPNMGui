@@ -379,6 +379,7 @@ def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str
     try:
         # Step 1: Have agent trigger spectrum capture
         logger.info(f"Triggering Spectrum capture via agent for {mac_address} ({modem_ip})")
+        logger.info(f"Using community: {community}")
         
         agent_manager = get_simple_agent_manager()
         agent = agent_manager.get_agent_for_capability('pnm_spectrum') if agent_manager else None
