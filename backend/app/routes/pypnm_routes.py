@@ -10,18 +10,42 @@ import os
 import tempfile
 import zipfile
 from io import BytesIO
+import json
 
 # Import spectrum plotter for generating matplotlib plots
 from app.core.spectrum_plotter import generate_spectrum_plot_from_data
+from app.core.constellation_plotter import generate_constellation_plots_from_data
 
 logger = logging.getLogger(__name__)
 
 pypnm_bp = Blueprint('pypnm', __name__, url_prefix='/api/pypnm')
 
+# Redis client for caching
+try:
+    import redis
+    REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+    REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    redis_client.ping()
+    REDIS_AVAILABLE = True
+except:
+    redis_client = None
+    REDIS_AVAILABLE = False
+
 
 def get_default_community():
-    """Get default SNMP community based on mode."""
+    """Get default SNMP community for modems based on mode."""
     return 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'm0d3m1nf0'
+
+
+def get_default_write_community():
+    """Get default SNMP write community for modem PNM operations (SET)."""
+    return 'z1gg0m0n1t0r1ng' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
+
+
+def get_cmts_community():
+    """Get default SNMP community for CMTS operations."""
+    return 'Z1gg0Sp3c1@l' if os.environ.get('PYPNM_MODE') == 'lab' else 'private'
 
 
 def get_default_tftp():
@@ -34,12 +58,10 @@ def pnm_measurement(measurement_type, mac_address):
     """
     Unified PNM measurement endpoint.
     
-    For RxMER: Agent triggers SNMP capture, then calls PyPNM API to get parsed data.
-    For others: Routes through agent.
-    
     Supported types:
-    - rxmer: RxMER per subcarrier (agent triggers, PyPNM parses)
-    - spectrum: Spectrum analyzer
+    - rxmer: RxMER per subcarrier
+    - spectrum: Downstream spectrum analyzer (DOCSIS 3.x/4.0)
+    - us_spectrum: Upstream spectrum analyzer (UTSC)
     - channel_estimation: Channel estimation coefficients
     - modulation_profile: Modulation profile
     - fec_summary: FEC summary stats
@@ -56,557 +78,464 @@ def pnm_measurement(measurement_type, mac_address):
         "sample_duration": 60    # Only for histogram
     }
     """
-    import requests
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
+    # Use write community for PNM operations that require SET
+    community = data.get('community', get_default_write_community())
+    tftp_ip = data.get('tftp_ip', get_default_tftp())
+    output_type = data.get('output_type', 'json')
     
-    # Spectrum requires SNMP SET operations - use RW community (ignore frontend value)
+    # Spectrum analyzer: always use JSON mode from PyPNM, then generate plots ourselves
     if measurement_type == 'spectrum':
-        from config_lab import CM_RW_COMMUNITY
-        community = CM_RW_COMMUNITY  # Always use RW community for spectrum, don't trust frontend
+        output_type = 'json'  # PyPNM returns JSON, we generate plots in backend
+        requested_archive = data.get('output_type') == 'archive'  # Track if user wanted archive
+    # PyPNM only supports json output currently - archive mode falls back to json
+    elif output_type == 'archive':
+        # Keep archive mode - PyPNM will return ZIP with plots
+        requested_archive = True
     else:
-        community = data.get('community', get_default_community())
+        requested_archive = False
     
-    if not modem_ip:
+    if not modem_ip and measurement_type != 'us_spectrum':
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    # Special handling for RxMER - use PyPNM API for parsing
-    if measurement_type == 'rxmer':
-        return _handle_rxmer_measurement(mac_address, modem_ip, community)
+    client = PyPNMClient()
     
-    # Map measurement types to agent commands
-    agent_command_map = {
-        'spectrum': 'pnm_spectrum',  # Spectrum analyzer via agent
-        'channel_power': 'pnm_channel_power',  # Basic channel info (not full spectrum)
-        'channel_estimation': 'pnm_ofdm_capture',
-        'modulation_profile': 'pnm_ofdm_capture',
-        'fec_summary': 'pnm_fec',
-        'histogram': 'pnm_spectrum',
-        'constellation': 'pnm_ofdm_capture',
-        'us_pre_eq': 'pnm_pre_eq',
-    }
-    
-    agent_command = agent_command_map.get(measurement_type)
-    if not agent_command:
-        return jsonify({
-            "status": "error",
-            "message": f"Unknown measurement type: {measurement_type}"
-        }), 400
-    
+    # Route to appropriate method
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability(agent_command) if agent_manager else None
-        
-        if not agent:
-            # Fallback: try any agent with cm_direct capability
-            agent = agent_manager.get_agent_for_capability('cm_direct') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": f"No agent available for {measurement_type}"}), 503
-        
-        # Build params for agent
-        params = {
-            "modem_ip": modem_ip,
-            "mac_address": mac_address,
-            "community": community,
-            "measurement_type": measurement_type
-        }
-        
-        # Add measurement-specific params
-        if measurement_type == 'fec_summary':
-            params['fec_type'] = data.get('fec_summary_type', 2)
-        elif measurement_type == 'histogram':
-            params['sample_duration'] = data.get('sample_duration', 60)
-        
-        logger.info(f"Sending {agent_command} to agent {agent.agent_id} for {mac_address}")
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command=agent_command,
-            params=params,
-            timeout=120
-        )
-        
-        result = agent_manager.wait_for_task(task_id, timeout=120)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        # Return 'data' field for frontend compatibility
-        return jsonify({
-            "status": 0 if task_result.get('success', False) else 1,
-            "message": task_result.get('message', 'Measurement complete'),
-            "data": task_result.get('data', task_result),
-            "mac_address": mac_address
-        })
-        
-    except Exception as e:
-        logger.error(f"PNM measurement {measurement_type} failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-def _handle_rxmer_measurement(mac_address: str, modem_ip: str, community: str):
-    """
-    Handle RxMER measurement.
-    
-    Flow:
-    1. Agent triggers SNMP capture (modem uploads file to TFTP)
-    2. Upload file to PyPNM and get transaction_id
-    3. Call PyPNM getAnalysis to parse and get data + plot
-    """
-    import time
-    import requests
-    from app.core.simple_ws import get_simple_agent_manager
-    
-    pypnm_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000'))
-    tftp_dir = '/var/lib/tftpboot'  # PyPNM container has this mounted
-    
-    try:
-        # Step 1: Have agent trigger SNMP capture
-        logger.info(f"Triggering RxMER capture via agent for {mac_address} ({modem_ip})")
-        
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_ofdm_rxmer') if agent_manager else None
-        
-        if not agent:
-            agent = agent_manager.get_agent_for_capability('cm_direct') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for RxMER capture"}), 503
-        
-        # Trigger capture via agent
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_ofdm_rxmer',
-            params={
-                "modem_ip": modem_ip,
-                "mac_address": mac_address,
-                "community": community
-            },
-            timeout=60
-        )
-        
-        trigger_result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if not trigger_result or not trigger_result.get('result', {}).get('success'):
-            error = trigger_result.get('result', {}).get('error', 'Agent trigger failed') if trigger_result else 'Timeout'
-            logger.error(f"Agent RxMER trigger failed: {error}")
+        if measurement_type == 'rxmer':
+            result = client.get_rxmer_capture(
+                mac_address, modem_ip, tftp_ip, community, 
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'spectrum':
+            result = client.get_spectrum_capture(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'us_spectrum':
+            # UTSC is CMTS-based, not modem-based - requires different parameters
+            cmts_ip = data.get('cmts_ip')
+            rf_port_ifindex = data.get('rf_port_ifindex')
+            trigger_mode = data.get('trigger_mode', 2)  # 2=FreeRunning
+            center_freq_hz = data.get('center_freq_hz', 30000000)  # 30 MHz
+            span_hz = data.get('span_hz', 80000000)  # 80 MHz
+            num_bins = data.get('num_bins', 800)
+            filename = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
+            cm_mac = data.get('cm_mac') if trigger_mode == 6 else None
+            logical_ch_ifindex = data.get('logical_ch_ifindex')
             
-            # Check for DOCSIS 3.0 modems (no OFDM)
-            if 'No OFDM channels' in error or 'DOCSIS 3.0' in error:
+            if not cmts_ip or rf_port_ifindex is None:
                 return jsonify({
                     "status": "error", 
-                    "message": "This modem does not support OFDM RxMER measurements",
-                    "error_type": "docsis_30",
-                    "details": "RxMER per-subcarrier measurements require DOCSIS 3.1 OFDM channels. This modem appears to be DOCSIS 3.0 or has no OFDM channels configured."
+                    "message": "cmts_ip and rf_port_ifindex required for UTSC"
                 }), 400
             
-            return jsonify({"status": "error", "message": f"Capture trigger failed: {error}"}), 500
-        
-        logger.info(f"Agent triggered RxMER capture, waiting for file upload...")
-        agent_result = trigger_result.get('result', {})
-        channels = agent_result.get('channels', [])
-        
-        # Step 2: Wait for modem to upload file to TFTP
-        time.sleep(5)
-        
-        # Step 3: Upload each file to PyPNM and get analysis
-        all_channel_data = []
-        
-        for channel in channels:
-            filename = channel.get('filename')
-            if not filename:
-                continue
-            
-            filepath = f"{tftp_dir}/{filename}"
-            logger.info(f"Processing RxMER file: {filename}")
-            
+            # Stop any existing UTSC measurement before starting a new one
             try:
-                # Upload file to PyPNM (reads from container's mounted TFTP dir)
-                # Note: GUI container can call PyPNM API, PyPNM reads file from its own mount
-                upload_response = requests.post(
-                    f"{pypnm_url}/docs/pnm/files/upload",
-                    files={'file': (filename, open(filepath, 'rb'), 'application/octet-stream')},
-                    timeout=30
-                )
-                
-                if upload_response.status_code not in [200, 201]:
-                    logger.warning(f"File upload failed: {upload_response.status_code}")
-                    continue
-                
-                upload_result = upload_response.json()
-                tx_id = upload_result.get('transaction_id')
-                
-                if not tx_id:
-                    logger.warning(f"No transaction_id in upload response")
-                    continue
-                
-                logger.info(f"File uploaded, transaction_id: {tx_id}")
-                
-                # Get analysis with archive output (includes PNG plots)
-                analysis_response = requests.post(
-                    f"{pypnm_url}/docs/pnm/files/getAnalysis",
-                    json={
-                        "search": {"transaction_id": tx_id},
-                        "analysis": {
-                            "type": "basic",
-                            "output": {"type": "archive"},
-                            "plot": {"ui": {"theme": "light"}}
-                        }
-                    },
-                    timeout=60
-                )
-                
-                if analysis_response.status_code == 200:
-                    # Archive is a ZIP file containing JSON + PNG plots
-                    import zipfile
-                    import io
-                    import base64
-                    import json as json_module
-                    
-                    archive_data = analysis_response.content
-                    channel_data = {'channel_index': channel.get('channel_index'), 'if_index': channel.get('if_index')}
-                    
-                    try:
-                        with zipfile.ZipFile(io.BytesIO(archive_data), 'r') as zf:
-                            plots = []
-                            json_data = None
-                            
-                            for name in zf.namelist():
-                                if name.endswith('.png'):
-                                    # Extract PNG and convert to base64
-                                    png_data = zf.read(name)
-                                    plots.append({
-                                        'filename': name,
-                                        'data': base64.b64encode(png_data).decode('utf-8'),
-                                        'type': 'rxmer' if 'rxmer' in name.lower() else 'modulation' if 'modulation' in name.lower() else 'aggregate'
-                                    })
-                                elif name.endswith('.json'):
-                                    # Parse JSON for measurement data
-                                    json_content = zf.read(name).decode('utf-8')
-                                    json_data = json_module.loads(json_content)
-                            
-                            # Transform JSON data if available
-                            if json_data:
-                                transformed = _transform_pypnm_rxmer_response({'analysis': json_data}, mac_address)
-                                channel_data.update(transformed)
-                            
-                            channel_data['plots'] = plots
-                            channel_data['mac_address'] = mac_address
-                            
-                    except zipfile.BadZipFile:
-                        # Fallback: try as JSON
-                        logger.warning("Archive not a valid ZIP, trying as JSON")
-                        result = analysis_response.json()
-                        channel_data = _transform_pypnm_rxmer_response(result, mac_address)
-                        channel_data['channel_index'] = channel.get('channel_index')
-                        channel_data['if_index'] = channel.get('if_index')
-                    
-                    all_channel_data.append(channel_data)
-                    logger.info(f"Analysis complete for channel {channel.get('channel_index')} with {len(channel_data.get('plots', []))} plots")
-                else:
-                    logger.warning(f"Analysis failed: {analysis_response.status_code}")
-                    
-            except FileNotFoundError:
-                logger.warning(f"File not found: {filepath} - modem may not have uploaded yet")
+                logger.info(f"Stopping any existing UTSC on {cmts_ip} port {rf_port_ifindex}")
+                client.stop_utsc(cmts_ip, rf_port_ifindex, community)
+                time.sleep(0.5)  # Brief delay to ensure stop completes
             except Exception as e:
-                logger.warning(f"Failed to process file {filename}: {e}")
-        
-        if all_channel_data:
-            # Collect all plots from all channels for top-level access
-            all_plots = []
-            for channel in all_channel_data:
-                channel_plots = channel.get('plots', [])
-                # Add channel_index to each plot for identification
-                for plot in channel_plots:
-                    plot['channel_index'] = channel.get('channel_index')
-                all_plots.extend(channel_plots)
+                logger.warning(f"Failed to stop existing UTSC (may not be running): {e}")
             
-            # Merge all channel data into unified response
+            result = client.get_upstream_spectrum_capture(
+                cmts_ip=cmts_ip,
+                rf_port_ifindex=rf_port_ifindex,
+                tftp_ipv4=tftp_ip,
+                community=community,
+                tftp_ipv6=None,
+                output_type=output_type,
+                trigger_mode=trigger_mode,
+                center_freq_hz=center_freq_hz,
+                span_hz=span_hz,
+                num_bins=num_bins,
+                filename=filename,
+                cm_mac=cm_mac,
+                logical_ch_ifindex=logical_ch_ifindex
+            )
+            
+            # Store UTSC config in Redis for later plot generation
+            try:
+                redis_client.setex(
+                    f'utsc_config:{mac_address}',
+                    3600,  # 1 hour TTL
+                    json.dumps({
+                        'span_hz': span_hz,
+                        'center_freq_hz': center_freq_hz,
+                        'num_bins': num_bins
+                    })
+                )
+            except Exception as e:
+                logger.warning(f"Failed to cache UTSC config: {e}")
+        elif measurement_type == 'channel_estimation':
+            result = client.get_channel_estimation(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'modulation_profile':
+            result = client.get_modulation_profile(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        elif measurement_type == 'fec_summary':
+            fec_type = data.get('fec_summary_type', 2)
+            result = client.get_fec_summary(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", fec_summary_type=fec_type, output_type=output_type
+            )
+        elif measurement_type == 'histogram':
+            duration = data.get('sample_duration', 60)
+            result = client.get_histogram(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", sample_duration=duration, output_type=output_type
+            )
+        elif measurement_type == 'constellation':
+            logger.info(f"=== CONSTELLATION DEBUG START ===")
+            logger.info(f"Requesting constellation for {mac_address} at {modem_ip}")
+            logger.info(f"Output type: {output_type}, Requested archive: {requested_archive}")
+            result = client.get_constellation_display(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+            logger.info(f"=== CONSTELLATION RAW RESULT ===")
+            logger.info(f"Result type: {type(result)}")
+            if isinstance(result, dict):
+                logger.info(f"Result keys: {result.keys()}")
+                logger.info(f"Result status: {result.get('status')}")
+                logger.info(f"Result message: {result.get('message')}")
+                if 'data' in result:
+                    logger.info(f"Data keys: {result['data'].keys() if isinstance(result['data'], dict) else 'not a dict'}")
+            elif isinstance(result, bytes):
+                logger.info(f"Result is bytes, length: {len(result)}")
+            else:
+                logger.info(f"Result: {result}")
+            
+            # Generate matplotlib plots for constellation data (like other measurements)
+            # PyPNM returns: {data: [{channel_id, samples: [(I, Q), ...]}, ...]}
+            if isinstance(result, dict) and result.get('status') == 0:
+                raw_data = result.get('data', [])
+                if isinstance(raw_data, list) and len(raw_data) > 0:
+                    try:
+                        constellation_plots = generate_constellation_plots_from_data(raw_data, mac_address)
+                        if constellation_plots:
+                            # Add plots to result (like other measurements)
+                            if 'plots' not in result:
+                                result['plots'] = []
+                            result['plots'].extend(constellation_plots)
+                            logger.info(f"Generated {len(constellation_plots)} matplotlib constellation plots")
+                    except Exception as e:
+                        logger.error(f"Failed to generate constellation plots: {e}", exc_info=True)
+            
+            logger.info(f"=== CONSTELLATION DEBUG END ===")
+        elif measurement_type == 'us_pre_eq':
+            result = client.get_us_ofdma_pre_equalization(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6="::1", output_type=output_type
+            )
+        else:
+            return jsonify({
+                "status": "error",
+                "message": f"Unknown measurement type: {measurement_type}"
+            }), 400
+        
+        # Handle archive (tar.gz) response - fetch matplotlib plots from PyPNM
+        if requested_archive and isinstance(result, bytes):
+            # Check if the "bytes" is actually a JSON error response
+            if len(result) < 1000:
+                try:
+                    error_json = json.loads(result.decode('utf-8'))
+                    if isinstance(error_json, dict) and error_json.get('status', 0) != 0:
+                        logger.error(f"PyPNM returned error: {error_json}")
+                        return jsonify({
+                            "status": error_json.get('status', 'error'),
+                            "message": error_json.get('message', 'Measurement failed'),
+                            "mac_address": mac_address
+                        }), 400
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass  # Not JSON, continue processing as binary
+            
+            # PyPNM returns binary archive file (ZIP or tar.gz)
+            import tarfile
+            import zipfile
+            import io
+            import base64
+            from datetime import datetime
+            
+            # Detect archive type
+            is_zip = result.startswith(b'PK')  # ZIP magic number
+            
+            # Save archive file
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            archive_ext = 'zip' if is_zip else 'tar.gz'
+            archive_filename = f"{measurement_type}_{mac_address}_{timestamp}.{archive_ext}"
+            archive_path = f"/app/data/{archive_filename}"
+            
+            with open(archive_path, 'wb') as f:
+                f.write(result)
+            
+            # Extract PNG images and JSON from archive
+            plots = []
+            json_data = None
+            try:
+                if is_zip:
+                    # Handle ZIP archive
+                    with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
+                        archive_files = zf.namelist()
+                        logger.info(f"ZIP archive contains {len(archive_files)} files")
+                        for filename in archive_files:
+                            if filename.endswith('.png'):
+                                img_data = zf.read(filename)
+                                plots.append({
+                                    'filename': filename.split('/')[-1],  # Get basename
+                                    'data': base64.b64encode(img_data).decode('utf-8')
+                                })
+                            elif filename.endswith('.json'):
+                                json_content = zf.read(filename).decode('utf-8')
+                                json_data = json.loads(json_content)
+                        logger.info(f"Extracted {len(plots)} PNG plots from ZIP")
+                else:
+                    # Handle tar.gz archive
+                    with tarfile.open(fileobj=io.BytesIO(result), mode='r:gz') as tf:
+                        archive_files = tf.getnames()
+                        logger.info(f"TAR archive contains {len(archive_files)} files")
+                        for filename in archive_files:
+                            if filename.endswith('.png'):
+                                member = tf.getmember(filename)
+                                img_data = tf.extractfile(member).read()
+                                plots.append({
+                                    'filename': filename.split('/')[-1],  # Get basename
+                                    'data': base64.b64encode(img_data).decode('utf-8')
+                                })
+                            elif filename.endswith('.json'):
+                                member = tf.getmember(filename)
+                                json_content = tf.extractfile(member).read().decode('utf-8')
+                                json_data = json.loads(json_content)
+                        logger.info(f"Extracted {len(plots)} PNG plots from TAR")
+            except Exception as e:
+                logger.error(f"Failed to extract from archive: {e}")
+            
+            # For constellation, generate matplotlib plots from extracted JSON data
+            # (PyPNM constellation archives don't contain pre-generated PNGs)
+            if measurement_type == 'constellation' and json_data and len(plots) == 0:
+                logger.info(f"Generating constellation plots from extracted JSON data")
+                raw_data = json_data if isinstance(json_data, list) else json_data.get('data', [])
+                if isinstance(raw_data, list) and len(raw_data) > 0:
+                    try:
+                        constellation_plots = generate_constellation_plots_from_data(raw_data, mac_address)
+                        if constellation_plots:
+                            plots.extend(constellation_plots)
+                            logger.info(f"Generated {len(constellation_plots)} matplotlib constellation plots")
+                    except Exception as e:
+                        logger.error(f"Failed to generate constellation plots: {e}", exc_info=True)
+            
+            # If we extracted JSON, return it with plots
+            if json_data:
+                response = json_data
+                # CRITICAL: Ensure status field exists (frontend requires it)
+                if 'status' not in response:
+                    response['status'] = 0  # SUCCESS - use PyPNM status codes
+                response['plots'] = plots
+                response['output_type'] = 'archive'
+                response['archive_file'] = archive_filename
+                response['download_url'] = f"/api/pypnm/download/{archive_filename}"
+                return jsonify(response)
+            
+            # Fallback if no JSON found
             return jsonify({
                 "status": 0,
-                "message": "RxMER capture complete",
-                "data": {
-                    "channels": all_channel_data,
-                    "mac_address": mac_address,
-                    "modem_ip": modem_ip
-                },
-                "plots": all_plots,  # Top-level for frontend compatibility
+                "message": f"Measurement complete - {len(plots)} plots generated",
+                "output_type": "archive",
+                "archive_file": archive_filename,
+                "download_url": f"/api/pypnm/download/{archive_filename}",
+                "plots": plots,
                 "mac_address": mac_address
             })
         
-        # Fallback: Return trigger result with file info
-        return jsonify({
-            "status": 0,
-            "message": "RxMER capture triggered - file pending upload",
-            "data": agent_result,
-            "mac_address": mac_address
-        })
+        # Handle archive (ZIP) response - fetch matplotlib plots from PyPNM
+        if requested_archive and result.get('status') == 0:
+            # PyPNM returns archive data, extract plots and save ZIP
+            import zipfile
+            import io
+            import base64
+            from datetime import datetime
             
-    except Exception as e:
-        logger.error(f"RxMER measurement failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str):
-    """
-    Handle Spectrum Analyzer (Full Band Capture) measurement.
-    
-    Flow:
-    1. Agent triggers SNMP capture (modem uploads file to TFTP)
-    2. Upload file to PyPNM and get transaction_id
-    3. Call PyPNM getAnalysis to parse and get data + plot
-    """
-    import time
-    import requests
-    from app.core.simple_ws import get_simple_agent_manager
-    
-    pypnm_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000'))
-    tftp_dir = '/var/lib/tftpboot'
-    
-    try:
-        # Step 1: Have agent trigger spectrum capture
-        logger.info(f"Triggering Spectrum capture via agent for {mac_address} ({modem_ip})")
-        logger.info(f"Using community: {community}")
-        
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_spectrum') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for spectrum capture"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_spectrum',
-            params={
-                "modem_ip": modem_ip,
-                "mac_address": mac_address,
-                "community": community
-            },
-            timeout=60
-        )
-        
-        trigger_result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if not trigger_result or not trigger_result.get('result', {}).get('success'):
-            error = trigger_result.get('result', {}).get('error', 'Agent trigger failed') if trigger_result else 'Timeout'
-            logger.error(f"Agent Spectrum trigger failed: {error}")
-            
-            if 'No OFDM channels' in error or 'DOCSIS 3.0' in error:
-                return jsonify({
-                    "status": "error", 
-                    "message": "This modem does not support Spectrum Analyzer (DOCSIS 3.0)",
-                    "error_type": "docsis_30"
-                }), 400
-            
-            return jsonify({"status": "error", "message": f"Capture trigger failed: {error}"}), 500
-        
-        logger.info(f"Agent triggered Spectrum capture, waiting for file upload...")
-        agent_result = trigger_result.get('result', {})
-        
-        # Get filename - agent now returns it directly (not in channels array)
-        filename = agent_result.get('filename')
-        if not filename:
-            # Fallback: check old format with channels array
-            channels = agent_result.get('channels', [])
-            if channels and len(channels) > 0:
-                filename = channels[0].get('filename')
-        
-        if not filename:
-            return jsonify({"status": "error", "message": "No filename returned from agent"}), 500
-        
-        # Step 2: Wait for modem to upload file to TFTP (status=3 means measurement done, but file write can take 30-60s)
-        time.sleep(30)
-        
-        # Step 3: Find and upload file to PyPNM
-        import glob
-        matches = glob.glob(f"{tftp_dir}/{filename}*")
-        if not matches:
-            logger.error(f"Spectrum file not found: {filename}")
-            return jsonify({"status": "error", "message": f"Spectrum file not found: {filename}"}), 500
-        
-        filepath = matches[0]
-        actual_filename = os.path.basename(filepath)
-        logger.info(f"Processing Spectrum file: {actual_filename}")
-        
-        try:
-            # Read file from mounted TFTP folder
-            with open(filepath, 'rb') as f:
-                file_content = f.read()
-            
-            # Upload to PyPNM API for parsing
-            upload_response = requests.post(
-                f"{pypnm_url}/docs/pnm/files/upload",
-                files={'file': (actual_filename, file_content, 'application/octet-stream')},
-                data={'pnm_file_type': 'FULL_BAND_CAPTURE'},  # Spectrum analyzer = full band capture
-                timeout=30
-            )
-            
-            if upload_response.status_code not in [200, 201]:
-                logger.error(f"Spectrum file upload failed: {upload_response.status_code} - {upload_response.text}")
-                return jsonify({"status": "error", "message": f"Failed to upload spectrum file to PyPNM: {upload_response.status_code}"}), 500
-            
-            upload_result = upload_response.json()
-            tx_id = upload_result.get('transaction_id')
-            
-            if not tx_id:
-                logger.error(f"No transaction_id in spectrum upload response")
-                return jsonify({"status": "error", "message": "No transaction_id from PyPNM"}), 500
-            
-            logger.info(f"Spectrum file uploaded, transaction_id: {tx_id}")
-            
-            # Get analysis with archive output (includes PNG plots)
-            analysis_response = requests.post(
-                f"{pypnm_url}/docs/pnm/files/getAnalysis",
-                json={
-                    "search": {"transaction_id": tx_id},
-                    "analysis": {
-                        "type": "basic",
-                        "output": {"type": "archive"},
-                        "plot": {"ui": {"theme": "light"}}
-                    }
-                },
-                timeout=60
-            )
-            
-            if analysis_response.status_code == 200:
-                import zipfile
-                import io
-                import base64
+            # Get the archive data from PyPNM
+            archive_data = result.get('archive_data')
+            if archive_data:
+                # Save ZIP and extract plot images
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                zip_filename = f"{measurement_type}_{mac_address}_{timestamp}.zip"
+                zip_path = f"/app/data/{zip_filename}"
                 
-                archive_data = analysis_response.content
-                all_plots = []
+                # Write ZIP file
+                with open(zip_path, 'wb') as f:
+                    f.write(base64.b64decode(archive_data) if isinstance(archive_data, str) else archive_data)
                 
+                # Extract PNG images from ZIP
+                plots = []
                 try:
-                    with zipfile.ZipFile(io.BytesIO(archive_data), 'r') as zf:
-                        for name in zf.namelist():
-                            if name.endswith('.png'):
-                                png_data = zf.read(name)
-                                all_plots.append({
-                                    'filename': name,
-                                    'data': base64.b64encode(png_data).decode('utf-8'),
-                                    'type': 'spectrum'
+                    with zipfile.ZipFile(zip_path, 'r') as zf:
+                        for filename in zf.namelist():
+                            if filename.endswith('.png'):
+                                img_data = zf.read(filename)
+                                plots.append({
+                                    'filename': filename,
+                                    'data': base64.b64encode(img_data).decode('utf-8')
                                 })
-                        logger.info(f"Spectrum analysis complete with {len(all_plots)} plots")
-                        
-                        return jsonify({
-                            "status": 0,
-                            "message": "Spectrum capture complete",
-                            "data": {
-                                "mac_address": mac_address,
-                                "modem_ip": modem_ip
-                            },
-                            "plots": all_plots,
-                            "mac_address": mac_address
-                        })
-                except zipfile.BadZipFile:
-                    logger.error("Spectrum analysis returned non-archive response")
-                    return jsonify({"status": "error", "message": "Invalid analysis response"}), 500
-            else:
-                logger.error(f"Spectrum analysis failed: {analysis_response.status_code} - {analysis_response.text}")
-                return jsonify({"status": "error", "message": f"Analysis failed: {analysis_response.status_code}"}), 500
+                except Exception as e:
+                    logger.error(f"Failed to extract plots: {e}")
                 
-        except FileNotFoundError:
-            logger.error(f"Spectrum file not found: {filepath}")
-            return jsonify({"status": "error", "message": "Spectrum file disappeared"}), 500
-        except Exception as e:
-            logger.error(f"Failed to process spectrum file: {e}")
-            return jsonify({"status": "error", "message": str(e)}), 500
+                return jsonify({
+                    "status": 0,
+                    "message": result.get('message', 'Archive generated successfully'),
+                    "output_type": "archive",
+                    "zip_file": zip_filename,
+                    "download_url": f"/api/pypnm/download/{zip_filename}",
+                    "plots": plots,
+                    "data": result.get('data', {})
+                })
             
-    except Exception as e:
-        logger.error(f"Spectrum measurement failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-def _transform_pypnm_rxmer_response(pypnm_response: dict, mac_address: str) -> dict:
-    """Transform PyPNM RxMER file analysis response to frontend expected format.
-    
-    PyPNM returns:
-    {
-        "mac_address": "...",
-        "pnm_file_type": "RECEIVE_MODULATION_ERROR_RATIO",
-        "status": "success",
-        "analysis": {
-            "channel_id": 34,
-            "subcarrier_spacing": 50000,
-            "subcarrier_zero_frequency": 1019600000,
-            "first_active_subcarrier_index": 148,
-            "carrier_values": {
-                "magnitude": [42.5, 43.0, ...],  # Per-subcarrier MER in dB
-                "frequency": [...]
-            },
-            "modulation_statistics": {...}
-        }
-    }
-    """
-    # Get analysis data from PyPNM response
-    analysis = pypnm_response.get('analysis', pypnm_response)
-    
-    rxmer_measurements = []
-    
-    # Extract carrier values (per-subcarrier MER)
-    carrier_values = analysis.get('carrier_values', {})
-    magnitudes = carrier_values.get('magnitude', [])
-    frequencies = carrier_values.get('frequency', [])
-    
-    if magnitudes:
-        first_idx = analysis.get('first_active_subcarrier_index', 0)
-        zero_freq = analysis.get('subcarrier_zero_frequency', 0)
-        spacing = analysis.get('subcarrier_spacing', 50000)
-        channel_id = analysis.get('channel_id', 1)
-        
-        # Build subcarrier samples for graphing
-        subcarrier_samples = []
-        for i, mer in enumerate(magnitudes):
-            freq = frequencies[i] if i < len(frequencies) else (zero_freq + (first_idx + i) * spacing)
-            subcarrier_samples.append({
-                'subcarrier_index': first_idx + i,
-                'frequency_hz': freq,
-                'mer_db': mer
+            # Archive data not available, return JSON
+            # But fetch matplotlib plots if they were generated
+            import glob
+            import os
+            import base64
+            import time
+            
+            logger.info(f"=== Plot Fetching Debug ===")
+            logger.info(f"requested_archive: {requested_archive}")
+            logger.info(f"result status: {result.get('status')}")
+            
+            plots = []
+            if result.get('status') == 0:
+                # Give PyPNM a moment to finish writing files
+                time.sleep(1)
+                
+                # Look for plots in /pypnm-data/png/
+                plot_dir = "/pypnm-data/png"
+                logger.info(f"Plot dir exists: {os.path.exists(plot_dir)}")
+                
+                if os.path.exists(plot_dir):
+                    # Find recent plots for this modem
+                    mac_clean = mac_address.replace(':', '')
+                    pattern = f"{plot_dir}/{mac_clean}*.png"
+                    plot_files = glob.glob(pattern)
+                    logger.info(f"Pattern: {pattern}")
+                    logger.info(f"Found {len(plot_files)} total files")
+                    
+                    # Get files modified in the last 60 seconds
+                    recent_time = time.time() - 60
+                    plot_files = [f for f in plot_files if os.path.getmtime(f) > recent_time]
+                    logger.info(f"Found {len(plot_files)} recent files (last 60s)")
+                    plot_files.sort(key=os.path.getmtime, reverse=True)
+                    
+                    for filepath in plot_files[:10]:  # Max 10 plots
+                        try:
+                            with open(filepath, 'rb') as f:
+                                img_data = f.read()
+                                plots.append({
+                                    'filename': os.path.basename(filepath),
+                                    'data': base64.b64encode(img_data).decode('utf-8')
+                                })
+                                logger.info(f"Added plot: {os.path.basename(filepath)}")
+                        except Exception as e:
+                            logger.error(f"Failed to read plot {filepath}: {e}")
+            
+            logger.info(f"Returning {len(plots)} plots")
+            
+            # For spectrum analyzer, generate matplotlib plots from the JSON data
+            if measurement_type == 'spectrum' and result.get('status') == 0:
+                spectrum_data = result.get('data', {})
+                if spectrum_data:
+                    logger.info(f"Generating spectrum plot for {mac_address}")
+                    try:
+                        spectrum_plot = generate_spectrum_plot_from_data(spectrum_data, mac_address)
+                        if spectrum_plot:
+                            plots.append(spectrum_plot)
+                            logger.info(f"Successfully generated spectrum plot: {spectrum_plot['filename']}")
+                    except Exception as e:
+                        logger.error(f"Failed to generate spectrum plot: {e}", exc_info=True)
+            
+            return jsonify({
+                "status": 0,
+                "message": result.get('message', 'Measurement complete'),
+                "plots": plots,  # Matplotlib PNG plots
+                "data": result.get('data', {})
             })
         
-        # Calculate statistics
-        avg_mer = sum(magnitudes) / len(magnitudes) if magnitudes else 0
-        min_mer = min(magnitudes) if magnitudes else 0
-        max_mer = max(magnitudes) if magnitudes else 0
+        # Handle errors
+        if result.get('status') != 0:
+            return jsonify(result), 500
         
-        rxmer_measurements.append({
-            'channel_id': channel_id,
-            'subcarrier_zero_freq': zero_freq,
-            'subcarrier_spacing_khz': spacing // 1000,
-            'subcarrier_count': len(magnitudes),
-            'first_active_subcarrier': first_idx,
-            'average_mer_db': round(avg_mer, 2),
-            'min_mer_db': round(min_mer, 2),
-            'max_mer_db': round(max_mer, 2),
-            'subcarrier_samples': subcarrier_samples
-        })
-    
-    return {
-        'mac_address': mac_address,
-        'rxmer_measurements': rxmer_measurements,
-        'signal_statistics': analysis.get('regression', {}),
-        'modulation_statistics': analysis.get('modulation_statistics', {})
-    }
+        # Fetch matplotlib plots for successful measurements (regardless of output_type)
+        import glob
+        import os
+        import base64
+        import time
+        
+        plots = []
+        plot_dir = "/pypnm-data/png"
+        if os.path.exists(plot_dir):
+            mac_clean = mac_address.replace(':', '')
+            pattern = f"{plot_dir}/{mac_clean}*.png"
+            plot_files = glob.glob(pattern)
+            
+            # Get files modified in the last 120 seconds
+            recent_time = time.time() - 120
+            plot_files = [f for f in plot_files if os.path.getmtime(f) > recent_time]
+            plot_files.sort(key=os.path.getmtime, reverse=True)
+            
+            for filepath in plot_files[:10]:
+                try:
+                    with open(filepath, 'rb') as f:
+                        img_data = f.read()
+                        plots.append({
+                            'filename': os.path.basename(filepath),
+                            'data': base64.b64encode(img_data).decode('utf-8')
+                        })
+                except Exception as e:
+                    logger.error(f"Failed to read plot {filepath}: {e}")
+        
+        # For spectrum analyzer, generate matplotlib plots from the JSON data
+        if measurement_type == 'spectrum' and result.get('status') == 0:
+            spectrum_data = result.get('data', {})
+            if spectrum_data:
+                logger.info(f"Generating spectrum plot for {mac_address}")
+                try:
+                    spectrum_plot = generate_spectrum_plot_from_data(spectrum_data, mac_address)
+                    if spectrum_plot:
+                        plots.append(spectrum_plot)
+                        logger.info(f"Successfully generated spectrum plot: {spectrum_plot['filename']}")
+                except Exception as e:
+                    logger.error(f"Failed to generate spectrum plot: {e}")
+        
+        # Add plots to result
+        result['plots'] = plots
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"PNM measurement {measurement_type} failed: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
 @pypnm_bp.route('/channel-stats/<mac_address>', methods=['POST'])
 def channel_stats(mac_address):
     """
-    Get comprehensive channel statistics via agent.
+    Get comprehensive channel statistics with profile information.
     
     Returns DS/US channel info including:
     - Channel type (SC-QAM, OFDM, ATDMA, OFDMA)
+    - Active profiles
     - Signal quality metrics
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
@@ -615,64 +544,39 @@ def channel_stats(mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
+    client = PyPNMClient()
+    
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_channel_info') if agent_manager else None
+        # Get all channel stats
+        ds_scqam = client.get_ds_scqam_stats(mac_address, modem_ip, community)
+        ds_ofdm = client.get_ds_ofdm_stats(mac_address, modem_ip, community)
+        us_atdma = client.get_us_atdma_stats(mac_address, modem_ip, community)
+        us_ofdma = client.get_us_ofdma_stats(mac_address, modem_ip, community)
         
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for channel stats"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_channel_info',
-            params={
-                "modem_ip": modem_ip,
-                "mac_address": mac_address,
-                "community": community
-            },
-            timeout=60
-        )
-        
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        if not task_result.get('success'):
-            return jsonify({"status": "error", "message": task_result.get('error', 'Query failed')}), 500
-        
-        # Transform agent result to expected format
-        ds_channels = task_result.get('downstream', [])
-        us_channels = task_result.get('upstream', [])
-        
+        # Process and enhance data with profile info
         downstream = {
             "scqam": {
                 "type": "SC-QAM (DOCSIS 3.0)",
-                "channels": [c for c in ds_channels if c.get('type') == 'SC-QAM'],
-                "count": len([c for c in ds_channels if c.get('type') == 'SC-QAM'])
+                "channels": _extract_scqam_channels(ds_scqam),
+                "count": len(_extract_scqam_channels(ds_scqam))
             },
             "ofdm": {
                 "type": "OFDM (DOCSIS 3.1)",
-                "channels": [c for c in ds_channels if c.get('type') == 'OFDM'],
-                "count": len([c for c in ds_channels if c.get('type') == 'OFDM'])
+                "channels": _extract_ofdm_channels(ds_ofdm),
+                "count": len(_extract_ofdm_channels(ds_ofdm))
             }
         }
         
         upstream = {
             "atdma": {
                 "type": "ATDMA (DOCSIS 3.0)",
-                "channels": [c for c in us_channels if c.get('type') == 'ATDMA'],
-                "count": len([c for c in us_channels if c.get('type') == 'ATDMA'])
+                "channels": _extract_atdma_channels(us_atdma),
+                "count": len(_extract_atdma_channels(us_atdma))
             },
             "ofdma": {
                 "type": "OFDMA (DOCSIS 3.1)",
-                "channels": [c for c in us_channels if c.get('type') == 'OFDMA'],
-                "count": len([c for c in us_channels if c.get('type') == 'OFDMA'])
+                "channels": _extract_ofdma_channels(us_ofdma),
+                "count": len(_extract_ofdma_channels(us_ofdma))
             }
         }
         
@@ -873,16 +777,7 @@ def _extract_atdma_channels(data: Dict[str, Any]) -> list:
 
 def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
     """Extract OFDMA channel info with profile data."""
-    status = data.get('status')
-    if status != 0:
-        # Log the status for debugging OFDMA channel loading issues
-        message = data.get('message', 'Unknown error')
-        if status == 121:  # NO_OFDMA_CHANNELS_EXIST
-            logger.debug(f"OFDMA: No OFDMA channels exist on this modem (status=121)")
-        elif status == "error":
-            logger.warning(f"OFDMA: PyPNM returned error: {message}")
-        else:
-            logger.warning(f"OFDMA: PyPNM returned non-zero status {status}: {message}")
+    if data.get('status') != 0:
         return []
     results = data.get('results', {})
     
@@ -1071,9 +966,9 @@ def get_plots(mac_address):
     if timestamp:
         plot_files = [f for f in plot_files if timestamp in f]
     
-    # Sort by modification time (newest first) and limit to last 10
+    # Sort by modification time (newest first) and limit to last 50
     plot_files.sort(key=os.path.getmtime, reverse=True)
-    plot_files = plot_files[:10]
+    plot_files = plot_files[:50]
     
     plots = []
     for filepath in plot_files:
@@ -1101,66 +996,41 @@ def get_plots(mac_address):
 def discover_rf_port(mac_address):
     """
     Fast discovery of the correct UTSC RF port for a modem.
-    For E6000, UTSC can be configured on logical OFDMA channels directly.
-    Returns ALL OFDMA channel ifindexes to use for UTSC.
+    Uses direct SNMP to find the RF port in seconds instead of minutes.
     
     POST body:
     {
         "cmts_ip": "x.x.x.x",
-        "community": "optional"
+        "community": "optional"  // Defaults to CMTS write community
     }
     
     Returns:
     {
         "success": true,
-        "ofdma_channels": [
-            {"ifindex": 843087883, "description": "cable-us-ofdma 1/ofd/4.0"}
-        ],
-        "rf_port_ifindex": 843087883,  // First OFDMA channel (for backward compat)
-        "us_channels": [843087883]
+        "rf_port_ifindex": 1078534144,
+        "rf_port_description": "MND-GT02-1 us-conn 0",
+        "cm_index": 3,
+        "us_channels": [843071811, 843071813, ...]
     }
     """
-    import requests
+    from app.core.utsc_discovery import discover_rf_port_for_modem
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    # CMTS queries need CMTS community string (Z1gg0@LL for read), not modem community
-    cmts_community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())  # Default write community
     
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
     
-    logger.info(f"RF port discovery for {mac_address} on CMTS {cmts_ip} - using OFDMA channels")
+    logger.info(f"Fast RF port discovery for {mac_address} on CMTS {cmts_ip}")
     
     try:
-        # Use the interfaces endpoint which returns ALL OFDMA channels
-        interfaces_url = f"http://localhost:5050/api/pypnm/upstream/interfaces/{mac_address}"
+        result = discover_rf_port_for_modem(cmts_ip, community, mac_address)
         
-        response = requests.post(interfaces_url, json={
-            "cmts_ip": cmts_ip,
-            "community": cmts_community
-        }, timeout=90)
-        
-        if response.status_code == 200:
-            result = response.json()
-            ofdma_channels = result.get('ofdma_channels', [])
-            
-            if result.get('success') and ofdma_channels:
-                # Return all OFDMA channels
-                us_channels = [ch['ifindex'] for ch in ofdma_channels]
-                return jsonify({
-                    "success": True,
-                    "ofdma_channels": ofdma_channels,
-                    "rf_port_ifindex": ofdma_channels[0]['ifindex'],  # First for backward compat
-                    "rf_port_description": ofdma_channels[0].get('description', 'OFDMA Channel'),
-                    "logical_channel": ofdma_channels[0]['ifindex'],
-                    "cm_index": result.get('cm_index'),
-                    "us_channels": us_channels
-                })
-            else:
-                return jsonify({"success": False, "error": "No OFDMA channels found"}), 404
+        if result["success"]:
+            return jsonify(result)
         else:
-            return jsonify({"success": False, "error": f"Interfaces API returned {response.status_code}"}), 500
+            return jsonify(result), 404
             
     except Exception as e:
         logger.error(f"RF port discovery failed: {e}")
@@ -1170,7 +1040,7 @@ def discover_rf_port(mac_address):
 @pypnm_bp.route('/upstream/interfaces/<mac_address>', methods=['POST'])
 def get_upstream_interfaces(mac_address):
     """
-    Get upstream interface information for a modem from CMTS via agent.
+    Get upstream interface information for a modem from CMTS.
     Returns OFDMA channels and SC-QAM channels available.
     
     POST body:
@@ -1183,7 +1053,7 @@ def get_upstream_interfaces(mac_address):
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
@@ -1193,7 +1063,11 @@ def get_upstream_interfaces(mac_address):
         agent = agent_manager.get_agent_for_capability('pnm_us_get_interfaces') if agent_manager else None
         
         if not agent:
-            return jsonify({"success": False, "error": "No agent available for OFDMA discovery"}), 503
+            # Fallback to any CMTS-capable agent
+            agent = agent_manager.get_agent_for_capability('cmts_snmp_direct') if agent_manager else None
+        
+        if not agent:
+            return jsonify({"status": "error", "message": "No agent available for upstream interface discovery"}), 503
         
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
@@ -1206,89 +1080,7 @@ def get_upstream_interfaces(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"success": False, "error": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"success": False, "error": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        return jsonify({
-            "success": task_result.get('success', False),
-            "mac_address": mac_address,
-            "cmts_ip": cmts_ip,
-            "scqam_channels": task_result.get('scqam_channels', []),
-            "ofdma_channels": task_result.get('ofdma_channels', [])
-        })
-            
-    except Exception as e:
-        logger.error(f"Get upstream interfaces failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@pypnm_bp.route('/upstream/utsc/configure/<mac_address>', methods=['POST'])
-def configure_utsc(mac_address):
-    """
-    Configure UTSC (Upstream Triggered Spectrum Capture) test.
-    
-    POST body:
-    {
-        "cmts_ip": "x.x.x.x",
-        "rf_port_ifindex": 12345,
-        "trigger_mode": 2,  // 2=FreeRunning, 5=IdleSID, 6=CM_MAC
-        "center_freq_hz": 30000000,
-        "span_hz": 80000000,
-        "num_bins": 800,
-        "output_format": 2,  // 2=fftPower
-        "filename": "utsc_capture",
-        "repeat_period_ms": 0,  // 0=single, >0=repeat
-        "freerun_duration_ms": 1000,
-        "logical_ch_ifindex": null,  // For IdleSID/CM_MAC
-        "community": "optional"
-    }
-    """
-    from app.core.simple_ws import get_simple_agent_manager
-    
-    data = request.get_json() or {}
-    cmts_ip = data.get('cmts_ip')
-    rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
-    
-    if not cmts_ip or not rf_port_ifindex:
-        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
-    
-    try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_configure') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for UTSC"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_utsc_configure',
-            params={
-                "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
-                "trigger_mode": data.get('trigger_mode', 2),
-                "center_freq_hz": data.get('center_freq_hz', 30000000),
-                "span_hz": data.get('span_hz', 80000000),
-                "num_bins": data.get('num_bins', 800),
-                "output_format": data.get('output_format', 2),
-                "filename": data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
-                "repeat_period_ms": data.get('repeat_period_ms', 0),
-                "freerun_duration_ms": data.get('freerun_duration_ms', 1000),
-                "cm_mac_address": mac_address if data.get('trigger_mode') == 6 else None,
-                "logical_ch_ifindex": data.get('logical_ch_ifindex'),
-                "community": community
-            },
-            timeout=60
-        )
-        
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        result = agent_manager.wait_for_task(task_id, timeout=90)
         
         if result is None:
             return jsonify({"status": "error", "message": "Task timed out"}), 504
@@ -1301,7 +1093,304 @@ def configure_utsc(mac_address):
         return jsonify({
             "success": task_result.get('success', False),
             "mac_address": mac_address,
-            **task_result
+            "cmts_ip": cmts_ip,
+            "cm_index": task_result.get('cm_index'),
+            "rf_ports": task_result.get('rf_ports', []),  # Modem's specific RF port(s)
+            "all_rf_ports": task_result.get('all_rf_ports', []),  # All us-conn ports
+            "modem_rf_port": task_result.get('modem_rf_port'),  # Modem's detected RF port
+            "modem_ofdma_ifindex": task_result.get('modem_ofdma_ifindex')
+        })
+        
+    except Exception as e:
+        logger.error(f"Get upstream interfaces failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ============== PyPNM pysnmp-based CMTS Operations ==============
+
+@pypnm_bp.route('/cmts/ofdma/discover/<mac_address>', methods=['POST'])
+def discover_modem_ofdma(mac_address):
+    """
+    Discover modem's OFDMA channel on CMTS using PyPNM pysnmp.
+    
+    This endpoint uses PyPNM's Snmp_v2c class for direct CMTS SNMP queries.
+    Returns the OFDMA ifIndex needed for US RxMER measurements.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "community": "optional"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "cm_index": 12345,
+        "ofdma_ifindex": 843087001,
+        "ofdma_description": "cable-us-ofdma 1/ofd/4.0"
+    }
+    """
+    from app.core.cmts_pnm import discover_modem_ofdma_sync, PYPNM_AVAILABLE
+    
+    if not PYPNM_AVAILABLE:
+        return jsonify({"success": False, "error": "PyPNM not available"}), 503
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    community = data.get('community', get_cmts_community())
+    
+    if not cmts_ip:
+        return jsonify({"success": False, "error": "cmts_ip required"}), 400
+    
+    try:
+        result = discover_modem_ofdma_sync(cmts_ip, mac_address, community)
+        
+        if result.get("success"):
+            return jsonify({
+                "success": True,
+                "mac_address": mac_address,
+                "cmts_ip": cmts_ip,
+                **result
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "mac_address": mac_address,
+                "cmts_ip": cmts_ip,
+                "error": result.get("error", "Discovery failed")
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"OFDMA discovery failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@pypnm_bp.route('/cmts/ofdma/rxmer/start/<mac_address>', methods=['POST'])
+def start_cmts_us_rxmer(mac_address):
+    """
+    Start US OFDMA RxMER measurement on CMTS using PyPNM pysnmp.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 843087001,
+        "pre_eq": true,
+        "filename": "optional",
+        "community": "optional"
+    }
+    """
+    from app.core.cmts_pnm import start_us_rxmer_sync, UsOfdmaRxMerConfig, PYPNM_AVAILABLE
+    
+    if not PYPNM_AVAILABLE:
+        return jsonify({"success": False, "error": "PyPNM not available"}), 503
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', get_cmts_community())
+    
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
+    
+    try:
+        config = UsOfdmaRxMerConfig(
+            cmts_ip=cmts_ip,
+            ofdma_ifindex=ofdma_ifindex,
+            cm_mac_address=mac_address,
+            community=community,
+            filename=data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
+            pre_eq=data.get('pre_eq', True),
+            num_averages=data.get('num_averages', 1)
+        )
+        
+        result = start_us_rxmer_sync(config)
+        
+        return jsonify({
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Start US RxMER failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@pypnm_bp.route('/cmts/ofdma/rxmer/status/<mac_address>', methods=['POST'])
+def get_cmts_us_rxmer_status(mac_address):
+    """
+    Get US OFDMA RxMER measurement status from CMTS using PyPNM pysnmp.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 843087001,
+        "community": "optional"
+    }
+    """
+    from app.core.cmts_pnm import get_us_rxmer_status_sync, PYPNM_AVAILABLE
+    
+    if not PYPNM_AVAILABLE:
+        return jsonify({"success": False, "error": "PyPNM not available"}), 503
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', get_cmts_community())
+    
+    if not cmts_ip or not ofdma_ifindex:
+        return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
+    
+    try:
+        result = get_us_rxmer_status_sync(cmts_ip, ofdma_ifindex, community)
+        
+        logger.info(f"US RxMER status response from PyPNM: {result}")
+        
+        return jsonify({
+            "mac_address": mac_address,
+            **result
+        })
+        
+    except Exception as e:
+        logger.error(f"Get US RxMER status failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/limits', methods=['GET'])
+def get_utsc_limits():
+    """
+    Get E6000 UTSC parameter limits and supported values.
+    
+    Returns validation constraints for:
+    - Frequency range (center_freq_hz, span_hz)
+    - Number of bins (num_bins)
+    - Timing parameters (repeat_period_ms, freerun_duration_ms)
+    - Trigger parameters (trigger_count)
+    """
+    try:
+        from app.core.utsc_validation import get_limits_summary
+        limits = get_limits_summary()
+        return jsonify(limits), 200
+    except Exception as e:
+        logger.error(f"Failed to get UTSC limits: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/validate', methods=['POST'])
+def validate_utsc_parameters():
+    """
+    Validate UTSC parameters before configuration.
+    
+    POST body:
+    {
+        "center_freq_hz": 30000000,
+        "span_hz": 80000000,
+        "num_bins": 800,
+        "trigger_mode": 2,
+        "repeat_period_ms": 1000,
+        "freerun_duration_ms": 60000,
+        "trigger_count": 10
+    }
+    
+    Returns:
+    {
+        "is_valid": true/false,
+        "errors": ["error1", "error2"],
+        "warnings": ["warning1"],
+        "parameters": {...}
+    }
+    """
+    try:
+        from app.core.utsc_validation import validate_all_parameters
+        
+        data = request.json
+        result = validate_all_parameters(
+            center_freq_hz=data.get('center_freq_hz', 30000000),
+            span_hz=data.get('span_hz', 80000000),
+            num_bins=data.get('num_bins', 800),
+            trigger_mode=data.get('trigger_mode', 2),
+            repeat_period_ms=data.get('repeat_period_ms', 1000),
+            freerun_duration_ms=data.get('freerun_duration_ms', 60000),
+            trigger_count=data.get('trigger_count') if 'trigger_count' in data else None  # Only set if explicitly provided
+        )
+        
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Parameter validation failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/utsc/configure/<mac_address>', methods=['POST'])
+def configure_utsc(mac_address):
+    """
+    Configure and start UTSC (Upstream Triggered Spectrum Capture) test via PyPNM API.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "rf_port_ifindex": 12345,
+        "trigger_mode": 2,  // 2=FreeRunning, 6=CM_MAC
+        "center_freq_hz": 30000000,
+        "span_hz": 80000000,
+        "num_bins": 800,
+        "filename": "utsc_capture",
+        "logical_ch_ifindex": null,  // For CM_MAC trigger
+        "community": "optional",
+        "tftp_ip": "optional"
+    }
+    """
+    from app.core.pypnm_client import PyPNMClient
+    
+    logger.info(f"=== UTSC CONFIGURE START === MAC: {mac_address}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Request data: {request.data}")
+    logger.info(f"Request content_type: {request.content_type}")
+    
+    data = request.get_json() or {}
+    logger.info(f"Parsed JSON data: {data}")
+    
+    cmts_ip = data.get('cmts_ip')
+    rf_port_ifindex = data.get('rf_port_ifindex')
+    community = data.get('community', get_cmts_community())  # UTSC needs CMTS write community
+    tftp_ip = data.get('tftp_ip', get_default_tftp())
+    
+    logger.info(f"Extracted params: cmts_ip={cmts_ip}, rf_port={rf_port_ifindex}, community={community}")
+    
+    if not cmts_ip or not rf_port_ifindex:
+        logger.error(f"Missing required params! cmts_ip={cmts_ip}, rf_port={rf_port_ifindex}")
+        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
+    
+    try:
+        client = PyPNMClient()
+        
+        trigger_mode = data.get('trigger_mode', 2)
+        cm_mac = mac_address if trigger_mode == 6 else None
+        
+        result = client.get_upstream_spectrum_capture(
+            cmts_ip=cmts_ip,
+            rf_port_ifindex=rf_port_ifindex,
+            tftp_ipv4=tftp_ip,
+            community=community,
+            output_type='json',
+            trigger_mode=trigger_mode,
+            center_freq_hz=data.get('center_freq_hz', 30000000),
+            span_hz=data.get('span_hz', 80000000),
+            num_bins=data.get('num_bins', 800),
+            filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
+            cm_mac=cm_mac,
+            logical_ch_ifindex=data.get('logical_ch_ifindex'),
+            repeat_period_ms=data.get('repeat_period_ms', 3000),
+            freerun_duration_ms=data.get('freerun_duration_ms', 300000),  # Default 5 minutes
+            trigger_count=data.get('trigger_count') if 'trigger_count' in data else None  # Only set if explicitly provided
+        )
+        logger.info(f"UTSC API full response: {result}")
+        return jsonify({
+            "success": result.get('success', False),
+            "mac_address": mac_address,
+            "cmts_ip": result.get('cmts_ip'),
+            "rf_port_ifindex": result.get('rf_port_ifindex'),
+            "filename": result.get('filename'),
+            "error": result.get('error'),
+            "data": result.get('data')
         })
         
     except Exception as e:
@@ -1312,62 +1401,14 @@ def configure_utsc(mac_address):
 @pypnm_bp.route('/upstream/utsc/start/<mac_address>', methods=['POST'])
 def start_utsc(mac_address):
     """
-    Start UTSC test on CMTS.
-    
-    POST body:
-    {
-        "cmts_ip": "x.x.x.x",
-        "rf_port_ifindex": 12345,
-        "community": "optional"
-    }
+    Start UTSC test on CMTS - calls configure_utsc with same request data.
     """
-    from app.core.simple_ws import get_simple_agent_manager
-    
-    data = request.get_json() or {}
-    cmts_ip = data.get('cmts_ip')
-    rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
-    
-    if not cmts_ip or not rf_port_ifindex:
-        return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
-    
-    try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_start') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for UTSC"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_utsc_start',
-            params={
-                "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
-                "community": community
-            },
-            timeout=60
-        )
-        
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
-        
-        return jsonify({
-            "success": task_result.get('success', False),
-            "mac_address": mac_address,
-            **task_result
-        })
-        
-    except Exception as e:
-        logger.error(f"Start UTSC failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    logger.info(f"=== START_UTSC CALLED === MAC: {mac_address}")
+    logger.info(f"Request object: {request}")
+    logger.info(f"Request data in start_utsc: {request.data}")
+    logger.info(f"Request JSON in start_utsc: {request.get_json()}")
+    # Call configure_utsc which handles the full flow
+    return configure_utsc(mac_address)
 
 
 @pypnm_bp.route('/upstream/utsc/stop/<mac_address>', methods=['POST'])
@@ -1378,7 +1419,7 @@ def stop_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
@@ -1434,7 +1475,7 @@ def get_utsc_status(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
@@ -1481,7 +1522,7 @@ def get_utsc_status(mac_address):
 @pypnm_bp.route('/upstream/rxmer/start/<mac_address>', methods=['POST'])
 def start_us_rxmer(mac_address):
     """
-    Start Upstream OFDMA RxMER measurement on CMTS via agent.
+    Start Upstream OFDMA RxMER measurement on CMTS.
     
     POST body:
     {
@@ -1497,7 +1538,7 @@ def start_us_rxmer(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0Sp3c1@l')  # CMTS write community
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1507,37 +1548,43 @@ def start_us_rxmer(mac_address):
         agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_start') if agent_manager else None
         
         if not agent:
-            return jsonify({"success": False, "error": "No agent available for US RxMER"}), 503
-        
-        params = {
-            "cmts_ip": cmts_ip,
-            "ofdma_ifindex": ofdma_ifindex,
-            "cm_mac_address": mac_address,
-            "community": community,
-            "pre_eq": data.get('pre_eq', True),
-            "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}')
-        }
-        
-        logger.info(f"Starting US RxMER via agent {agent.agent_id} for {mac_address}")
+            return jsonify({"status": "error", "message": "No agent available for US RxMER"}), 503
         
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='pnm_us_rxmer_start',
-            params=params,
+            params={
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+                "cm_mac_address": mac_address,
+                "pre_eq": data.get('pre_eq', True),
+                "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
+                "community": community
+            },
             timeout=60
         )
         
         result = agent_manager.wait_for_task(task_id, timeout=60)
         
         if result is None:
-            return jsonify({"success": False, "error": "Task timed out"}), 504
+            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        
+        if result.get('error'):
+            return jsonify({"status": "error", "message": result.get('error')}), 500
         
         task_result = result.get('result', {})
-        return jsonify({
+        
+        # Extract filename from result - PyPNM returns it in the result
+        response = {
             "success": task_result.get('success', False),
             "mac_address": mac_address,
             **task_result
-        })
+        }
+        
+        # Log the filename for debugging
+        logger.info(f"US RxMER started for {mac_address}, filename: {response.get('filename')}, full result: {task_result}")
+        
+        return jsonify(response)
         
     except Exception as e:
         logger.error(f"Start US RxMER failed: {e}")
@@ -1546,13 +1593,13 @@ def start_us_rxmer(mac_address):
 
 @pypnm_bp.route('/upstream/rxmer/status/<mac_address>', methods=['POST'])
 def get_us_rxmer_status(mac_address):
-    """Get Upstream RxMER measurement status via agent."""
+    """Get Upstream RxMER measurement status."""
     from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1562,27 +1609,29 @@ def get_us_rxmer_status(mac_address):
         agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_status') if agent_manager else None
         
         if not agent:
-            return jsonify({"success": False, "error": "No agent available for US RxMER"}), 503
-        
-        params = {
-            "cmts_ip": cmts_ip,
-            "ofdma_ifindex": ofdma_ifindex,
-            "community": community
-        }
+            return jsonify({"status": "error", "message": "No agent available for US RxMER"}), 503
         
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='pnm_us_rxmer_status',
-            params=params,
-            timeout=30
+            params={
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+                "community": community
+            },
+            timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=30)
+        result = agent_manager.wait_for_task(task_id, timeout=60)
         
         if result is None:
-            return jsonify({"success": False, "error": "Task timed out"}), 504
+            return jsonify({"status": "error", "message": "Task timed out"}), 504
+        
+        if result.get('error'):
+            return jsonify({"status": "error", "message": result.get('error')}), 500
         
         task_result = result.get('result', {})
+        
         return jsonify({
             "success": task_result.get('success', False),
             "mac_address": mac_address,
@@ -1597,7 +1646,7 @@ def get_us_rxmer_status(mac_address):
 @pypnm_bp.route('/upstream/utsc/data/<mac_address>', methods=['POST'])
 def get_utsc_data(mac_address):
     """
-    Fetch UTSC spectrum data from TFTP server.
+    Fetch UTSC spectrum data from TFTP server (local filesystem access).
     
     POST body:
     {
@@ -1609,33 +1658,154 @@ def get_utsc_data(mac_address):
     
     Returns spectrum data with frequencies and amplitudes for graphing.
     """
+    import glob
+    import os
+    import struct
+    
+    data = request.get_json() or {}
+    cmts_ip = data.get('cmts_ip')
+    filename_base = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
+    
+    if not cmts_ip:
+        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
+    
+    try:
+        # TFTP files are mounted at /var/lib/tftpboot
+        tftp_base = '/var/lib/tftpboot'
+        
+        # Find the most recent UTSC file matching the pattern
+        pattern = f"{tftp_base}/{filename_base}_*"
+        files = sorted(glob.glob(pattern), reverse=True)
+        
+        if not files:
+            # No files yet - return empty result (not an error)
+            logger.info(f"No UTSC files found yet for {filename_base}")
+            return jsonify({
+                "success": True,
+                "message": "No UTSC data available yet. Start a measurement to begin.",
+                "data": None
+            }), 200
+        
+        # Get the most recent file
+        latest_file = files[0]
+        logger.info(f"Reading UTSC file: {latest_file}")
+        
+        # Read the binary file
+        with open(latest_file, 'rb') as f:
+            binary_data = f.read()
+        
+        if len(binary_data) < 328:
+            return jsonify({
+                "success": False,
+                "message": "File too small - invalid UTSC data"
+            }), 400
+        
+        # Retrieve UTSC config from Redis FIRST to get correct span
+        utsc_config = {}
+        try:
+            config_json = redis_client.get(f'utsc_config:{mac_address}')
+            if config_json:
+                utsc_config = json.loads(config_json)
+                logger.info(f"Retrieved UTSC config: {utsc_config}")
+        except Exception as e:
+            logger.warning(f"Failed to retrieve UTSC config: {e}")
+        
+        # Basic parsing: skip 328-byte header, extract amplitude data
+        # Full parsing requires PyPNM library which isn't installed
+        header = binary_data[:328]
+        samples = binary_data[328:]
+        
+        # Convert binary samples to amplitude values (simplified)
+        # Real implementation needs proper DOCSIS OSSIv4.0 parsing
+        amplitudes = []
+        for i in range(0, len(samples), 2):
+            if i+1 < len(samples):
+                # Each sample is 2 bytes (int16)
+                val = struct.unpack('<h', samples[i:i+2])[0]
+                amplitudes.append(val / 100.0)  # Scale to dB
+        
+        # Generate frequencies using configured span (defaults: 5-85 MHz = 80 MHz span, center 45 MHz)
+        num_bins = len(amplitudes)
+        span_hz = utsc_config.get('span_hz', 80000000)  # 80 MHz default
+        center_freq_hz = utsc_config.get('center_freq_hz', 45000000)  # 45 MHz default
+        freq_start = center_freq_hz - (span_hz / 2)
+        freq_end = center_freq_hz + (span_hz / 2)
+        freq_step = span_hz / num_bins if num_bins > 0 else 1
+        frequencies = [freq_start + i * freq_step for i in range(num_bins)]
+        
+        logger.info(f"UTSC freq range: {freq_start/1e6:.1f} - {freq_end/1e6:.1f} MHz, {num_bins} bins")
+        
+        spectrum_data = {
+            'filename': os.path.basename(latest_file),
+            'num_samples': len(amplitudes),
+            'frequencies': frequencies[:800],  # Limit to first 800 points
+            'amplitudes': amplitudes[:800],
+            'span_hz': span_hz,
+            'center_freq_hz': center_freq_hz,
+            'num_bins': num_bins
+        }
+        
+        # Generate matplotlib plot with correct span
+        from app.core.utsc_plotter import generate_utsc_plot_from_data
+        rf_port_desc = data.get('rf_port_description', '')
+        
+        plot = generate_utsc_plot_from_data(spectrum_data, mac_address, rf_port_desc)
+        logger.info(f"Plot generated: {plot is not None}, has data: {plot.get('data')[:50] if plot and plot.get('data') else 'None'}...")
+        
+        return jsonify({
+            "success": True,
+            "mac_address": mac_address,
+            "data": spectrum_data,
+            "plot": plot  # Add matplotlib PNG plot
+        })
+        
+    except Exception as e:
+        logger.error(f"Get UTSC data failed: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/upstream/rxmer/data/<mac_address>', methods=['POST'])
+def get_us_rxmer_data(mac_address):
+    """
+    Fetch Upstream RxMER data from TFTP server.
+    
+    POST body:
+    {
+        "cmts_ip": "x.x.x.x",
+        "ofdma_ifindex": 12345,
+        "filename": "optional",
+        "community": "optional"
+    }
+    
+    Returns RxMER per subcarrier for graphing.
+    """
     from app.core.simple_ws import get_simple_agent_manager
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
+    ofdma_ifindex = data.get('ofdma_ifindex')
+    community = data.get('community', get_cmts_community())
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
         agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_data') if agent_manager else None
+        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_data') if agent_manager else None
         
         if not agent:
-            return jsonify({"status": "error", "message": "No agent available for UTSC data"}), 503
+            return jsonify({"status": "error", "message": "No agent available for US RxMER data"}), 503
         
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
-            command='pnm_utsc_data',
+            command='pnm_us_rxmer_data',
             params={
                 "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
+                "ofdma_ifindex": ofdma_ifindex,
                 "filename": data.get('filename'),
                 "community": community
             },
-            timeout=120  # File fetch may take longer
+            timeout=120
         )
         
         result = agent_manager.wait_for_task(task_id, timeout=120)
@@ -1655,73 +1825,109 @@ def get_utsc_data(mac_address):
         })
         
     except Exception as e:
-        logger.error(f"Get UTSC data failed: {e}")
+        logger.error(f"Get US RxMER data failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@pypnm_bp.route('/upstream/rxmer/data/<mac_address>', methods=['POST'])
-def get_us_rxmer_data(mac_address):
+@pypnm_bp.route('/upstream/rxmer/plot/<mac_address>', methods=['POST'])
+def get_us_rxmer_plot(mac_address):
     """
-    Fetch Upstream RxMER data via agent.
+    Fetch Upstream RxMER plot from PyPNM API.
     
     POST body:
     {
-        "cmts_ip": "x.x.x.x",
-        "ofdma_ifindex": 12345,
-        "filename": "optional",
-        "community": "optional"
+        "filename": "usrxmer_90324bc81373_2026-01-28_12.13.25.870"
     }
     
-    Returns RxMER per subcarrier for graphing.
+    Returns PNG image of the RxMER spectrum.
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    import requests
+    from flask import Response as FlaskResponse
+    from app.core.cmts_pnm import get_pypnm_api_url
     
     data = request.get_json() or {}
-    cmts_ip = data.get('cmts_ip')
-    ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', 'Z1gg0@LL')
-    filename = data.get('filename')
+    full_filename = data.get('filename')  # Full filename with timestamp from status response
     
-    if not cmts_ip:
-        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
+    logger.info(f"US RxMER plot request for {mac_address}, filename: {full_filename}")
+    
+    if not full_filename:
+        logger.error("No filename provided in request")
+        return jsonify({"status": "error", "message": "filename required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_data') if agent_manager else None
+        pypnm_url = get_pypnm_api_url()
+        api_url = f"{pypnm_url}/docs/pnm/us/ofdma/rxmer/getCapture"
         
-        if not agent:
-            return jsonify({"success": False, "error": "No agent available for US RxMER"}), 503
+        logger.info(f"Fetching US RxMER plot from {api_url} for file {full_filename}")
         
-        params = {
-            "cmts_ip": cmts_ip,
-            "ofdma_ifindex": ofdma_ifindex,
-            "community": community,
-            "cm_mac_address": mac_address
-        }
-        
-        if filename:
-            import os
-            params["filename"] = os.path.basename(filename)
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_us_rxmer_data',
-            params=params,
-            timeout=120
+        response = requests.post(
+            api_url,
+            json={
+                "filename": full_filename,  # Full filename with timestamp from status
+                "tftp_path": "/var/lib/tftpboot"
+            },
+            timeout=30
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=120)
+        if response.status_code == 200 and response.headers.get('Content-Type', '').startswith('image/'):
+            # Return the PNG image directly
+            logger.info(f"Successfully fetched US RxMER plot for {mac_address}, size: {len(response.content)} bytes")
+            return FlaskResponse(
+                response.content,
+                mimetype='image/png',
+                headers={
+                    'Content-Disposition': f'inline; filename=us_rxmer_{mac_address.replace(":", "")}.png'
+                }
+            )
+        else:
+            # Parse JSON error response
+            logger.warning(f"PyPNM API returned non-image response: {response.status_code}, content-type: {response.headers.get('Content-Type')}")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('error', 'Unknown error')
+                logger.error(f"PyPNM error: {error_msg}")
+            except Exception:
+                error_msg = response.text or f"HTTP {response.status_code}"
+                logger.error(f"PyPNM error (raw): {error_msg}")
+            
+            return jsonify({"status": "error", "message": error_msg}), response.status_code
+            
+    except requests.Timeout:
+        logger.error("PyPNM API timeout fetching US RxMER plot")
+        return jsonify({"status": "error", "message": "PyPNM API timeout"}), 504
+    except Exception as e:
+        logger.error(f"Get US RxMER plot failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@pypnm_bp.route('/cleanup', methods=['POST'])
+def cleanup_old_files():
+    """Clean up old PNM measurement files."""
+    try:
+        import glob
+        import time
         
-        if result is None:
-            return jsonify({"success": False, "error": "Task timed out"}), 504
+        # Clean up temp files older than 1 hour
+        temp_dir = tempfile.gettempdir()
+        cleanup_count = 0
+        cutoff_time = time.time() - 3600  # 1 hour ago
         
-        task_result = result.get('result', {})
-        return jsonify({
-            "success": task_result.get('success', False),
-            "mac_address": mac_address,
-            **task_result
-        })
+        # Clean PNG, CSV, and ZIP files in temp directory
+        patterns = ['*_rxmer*.png', '*_spectrum*.png', '*_channel*.png', '*_modulation*.png', 
+                   '*.csv', 'pnm_*.zip']
+        
+        for pattern in patterns:
+            for filepath in glob.glob(os.path.join(temp_dir, pattern)):
+                try:
+                    if os.path.getmtime(filepath) < cutoff_time:
+                        os.remove(filepath)
+                        cleanup_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete {filepath}: {e}")
+        
+        logger.info(f"Cleaned up {cleanup_count} old PNM files")
+        return jsonify({"success": True, "files_removed": cleanup_count})
         
     except Exception as e:
-        logger.error(f"Get US RxMER data failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"Cleanup failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
