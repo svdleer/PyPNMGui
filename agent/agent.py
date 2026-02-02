@@ -1515,14 +1515,49 @@ class PyPNMAgent:
             timestamp = int(datetime.now().timestamp())
             filename = f"spectrum_{mac_clean}_{timestamp}"
             
-            # docsIf3CmSpectrumAnalysisCtrlCmdFileName.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.12.0
-            OID_SPEC_FILENAME = '1.3.6.1.4.1.4491.2.1.20.1.34.12.0'
-            # docsIf3CmSpectrumAnalysisCtrlCmdFileEnable.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.10.0
+            # Detect vendor and adjust segment span for Ubee modems
+            vendor = self._get_vendor_from_mac(mac_address)
+            segment_span = 1_000_000  # Default 1 MHz
+            if vendor == 'Ubee':
+                segment_span = 2_000_000  # Ubee needs 2 MHz minimum
+                self.logger.info(f"Ubee modem detected ({mac_address}), using 2 MHz segment span")
+            else:
+                self.logger.info(f"Vendor: {vendor}, using 1 MHz segment span")
+            
+            # Spectrum analyzer parameters (from PyPNM SpectrumAnalysisDefaults)
+            first_seg_freq = 108_000_000  # 108 MHz
+            last_seg_freq = 993_000_000   # 993 MHz
+            num_bins = 256
+            noise_bw = 110  # Hz
+            window_func = 1  # HANN
+            num_averages = 1
+            inactivity_timeout = 100  # seconds
+            
+            # OID definitions (docsIf3CmSpectrumAnalysisCtrlCmd base: 1.3.6.1.4.1.4491.2.1.20.1.34)
+            OID_INACTIVITY_TIMEOUT = '1.3.6.1.4.1.4491.2.1.20.1.34.2.0'
+            OID_FIRST_SEG_FREQ = '1.3.6.1.4.1.4491.2.1.20.1.34.3.0'
+            OID_LAST_SEG_FREQ = '1.3.6.1.4.1.4491.2.1.20.1.34.4.0'
+            OID_SEGMENT_SPAN = '1.3.6.1.4.1.4491.2.1.20.1.34.5.0'
+            OID_NUM_BINS = '1.3.6.1.4.1.4491.2.1.20.1.34.6.0'
+            OID_NOISE_BW = '1.3.6.1.4.1.4491.2.1.20.1.34.7.0'
+            OID_WINDOW_FUNC = '1.3.6.1.4.1.4491.2.1.20.1.34.8.0'
+            OID_NUM_AVERAGES = '1.3.6.1.4.1.4491.2.1.20.1.34.9.0'
             OID_SPEC_FILE_ENABLE = '1.3.6.1.4.1.4491.2.1.20.1.34.10.0'
-            # docsIf3CmSpectrumAnalysisCtrlCmdEnable.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.1.0
+            OID_SPEC_FILENAME = '1.3.6.1.4.1.4491.2.1.20.1.34.12.0'
             OID_SPEC_ENABLE = '1.3.6.1.4.1.4491.2.1.20.1.34.1.0'
             
-            # Set filename first
+            # Set all spectrum parameters (order matters - configure before enable)
+            self.logger.info(f"Configuring spectrum analyzer parameters...")
+            self._snmp_set(modem_ip, OID_INACTIVITY_TIMEOUT, inactivity_timeout, 'i', community)
+            self._snmp_set(modem_ip, OID_FIRST_SEG_FREQ, first_seg_freq, 'i', community)
+            self._snmp_set(modem_ip, OID_LAST_SEG_FREQ, last_seg_freq, 'i', community)
+            self._snmp_set(modem_ip, OID_SEGMENT_SPAN, segment_span, 'i', community)
+            self._snmp_set(modem_ip, OID_NUM_BINS, num_bins, 'i', community)
+            self._snmp_set(modem_ip, OID_NOISE_BW, noise_bw, 'i', community)
+            self._snmp_set(modem_ip, OID_WINDOW_FUNC, window_func, 'i', community)
+            self._snmp_set(modem_ip, OID_NUM_AVERAGES, num_averages, 'i', community)
+            
+            # Set filename
             self.logger.info(f"Setting spectrum filename: {filename}")
             result = self._snmp_set(modem_ip, OID_SPEC_FILENAME, filename, 's', community)
             if not result.get('success'):
@@ -3499,12 +3534,30 @@ class PyPNMAgent:
             '00:1d:d4': 'ARRIS',
             '00:1d:d5': 'ARRIS',
             '00:23:74': 'ARRIS',
-            'e8:ed:05': 'ARRIS',
-            'f8:0b:be': 'ARRIS',
+            '18:35:d1': 'Arris',
             '20:3d:66': 'ARRIS',
+            '40:0d:10': 'Arris',
+            '44:6a:b7': 'Arris',
+            '48:d3:43': 'Arris',
+            '4c:38:d8': 'Arris',
+            '54:e2:e0': 'Arris',
+            '70:76:30': 'Arris',
+            '70:85:c6': 'Arris',
+            '7c:26:34': 'Arris',
             '84:a0:6e': 'ARRIS',
+            '84:e0:58': 'Arris',
+            'a0:c5:62': 'Arris',
+            'a4:05:d6': 'Arris',
+            'ac:f8:cc': 'Arris',
+            'c0:05:c2': 'Arris',
+            'd4:2c:0f': 'Arris',
+            'd8:25:22': 'Arris',
+            'e4:57:40': 'Arris',
+            'e8:ed:05': 'ARRIS',
             'f0:af:85': 'ARRIS',
+            'f8:0b:be': 'ARRIS',
             'fc:51:a4': 'ARRIS',
+            'fc:6f:b7': 'Arris',
             '00:1e:5a': 'CISCO',
             '00:1e:bd': 'CISCO',
             '00:22:6b': 'CISCO',
@@ -3532,32 +3585,181 @@ class PyPNMAgent:
             '00:24:95': 'Motorola',
             '00:26:41': 'Motorola',
             '00:26:42': 'Motorola',
+            '08:95:2a': 'Technicolor',
             '10:86:8c': 'Technicolor',
             '18:35:d1': 'Technicolor',
             '2c:39:96': 'Technicolor',
             '30:d3:2d': 'Technicolor',
+            '44:32:c8': 'Technicolor',
+            '50:09:59': 'Technicolor',
             '58:23:8c': 'Technicolor',
+            '70:5a:9e': 'Technicolor',
             '70:b1:4e': 'Technicolor',
             '7c:03:4c': 'Technicolor',
+            '80:29:94': 'Technicolor',
             '88:f7:c7': 'Technicolor',
+            '8c:04:ff': 'Technicolor',
             '90:01:3b': 'Technicolor',
             'a0:ce:c8': 'Technicolor',
+            'b0:c2:87': 'Technicolor',
+            'c4:27:95': 'Technicolor',
             'c8:d1:5e': 'Technicolor',
+            'cc:03:fa': 'Technicolor',
+            'cc:35:40': 'Technicolor',
+            'd0:b2:c4': 'Technicolor',
             'd4:35:1d': 'Technicolor',
+            'e0:88:5d': 'Technicolor',
             'f4:ca:e5': 'Technicolor',
+            'fc:52:8d': 'Technicolor',
+            'fc:91:14': 'Technicolor',
+            'fc:94:e3': 'Technicolor',
             '00:1d:b5': 'Juniper',
             '00:1f:12': 'Juniper',
             '00:21:59': 'Juniper',
             '00:23:9c': 'Juniper',
             '00:26:88': 'Juniper',
+            # Sci Atl
+            '00:0a:73': 'Sci Atl',
+            '00:14:f8': 'Sci Atl',
+            '00:16:92': 'Sci Atl',
+            '00:18:68': 'Sci Atl',
+            '00:19:47': 'Sci Atl',
+            '00:1a:c3': 'Sci Atl',
+            '00:1b:d7': 'Sci Atl',
+            '00:1c:ea': 'Sci Atl',
+            # Thomson
+            '00:18:9b': 'Thomson',
+            '00:1e:69': 'Thomson',
+            '00:24:d1': 'Thomson',
+            '00:26:24': 'Thomson',
+            '80:c6:ab': 'Thomson',
+            # Samsung
+            '00:21:4c': 'Samsung',
+            '1c:3a:de': 'Samsung',
+            '20:d5:bf': 'Samsung',
+            '54:fa:3e': 'Samsung',
+            'd4:7a:e2': 'Samsung',
+            # Cisco
+            '00:22:3a': 'Cisco',
+            '08:80:39': 'Cisco',
+            '0c:02:27': 'Cisco',
+            '10:5f:49': 'Cisco',
+            '14:98:7d': 'Cisco',
+            '18:55:0f': 'Cisco',
+            '24:37:4c': 'Cisco',
+            '2c:ab:a4': 'Cisco',
+            '38:5f:66': 'Cisco',
+            '48:1d:70': 'Cisco',
+            '48:f7:c0': 'Cisco',
+            '50:39:55': 'Cisco',
+            '74:54:7d': 'Cisco',
+            '84:8d:c7': 'Cisco',
+            'c0:c6:87': 'Cisco',
+            'c8:fb:26': 'Cisco',
+            'e4:48:c7': 'Cisco',
+            # Pace
+            '00:4c:00': 'Pace',
+            '00:4e:00': 'Pace',
+            '00:d0:37': 'Pace',
+            '34:7a:60': 'Pace',
+            '80:f5:03': 'Pace',
+            '84:96:d8': 'Pace',
+            'fc:8e:7e': 'Pace',
+            # Intel
+            '00:50:f1': 'Intel',
+            # Teleste
+            '00:90:50': 'Teleste',
+            # Netgear
+            '04:a1:51': 'Netgear',
+            '6c:b0:ce': 'Netgear',
+            # FritzBox
+            '04:b4:fe': 'FritzBox',
+            '1c:ed:6f': 'FritzBox',
+            '2c:91:ab': 'FritzBox',
+            '3c:37:12': 'FritzBox',
+            '3c:a6:2f': 'FritzBox',
+            '48:5d:35': 'FritzBox',
+            '74:42:7f': 'FritzBox',
+            'b0:f2:08': 'FritzBox',
+            'dc:15:c8': 'FritzBox',
+            # Sagemcom
+            '04:e3:1a': 'Sagemcom',
+            '08:95:2a': 'Sagemcom',
+            '10:b3:6f': 'Sagemcom',
+            '18:6a:81': 'Sagemcom',
+            '28:52:e8': 'Sagemcom',
+            '30:7c:b2': 'Sagemcom',
+            '34:5d:9e': 'Sagemcom',
+            '44:05:3f': 'Sagemcom',
+            '44:d4:54': 'Sagemcom',
+            '44:e1:37': 'Sagemcom',
+            '4c:19:5d': 'Sagemcom',
+            '54:47:cc': 'Sagemcom',
+            '5c:fa:25': 'Sagemcom',
+            '64:fd:96': 'Sagemcom',
+            '6c:ff:ce': 'Sagemcom',
+            '70:fc:8f': 'Sagemcom',
+            '7c:16:89': 'Sagemcom',
+            '7c:8b:ca': 'Sagemcom',
+            '94:3c:96': 'Sagemcom',
+            '94:98:8f': 'Sagemcom',
+            'a0:1b:29': 'Sagemcom',
+            'a8:4e:3f': 'Sagemcom',
+            'a8:70:5d': 'Sagemcom',
+            'b0:5b:99': 'Sagemcom',
+            'c4:eb:39': 'Sagemcom',
+            'cc:00:f1': 'Sagemcom',
+            'cc:33:bb': 'Sagemcom',
+            'cc:58:30': 'Sagemcom',
+            'd0:6d:c9': 'Sagemcom',
+            'd0:cf:0e': 'Sagemcom',
+            'e4:c0:e2': 'Sagemcom',
+            'f8:08:4f': 'Sagemcom',
+            # Ubee
             '00:14:d1': 'Ubee',
             '00:15:2c': 'Ubee',
+            '00:26:5e': 'Ubee',
+            '08:3e:8e': 'Ubee',
+            '0c:84:dc': 'Ubee',
+            '0c:b9:37': 'Ubee',
+            '0c:ee:e6': 'Ubee',
+            '10:08:b1': 'Ubee',
+            '1c:3e:84': 'Ubee',
             '28:c6:8e': 'Ubee',
+            '2c:33:7a': 'Ubee',
+            '34:23:87': 'Ubee',
+            '38:b1:db': 'Ubee',
+            '3c:77:e6': 'Ubee',
+            '48:5a:b6': 'Ubee',
+            '4c:eb:bd': 'Ubee',
+            '54:35:30': 'Ubee',
             '58:6d:8f': 'Ubee',
+            '5c:3a:45': 'Ubee',
             '5c:b0:66': 'Ubee',
             '64:0d:ce': 'Ubee',
+            '64:7c:34': 'Ubee',
+            '68:94:23': 'Ubee',
             '68:b6:fc': 'Ubee',
+            '70:18:8b': 'Ubee',
+            '70:77:81': 'Ubee',
+            '74:29:af': 'Ubee',
             '78:96:84': 'Ubee',
+            '78:dd:08': 'Ubee',
+            '7c:e9:d3': 'Ubee',
+            '80:56:f2': 'Ubee',
+            '88:9f:fa': 'Ubee',
+            '90:32:4b': 'Ubee',
+            '94:53:30': 'Ubee',
+            '9c:2a:70': 'Ubee',
+            '9c:30:5b': 'Ubee',
+            'a4:17:31': 'Ubee',
+            'a4:cf:d2': 'Ubee',
+            'ac:d1:b8': 'Ubee',
+            'bc:85:56': 'Ubee',
+            'c0:38:96': 'Ubee',
+            'd4:6a:6a': 'Ubee',
+            'd8:0f:99': 'Ubee',
+            'fc:01:7c': 'Ubee',
             '08:95:2a': 'Sagemcom',
             '10:b3:6f': 'Sagemcom',
             '28:52:e8': 'Sagemcom',
@@ -3570,13 +3772,27 @@ class PyPNMAgent:
             'a8:70:5d': 'Sagemcom',
             'cc:33:bb': 'Sagemcom',
             'f8:08:4f': 'Sagemcom',
+            # Compal
+            '34:2c:c4': 'Compal',
+            '38:43:7d': 'Compal',
+            '54:67:51': 'Compal',
+            '68:02:b8': 'Compal',
+            '90:5c:44': 'Compal',
+            'ac:22:05': 'Compal',
+            'b4:f2:67': 'Compal',
+            # Hitron
             '00:04:bd': 'Hitron',
             '00:26:5b': 'Hitron',
             '00:26:d8': 'Hitron',
-            '68:02:b8': 'Hitron',
+            '1c:ab:c0': 'Hitron',
+            '84:94:8c': 'Hitron',
+            '90:50:ca': 'Hitron',
+            'a8:4e:3f': 'Hitron',
+            'ac:20:2e': 'Hitron',
             'bc:14:85': 'Hitron',
-            'c4:27:95': 'Hitron',
-            'cc:03:fa': 'Hitron',
+            'bc:4d:fb': 'Hitron',
+            'f0:f2:49': 'Hitron',
+            'f8:1d:0f': 'Hitron',
         }
         
         if not mac or len(mac) < 8:
