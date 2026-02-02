@@ -1535,12 +1535,44 @@ class PyPNMAgent:
             if not result.get('success'):
                 return {'success': False, 'error': f"Failed to trigger spectrum capture: {result.get('error')}"}
             
+            # Poll status to check if measurement completed
+            # docsIf3CmSpectrumAnalysisCtrlCmdMeasStatus.0 = 1.3.6.1.4.1.4491.2.1.20.1.34.11.0
+            # Values: 1=notReady, 2=sampleReady, 3=complete
+            OID_SPEC_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.34.11.0'
+            import time
+            max_wait = 30
+            poll_interval = 2
+            elapsed = 0
+            
+            self.logger.info(f"Polling spectrum status (max {max_wait}s)...")
+            while elapsed < max_wait:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                status_result = self._snmp_get(modem_ip, OID_SPEC_STATUS, community)
+                if status_result.get('success'):
+                    status_value = status_result.get('value')
+                    self.logger.info(f"Spectrum status: {status_value} (after {elapsed}s)")
+                    
+                    # 3 = complete (file ready)
+                    if status_value == 3:
+                        self.logger.info(f"Spectrum capture complete")
+                        break
+                    # 1 = notReady, 2 = sampleReady (still processing)
+                else:
+                    self.logger.warning(f"Failed to poll status: {status_result.get('error')}")
+                    break
+            
+            if elapsed >= max_wait:
+                self.logger.warning(f"Spectrum capture timed out after {max_wait}s")
+            
             return {
                 'success': True,
                 'mac_address': mac_address,
                 'modem_ip': modem_ip,
                 'message': 'Spectrum capture triggered',
-                'filename': filename
+                'filename': filename,
+                'status_polled': elapsed < max_wait
             }
             
         except Exception as e:
