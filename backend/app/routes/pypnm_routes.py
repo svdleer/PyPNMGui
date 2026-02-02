@@ -64,7 +64,7 @@ def pnm_measurement(measurement_type, mac_address):
     
     # Spectrum requires SNMP SET operations - use RW community
     if measurement_type == 'spectrum':
-        from backend.config_lab import CM_RW_COMMUNITY
+        from config_lab import CM_RW_COMMUNITY
         community = data.get('community', CM_RW_COMMUNITY)
     else:
         community = data.get('community', get_default_community())
