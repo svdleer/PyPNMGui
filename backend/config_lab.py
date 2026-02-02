@@ -16,6 +16,9 @@ SNMP_COMMUNITY_CASA = os.environ.get('SNMP_COMMUNITY_CASA', 'public')
 SNMP_COMMUNITY_CISCO = os.environ.get('SNMP_COMMUNITY_CISCO', 'public')
 SNMP_COMMUNITY_COMMSCOPE = os.environ.get('SNMP_COMMUNITY_COMMSCOPE', 'public')
 
+# Modem SNMP communities (for direct modem access requiring SET operations)
+CM_SNMP_COMMUNITY = os.environ.get('CM_SNMP_COMMUNITY', 'z1gg0m0n1t0r1ng')
+
 LAB_CMTS_SYSTEMS = [
     {
         'name': 'mnd-gt0002-ccap001',

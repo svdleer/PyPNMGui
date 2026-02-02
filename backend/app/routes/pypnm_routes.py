@@ -61,7 +61,13 @@ def pnm_measurement(measurement_type, mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', get_default_community())
+    
+    # Spectrum requires SNMP SET operations - use RW community
+    if measurement_type == 'spectrum':
+        from backend.config_lab import CM_SNMP_COMMUNITY
+        community = data.get('community', CM_SNMP_COMMUNITY)
+    else:
+        community = data.get('community', get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
