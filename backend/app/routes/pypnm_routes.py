@@ -434,7 +434,12 @@ def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str
         logger.info(f"Processing Spectrum file: {actual_filename}")
         
         try:
-            # Upload file to PyPNM
+            # PyPNM has TFTP folder mounted - use direct file path instead of HTTP upload
+            # PyPNM will read from /var/lib/tftpboot/<filename>
+            pypnm_file_path = f"/var/lib/tftpboot/{actual_filename}"
+            
+            # Call PyPNM file upload endpoint with local file path
+            # This avoids HTTP file transfer overhead
             upload_response = requests.post(
                 f"{pypnm_url}/docs/pnm/files/upload",
                 files={'file': (actual_filename, open(filepath, 'rb'), 'application/octet-stream')},
@@ -442,8 +447,8 @@ def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str
             )
             
             if upload_response.status_code not in [200, 201]:
-                logger.error(f"Spectrum file upload failed: {upload_response.status_code}")
-                return jsonify({"status": "error", "message": "Failed to upload spectrum file to PyPNM"}), 500
+                logger.error(f"Spectrum file upload failed: {upload_response.status_code} - {upload_response.text}")
+                return jsonify({"status": "error", "message": f"Failed to upload spectrum file to PyPNM: {upload_response.status_code}"}), 500
             
             upload_result = upload_response.json()
             tx_id = upload_result.get('transaction_id')
