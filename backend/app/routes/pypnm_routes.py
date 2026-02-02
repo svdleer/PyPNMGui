@@ -62,10 +62,10 @@ def pnm_measurement(measurement_type, mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     
-    # Spectrum requires SNMP SET operations - use RW community
+    # Spectrum requires SNMP SET operations - use RW community (ignore frontend value)
     if measurement_type == 'spectrum':
         from config_lab import CM_RW_COMMUNITY
-        community = data.get('community', CM_RW_COMMUNITY)
+        community = CM_RW_COMMUNITY  # Always use RW community for spectrum, don't trust frontend
     else:
         community = data.get('community', get_default_community())
     
