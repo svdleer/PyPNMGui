@@ -434,81 +434,57 @@ def _handle_spectrum_measurement(mac_address: str, modem_ip: str, community: str
         logger.info(f"Processing Spectrum file: {actual_filename}")
         
         try:
-            # PyPNM has TFTP folder mounted - use direct file path instead of HTTP upload
-            # PyPNM will read from /var/lib/tftpboot/<filename>
-            pypnm_file_path = f"/var/lib/tftpboot/{actual_filename}"
+            # Both backend and PyPNM have /var/lib/tftpboot mounted
+            # Read file and send to PyPNM for parsing directly
+            with open(filepath, 'rb') as f:
+                file_content = f.read()
             
-            # Call PyPNM file upload endpoint with local file path
-            # This avoids HTTP file transfer overhead
-            upload_response = requests.post(
-                f"{pypnm_url}/docs/pnm/files/upload",
-                files={'file': (actual_filename, open(filepath, 'rb'), 'application/octet-stream')},
-                timeout=30
-            )
-            
-            if upload_response.status_code not in [200, 201]:
-                logger.error(f"Spectrum file upload failed: {upload_response.status_code} - {upload_response.text}")
-                return jsonify({"status": "error", "message": f"Failed to upload spectrum file to PyPNM: {upload_response.status_code}"}), 500
-            
-            upload_result = upload_response.json()
-            tx_id = upload_result.get('transaction_id')
-            
-            if not tx_id:
-                logger.error(f"No transaction_id in spectrum upload response")
-                return jsonify({"status": "error", "message": "No transaction_id from PyPNM"}), 500
-            
-            logger.info(f"Spectrum file uploaded, transaction_id: {tx_id}")
-            
-            # Get analysis with archive output (includes PNG plots)
-            analysis_response = requests.post(
-                f"{pypnm_url}/docs/pnm/files/getAnalysis",
-                json={
-                    "search": {"transaction_id": tx_id},
-                    "analysis": {
-                        "type": "basic",
-                        "output": {"type": "archive"},
-                        "plot": {"ui": {"theme": "light"}}
-                    }
-                },
-                timeout=60
-            )
-            
-            if analysis_response.status_code == 200:
-                import zipfile
+            # Import PyPNM parser directly - avoid HTTP upload overhead
+            try:
+                from pypnm.pnm.parser.pnm_parameter import GetPnmParserAndParameters
+                from pypnm.pnm.parser.pnm_processor import PnmFileProcessor
+                
+                # Parse spectrum file directly
+                processor = PnmFileProcessor(filename=actual_filename, data=file_content)
+                parsed_obj = GetPnmParserAndParameters(processor.read_file())
+                spectrum_model = parsed_obj.to_model()
+                
+                # Generate plot using PyPNM plotter
+                from pypnm.plotter.cm_spectrum_analysis import plot_spectrum_analysis
                 import io
                 import base64
                 
-                archive_data = analysis_response.content
-                all_plots = []
+                fig = plot_spectrum_analysis(spectrum_model)
+                buf = io.BytesIO()
+                fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                buf.seek(0)
+                png_data = base64.b64encode(buf.read()).decode('utf-8')
+                buf.close()
                 
-                try:
-                    with zipfile.ZipFile(io.BytesIO(archive_data), 'r') as zf:
-                        for name in zf.namelist():
-                            if name.endswith('.png'):
-                                png_data = zf.read(name)
-                                all_plots.append({
-                                    'filename': name,
-                                    'data': base64.b64encode(png_data).decode('utf-8'),
-                                    'type': 'spectrum'
-                                })
-                        logger.info(f"Spectrum analysis complete with {len(all_plots)} plots")
-                        
-                        return jsonify({
-                            "status": 0,
-                            "message": "Spectrum capture complete",
-                            "data": {
-                                "mac_address": mac_address,
-                                "modem_ip": modem_ip
-                            },
-                            "plots": all_plots,
-                            "mac_address": mac_address
-                        })
-                except zipfile.BadZipFile:
-                    logger.error("Spectrum analysis returned non-archive response")
-                    return jsonify({"status": "error", "message": "Invalid analysis response"}), 500
-            else:
-                logger.error(f"Spectrum analysis failed: {analysis_response.status_code}")
-                return jsonify({"status": "error", "message": "Analysis failed"}), 500
+                logger.info(f"Spectrum analysis complete with plot")
+                
+                return jsonify({
+                    "status": 0,
+                    "message": "Spectrum capture complete",
+                    "data": {
+                        "mac_address": mac_address,
+                        "modem_ip": modem_ip,
+                        "spectrum_data": spectrum_model
+                    },
+                    "plots": [{
+                        'filename': f'{actual_filename}.png',
+                        'data': png_data,
+                        'type': 'spectrum'
+                    }],
+                    "mac_address": mac_address
+                })
+                
+            except ImportError as e:
+                logger.error(f"PyPNM not available for direct parsing: {e}")
+                return jsonify({"status": "error", "message": "PyPNM library not available in backend"}), 500
+            except Exception as e:
+                logger.error(f"Failed to parse spectrum file: {e}")
+                return jsonify({"status": "error", "message": f"Spectrum analysis failed: {str(e)}"}), 500
                 
         except FileNotFoundError:
             logger.error(f"Spectrum file not found: {filepath}")
