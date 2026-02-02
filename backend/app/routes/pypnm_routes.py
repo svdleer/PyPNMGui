@@ -76,14 +76,9 @@ def pnm_measurement(measurement_type, mac_address):
     if measurement_type == 'rxmer':
         return _handle_rxmer_measurement(mac_address, modem_ip, community)
     
-    # Special handling for Spectrum - trigger via agent, parse via PyPNM
-    # Spectrum needs SNMP SET commands, so use RW community
-    if measurement_type == 'spectrum':
-        from config_lab import CM_RW_COMMUNITY
-        return _handle_spectrum_measurement(mac_address, modem_ip, CM_RW_COMMUNITY)
-    
     # Map measurement types to agent commands
     agent_command_map = {
+        'spectrum': 'pnm_spectrum',  # Spectrum analyzer via agent
         'channel_power': 'pnm_channel_power',  # Basic channel info (not full spectrum)
         'channel_estimation': 'pnm_ofdm_capture',
         'modulation_profile': 'pnm_ofdm_capture',
