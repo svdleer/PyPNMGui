@@ -13,6 +13,7 @@ LAB_SSH_USER = os.environ.get('LAB_SSH_USER', 'svdleer')
 # SNMP Communities from environment
 SNMP_COMMUNITY_ARRIS = os.environ.get('SNMP_COMMUNITY_ARRIS', 'public')
 SNMP_COMMUNITY_CASA = os.environ.get('SNMP_COMMUNITY_CASA', 'public')
+CM_RW_COMMUNITY = os.environ.get('CM_RW_COMMUNITY', 'z1gg0m0n1t0r1ng')  # Read-Write community for modem SNMP SET
 SNMP_COMMUNITY_CISCO = os.environ.get('SNMP_COMMUNITY_CISCO', 'public')
 SNMP_COMMUNITY_COMMSCOPE = os.environ.get('SNMP_COMMUNITY_COMMSCOPE', 'public')
 
