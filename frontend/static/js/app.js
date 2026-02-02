@@ -104,6 +104,34 @@ createApp({
                 'name': 'e.g., CM-Residential'
             };
             return placeholders[this.searchType] || 'Enter search value';
+        },
+        
+        // Check if modem has downstream OFDM channels (DOCSIS 3.1)
+        hasOfdmChannels() {
+            return this.channelStats?.downstream?.ofdm?.count > 0;
+        },
+        
+        // Check if modem has upstream OFDMA channels (DOCSIS 3.1)
+        hasOfdmaChannels() {
+            return this.channelStats?.upstream?.ofdma?.count > 0 || 
+                   this.upstreamInterfaces?.ofdmaChannels?.length > 0;
+        },
+        
+        // Measurements requiring downstream OFDM
+        requiresOfdm() {
+            const ofdmRequired = ['rxmer', 'channel_estimation', 'modulation_profile', 'fec_summary', 'histogram', 'constellation'];
+            return ofdmRequired.includes(this.pnmMeasurementType);
+        },
+        
+        // Check if selected measurement can run
+        canRunMeasurement() {
+            if (!this.selectedModem) return false;
+            if (this.runningTest) return false;
+            // spectrum and us_pre_eq work without OFDM
+            if (this.pnmMeasurementType === 'spectrum') return true;
+            if (this.pnmMeasurementType === 'us_pre_eq') return this.hasOfdmaChannels;
+            // Other measurements require OFDM
+            return this.hasOfdmChannels;
         }
     },
     

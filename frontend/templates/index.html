@@ -906,22 +906,36 @@
                             <!-- PNM Measurement Controls -->
                             <div class="col-12 mb-4">
                                 <div class="card shadow-sm">
-                                    <div class="card-header bg-white">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>PNM Measurements</h5>
+                                        <div v-if="channelStats">
+                                            <span class="badge" :class="hasOfdmChannels ? 'bg-success' : 'bg-secondary'" title="Downstream OFDM (DOCSIS 3.1)">
+                                                <i class="bi" :class="hasOfdmChannels ? 'bi-check-circle' : 'bi-x-circle'"></i> DS OFDM
+                                            </span>
+                                            <span class="badge ms-1" :class="hasOfdmaChannels ? 'bg-success' : 'bg-secondary'" title="Upstream OFDMA (DOCSIS 3.1)">
+                                                <i class="bi" :class="hasOfdmaChannels ? 'bi-check-circle' : 'bi-x-circle'"></i> US OFDMA
+                                            </span>
+                                        </div>
                                     </div>
                                     <div class="card-body">
+                                        <!-- Info alert when no OFDM -->
+                                        <div v-if="channelStats && !hasOfdmChannels" class="alert alert-info py-2 mb-3">
+                                            <i class="bi bi-info-circle me-2"></i>
+                                            <strong>DOCSIS 3.0 Modem:</strong> No downstream OFDM channels detected. Only Spectrum Analyzer is available for downstream. 
+                                            <span v-if="hasOfdmaChannels">Upstream OFDMA measurements are available.</span>
+                                        </div>
                                         <div class="row g-3 mb-3">
                                             <div class="col-md-4">
                                                 <label class="form-label">Measurement Type</label>
                                                 <select v-model="pnmMeasurementType" class="form-select">
-                                                    <option value="rxmer">RxMER - Per Subcarrier</option>
+                                                    <option value="rxmer" :disabled="!hasOfdmChannels">RxMER - Per Subcarrier {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
                                                     <option value="spectrum">Spectrum Analyzer</option>
-                                                    <option value="channel_estimation">Channel Estimation</option>
-                                                    <option value="modulation_profile">Modulation Profile</option>
-                                                    <option value="fec_summary">FEC Summary</option>
-                                                    <option value="histogram">Histogram</option>
-                                                    <option value="constellation">Constellation Display</option>
-                                                    <option value="us_pre_eq">US Pre-Equalization</option>
+                                                    <option value="channel_estimation" :disabled="!hasOfdmChannels">Channel Estimation {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="modulation_profile" :disabled="!hasOfdmChannels">Modulation Profile {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="fec_summary" :disabled="!hasOfdmChannels">FEC Summary {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="histogram" :disabled="!hasOfdmChannels">Histogram {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="constellation" :disabled="!hasOfdmChannels">Constellation Display {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="us_pre_eq" :disabled="!hasOfdmaChannels">US Pre-Equalization {{ !hasOfdmaChannels ? '(Requires OFDMA)' : '' }}</option>
                                                 </select>
                                             </div>
                                             <div class="col-md-3">
@@ -933,9 +947,13 @@
                                             <div class="col-md-3 d-flex align-items-end">
                                                 <button @click="runPnmMeasurement(pnmMeasurementType)" 
                                                         class="btn btn-primary w-100" 
-                                                        :disabled="runningTest || !selectedModem">
+                                                        :disabled="!canRunMeasurement"
+                                                        :title="requiresOfdm && !hasOfdmChannels ? 'Requires OFDM downstream (DOCSIS 3.1)' : ''">
                                                     <span v-if="runningTest">
                                                         <i class="bi bi-arrow-repeat spin me-1"></i>Running...
+                                                    </span>
+                                                    <span v-else-if="requiresOfdm && !hasOfdmChannels">
+                                                        <i class="bi bi-exclamation-triangle me-1"></i>No OFDM
                                                     </span>
                                                     <span v-else>
                                                         <i class="bi bi-play-fill me-1"></i>Run Measurement
@@ -954,23 +972,35 @@
                                         <!-- Quick Action Buttons -->
                                         <div class="row g-2">
                                             <div class="col-md-3">
-                                                <button @click="runRxmerTest" class="btn btn-sm btn-outline-primary w-100" :disabled="runningTest">
+                                                <button @click="runRxmerTest" class="btn btn-sm btn-outline-primary w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
                                                     <i class="bi bi-graph-up me-1"></i>RxMER
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
                                                 </button>
                                             </div>
                                             <div class="col-md-3">
-                                                <button @click="runChannelEstimation" class="btn btn-sm btn-outline-success w-100" :disabled="runningTest">
+                                                <button @click="runChannelEstimation" class="btn btn-sm btn-outline-success w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
                                                     <i class="bi bi-soundwave me-1"></i>Chan Est
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
                                                 </button>
                                             </div>
                                             <div class="col-md-3">
-                                                <button @click="runModulationProfile" class="btn btn-sm btn-outline-info w-100" :disabled="runningTest">
+                                                <button @click="runModulationProfile" class="btn btn-sm btn-outline-info w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
                                                     <i class="bi bi-reception-4 me-1"></i>Mod Profile
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
                                                 </button>
                                             </div>
                                             <div class="col-md-3">
-                                                <button @click="runFecTest" class="btn btn-sm btn-outline-warning w-100" :disabled="runningTest">
+                                                <button @click="runFecTest" class="btn btn-sm btn-outline-warning w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
                                                     <i class="bi bi-shield-check me-1"></i>FEC
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
                                                 </button>
                                             </div>
                                         </div>
