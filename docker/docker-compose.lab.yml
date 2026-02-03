@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # PyPNM API - Built from fork at /home/svdleer/docker/PyPNM
+  pypnm-api:
+    build:
+      context: /home/svdleer/docker/PyPNM
+      dockerfile: Dockerfile
+    image: pypnm:latest
+    container_name: pypnm-api
+    network_mode: host
+    environment:
+      # Pysnmp MIB configuration - Include pysnmp-mibs package directory
+      - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
+      # Agent authentication token
+      - PYPNM_AGENT_TOKEN=dev-token-change-me
+      # Enable agent-based SNMP routing
+      - PYPNM_USE_AGENT_SNMP=true
+    volumes:
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+  # GUI Server - LAB Version
+  gui-server-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+    container_name: pypnm-gui-lab
+    image: docker_gui-server-lab:latest
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=lab
+      - PYPNM_MODE=lab
+      - PYPNM_BASE_URL=http://localhost:8000
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+      - AGENT_REQUIRED=false
+      - ENABLE_AGENT_WEBSOCKET=true
+      - DATA_MODE=agent
+    volumes:
+      - pypnm-data-lab:/app/data
+      - pypnm-logs-lab:/app/logs
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+    restart: unless-stopped
+    depends_on:
+      - pypnm-api
+      - redis-lab
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  redis-lab:
+    image: redis:7-alpine
+    container_name: eve-li-redis-lab
+    network_mode: host
+    volumes:
+      - redis-data-lab:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  agent-lab:
+    build:
+      context: /home/svdleer/docker/pyPNMAgent
+      dockerfile: docker/Dockerfile
+    container_name: pypnm-agent-lab
+    image: pypnm-agent:latest
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - AGENT_ID=lab-agent-local
+      - SERVER_URL=ws://localhost:8000/api/agents/ws
+    volumes:
+      - agent-config-lab:/app/config
+      - agent-logs-lab:/app/logs
+      - /var/lib/tftpboot:/tftpboot:ro
+    restart: unless-stopped
+    depends_on:
+      - pypnm-api
+
+volumes:
+  pypnm-data-lab:
+    driver: local
+  pypnm-logs-lab:
+    driver: local
+  redis-data-lab:
+    driver: local
+  agent-config-lab:
+    driver: local
+  agent-logs-lab:
+    driver: local
