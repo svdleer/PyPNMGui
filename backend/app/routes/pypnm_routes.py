@@ -56,7 +56,7 @@ def get_default_tftp():
 @pypnm_bp.route('/measurements/<measurement_type>/<mac_address>', methods=['POST'])
 def pnm_measurement(measurement_type, mac_address):
     """
-    Unified PNM measurement endpoint.
+    Unified PNM measurement endpoint - routes via agent for SNMP operations.
     
     Supported types:
     - rxmer: RxMER per subcarrier
@@ -79,6 +79,17 @@ def pnm_measurement(measurement_type, mac_address):
     }
     """
     from app.core.pypnm_client import PyPNMClient
+    from app.core.simple_ws import get_simple_agent_manager
+    
+    # Get agent for CM operations
+    def get_cm_capable_agent():
+        agent_manager = get_simple_agent_manager()
+        if not agent_manager:
+            return None
+        agent = agent_manager.get_agent_for_capability('cm_reachable')
+        if not agent:
+            agent = agent_manager.get_agent_for_capability('pnm_spectrum')
+        return agent
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
@@ -101,21 +112,87 @@ def pnm_measurement(measurement_type, mac_address):
     if not modem_ip and measurement_type != 'us_spectrum':
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
+    # Map measurement types to agent commands (downstream modem PNM)
+    # Only include commands that the agent actually supports
+    agent_command_map = {
+        'rxmer': 'pnm_ofdm_rxmer',     # Agent has this
+        'spectrum': 'pnm_spectrum',     # Agent has this
+        'fec_summary': 'pnm_fec',       # Agent has this
+        'us_pre_eq': 'pnm_pre_eq',      # Agent has this
+        # These don't exist in agent yet - will fallback to PyPNM API:
+        # 'channel_estimation': 'pnm_channel_estimation',
+        # 'modulation_profile': 'pnm_modulation_profile',
+        # 'histogram': 'pnm_histogram',
+        # 'constellation': 'pnm_constellation',
+    }
+    
+    # Downstream modem PNM - route via agent
+    if measurement_type in agent_command_map:
+        agent_manager = get_simple_agent_manager()
+        agent = get_cm_capable_agent()
+        
+        if not agent:
+            logger.warning(f"No agent available for {measurement_type}, falling back to PyPNM API")
+            # Fall through to PyPNM client
+        else:
+            # Build agent params
+            agent_params = {
+                'mac_address': mac_address,
+                'modem_ip': modem_ip,
+                'community': community,
+                'tftp_server': tftp_ip,
+            }
+            
+            # Add measurement-specific params
+            if measurement_type == 'fec_summary':
+                agent_params['fec_type'] = data.get('fec_summary_type', 2)
+            elif measurement_type == 'histogram':
+                agent_params['sample_duration'] = data.get('sample_duration', 60)
+            
+            try:
+                logger.info(f"Sending {measurement_type} to agent {agent.agent_id}")
+                task_id = agent_manager.send_task_sync(
+                    agent_id=agent.agent_id,
+                    command=agent_command_map[measurement_type],
+                    params=agent_params,
+                    timeout=180
+                )
+                result = agent_manager.wait_for_task(task_id, timeout=180)
+                
+                if result and result.get('result', {}).get('success'):
+                    agent_result = result.get('result', {})
+                    logger.info(f"Agent {measurement_type} success")
+                    
+                    # Generate plots if data returned
+                    if measurement_type == 'spectrum' and 'data' in agent_result:
+                        try:
+                            from app.core.spectrum_plotter import generate_spectrum_plot_from_data
+                            plot_result = generate_spectrum_plot_from_data(
+                                agent_result['data'], 
+                                mac_address,
+                                measurement_type='ds_spectrum'
+                            )
+                            if plot_result:
+                                agent_result['plots'] = plot_result.get('plots', [])
+                        except Exception as e:
+                            logger.error(f"Failed to generate spectrum plots: {e}")
+                    
+                    return jsonify(agent_result)
+                else:
+                    error_msg = result.get('result', {}).get('error', 'Unknown error') if result else 'Timeout'
+                    logger.error(f"Agent {measurement_type} failed: {error_msg}")
+                    return jsonify({"status": "error", "message": error_msg}), 500
+                    
+            except Exception as e:
+                logger.error(f"Agent {measurement_type} exception: {e}")
+                return jsonify({"status": "error", "message": str(e)}), 500
+    
+    # UTSC and fallback cases - use PyPNM client directly
     client = PyPNMClient()
     
     # Route to appropriate method
     try:
-        if measurement_type == 'rxmer':
-            result = client.get_rxmer_capture(
-                mac_address, modem_ip, tftp_ip, community, 
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'spectrum':
-            result = client.get_spectrum_capture(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
-        elif measurement_type == 'us_spectrum':
+        if measurement_type == 'us_spectrum':
             # UTSC is CMTS-based, not modem-based - requires different parameters
             cmts_ip = data.get('cmts_ip')
             rf_port_ifindex = data.get('rf_port_ifindex')
@@ -170,6 +247,8 @@ def pnm_measurement(measurement_type, mac_address):
                 )
             except Exception as e:
                 logger.warning(f"Failed to cache UTSC config: {e}")
+        
+        # Measurements not yet in agent - fallback to PyPNM API
         elif measurement_type == 'channel_estimation':
             result = client.get_channel_estimation(
                 mac_address, modem_ip, tftp_ip, community,
@@ -180,12 +259,6 @@ def pnm_measurement(measurement_type, mac_address):
                 mac_address, modem_ip, tftp_ip, community,
                 tftp_ipv6="::1", output_type=output_type
             )
-        elif measurement_type == 'fec_summary':
-            fec_type = data.get('fec_summary_type', 2)
-            result = client.get_fec_summary(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", fec_summary_type=fec_type, output_type=output_type
-            )
         elif measurement_type == 'histogram':
             duration = data.get('sample_duration', 60)
             result = client.get_histogram(
@@ -193,48 +266,22 @@ def pnm_measurement(measurement_type, mac_address):
                 tftp_ipv6="::1", sample_duration=duration, output_type=output_type
             )
         elif measurement_type == 'constellation':
-            logger.info(f"=== CONSTELLATION DEBUG START ===")
-            logger.info(f"Requesting constellation for {mac_address} at {modem_ip}")
-            logger.info(f"Output type: {output_type}, Requested archive: {requested_archive}")
             result = client.get_constellation_display(
                 mac_address, modem_ip, tftp_ip, community,
                 tftp_ipv6="::1", output_type=output_type
             )
-            logger.info(f"=== CONSTELLATION RAW RESULT ===")
-            logger.info(f"Result type: {type(result)}")
-            if isinstance(result, dict):
-                logger.info(f"Result keys: {result.keys()}")
-                logger.info(f"Result status: {result.get('status')}")
-                logger.info(f"Result message: {result.get('message')}")
-                if 'data' in result:
-                    logger.info(f"Data keys: {result['data'].keys() if isinstance(result['data'], dict) else 'not a dict'}")
-            elif isinstance(result, bytes):
-                logger.info(f"Result is bytes, length: {len(result)}")
-            else:
-                logger.info(f"Result: {result}")
-            
-            # Generate matplotlib plots for constellation data (like other measurements)
-            # PyPNM returns: {data: [{channel_id, samples: [(I, Q), ...]}, ...]}
+            # Generate matplotlib plots for constellation data
             if isinstance(result, dict) and result.get('status') == 0:
                 raw_data = result.get('data', [])
                 if isinstance(raw_data, list) and len(raw_data) > 0:
                     try:
                         constellation_plots = generate_constellation_plots_from_data(raw_data, mac_address)
                         if constellation_plots:
-                            # Add plots to result (like other measurements)
                             if 'plots' not in result:
                                 result['plots'] = []
                             result['plots'].extend(constellation_plots)
-                            logger.info(f"Generated {len(constellation_plots)} matplotlib constellation plots")
                     except Exception as e:
-                        logger.error(f"Failed to generate constellation plots: {e}", exc_info=True)
-            
-            logger.info(f"=== CONSTELLATION DEBUG END ===")
-        elif measurement_type == 'us_pre_eq':
-            result = client.get_us_ofdma_pre_equalization(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
-            )
+                        logger.error(f"Failed to generate constellation plots: {e}")
         else:
             return jsonify({
                 "status": "error",
