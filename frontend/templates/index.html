@@ -237,7 +237,14 @@
                                                 <td>{{ modem.vendor }}</td>
                                                 <td>{{ modem.model }}</td>
                                                 <td><small>{{ modem.software_version }}</small></td>
-                                                <td>{{ modem.docsis_version }}</td>
+                                                <td>
+                                                    <span class="badge" :class="modem.docsis_version >= '3.1' ? 'bg-info' : 'bg-secondary'">
+                                                        {{ modem.docsis_version }}
+                                                    </span>
+                                                    <span v-if="modem.docsis_version >= '3.1'" class="badge bg-primary ms-1" title="DOCSIS 3.1 - OFDM/OFDMA capable">
+                                                        <i class="bi bi-lightning-fill"></i>
+                                                    </span>
+                                                </td>
                                                 <td>{{ modem.cmts }}<br><small class="text-muted">{{ modem.cmts_interface }}</small></td>
                                                 <td>
                                                     <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
@@ -289,6 +296,21 @@
                             <div class="col-md-4 text-md-end mt-3 mt-md-0">
                                 <span class="badge bg-light text-dark me-2 py-2 px-3" style="font-size: 0.9rem;">
                                     <i class="bi bi-cpu me-1"></i>DOCSIS {{ selectedModem.docsis_version || '3.1' }}
+                                </span>
+                                <!-- OFDM/OFDMA Status Badges -->
+                                <span v-if="channelStats" class="badge me-1 py-2 px-3" 
+                                      :class="hasOfdmChannels ? 'bg-success' : (selectedModem.docsis_version >= '3.1' ? 'bg-warning' : 'bg-secondary')" 
+                                      style="font-size: 0.85rem;"
+                                      :title="'Downstream OFDM: ' + (channelStats?.downstream?.ofdm?.count || 0) + ' channels'">
+                                    <i class="bi bi-arrow-down-circle me-1"></i>OFDM
+                                    <i class="bi ms-1" :class="hasOfdmChannels ? 'bi-check-circle-fill' : 'bi-x-circle-fill'"></i>
+                                </span>
+                                <span v-if="channelStats" class="badge me-2 py-2 px-3" 
+                                      :class="hasOfdmaChannels ? 'bg-success' : (selectedModem.docsis_version >= '3.1' ? 'bg-warning' : 'bg-secondary')" 
+                                      style="font-size: 0.85rem;"
+                                      :title="'Upstream OFDMA: ' + (channelStats?.upstream?.ofdma?.count || 0) + ' channels'">
+                                    <i class="bi bi-arrow-up-circle me-1"></i>OFDMA
+                                    <i class="bi ms-1" :class="hasOfdmaChannels ? 'bi-check-circle-fill' : 'bi-x-circle-fill'"></i>
                                 </span>
                                 <span class="badge py-2 px-3" :class="selectedModem.status === 'online' || selectedModem.status === 'registrationComplete' ? 'bg-success' : 'bg-danger'" style="font-size: 0.9rem;">
                                     <i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>
