@@ -14,6 +14,8 @@ services:
       - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
       # Agent authentication token
       - PYPNM_AGENT_TOKEN=dev-token-change-me
+      # Enable agent-based SNMP routing
+      - PYPNM_USE_AGENT_SNMP=true
     volumes:
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
     restart: unless-stopped
