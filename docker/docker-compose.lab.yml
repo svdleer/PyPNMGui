@@ -12,6 +12,8 @@ services:
     environment:
       # Pysnmp MIB configuration - Include pysnmp-mibs package directory
       - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
+      # Agent authentication token
+      - PYPNM_AGENT_TOKEN=dev-token-change-me
     volumes:
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
     restart: unless-stopped
@@ -77,14 +79,14 @@ services:
       - .env
     environment:
       - AGENT_ID=lab-agent-local
-      - SERVER_URL=ws://localhost:5051/ws/agent
+      - SERVER_URL=ws://localhost:8000/api/agents/ws
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
       - /var/lib/tftpboot:/tftpboot:ro
     restart: unless-stopped
     depends_on:
-      - gui-server-lab
+      - pypnm-api
 
 volumes:
   pypnm-data-lab:
