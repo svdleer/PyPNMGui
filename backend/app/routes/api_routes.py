@@ -7,7 +7,7 @@ import logging
 from flask import jsonify, request, current_app
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
-from app.core.simple_ws import get_simple_agent_manager
+from app.core.pypnm_client import PyPNMClient
 
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
@@ -21,18 +21,6 @@ def get_default_community():
 def get_cmts_community():
     """Get default SNMP community for CMTS operations."""
     return os.environ.get('CMTS_SNMP_COMMUNITY', 'Z1gg0Sp3c1@l')
-
-
-def get_cm_capable_agent():
-    """Get an agent that can reach cable modems (cm_reachable or cm_proxy)."""
-    agent_manager = get_simple_agent_manager()
-    if not agent_manager:
-        return None
-    # Try cm_reachable (direct) first, then cm_proxy
-    agent = agent_manager.get_agent_for_capability('cm_reachable')
-    if not agent:
-        agent = get_cm_capable_agent()
-    return agent
 
 
 # Redis for caching modem data
@@ -206,7 +194,7 @@ def get_cmts_interfaces(cmts_name):
 
 @api_bp.route('/modem/<mac_address>/system-info', methods=['POST'])
 def get_system_info(mac_address):
-    """Get system information for a modem via agent."""
+    """Get system information for a modem via PyPNM API."""
     request_data = request.get_json() or {}
     modem_ip = request_data.get('modem_ip')
     community = request_data.get('community', get_default_community())
@@ -214,21 +202,18 @@ def get_system_info(mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    agent_manager = get_simple_agent_manager()
-    agent = get_cm_capable_agent()
-    
-    if not agent:
-        return jsonify({"status": "error", "message": "No agent available"}), 503
-    
     try:
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_channel_info',
-            params={'mac_address': mac_address, 'modem_ip': modem_ip, 'community': community},
-            timeout=60
+        # Use PyPNM API - it will route through agent automatically
+        client = PyPNMClient()
+        result = client._post(
+            '/docs/pnm/ds/status/getChannelStatus',
+            client._build_cable_modem_request(mac_address, modem_ip, community)
         )
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        return handle_agent_result(result)
+        
+        if result.get('status_code') == 200:
+            return jsonify({"status": 0, "success": True, **result})
+        else:
+            return jsonify({"status": 1, "error": result.get('message', 'Unknown error')}), 500
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
