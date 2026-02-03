@@ -2306,7 +2306,7 @@ class PyPNMAgent:
         return self._snmp_set(cmts_ip, oid, value, value_type, community, timeout=15)
     
     def _handle_pnm_us_get_interfaces(self, params: dict) -> dict:
-        """Get upstream interface information from CMTS for a specific modem."""
+        """Get upstream RF port interfaces from CMTS for UTSC."""
         cmts_ip = params.get('cmts_ip')
         cm_mac = params.get('cm_mac_address')
         community = params.get('community') or self.config.cmts_write_community or self.config.cmts_community
@@ -2315,51 +2315,81 @@ class PyPNMAgent:
             return {'success': False, 'error': 'cmts_ip required'}
         
         try:
-            # OIDs for OFDMA channel discovery
+            import re
             OID_IF_DESCR = '1.3.6.1.2.1.2.2.1.2'  # ifDescr
             OID_CM_OFDMA_STATUS = '1.3.6.1.4.1.4491.2.1.28.1.5.1.1'  # docsIf31CmtsCmUsOfdmaChannelStatus
             OID_CM_REG_MAC = '1.3.6.1.4.1.4491.2.1.20.1.3.1.2'  # docsIf3CmtsCmRegStatusMacAddr
             
+            self.logger.info(f"Querying us-conn RF ports from {cmts_ip}")
+            result = self._query_cmts_direct(cmts_ip, OID_IF_DESCR, community, walk=True)
+            
+            # Parse all us-conn ports and build blade mapping
+            all_rf_ports = []
+            blade_to_ports = {}  # blade_slot -> [(ifindex, descr), ...]
+            
+            if result.get('success') and result.get('results'):
+                for r in result['results']:
+                    try:
+                        descr = str(r.get('value', ''))
+                        if 'us-conn' not in descr.lower():
+                            continue
+                        ifindex = int(r['oid'].split('.')[-1])
+                        
+                        all_rf_ports.append({'ifindex': ifindex, 'description': descr})
+                        
+                        # Extract blade slot (e.g., "1" from "RPS01-1")
+                        blade_match = re.search(r'RPS\d+-(\d+)', descr)
+                        if blade_match:
+                            blade_slot = int(blade_match.group(1))
+                            if blade_slot not in blade_to_ports:
+                                blade_to_ports[blade_slot] = []
+                            blade_to_ports[blade_slot].append((ifindex, descr))
+                    except:
+                        pass
+            
+            all_rf_ports.sort(key=lambda x: x['ifindex'])
+            self.logger.info(f"Found {len(all_rf_ports)} us-conn RF ports")
+            
+            # Find modem's specific RF port and OFDMA channels
+            modem_rf_port = None
             ofdma_channels = []
             cm_index = None
             
-            # If we have a CM MAC, find its OFDMA channel(s)
             if cm_mac:
+                # Step 1: Find CM index from MAC address
                 mac_normalized = cm_mac.replace(':', '').replace('-', '').lower()
                 result = self._query_cmts_direct(cmts_ip, OID_CM_REG_MAC, community, walk=True)
                 
                 if result.get('success') and result.get('results'):
                     for r in result['results']:
                         try:
-                            # Value is MAC as colon-separated hex (from _parse_snmp_value)
                             mac_value = str(r.get('value', '')).replace(':', '').lower()
-                            
                             if mac_normalized == mac_value:
-                                # Extract CM index from OID
                                 cm_index = int(r['oid'].split('.')[-1])
                                 self.logger.info(f"Found CM index {cm_index} for MAC {cm_mac}")
                                 break
-                        except Exception as e:
-                            self.logger.debug(f"Error parsing MAC: {e}")
+                        except:
+                            pass
                 
-                # Find OFDMA channels for this CM
                 if cm_index:
+                    # Step 2: Find modem's OFDMA channel(s)
                     result = self._query_cmts_direct(cmts_ip, OID_CM_OFDMA_STATUS, community, walk=True)
                     
                     if result.get('success') and result.get('results'):
                         seen_ifindexes = set()
+                        first_ofdma_ifindex = None
                         for r in result['results']:
                             try:
-                                # OID format: ...1.5.1.<column>.<cmIndex>.<ofdmaIfIndex>.<metric>
-                                # We want column 1 (status), and extract cmIndex and ofdmaIfIndex
                                 oid_parts = r['oid'].split('.')
                                 if len(oid_parts) >= 3:
-                                    # Last 3 parts: cmIndex, ofdmaIfIndex, metric
                                     found_cm_index = int(oid_parts[-3])
                                     ofdma_ifindex = int(oid_parts[-2])
                                     
                                     if found_cm_index == cm_index and ofdma_ifindex > 1000 and ofdma_ifindex not in seen_ifindexes:
                                         seen_ifindexes.add(ofdma_ifindex)
+                                        if first_ofdma_ifindex is None:
+                                            first_ofdma_ifindex = ofdma_ifindex
+                                        
                                         # Get interface description
                                         desc_result = self._snmp_get(cmts_ip, f"{OID_IF_DESCR}.{ofdma_ifindex}", community)
                                         description = ""
@@ -2371,9 +2401,26 @@ class PyPNMAgent:
                                             'ifindex': ofdma_ifindex,
                                             'description': description
                                         })
-                                        self.logger.info(f"Found OFDMA ifIndex {ofdma_ifindex} for CM {cm_mac}")
+                                        self.logger.info(f"Found OFDMA ifIndex {ofdma_ifindex} for CM {cm_mac}: {description}")
                             except Exception as e:
                                 self.logger.debug(f"Error parsing OFDMA: {e}")
+                        
+                        # Step 3: Map OFDMA channel to physical RF port via blade slot
+                        if first_ofdma_ifindex and ofdma_channels:
+                            ofdma_descr = ofdma_channels[0].get('description', '')
+                            # Extract slot from "cable-us-ofdma 1/ofd/4.0" -> slot 1
+                            slot_match = re.search(r'cable-us(?:-ofdma)?\s+(\d+)/', ofdma_descr)
+                            if slot_match:
+                                slot = int(slot_match.group(1))
+                                self.logger.info(f"Modem is on slot {slot}")
+                                
+                                # Find us-conn port for this slot
+                                if slot in blade_to_ports and blade_to_ports[slot]:
+                                    port_ifindex, port_descr = blade_to_ports[slot][0]
+                                    modem_rf_port = {'ifindex': port_ifindex, 'description': port_descr}
+                                    self.logger.info(f"Found modem's RF port: {port_descr} ({port_ifindex})")
+                else:
+                    self.logger.warning(f"CM index not found for MAC: {cm_mac}")
             
             # Fallback: get all OFDMA channels if none found for CM
             if not ofdma_channels:
@@ -2390,55 +2437,19 @@ class PyPNMAgent:
                         except:
                             pass
             
-            # Get modem's specific SC-QAM upstream channels using docsIf3CmtsCmUsStatusTable
-            scqam_channels = []
-            modem_us_ifindexes = set()
-            
-            if cm_index:
-                # docsIf3CmtsCmUsStatusTable: OID.cmIndex.usIfIndex = status
-                OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4.1.3'  # docsIf3CmtsCmUsStatusModulationType
-                result = self._query_cmts_direct(cmts_ip, OID_CM_US_STATUS, community, walk=True)
-                
-                if result.get('success') and result.get('results'):
-                    for r in result['results']:
-                        try:
-                            oid_parts = r['oid'].split('.')
-                            if len(oid_parts) >= 2:
-                                # OID format: ...1.4.1.3.<cmIndex>.<usIfIndex>
-                                found_cm_index = int(oid_parts[-2])
-                                us_ifindex = int(oid_parts[-1])
-                                
-                                if found_cm_index == cm_index and us_ifindex > 0:
-                                    modem_us_ifindexes.add(us_ifindex)
-                                    self.logger.info(f"Found modem US ifIndex {us_ifindex} for CM {cm_mac}")
-                        except Exception as e:
-                            self.logger.debug(f"Error parsing CM US status: {e}")
-            
-            # Get SC-QAM channel info for modem's ifindexes (or all if no modem-specific found)
-            OID_US_CHANNEL = '1.3.6.1.2.1.10.127.1.1.2.1.1'
-            result = self._query_cmts_direct(cmts_ip, OID_US_CHANNEL, community, walk=True)
-            
-            if result.get('success') and result.get('results'):
-                for r in result['results']:
-                    try:
-                        ifindex = int(r['oid'].split('.')[-1])
-                        channel_id = int(r.get('value', 0))
-                        # If we have modem-specific US ifindexes, filter by them
-                        if modem_us_ifindexes:
-                            if ifindex in modem_us_ifindexes:
-                                scqam_channels.append({'ifindex': ifindex, 'channel_id': channel_id})
-                        else:
-                            # Fallback: include all SC-QAM channels
-                            scqam_channels.append({'ifindex': ifindex, 'channel_id': channel_id})
-                    except:
-                        pass
+            # Return modem's specific port if found, otherwise all ports
+            rf_ports = [modem_rf_port] if modem_rf_port else all_rf_ports
             
             return {
                 'success': True,
                 'cmts_ip': cmts_ip,
+                'rf_ports': rf_ports,
+                'all_rf_ports': all_rf_ports,
                 'ofdma_channels': ofdma_channels,
-                'scqam_channels': scqam_channels,
-                'cm_index': cm_index
+                'scqam_channels': rf_ports,  # Use rf_ports for SC-QAM dropdown compatibility
+                'cm_index': cm_index,
+                'modem_rf_port': modem_rf_port,
+                'modem_ofdma_ifindex': ofdma_channels[0]['ifindex'] if ofdma_channels else None
             }
             
         except Exception as e:
