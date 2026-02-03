@@ -69,3 +69,4 @@ dump.rdb
 ssh-tunnel*.sh
 .ssh-tunnel*.pid
 .ssh-tunnel*.log
+.DS_Store
