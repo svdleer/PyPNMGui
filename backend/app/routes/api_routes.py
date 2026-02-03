@@ -1357,56 +1357,63 @@ def pypnm_rxmer(mac_address):
 
 @api_bp.route('/pypnm/modem/<mac_address>/spectrum', methods=['POST'])
 def pypnm_spectrum(mac_address):
-    """Get spectrum analyzer capture via agent (pysnmp)."""
-    from app.core.simple_ws import get_simple_agent_manager
+    """Get spectrum analyzer capture via PyPNM API (which uses agent)."""
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', get_default_community())
+    tftp_ip = data.get('tftp_ip', DEFAULT_TFTP_IP)
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_spectrum') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_spectrum',
-            params={"modem_ip": modem_ip, "mac_address": mac_address, "community": community},
-            timeout=120
+        client = PyPNMClient()
+        result = client.get_spectrum_analyzer(
+            mac_address=mac_address,
+            ip_address=modem_ip,
+            snmp_community=community,
+            tftp_ipv4=tftp_ip
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=120)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Timeout"}), 504
-        
-        task_result = result.get('result', {})
-        return jsonify({"status": 0 if task_result.get('success') else 1, **task_result})
+        # Convert PyPNM response to expected format
+        if result.get('status_code') == 200:
+            return jsonify({"status": 0, "success": True, "result": result})
+        else:
+            return jsonify({"status": 1, "success": False, "error": result.get('message', 'Unknown error')})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/pypnm/modem/<mac_address>/fec', methods=['POST'])
 def pypnm_fec(mac_address):
-    """Get FEC summary via agent (pysnmp)."""
-    from app.core.simple_ws import get_simple_agent_manager
+    """Get FEC summary via PyPNM API (which uses agent)."""
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', get_default_community())
+    tftp_ip = data.get('tftp_ip', DEFAULT_TFTP_IP)
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_fec') if agent_manager else None
+        client = PyPNMClient()
+        result = client.get_fec_summary(
+            mac_address=mac_address,
+            ip_address=modem_ip,
+            snmp_community=community,
+            tftp_ipv4=tftp_ip
+        )
+        
+        if result.get('status_code') == 200:
+            return jsonify({"status": 0, "success": True, "result": result})
+        else:
+            return jsonify({"status": 1, "success": False, "error": result.get('message', 'Unknown error')})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
         
         if not agent:
             return jsonify({"status": "error", "message": "No agent available"}), 503
@@ -1468,8 +1475,10 @@ def pypnm_constellation(mac_address):
 
 @api_bp.route('/pypnm/modem/<mac_address>/channel-stats', methods=['POST'])
 def pypnm_channel_stats(mac_address):
-    """Get DOCSIS channel statistics via agent (pysnmp)."""
-    from app.core.simple_ws import get_simple_agent_manager
+    """Get DOCSIS channel statistics via PyPNM API (which uses agent)."""
+    # Note: This now goes through PyPNM API's SNMP transport which routes via agent
+    # The agent transport is transparent - PyPNM handles it automatically
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
@@ -1479,32 +1488,22 @@ def pypnm_channel_stats(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        # Prefer agents that can reach cable modems
-        agent = agent_manager.get_agent_for_capability('cm_reachable') if agent_manager else None
-        if not agent:
-            agent = agent_manager.get_agent_for_capability('pnm_channel_info') if agent_manager else None
-        
-        if not agent:
-            return jsonify({"status": "error", "message": "No CM-capable agent available"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='pnm_channel_info',
-            params={"modem_ip": modem_ip, "mac_address": mac_address, "community": community},
-            timeout=60
+        # PyPNM API will use AgentSnmpTransport when PYPNM_USE_AGENT_SNMP=true
+        client = PyPNMClient()
+        # Get channel info via PyPNM's channel status endpoints
+        ds_result = client._post(
+            '/docs/pnm/ds/status/getChannelStatus',
+            client._build_cable_modem_request(mac_address, modem_ip, community)
+        )
+        us_result = client._post(
+            '/docs/pnm/us/status/getChannelStatus',
+            client._build_cable_modem_request(mac_address, modem_ip, community)
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
-        
-        if result is None:
-            return jsonify({"status": "error", "message": "Timeout"}), 504
-        
-        task_result = result.get('result', {})
         return jsonify({
             "mac_address": mac_address,
-            "downstream": task_result.get('downstream', []),
-            "upstream": task_result.get('upstream', [])
+            "downstream": ds_result.get('doc_if_downstream_channels', []) if ds_result.get('status_code') == 200 else [],
+            "upstream": us_result.get('doc_if_upstream_channels', []) if us_result.get('status_code') == 200 else []
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
