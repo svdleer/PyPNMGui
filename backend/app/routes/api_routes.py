@@ -613,5 +613,78 @@ def health_check():
     })
 
 
+# ============== Cache Management ==============
+
+@api_bp.route('/cache/flush', methods=['POST'])
+def flush_cache():
+    """Flush all Redis cache."""
+    if not REDIS_AVAILABLE or not redis_client:
+        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    
+    try:
+        redis_client.flushdb()
+        return jsonify({"status": "success", "message": "Cache flushed"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/cache/flush/modems', methods=['POST'])
+def flush_modem_cache():
+    """Flush modem cache (modems:*)."""
+    if not REDIS_AVAILABLE or not redis_client:
+        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    
+    try:
+        keys = redis_client.keys("modems:*")
+        if keys:
+            redis_client.delete(*keys)
+            count = len(keys)
+        else:
+            count = 0
+        return jsonify({"status": "success", "message": f"Flushed {count} modem cache keys"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/cache/flush/cmts', methods=['POST'])
+def flush_cmts_cache():
+    """Flush CMTS cache (cmts:*)."""
+    if not REDIS_AVAILABLE or not redis_client:
+        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    
+    try:
+        keys = redis_client.keys("cmts:*")
+        if keys:
+            redis_client.delete(*keys)
+            count = len(keys)
+        else:
+            count = 0
+        return jsonify({"status": "success", "message": f"Flushed {count} CMTS cache keys"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/cache/stats', methods=['GET'])
+def cache_stats():
+    """Get Redis cache statistics."""
+    if not REDIS_AVAILABLE or not redis_client:
+        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    
+    try:
+        info = redis_client.info()
+        stats = {
+            "status": "ok",
+            "keys": redis_client.dbsize(),
+            "memory_used": info.get('used_memory_human', 'N/A'),
+            "memory_peak": info.get('used_memory_peak_human', 'N/A'),
+            "hits": info.get('keyspace_hits', 0),
+            "misses": info.get('keyspace_misses', 0),
+            "hit_rate": f"{info.get('keyspace_hits', 0) / max(info.get('keyspace_hits', 0) + info.get('keyspace_misses', 1), 1) * 100:.1f}%"
+        }
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # ============== Agent-Based CMTS Modem Lookup ==============
 
