@@ -64,3 +64,8 @@ dump.rdb
 *.tmp
 *.bak
 *.orig
+
+# SSH Tunnel Scripts (environment-specific)
+ssh-tunnel*.sh
+.ssh-tunnel*.pid
+.ssh-tunnel*.log
