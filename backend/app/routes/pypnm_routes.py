@@ -1090,6 +1090,13 @@ def get_upstream_interfaces(mac_address):
         
         task_result = result.get('result', {})
         
+        # Extract OFDMA ifIndex from ofdma_channels list (agent returns list of channels)
+        ofdma_channels = task_result.get('ofdma_channels', [])
+        modem_ofdma_ifindex = None
+        if ofdma_channels and len(ofdma_channels) > 0:
+            # Get first OFDMA channel's ifindex
+            modem_ofdma_ifindex = ofdma_channels[0].get('ifindex')
+        
         return jsonify({
             "success": task_result.get('success', False),
             "mac_address": mac_address,
@@ -1098,7 +1105,8 @@ def get_upstream_interfaces(mac_address):
             "rf_ports": task_result.get('rf_ports', []),  # Modem's specific RF port(s)
             "all_rf_ports": task_result.get('all_rf_ports', []),  # All us-conn ports
             "modem_rf_port": task_result.get('modem_rf_port'),  # Modem's detected RF port
-            "modem_ofdma_ifindex": task_result.get('modem_ofdma_ifindex')
+            "modem_ofdma_ifindex": modem_ofdma_ifindex,
+            "ofdma_channels": ofdma_channels  # Include all OFDMA channels for debugging
         })
         
     except Exception as e:
