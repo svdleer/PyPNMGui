@@ -581,8 +581,10 @@ createApp({
                 const data = await response.json();
                 
                 // Store full channel stats for computed properties
-                if (data.status === 0) {
+                // Check for successful response (status === 0 or has downstream/upstream data)
+                if (data.status === 0 || data.downstream || data.upstream) {
                     this.channelStats = data;
+                    console.log('Channel stats loaded:', data.downstream?.ofdm?.count, 'OFDM,', data.upstream?.ofdma?.count, 'OFDMA');
                 }
                 
                 // Process DS OFDM channels if available
