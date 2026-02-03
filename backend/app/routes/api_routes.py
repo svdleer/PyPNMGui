@@ -615,6 +615,7 @@ def health_check():
 
 # ============== Agent-Based CMTS Modem Lookup ==============
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/cmts/<hostname>/modems', methods=['GET'])
 def get_cmts_modems(hostname):
     """
@@ -832,6 +833,7 @@ def get_cmts_modems(hostname):
         }), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/agents', methods=['GET'])
 def get_connected_agents():
     """Get list of connected WebSocket agents."""
@@ -854,6 +856,7 @@ def get_connected_agents():
     })
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/snmp/set', methods=['POST'])
 def snmp_set():
     """Execute SNMP SET via agent."""
@@ -895,6 +898,7 @@ def snmp_set():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/snmp/get', methods=['POST'])
 def snmp_get():
     """Execute SNMP GET via agent."""
@@ -933,6 +937,7 @@ def snmp_get():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/snmp/walk', methods=['POST'])
 def snmp_walk():
     """Execute SNMP WALK via agent."""
@@ -971,6 +976,7 @@ def snmp_walk():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/snmp/bulk_get', methods=['POST'])
 def snmp_bulk_get():
     """Execute SNMP BULKGET via agent for faster data retrieval."""
@@ -1010,6 +1016,7 @@ def snmp_bulk_get():
 
 # ============== PyPNM OFDM Capture Endpoints ==============
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pnm/ofdm/tftp/configure', methods=['POST'])
 def configure_ofdm_tftp():
     """Configure modem TFTP destination for PNM captures."""
@@ -1048,6 +1055,7 @@ def configure_ofdm_tftp():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pnm/ofdm/capture/trigger', methods=['POST'])
 def trigger_ofdm_capture():
     """Trigger OFDM RxMER capture on modem via PyPNM agent."""
@@ -1149,6 +1157,7 @@ def get_ofdm_capture_status(mac_address):
     return jsonify(json.loads(data))
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pnm/ofdm/channels', methods=['POST'])
 def get_ofdm_channels():
     """Get list of OFDM channels for modem via PyPNM agent."""
@@ -1199,6 +1208,7 @@ def get_ofdm_channels():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pnm/ofdm/rxmer/<mac_address>', methods=['GET'])
 def get_ofdm_rxmer_data(mac_address):
     """Get OFDM RxMER spectrum data via PyPNM agent."""
@@ -1266,6 +1276,7 @@ def get_ofdm_rxmer_data(mac_address):
 # ============== PyPNM API Proxy Routes ==============
 # These routes proxy requests to PyPNM FastAPI for PNM operations
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pypnm/health', methods=['GET'])
 def pypnm_health():
     """Check agent availability for SNMP operations."""
@@ -1421,6 +1432,7 @@ def pypnm_fec(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pypnm/modem/<mac_address>/constellation', methods=['POST'])
 def pypnm_constellation(mac_address):
     """Get constellation display via agent (pysnmp)."""
@@ -1494,6 +1506,7 @@ def pypnm_channel_stats(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pypnm/modem/<mac_address>/pre-eq', methods=['POST'])
 def pypnm_pre_eq(mac_address):
     """Get pre-equalization data via agent (pysnmp)."""
@@ -1531,6 +1544,7 @@ def pypnm_pre_eq(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pypnm/modem/<mac_address>/sysdescr', methods=['POST'])
 def pypnm_sysdescr(mac_address):
     """Get system description via agent (pysnmp)."""
@@ -1595,6 +1609,7 @@ def pypnm_sysdescr(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# REMOVED: This endpoint no longer works. Use PyPNM API instead. See backend/REMOVED_ENDPOINTS.md
 @api_bp.route('/pypnm/modem/<mac_address>/event-log', methods=['POST'])
 def pypnm_event_log(mac_address):
     """Get event log via agent (pysnmp)."""
