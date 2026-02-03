@@ -458,6 +458,20 @@ createApp({
             
             const channels = [];
             
+            // Handle flat array from agent (already has type field)
+            if (Array.isArray(dsData)) {
+                dsData.forEach(ch => {
+                    channels.push({
+                        channel_id: ch.channel_id,
+                        frequency_mhz: ch.frequency_mhz || 0,
+                        power_dbmv: ch.power_dbmv || 0,
+                        snr_db: ch.snr_db || 0,
+                        type: ch.type || 'SC-QAM'
+                    });
+                });
+                return channels;
+            }
+            
             // Handle SC-QAM data from PyPNM response format
             const scqam = dsData.scqam || {};
             const scqamResults = scqam.results || [];
@@ -514,6 +528,19 @@ createApp({
             if (!usData) return [];
             
             const channels = [];
+            
+            // Handle flat array from agent (already has type field)
+            if (Array.isArray(usData)) {
+                usData.forEach(ch => {
+                    channels.push({
+                        channel_id: ch.channel_id,
+                        frequency_mhz: ch.frequency_mhz || 0,
+                        power_dbmv: ch.power_dbmv || 0,
+                        type: ch.type || 'ATDMA'
+                    });
+                });
+                return channels;
+            }
             
             // Handle ATDMA data
             const atdma = usData.atdma || {};
