@@ -2,7 +2,7 @@
     "agent_id": "lab-agent-local",
     
     "pypnm_server": {
-        "url": "ws://pypnm-gui-lab:5050/ws/agent",
+        "url": "ws://pypnm-api:8000/api/ws/agent",
         "auth_token": "dev-token-change-in-production",
         "reconnect_interval": 5
     },
