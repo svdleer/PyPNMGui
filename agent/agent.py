@@ -2390,17 +2390,46 @@ class PyPNMAgent:
                         except:
                             pass
             
-            # Get SC-QAM upstream channels
+            # Get modem's specific SC-QAM upstream channels using docsIf3CmtsCmUsStatusTable
+            scqam_channels = []
+            modem_us_ifindexes = set()
+            
+            if cm_index:
+                # docsIf3CmtsCmUsStatusTable: OID.cmIndex.usIfIndex = status
+                OID_CM_US_STATUS = '1.3.6.1.4.1.4491.2.1.20.1.4.1.3'  # docsIf3CmtsCmUsStatusModulationType
+                result = self._query_cmts_direct(cmts_ip, OID_CM_US_STATUS, community, walk=True)
+                
+                if result.get('success') and result.get('results'):
+                    for r in result['results']:
+                        try:
+                            oid_parts = r['oid'].split('.')
+                            if len(oid_parts) >= 2:
+                                # OID format: ...1.4.1.3.<cmIndex>.<usIfIndex>
+                                found_cm_index = int(oid_parts[-2])
+                                us_ifindex = int(oid_parts[-1])
+                                
+                                if found_cm_index == cm_index and us_ifindex > 0:
+                                    modem_us_ifindexes.add(us_ifindex)
+                                    self.logger.info(f"Found modem US ifIndex {us_ifindex} for CM {cm_mac}")
+                        except Exception as e:
+                            self.logger.debug(f"Error parsing CM US status: {e}")
+            
+            # Get SC-QAM channel info for modem's ifindexes (or all if no modem-specific found)
             OID_US_CHANNEL = '1.3.6.1.2.1.10.127.1.1.2.1.1'
             result = self._query_cmts_direct(cmts_ip, OID_US_CHANNEL, community, walk=True)
             
-            scqam_channels = []
             if result.get('success') and result.get('results'):
                 for r in result['results']:
                     try:
                         ifindex = int(r['oid'].split('.')[-1])
                         channel_id = int(r.get('value', 0))
-                        scqam_channels.append({'ifindex': ifindex, 'channel_id': channel_id})
+                        # If we have modem-specific US ifindexes, filter by them
+                        if modem_us_ifindexes:
+                            if ifindex in modem_us_ifindexes:
+                                scqam_channels.append({'ifindex': ifindex, 'channel_id': channel_id})
+                        else:
+                            # Fallback: include all SC-QAM channels
+                            scqam_channels.append({'ifindex': ifindex, 'channel_id': channel_id})
                     except:
                         pass
             
