@@ -14,8 +14,8 @@ DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
 
 
 def get_default_community():
-    """Get default SNMP community for modems from environment."""
-    return os.environ.get('CM_DIRECT_COMMUNITY', 'Z1gg0Sp3c1@l')
+    """Get default SNMP community for modems."""
+    return os.environ.get('CM_SNMP_COMMUNITY', 'z1gg0m0n1t0r1ng')
 
 
 def get_cmts_community():
