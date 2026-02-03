@@ -1097,16 +1097,22 @@ def get_upstream_interfaces(mac_address):
             # Get first OFDMA channel's ifindex
             modem_ofdma_ifindex = ofdma_channels[0].get('ifindex')
         
+        # Extract RF ports from scqam_channels (agent returns these for UTSC)
+        scqam_channels = task_result.get('scqam_channels', [])
+        rf_ports = [{'ifindex': ch.get('ifindex'), 'channel_id': ch.get('channel_id')} for ch in scqam_channels]
+        modem_rf_port = rf_ports[0].get('ifindex') if rf_ports else None
+        
         return jsonify({
             "success": task_result.get('success', False),
             "mac_address": mac_address,
             "cmts_ip": cmts_ip,
             "cm_index": task_result.get('cm_index'),
-            "rf_ports": task_result.get('rf_ports', []),  # Modem's specific RF port(s)
-            "all_rf_ports": task_result.get('all_rf_ports', []),  # All us-conn ports
-            "modem_rf_port": task_result.get('modem_rf_port'),  # Modem's detected RF port
+            "rf_ports": rf_ports,  # SC-QAM upstream ports for UTSC
+            "all_rf_ports": rf_ports,  # All us-conn ports (same as rf_ports)
+            "modem_rf_port": modem_rf_port,  # First RF port ifIndex
             "modem_ofdma_ifindex": modem_ofdma_ifindex,
-            "ofdma_channels": ofdma_channels  # Include all OFDMA channels for debugging
+            "ofdma_channels": ofdma_channels,  # Include all OFDMA channels
+            "scqam_channels": scqam_channels  # Include SC-QAM channels for debugging
         })
         
     except Exception as e:
