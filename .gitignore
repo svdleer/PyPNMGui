@@ -1,44 +1,66 @@
-venv/
-
-# Archived files (test scripts, postmortems, old docs)
-archive/
-
-# Lab config files
-docker-compose.lab.yml
-docker-compose.*.lab*.yml
-.env.lab
-*.lab.json
-
-# Config files with credentials (use *.example.json as template)
-agent/agent_config.json
-docker/agent-config/agent_config.json
-config/*.json
-!config/*.example.json
-backend/data/devices.json
-docker/.env*
-!docker/.env.example
-
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.egg-info/
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
 
 # IDE
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
 logs/
 
-# Environment
-.env
-.env.local
+# Archive (cleanup storage)
+.archive/
+archive/
 
-# OS
-.DS_Store
-Thumbs.db
+# Docker
+*.pid
+
+# Redis
+dump.rdb
+
+# Temporary
+*.tmp
+*.bak
+*.orig

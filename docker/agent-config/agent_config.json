@@ -1,0 +1,41 @@
+{
+    "agent_id": "lab-agent-local",
+    
+    "pypnm_server": {
+        "url": "ws://pypnm-gui-lab:5050/ws/agent",
+        "auth_token": "dev-token-change-in-production",
+        "reconnect_interval": 5
+    },
+    
+    "pypnm_ssh_tunnel": {
+        "enabled": false,
+        "ssh_host": "",
+        "ssh_port": 22,
+        "ssh_user": "",
+        "ssh_key_file": "/home/pypnm/.ssh/id_pypnm_server",
+        "local_port": 8080,
+        "remote_port": 8080
+    },
+    
+    "cmts_access": {
+        "snmp_direct": true,
+        "ssh_enabled": false,
+        "ssh_user": "pypnm",
+        "ssh_key_file": "/home/pypnm/.ssh/id_cmts"
+    },
+    
+    "cm_proxy": {
+        "host": "",
+        "port": 22,
+        "username": "pypnm",
+        "key_file": "/home/pypnm/.ssh/id_cm_proxy"
+    },
+    
+    "tftp_server": {
+        "host": "",
+        "port": 22,
+        "username": "pypnm",
+        "key_file": "/home/pypnm/.ssh/id_tftp",
+        "tftp_path": "/tftpboot"
+    }
+}
