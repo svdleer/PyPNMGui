@@ -213,7 +213,7 @@ def get_cmts_modems(cmts_name):
         # Call PyPNM API - it will use the agent for SNMP
         client = PyPNMClient()
         result = client.get_cmts_modems(
-            cmts_ip=cmts['ip_address'],
+            cmts_ip=cmts.get('ip') or cmts.get('ip_address'),  # Support both key names
             community=community,
             limit=limit,
             enrich=enrich,
