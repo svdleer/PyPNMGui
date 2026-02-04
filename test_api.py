@@ -13,6 +13,7 @@ from typing import Dict, List, Any
 
 # Configuration
 GUI_BASE_URL = "http://localhost:5050"
+GUI_API_URL = "http://localhost:5050/api"
 PYPNM_BASE_URL = "http://localhost:8000"
 
 # Test data
@@ -112,7 +113,7 @@ class APITester:
         self.test_endpoint(
             "GUI Health Check",
             "GET",
-            f"{GUI_BASE_URL}/health"
+            f"{GUI_API_URL}/health"
         )
         
         # PyPNM API health
@@ -139,14 +140,14 @@ class APITester:
         self.test_endpoint(
             "List All CMTS",
             "GET",
-            f"{GUI_BASE_URL}/cmts"
+            f"{GUI_API_URL}/cmts"
         )
         
         # CMTS summary
         self.test_endpoint(
             "CMTS Summary",
             "GET",
-            f"{GUI_BASE_URL}/cmts/summary"
+            f"{GUI_API_URL}/cmts/summary"
         )
     
     def test_modem_endpoints(self):
@@ -159,14 +160,14 @@ class APITester:
         self.test_endpoint(
             "List Modems",
             "GET",
-            f"{GUI_BASE_URL}/modems"
+            f"{GUI_API_URL}/modems"
         )
         
         # Get specific modem
         self.test_endpoint(
             "Get Specific Modem",
             "GET",
-            f"{GUI_BASE_URL}/modems/{TEST_MAC}"
+            f"{GUI_API_URL}/modems/{TEST_MAC}"
         )
         
         # System info (needs real modem)
