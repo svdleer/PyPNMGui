@@ -208,7 +208,15 @@ def get_cmts_modems(cmts_name):
     limit = int(request.args.get('limit', 10000))
     
     try:
-        cmts_ip = cmts.get('ip') or cmts.get('ip_address')
+        # CMTSProvider returns 'IPAddress' from appdb format
+        cmts_ip = cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address')
+        
+        if not cmts_ip:
+            logger.error(f"CMTS {cmts_name} has no IP address: {cmts}")
+            return jsonify({
+                "status": "error",
+                "message": f"CMTS '{cmts_name}' has no IP address configured"
+            }), 500
         
         # Call PyPNM API which will route to agent for SNMP
         client = PyPNMClient()
