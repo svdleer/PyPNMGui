@@ -8,7 +8,6 @@ from flask import jsonify, request, current_app
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
 from app.core.pypnm_client import PyPNMClient
-from pysnmp.hlapi import *
 
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
@@ -193,7 +192,7 @@ def get_cmts_interfaces(cmts_name):
 
 @api_bp.route('/cmts/<cmts_name>/modems', methods=['GET'])
 def get_cmts_modems(cmts_name):
-    """Get modems from a specific CMTS via direct SNMP."""
+    """Get modems from a specific CMTS via PyPNM API -> Agent -> SNMP."""
     logger = logging.getLogger(__name__)
     
     # Get CMTS info from provider
@@ -211,65 +210,43 @@ def get_cmts_modems(cmts_name):
     try:
         cmts_ip = cmts.get('ip') or cmts.get('ip_address')
         
-        # DOCSIS 3.0 Cable Modem MAC Table OID
-        docsIfCmtsCmStatusMacAddress_oid = '1.3.6.1.2.1.10.127.1.3.3.1.2'
+        # Call PyPNM API which will route to agent for SNMP
+        client = PyPNMClient()
+        result = client.get_cmts_modems(
+            cmts_ip=cmts_ip,
+            community=community,
+            limit=limit
+        )
         
-        modems = []
-        
-        # SNMP walk to get all modem MAC addresses
-        for (errorIndication, errorStatus, errorIndex, varBinds) in bulkCmd(
-            SnmpEngine(),
-            CommunityData(community),
-            UdpTransportTarget((cmts_ip, 161), timeout=5, retries=2),
-            ContextData(),
-            0, 25,  # Non-repeaters, max-repetitions
-            ObjectType(ObjectIdentity(docsIfCmtsCmStatusMacAddress_oid)),
-            lexicographicMode=False
-        ):
-            if errorIndication:
-                logger.error(f"SNMP error: {errorIndication}")
-                break
-            elif errorStatus:
-                logger.error(f"SNMP error: {errorStatus.prettyPrint()}")
-                break
-            else:
-                for varBind in varBinds:
-                    oid, value = varBind
-                    # Extract MAC address from hex string
-                    mac_hex = value.prettyPrint()
-                    if mac_hex.startswith('0x'):
-                        mac_hex = mac_hex[2:]
-                    # Convert to standard MAC format
-                    if len(mac_hex) == 12:
-                        mac_address = ':'.join(mac_hex[i:i+2] for i in range(0, 12, 2))
-                        modems.append({
-                            "mac_address": mac_address.upper(),
-                            "cmts": cmts_name
-                        })
+        if result.get('success'):
+            modems = result.get('modems', [])
+            logger.info(f"Retrieved {len(modems)} modems from {cmts_name} via PyPNM API/agent")
             
-            if len(modems) >= limit:
-                break
-        
-        logger.info(f"Retrieved {len(modems)} modems from {cmts_name} via SNMP")
-        
-        # Cache in Redis if available
-        if REDIS_AVAILABLE and redis_client:
-            try:
-                cache_key = f"modems:{cmts_name}"
-                redis_client.setex(cache_key, REDIS_TTL, json.dumps({
-                    "cmts": cmts_name,
-                    "modems": modems,
-                    "timestamp": str(current_app.config.get('SERVER_START_TIME', ''))
-                }))
-            except Exception as e:
-                logger.warning(f"Redis cache error: {e}")
-        
-        return jsonify({
-            "status": "success",
-            "cmts": cmts_name,
-            "modems": modems,
-            "count": len(modems)
-        })
+            # Cache in Redis if available
+            if REDIS_AVAILABLE and redis_client:
+                try:
+                    cache_key = f"modems:{cmts_name}"
+                    redis_client.setex(cache_key, REDIS_TTL, json.dumps({
+                        "cmts": cmts_name,
+                        "modems": modems,
+                        "timestamp": result.get('timestamp')
+                    }))
+                except Exception as e:
+                    logger.warning(f"Redis cache error: {e}")
+            
+            return jsonify({
+                "status": "success",
+                "cmts": cmts_name,
+                "modems": modems,
+                "count": len(modems)
+            })
+        else:
+            error_msg = result.get('error', 'Unknown error from PyPNM API')
+            logger.error(f"PyPNM API error for {cmts_name}: {error_msg}")
+            return jsonify({
+                "status": "error",
+                "message": error_msg
+            }), 500
             
     except Exception as e:
         logger.error(f"Error getting modems from {cmts_name}: {e}")

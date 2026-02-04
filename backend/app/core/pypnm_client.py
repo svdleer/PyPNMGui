@@ -749,8 +749,49 @@ class PyPNMClient:
         except Exception as e:
             logger.error(f"PyPNM health check failed: {e}")
             return False
-
-
+    
+    # ============== CMTS Modem Discovery Endpoints ==============
+    
+    def get_cmts_modems(self, cmts_ip: str, community: str = "public", 
+                       limit: int = 10000) -> Dict[str, Any]:
+        """
+        Get all modems from a CMTS via agent SNMP bulk walk.
+        
+        This endpoint uses PyPNM API which routes the request to an agent
+        for SNMP operations. The agent performs a bulk walk of the DOCSIS
+        modem MAC address table.
+        
+        Args:
+            cmts_ip: CMTS IP address
+            community: SNMP community string
+            limit: Maximum number of modems to return
+            
+        Returns:
+            {
+                "success": bool,
+                "modems": [{"mac_address": str, ...}, ...],
+                "count": int,
+                "timestamp": str
+            }
+        """
+        endpoint = "/cmts/modems"
+        payload = {
+            "cmts_ip": cmts_ip,
+            "community": community,
+            "limit": limit
+        }
+        
+        try:
+            logger.debug(f"POST {endpoint} with payload: {payload}")
+            response = self._post(endpoint, payload)
+            return response
+        except Exception as e:
+            logger.error(f"Error getting CMTS modems: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "modems": []
+            }
 # Global PyPNM client instance
 _pypnm_client: Optional[PyPNMClient] = None
 
