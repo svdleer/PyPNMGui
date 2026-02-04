@@ -206,6 +206,8 @@ def get_cmts_modems(cmts_name):
     # Get query parameters
     community = request.args.get('community', get_cmts_community())
     limit = int(request.args.get('limit', 10000))
+    enrich = request.args.get('enrich', 'true').lower() == 'true'  # Enable enrichment by default
+    modem_community = request.args.get('modem_community', get_default_community())
     
     try:
         # CMTSProvider returns 'IPAddress' from appdb format
@@ -219,11 +221,14 @@ def get_cmts_modems(cmts_name):
             }), 500
         
         # Call PyPNM API which will route to agent for SNMP
+        # Enrichment queries each modem for model/firmware via modem_community
         client = PyPNMClient()
         result = client.get_cmts_modems(
             cmts_ip=cmts_ip,
             community=community,
-            limit=limit
+            limit=limit,
+            enrich=enrich,
+            modem_community=modem_community
         )
         
         if result.get('success'):
