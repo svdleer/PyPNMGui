@@ -220,7 +220,7 @@
                                                 <th>Model</th>
                                                 <th>Firmware</th>
                                                 <th>DOCSIS</th>
-                                                <th>CMTS</th>
+                                                <th>CMTS / Interface</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -245,7 +245,14 @@
                                                         <i class="bi bi-lightning-fill"></i>
                                                     </span>
                                                 </td>
-                                                <td>{{ modem.cmts }}<br><small class="text-muted">{{ modem.cmts_interface }}</small></td>
+                                                <td>{{ modem.cmts || 'N/A' }}<br>
+                                                    <small class="text-muted" v-if="modem.upstream_interface">
+                                                        <i class="bi bi-ethernet me-1"></i>{{ modem.upstream_interface }}
+                                                    </small>
+                                                    <small class="text-muted" v-if="modem.upstream_channel_id">
+                                                        <span class="badge bg-secondary ms-1">CH: {{ modem.upstream_channel_id }}</span>
+                                                    </small>
+                                                </td>
                                                 <td>
                                                     <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
                                                         <i class="bi bi-eye"></i>
@@ -393,8 +400,13 @@
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div>
-                                                <h6 class="text-muted mb-2">Interface</h6>
-                                                <h4 class="mb-0">{{ selectedModem.cmts_interface || 'N/A' }}</h4>
+                                                <h6 class="text-muted mb-2">Upstream Interface</h6>
+                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.upstream_interface">
+                                                    {{ selectedModem.upstream_interface || selectedModem.cmts_interface || 'N/A' }}
+                                                </h5>
+                                                <small v-if="selectedModem.upstream_channel_id" class="text-muted">
+                                                    <span class="badge bg-secondary mt-1">CH: {{ selectedModem.upstream_channel_id }}</span>
+                                                </small>
                                             </div>
                                             <i class="bi bi-ethernet text-purple" style="font-size: 2rem; color: #6f42c1;"></i>
                                         </div>
@@ -450,6 +462,18 @@
                                             <tr>
                                                 <td class="text-muted">Firmware</td>
                                                 <td><small>{{ selectedModem.software_version || 'N/A' }}</small></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.upstream_interface">
+                                                <td class="text-muted">Upstream Interface</td>
+                                                <td><code>{{ selectedModem.upstream_interface }}</code></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.upstream_channel_id">
+                                                <td class="text-muted">Upstream Channel</td>
+                                                <td><span class="badge bg-secondary">{{ selectedModem.upstream_channel_id }}</span></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.md_if_index">
+                                                <td class="text-muted">MD-IF-INDEX</td>
+                                                <td><code>{{ selectedModem.md_if_index }}</code></td>
                                             </tr>
                                         </table>
                                     </div>
