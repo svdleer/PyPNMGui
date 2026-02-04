@@ -700,6 +700,44 @@ class PyPNMClient:
         }
         logger.info(f"UTSC payload trigger_count={'OMITTED' if trigger_count is None else trigger_count}: {payload}")
         return self._post("/docs/pnm/us/spectrumAnalyzer/getCapture", payload)
+    
+    def get_cmts_modems(
+        self,
+        cmts_ip: str,
+        community: str = "public",
+        limit: int = 10000,
+        enrich: bool = False,
+        modem_community: str = "private"
+    ) -> Dict[str, Any]:
+        """
+        Get cable modems from CMTS via PyPNM API (which uses agent for SNMP).
+        
+        Args:
+            cmts_ip: CMTS IP address
+            community: CMTS SNMP community
+            limit: Maximum number of modems to return
+            enrich: Whether to enrich modem data with additional info
+            modem_community: SNMP community for individual modems
+        
+        Returns:
+            Dictionary with 'success', 'modems', and optional 'error'
+        """
+        payload = {
+            "cmts_ip": cmts_ip,
+            "community": community,
+            "limit": limit,
+            "enrich": enrich,
+            "modem_community": modem_community
+        }
+        
+        try:
+            # PyPNM API will route this through the agent
+            response = self._post("/cmts/modems", payload)
+            return response
+        except Exception as e:
+            logger.error(f"Error getting modems from CMTS {cmts_ip}: {e}")
+            return {"success": False, "error": str(e)}
+    
     def health_check(self) -> bool:
         """Check if PyPNM server is reachable."""
         try:

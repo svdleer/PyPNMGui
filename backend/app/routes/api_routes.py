@@ -190,6 +190,74 @@ def get_cmts_interfaces(cmts_name):
     }), 404
 
 
+@api_bp.route('/cmts/<cmts_name>/modems', methods=['GET'])
+def get_cmts_modems(cmts_name):
+    """Get modems from a specific CMTS via PyPNM API (which uses agent for SNMP)."""
+    logger = logging.getLogger(__name__)
+    
+    # Get CMTS info from provider
+    cmts = CMTSProvider.get_cmts_by_hostname(cmts_name)
+    if not cmts:
+        return jsonify({
+            "status": "error",
+            "message": f"CMTS '{cmts_name}' not found"
+        }), 404
+    
+    # Get query parameters
+    community = request.args.get('community', get_cmts_community())
+    limit = int(request.args.get('limit', 10000))
+    enrich = request.args.get('enrich', 'false').lower() == 'true'
+    modem_community = request.args.get('modem_community', get_default_community())
+    
+    try:
+        # Call PyPNM API - it will use the agent for SNMP
+        client = PyPNMClient()
+        result = client.get_cmts_modems(
+            cmts_ip=cmts['ip_address'],
+            community=community,
+            limit=limit,
+            enrich=enrich,
+            modem_community=modem_community
+        )
+        
+        if result.get('success'):
+            modems = result.get('modems', [])
+            logger.info(f"Retrieved {len(modems)} modems from {cmts_name} via PyPNM API/agent")
+            
+            # Cache in Redis if available
+            if REDIS_AVAILABLE and redis_client:
+                try:
+                    cache_key = f"modems:{cmts_name}"
+                    redis_client.setex(cache_key, REDIS_TTL, json.dumps({
+                        "cmts": cmts_name,
+                        "modems": modems,
+                        "timestamp": result.get('timestamp')
+                    }))
+                except Exception as e:
+                    logger.warning(f"Redis cache error: {e}")
+            
+            return jsonify({
+                "status": "success",
+                "cmts": cmts_name,
+                "modems": modems,
+                "count": len(modems)
+            })
+        else:
+            error_msg = result.get('error', 'Unknown error from PyPNM API')
+            logger.error(f"PyPNM API error for {cmts_name}: {error_msg}")
+            return jsonify({
+                "status": "error",
+                "message": error_msg
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting modems from {cmts_name}: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
 # ============== System Information Endpoints ==============
 
 @api_bp.route('/modem/<mac_address>/system-info', methods=['POST'])
