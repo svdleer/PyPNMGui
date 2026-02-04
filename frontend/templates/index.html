@@ -217,10 +217,10 @@
                                                 <th>MAC Address</th>
                                                 <th>IP Address</th>
                                                 <th>Vendor</th>
-                                                <th>Model</th>
                                                 <th>Firmware</th>
                                                 <th>DOCSIS</th>
-                                                <th>CMTS / Interface</th>
+                                                <th>CableMac</th>
+                                                <th>FiberNode</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -235,8 +235,7 @@
                                                 <td><code>{{ modem.mac_address }}</code></td>
                                                 <td>{{ modem.ip_address }}</td>
                                                 <td>{{ modem.vendor }}</td>
-                                                <td>{{ modem.model }}</td>
-                                                <td><small>{{ modem.software_version }}</small></td>
+                                                <td><small>{{ modem.firmware || modem.software_version }}</small></td>
                                                 <td>
                                                     <span class="badge" :class="modem.docsis_version >= '3.1' ? 'bg-info' : 'bg-secondary'">
                                                         {{ modem.docsis_version }}
@@ -245,13 +244,18 @@
                                                         <i class="bi bi-lightning-fill"></i>
                                                     </span>
                                                 </td>
-                                                <td>{{ modem.cmts || 'N/A' }}<br>
-                                                    <small class="text-muted" v-if="modem.upstream_interface">
-                                                        <i class="bi bi-ethernet me-1"></i>{{ modem.upstream_interface }}
+                                                <td>
+                                                    <small class="text-muted" v-if="modem.cable_mac">
+                                                        {{ modem.cable_mac }}
                                                     </small>
+                                                    <small class="text-muted" v-else>N/A</small>
                                                     <small class="text-muted" v-if="modem.upstream_channel_id">
                                                         <span class="badge bg-secondary ms-1">CH: {{ modem.upstream_channel_id }}</span>
                                                     </small>
+                                                </td>
+                                                <td>
+                                                    <small v-if="modem.fiber_node">{{ modem.fiber_node }}</small>
+                                                    <small v-else class="text-muted">N/A</small>
                                                 </td>
                                                 <td>
                                                     <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
@@ -400,9 +404,9 @@
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div>
-                                                <h6 class="text-muted mb-2">Upstream Interface</h6>
-                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.upstream_interface">
-                                                    {{ selectedModem.upstream_interface || selectedModem.cmts_interface || 'N/A' }}
+                                                <h6 class="text-muted mb-2">Cable MAC</h6>
+                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.cable_mac">
+                                                    {{ selectedModem.cable_mac || 'N/A' }}
                                                 </h5>
                                                 <small v-if="selectedModem.upstream_channel_id" class="text-muted">
                                                     <span class="badge bg-secondary mt-1">CH: {{ selectedModem.upstream_channel_id }}</span>
@@ -418,12 +422,12 @@
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div>
-                                                <h6 class="text-muted mb-2">Firmware</h6>
-                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.software_version">
-                                                    {{ selectedModem.software_version || 'N/A' }}
+                                                <h6 class="text-muted mb-2">Fiber Node</h6>
+                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.fiber_node">
+                                                    {{ selectedModem.fiber_node || 'N/A' }}
                                                 </h5>
                                             </div>
-                                            <i class="bi bi-cpu" style="font-size: 2rem; color: #fd7e14;"></i>
+                                            <i class="bi bi-diagram-3" style="font-size: 2rem; color: #fd7e14;"></i>
                                         </div>
                                     </div>
                                 </div>
@@ -461,11 +465,15 @@
                                             </tr>
                                             <tr>
                                                 <td class="text-muted">Firmware</td>
-                                                <td><small>{{ selectedModem.software_version || 'N/A' }}</small></td>
+                                                <td><small>{{ selectedModem.firmware || selectedModem.software_version || 'N/A' }}</small></td>
                                             </tr>
-                                            <tr v-if="selectedModem.upstream_interface">
-                                                <td class="text-muted">Upstream Interface</td>
-                                                <td><code>{{ selectedModem.upstream_interface }}</code></td>
+                                            <tr v-if="selectedModem.cable_mac">
+                                                <td class="text-muted">Cable MAC Interface</td>
+                                                <td><code>{{ selectedModem.cable_mac }}</code></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.fiber_node">
+                                                <td class="text-muted">Fiber Node</td>
+                                                <td><span class="badge bg-info">{{ selectedModem.fiber_node }}</span></td>
                                             </tr>
                                             <tr v-if="selectedModem.upstream_channel_id">
                                                 <td class="text-muted">Upstream Channel</td>
