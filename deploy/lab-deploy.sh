@@ -275,6 +275,10 @@ full_deploy() {
     ssh "${REMOTE_SERVER}" << 'ENDSSH'
         set -e
         
+        echo "[INFO] Pulling PyPNM API..."
+        cd /home/svdleer/docker/PyPNM/
+        git pull
+        
         echo "[INFO] Pulling PyPNMGui..."
         cd /opt/pypnm-gui-lab/
         git pull
