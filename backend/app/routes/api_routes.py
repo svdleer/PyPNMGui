@@ -251,7 +251,10 @@ def get_cmts_modems(cmts_name):
                 "status": "success",
                 "cmts": cmts_name,
                 "modems": modems,
-                "count": len(modems)
+                "count": len(modems),
+                "enriched": result.get('enriched', False),
+                "cached": result.get('cached', False),
+                "enriching": result.get('enriching', False)
             })
         else:
             error_msg = result.get('error', 'Unknown error from PyPNM API')
