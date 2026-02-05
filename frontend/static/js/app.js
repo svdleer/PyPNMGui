@@ -315,7 +315,10 @@ createApp({
                         cmts: data.cmts_hostname,
                         cmts_ip: data.cmts_ip,  // For upstream PNM
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
-                        software_version: m.software_version || ''
+                        software_version: m.software_version || '',
+                        cable_mac: m.cable_mac || '',
+                        upstream_interface: m.upstream_interface || '',
+                        fiber_node: m.fiber_node || ''
                     }));
                     const cacheInfo = data.cached ? ' (cached)' : '';
                     const enrichInfo = data.enriched ? ' [enriched]' : (data.enriching ? ' [enriching in background...]' : '');
@@ -366,7 +369,10 @@ createApp({
                             cmts: data.cmts_hostname,
                             cmts_ip: data.cmts_ip,
                             cmts_interface: m.interface || m.cmts_index || 'N/A',
-                            software_version: m.software_version || ''
+                            software_version: m.software_version || '',
+                            cable_mac: m.cable_mac || '',
+                            upstream_interface: m.upstream_interface || '',
+                            fiber_node: m.fiber_node || ''
                         }));
                         this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
                         console.log('Modem list refreshed with enriched data');
