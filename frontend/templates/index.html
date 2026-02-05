@@ -220,7 +220,7 @@
                                                 <th>Firmware</th>
                                                 <th>DOCSIS</th>
                                                 <th>CableMac</th>
-                                                <th>FiberNode</th>
+                                                <th>Upstream</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -246,16 +246,15 @@
                                                 </td>
                                                 <td>
                                                     <small class="text-muted" v-if="modem.cable_mac">
-                                                        {{ modem.cable_mac }}
+                                                        {{ modem.cable_mac.replace('cable-mac ', '') }}
                                                     </small>
-                                                    <small class="text-muted" v-else>N/A</small>
-                                                    <small class="text-muted" v-if="modem.upstream_channel_id">
-                                                        <span class="badge bg-secondary ms-1">CH: {{ modem.upstream_channel_id }}</span>
-                                                    </small>
+                                                    <small class="text-muted" v-else>-</small>
                                                 </td>
                                                 <td>
-                                                    <small v-if="modem.fiber_node">{{ modem.fiber_node }}</small>
-                                                    <small v-else class="text-muted">N/A</small>
+                                                    <small v-if="modem.upstream_interface" :class="modem.upstream_interface.includes('ofdma') ? 'text-primary fw-bold' : 'text-muted'">
+                                                        {{ modem.upstream_interface.replace('cable-mac ', '').replace('cable-us-ofdma ', 'OFDMA ') }}
+                                                    </small>
+                                                    <small v-else class="text-muted">-</small>
                                                 </td>
                                                 <td>
                                                     <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
