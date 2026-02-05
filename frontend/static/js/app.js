@@ -321,6 +321,12 @@ createApp({
                     const enrichInfo = data.enriched ? ' [enriched]' : (data.enriching ? ' [enriching in background...]' : '');
                     this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems${cacheInfo}${enrichInfo}`;
                     this.searchPerformed = true;
+                    
+                    // Auto-refresh after 15s to get enriched data
+                    if (this.enrichModems && !data.enriched && !data.cached) {
+                        console.log('Scheduling auto-refresh in 15s for enriched data...');
+                        setTimeout(() => this.refreshEnrichedModems(), 15000);
+                    }
                 } else {
                     this.showError('Failed to get modems', data.message || 'Unknown error');
                 }
@@ -329,6 +335,45 @@ createApp({
                 this.showError('Failed to get modems', error.message);
             } finally {
                 this.loadingLiveModems = false;
+            }
+        },
+        
+        async refreshEnrichedModems() {
+            // Silently refresh modem list to get enriched data (no loading spinner)
+            if (!this.selectedCmts) return;
+            
+            try {
+                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000`;
+                if (this.enrichModems) {
+                    url += `&enrich=true&modem_community=${this.snmpCommunityModem}`;
+                }
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.modems) {
+                    // Check if we got enriched data (any modem has model)
+                    const hasEnrichedData = data.modems.some(m => m.model || m.software_version);
+                    if (hasEnrichedData) {
+                        this.modems = data.modems.map(m => ({
+                            mac_address: m.mac_address,
+                            ip_address: m.ip_address,
+                            status: m.status || 'unknown',
+                            name: m.mac_address,
+                            vendor: m.vendor || 'Unknown',
+                            model: m.model || 'N/A',
+                            docsis_version: m.docsis_version || 'Unknown',
+                            cmts: data.cmts_hostname,
+                            cmts_ip: data.cmts_ip,
+                            cmts_interface: m.interface || m.cmts_index || 'N/A',
+                            software_version: m.software_version || ''
+                        }));
+                        this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
+                        console.log('Modem list refreshed with enriched data');
+                    }
+                }
+            } catch (error) {
+                console.warn('Silent refresh failed:', error);
             }
         },
         
