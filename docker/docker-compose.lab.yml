@@ -82,7 +82,7 @@ services:
     environment:
       - AGENT_ID=lab-agent-local
       - PYPNM_SERVER_URL=ws://pypnm-api:8000/api/ws/agent
-      - PYPNM_CM_COMMUNITY=Z1gg0Sp3c1@l
+      - PYPNM_CM_COMMUNITY=z1gg0m0n1t0r1ng
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
