@@ -702,7 +702,8 @@ def pypnm_health_check():
     pypnm_api_url = os.environ.get('PYPNM_BASE_URL', os.environ.get('PYPNM_API_URL', 'http://localhost:8000'))
     
     try:
-        response = requests.get(f"{pypnm_api_url}/", timeout=3)
+        # Use /docs endpoint as health check (root returns 404)
+        response = requests.get(f"{pypnm_api_url}/docs", timeout=3)
         if response.status_code == 200:
             return jsonify({
                 "status": "ok",
