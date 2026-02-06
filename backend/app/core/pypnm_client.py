@@ -169,6 +169,69 @@ class PyPNMClient:
                 "message": f"Unexpected error: {str(e)}"
             }
     
+    # ============== Agent Management ==============
+    
+    def get_agents(self) -> Dict[str, Any]:
+        """
+        Get list of connected agents.
+        
+        Endpoint: GET /api/agents
+        """
+        url = f"{self.config.base_url}/api/agents"
+        try:
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get agents: {e}")
+            return {"agents": [], "error": str(e)}
+    
+    def send_agent_task(self, agent_id: str, command: str, params: Dict[str, Any], 
+                       timeout: float = 60.0) -> Dict[str, Any]:
+        """
+        Send a task to a specific agent via PyPNM API.
+        
+        This is for CMTS operations that need to go through an agent.
+        
+        Endpoint: POST /api/agents/{agent_id}/task
+        
+        Args:
+            agent_id: The agent ID (e.g., 'pypnm-agent-lab')
+            command: The command to execute (e.g., 'pnm_us_get_interfaces', 'cmts_get_modem_info')
+            params: Command parameters
+            timeout: Task timeout in seconds
+            
+        Returns:
+            Task result from agent
+        """
+        url = f"{self.config.base_url}/api/agents/{agent_id}/task"
+        try:
+            logger.info(f"Sending agent task: {command} to {agent_id}")
+            response = self.session.post(
+                url,
+                params={"command": command, "timeout": timeout},
+                json=params,
+                timeout=timeout + 10  # HTTP timeout slightly longer than task timeout
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Agent task result: success={result.get('success', False)}")
+            return result
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Agent task HTTP error: {e}")
+            return {"success": False, "error": f"HTTP error: {e.response.status_code}"}
+        except Exception as e:
+            logger.error(f"Agent task failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def get_first_agent_id(self) -> Optional[str]:
+        """Get the ID of the first available agent."""
+        agents = self.get_agents()
+        agent_list = agents.get('agents', [])
+        if agent_list:
+            return agent_list[0].get('agent_id')
+        return None
+    
     # ============== System Information Endpoints ==============
     
     def get_sys_descr(self, mac_address: str, ip_address: str, 

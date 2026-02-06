@@ -1049,7 +1049,7 @@ def get_upstream_interfaces(mac_address):
         "community": "optional"
     }
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1059,18 +1059,16 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_get_interfaces') if agent_manager else None
+        client = PyPNMClient()
         
-        if not agent:
-            # Fallback to any CMTS-capable agent
-            agent = agent_manager.get_agent_for_capability('cmts_snmp_direct') if agent_manager else None
+        # Get first available agent
+        agent_id = client.get_first_agent_id()
+        if not agent_id:
+            return jsonify({"status": "error", "message": "No agent available"}), 503
         
-        if not agent:
-            return jsonify({"status": "error", "message": "No agent available for upstream interface discovery"}), 503
-        
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
+        # Send task to agent via PyPNM API
+        result = client.send_agent_task(
+            agent_id=agent_id,
             command='pnm_us_get_interfaces',
             params={
                 "cmts_ip": cmts_ip,
@@ -1080,15 +1078,11 @@ def get_upstream_interfaces(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=90)
+        if not result.get('success'):
+            error_msg = result.get('error', 'Task failed')
+            return jsonify({"status": "error", "message": error_msg}), 500
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
+        task_result = result.get('result', result)
         
         # Extract OFDMA ifIndex from ofdma_channels list (agent returns list of channels)
         ofdma_channels = task_result.get('ofdma_channels', [])
@@ -1428,7 +1422,7 @@ def start_utsc(mac_address):
 @pypnm_bp.route('/upstream/utsc/stop/<mac_address>', methods=['POST'])
 def stop_utsc(mac_address):
     """Stop UTSC test on CMTS."""
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1439,14 +1433,13 @@ def stop_utsc(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_stop') if agent_manager else None
-        
-        if not agent:
+        client = PyPNMClient()
+        agent_id = client.get_first_agent_id()
+        if not agent_id:
             return jsonify({"status": "error", "message": "No agent available for UTSC"}), 503
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
+        result = client.send_agent_task(
+            agent_id=agent_id,
             command='pnm_utsc_stop',
             params={
                 "cmts_ip": cmts_ip,
@@ -1456,15 +1449,10 @@ def stop_utsc(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if not result.get('success'):
+            return jsonify({"status": "error", "message": result.get('error', 'Task failed')}), 500
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
+        task_result = result.get('result', result)
         
         return jsonify({
             "success": task_result.get('success', False),
@@ -1484,7 +1472,7 @@ def get_utsc_status(mac_address):
     Returns:
     - meas_status: 1=other, 2=inactive, 3=busy, 4=sampleReady, 5=error
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1495,14 +1483,13 @@ def get_utsc_status(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_utsc_status') if agent_manager else None
-        
-        if not agent:
+        client = PyPNMClient()
+        agent_id = client.get_first_agent_id()
+        if not agent_id:
             return jsonify({"status": "error", "message": "No agent available for UTSC"}), 503
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
+        result = client.send_agent_task(
+            agent_id=agent_id,
             command='pnm_utsc_status',
             params={
                 "cmts_ip": cmts_ip,
@@ -1512,15 +1499,10 @@ def get_utsc_status(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if not result.get('success'):
+            return jsonify({"status": "error", "message": result.get('error', 'Task failed')}), 500
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
+        task_result = result.get('result', result)
         
         return jsonify({
             "success": task_result.get('success', False),
@@ -1547,7 +1529,7 @@ def start_us_rxmer(mac_address):
         "community": "optional"
     }
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1558,14 +1540,13 @@ def start_us_rxmer(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_start') if agent_manager else None
-        
-        if not agent:
+        client = PyPNMClient()
+        agent_id = client.get_first_agent_id()
+        if not agent_id:
             return jsonify({"status": "error", "message": "No agent available for US RxMER"}), 503
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
+        result = client.send_agent_task(
+            agent_id=agent_id,
             command='pnm_us_rxmer_start',
             params={
                 "cmts_ip": cmts_ip,
@@ -1578,15 +1559,10 @@ def start_us_rxmer(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if not result.get('success'):
+            return jsonify({"status": "error", "message": result.get('error', 'Task failed')}), 500
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
+        task_result = result.get('result', result)
         
         # Extract filename from result - PyPNM returns it in the result
         response = {
@@ -1608,7 +1584,7 @@ def start_us_rxmer(mac_address):
 @pypnm_bp.route('/upstream/rxmer/status/<mac_address>', methods=['POST'])
 def get_us_rxmer_status(mac_address):
     """Get Upstream RxMER measurement status."""
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1619,14 +1595,13 @@ def get_us_rxmer_status(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_status') if agent_manager else None
-        
-        if not agent:
+        client = PyPNMClient()
+        agent_id = client.get_first_agent_id()
+        if not agent_id:
             return jsonify({"status": "error", "message": "No agent available for US RxMER"}), 503
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
+        result = client.send_agent_task(
+            agent_id=agent_id,
             command='pnm_us_rxmer_status',
             params={
                 "cmts_ip": cmts_ip,
@@ -1636,15 +1611,10 @@ def get_us_rxmer_status(mac_address):
             timeout=60
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=60)
+        if not result.get('success'):
+            return jsonify({"status": "error", "message": result.get('error', 'Task failed')}), 500
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
+        task_result = result.get('result', result)
         
         return jsonify({
             "success": task_result.get('success', False),
@@ -1793,7 +1763,7 @@ def get_us_rxmer_data(mac_address):
     
     Returns RxMER per subcarrier for graphing.
     """
-    from app.core.simple_ws import get_simple_agent_manager
+    from app.core.pypnm_client import PyPNMClient
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
@@ -1804,14 +1774,13 @@ def get_us_rxmer_data(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        agent_manager = get_simple_agent_manager()
-        agent = agent_manager.get_agent_for_capability('pnm_us_rxmer_data') if agent_manager else None
-        
-        if not agent:
+        client = PyPNMClient()
+        agent_id = client.get_first_agent_id()
+        if not agent_id:
             return jsonify({"status": "error", "message": "No agent available for US RxMER data"}), 503
         
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
+        result = client.send_agent_task(
+            agent_id=agent_id,
             command='pnm_us_rxmer_data',
             params={
                 "cmts_ip": cmts_ip,
@@ -1822,15 +1791,10 @@ def get_us_rxmer_data(mac_address):
             timeout=120
         )
         
-        result = agent_manager.wait_for_task(task_id, timeout=120)
+        if not result.get('success'):
+            return jsonify({"status": "error", "message": result.get('error', 'Task failed')}), 500
         
-        if result is None:
-            return jsonify({"status": "error", "message": "Task timed out"}), 504
-        
-        if result.get('error'):
-            return jsonify({"status": "error", "message": result.get('error')}), 500
-        
-        task_result = result.get('result', {})
+        task_result = result.get('result', result)
         
         return jsonify({
             "success": task_result.get('success', False),
