@@ -695,6 +695,34 @@ def health_check():
     })
 
 
+@api_bp.route('/pypnm/health', methods=['GET'])
+def pypnm_health_check():
+    """Check PyPNM API health by testing connection to pypnm-api service."""
+    import requests
+    pypnm_api_url = os.environ.get('PYPNM_API_URL', 'http://eve-li-pypnm:8000')
+    
+    try:
+        response = requests.get(f"{pypnm_api_url}/", timeout=3)
+        if response.status_code == 200:
+            return jsonify({
+                "status": "ok",
+                "pypnm_healthy": True,
+                "pypnm_api_url": pypnm_api_url
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "pypnm_healthy": False,
+                "message": f"PyPNM API returned status {response.status_code}"
+            })
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "status": "error",
+            "pypnm_healthy": False,
+            "message": str(e)
+        })
+
+
 # ============== Cache Management ==============
 
 @api_bp.route('/cache/flush', methods=['POST'])

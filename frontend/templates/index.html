@@ -249,7 +249,8 @@
                                                     <span class="badge" :class="modem.docsis_version >= '3.1' ? 'bg-info' : 'bg-secondary'">
                                                         {{ modem.docsis_version }}
                                                     </span>
-                                                    <span v-if="modem.docsis_version >= '3.1'" class="badge bg-primary ms-1" title="DOCSIS 3.1 - OFDM/OFDMA capable">
+                                                    <span v-if="modem.upstream_interface && modem.upstream_interface.includes('ofdma')" 
+                                                          class="badge bg-primary ms-1" title="OFDMA Upstream Active">
                                                         <i class="bi bi-lightning-fill"></i>
                                                     </span>
                                                 </td>
@@ -260,8 +261,10 @@
                                                     <small class="text-muted" v-else>-</small>
                                                 </td>
                                                 <td>
-                                                    <small v-if="modem.upstream_interface" :class="modem.upstream_interface.includes('ofdma') ? 'text-primary fw-bold' : 'text-muted'">
-                                                        {{ modem.upstream_interface.replace('cable-mac ', '').replace('cable-us-ofdma ', 'OFDMA ') }}
+                                                    <small v-if="modem.upstream_interface" 
+                                                           :class="modem.upstream_interface.includes('ofdma') ? 'text-primary fw-bold' : 'text-muted'"
+                                                           :title="modem.upstream_interface">
+                                                        {{ modem.upstream_interface.replace('cable-upstream ', 'US ').replace('cable-us-ofdma ', 'OFDMA ').replace('cable-mac ', '') }}
                                                     </small>
                                                     <small v-else class="text-muted">-</small>
                                                 </td>
