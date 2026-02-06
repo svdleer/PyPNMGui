@@ -53,6 +53,80 @@ def get_default_tftp():
     return os.environ.get('TFTP_IPV4', '172.22.147.18')
 
 
+# ============== Compatibility Routes ==============
+# These routes support frontend calls using /modem/<mac>/... pattern
+# The canonical routes are /channel-stats/<mac>, /event-log/<mac>, etc.
+
+@pypnm_bp.route('/modem/<mac_address>/channel-stats', methods=['POST'])
+def modem_channel_stats_compat(mac_address):
+    """Compatibility route - redirects to /channel-stats/<mac>."""
+    return channel_stats(mac_address)
+
+
+@pypnm_bp.route('/modem/<mac_address>/event-log', methods=['POST'])
+def modem_event_log(mac_address):
+    """Get modem event log via PyPNM API."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', get_default_community())
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    
+    try:
+        result = client.get_event_log(mac_address, modem_ip, community)
+        
+        if result.get('status') == 0:
+            return jsonify(result)
+        else:
+            return jsonify({
+                "status": "error",
+                "message": result.get('message', 'Failed to get event log')
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Event log failed for {mac_address}: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+@pypnm_bp.route('/modem/<mac_address>/pre-eq', methods=['POST'])
+def modem_pre_eq(mac_address):
+    """Get upstream pre-equalization via PyPNM API."""
+    from app.core.pypnm_client import PyPNMClient
+    
+    data = request.get_json() or {}
+    modem_ip = data.get('modem_ip')
+    community = data.get('community', get_default_write_community())
+    tftp_ip = data.get('tftp_ip', get_default_tftp())
+    
+    if not modem_ip:
+        return jsonify({"status": "error", "message": "modem_ip required"}), 400
+    
+    client = PyPNMClient()
+    
+    try:
+        result = client.get_us_ofdma_pre_equalization(
+            mac_address, modem_ip, tftp_ip, community
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Pre-EQ failed for {mac_address}: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500
+
+
+# ============== End Compatibility Routes ==============
+
+
 @pypnm_bp.route('/measurements/<measurement_type>/<mac_address>', methods=['POST'])
 def pnm_measurement(measurement_type, mac_address):
     """
