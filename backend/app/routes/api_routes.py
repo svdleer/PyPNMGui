@@ -259,8 +259,11 @@ def get_cmts_modems(cmts_name):
             modems = result.get('modems', [])
             logger.info(f"Retrieved {len(modems)} modems from {cmts_name} via PyPNM API/agent")
             
-            # Cache in Redis if available
-            if REDIS_AVAILABLE and redis_client:
+            # Only cache in Redis if enrichment is complete (not still in progress)
+            is_enriched = result.get('enriched', False)
+            is_enriching = result.get('enriching', False)
+            
+            if REDIS_AVAILABLE and redis_client and is_enriched and not is_enriching:
                 try:
                     cache_key = f"modems:{cmts_name}"
                     redis_client.setex(cache_key, REDIS_TTL, json.dumps({
@@ -268,6 +271,7 @@ def get_cmts_modems(cmts_name):
                         "modems": modems,
                         "timestamp": result.get('timestamp')
                     }))
+                    logger.info(f"Cached {len(modems)} enriched modems for {cmts_name}")
                 except Exception as e:
                     logger.warning(f"Redis cache error: {e}")
             
