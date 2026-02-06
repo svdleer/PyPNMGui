@@ -621,11 +621,21 @@ def channel_stats(mac_address):
     client = PyPNMClient()
     
     try:
-        # Get all channel stats
-        ds_scqam = client.get_ds_scqam_stats(mac_address, modem_ip, community)
-        ds_ofdm = client.get_ds_ofdm_stats(mac_address, modem_ip, community)
-        us_atdma = client.get_us_atdma_stats(mac_address, modem_ip, community)
-        us_ofdma = client.get_us_ofdma_stats(mac_address, modem_ip, community)
+        # Get all channel stats in parallel for better performance
+        import concurrent.futures
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit all requests in parallel
+            future_scqam = executor.submit(client.get_ds_scqam_stats, mac_address, modem_ip, community)
+            future_ofdm = executor.submit(client.get_ds_ofdm_stats, mac_address, modem_ip, community)
+            future_atdma = executor.submit(client.get_us_atdma_stats, mac_address, modem_ip, community)
+            future_ofdma = executor.submit(client.get_us_ofdma_stats, mac_address, modem_ip, community)
+            
+            # Wait for all to complete
+            ds_scqam = future_scqam.result()
+            ds_ofdm = future_ofdm.result()
+            us_atdma = future_atdma.result()
+            us_ofdma = future_ofdma.result()
         
         # Process and enhance data with profile info
         downstream = {
