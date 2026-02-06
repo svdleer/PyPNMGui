@@ -28,7 +28,7 @@ try:
     import redis
     REDIS_HOST = os.environ.get('REDIS_HOST', 'eve-li-redis')
     REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
-    REDIS_TTL = int(os.environ.get('REDIS_TTL', '21600'))  # 6 hour cache
+    REDIS_TTL = int(os.environ.get('REDIS_TTL', '86400'))  # 24 hour cache
     redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     # Test connection
     redis_client.ping()
@@ -208,6 +208,7 @@ def get_cmts_modems(cmts_name):
     limit = int(request.args.get('limit', 10000))
     enrich = request.args.get('enrich', 'true').lower() == 'true'  # Enable enrichment by default
     modem_community = request.args.get('modem_community', get_default_community())
+    force_refresh = request.args.get('refresh', 'false').lower() == 'true'
     
     try:
         # CMTSProvider returns 'IPAddress' from appdb format
@@ -219,6 +220,29 @@ def get_cmts_modems(cmts_name):
                 "status": "error",
                 "message": f"CMTS '{cmts_name}' has no IP address configured"
             }), 500
+        
+        # Check Redis cache first (unless force_refresh)
+        if REDIS_AVAILABLE and redis_client and not force_refresh:
+            try:
+                cache_key = f"modems:{cmts_name}"
+                cached = redis_client.get(cache_key)
+                if cached:
+                    data = json.loads(cached)
+                    logger.info(f"Returning {len(data.get('modems', []))} modems from Redis cache for {cmts_name}")
+                    return jsonify({
+                        "status": "success",
+                        "cmts": cmts_name,
+                        "cmts_hostname": cmts_name,
+                        "cmts_ip": cmts_ip,
+                        "agent_id": "cached",
+                        "modems": data.get('modems', []),
+                        "count": len(data.get('modems', [])),
+                        "enriched": True,  # Cached data is already enriched
+                        "cached": True,
+                        "enriching": False
+                    })
+            except Exception as e:
+                logger.warning(f"Redis cache read error: {e}")
         
         # Call PyPNM API which will route to agent for SNMP
         # Enrichment queries each modem for model/firmware via modem_community
