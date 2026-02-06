@@ -246,7 +246,11 @@
                                                 <td>{{ modem.vendor }}</td>
                                                 <td><small>{{ modem.firmware || modem.software_version }}</small></td>
                                                 <td>
-                                                    <span class="badge" :class="modem.docsis_version >= '3.1' ? 'bg-info' : 'bg-secondary'">
+                                                    <span class="badge" :class="{
+                                                        'bg-info': modem.docsis_version >= '3.1',
+                                                        'bg-warning text-dark': modem.docsis_version == '3.0' || modem.docsis_version == 'DOCSIS 3.0',
+                                                        'bg-secondary': modem.docsis_version < '3.0' && modem.docsis_version != 'DOCSIS 3.0'
+                                                    }">
                                                         {{ modem.docsis_version }}
                                                     </span>
                                                     <span v-if="modem.upstream_interface && modem.upstream_interface.includes('ofdma')" 
