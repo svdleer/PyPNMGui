@@ -31,8 +31,8 @@ TEST_TIMEOUT = 30000  # 30 seconds
 MEASUREMENT_TIMEOUT = 120000  # 120 seconds for PNM measurements
 
 # Test modem (update with a real modem for live testing)
-TEST_MODEM_MAC = "14:ab:f0:e1:d0:4a"  # Example - change to your test modem
-TEST_MODEM_IP = "10.200.83.135"  # Example - change to your test modem
+TEST_MODEM_MAC = "ac:22:05:3a:d5:c0"  # Online modem from lab CMTS
+TEST_MODEM_IP = "10.206.234.83"  # Online modem IP
 TEST_CMTS = "mnd-gt0002-ccap002"  # Lab CMTS
 SNMP_COMMUNITY = "z1gg0m0n1t0r1ng"
 
