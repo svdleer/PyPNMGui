@@ -250,6 +250,9 @@ def get_cmts_modems(cmts_name):
             return jsonify({
                 "status": "success",
                 "cmts": cmts_name,
+                "cmts_hostname": cmts_name,
+                "cmts_ip": cmts_ip,
+                "agent_id": result.get('agent_id', 'agent'),
                 "modems": modems,
                 "count": len(modems),
                 "enriched": result.get('enriched', False),
