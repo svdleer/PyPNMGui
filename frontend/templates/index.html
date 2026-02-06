@@ -228,8 +228,17 @@
                                             <tr v-for="modem in modems" :key="modem.mac_address" 
                                                 :class="{ 'table-active': selectedModem && selectedModem.mac_address === modem.mac_address }">
                                                 <td>
-                                                    <span class="badge" :class="modem.status === 'online' ? 'bg-success' : 'bg-danger'">
-                                                        {{ modem.status }}
+                                                    <span class="badge" :class="{
+                                                        'bg-success': modem.status === 'operational' || modem.status === 'online',
+                                                        'bg-warning text-dark': modem.status === 'registrationComplete' || modem.status === 'ipComplete' || modem.status === 'registeredBPIInitializing',
+                                                        'bg-info': modem.status === 'ranging' || modem.status === 'rangingComplete',
+                                                        'bg-danger': modem.status === 'offline' || modem.status === 'accessDenied' || modem.status === 'rangingAborted',
+                                                        'bg-secondary': !['operational','online','registrationComplete','ipComplete','registeredBPIInitializing','ranging','rangingComplete','offline','accessDenied','rangingAborted'].includes(modem.status)
+                                                    }" :title="modem.status">
+                                                        {{ modem.status === 'registrationComplete' ? 'regComplete' : 
+                                                           modem.status === 'registeredBPIInitializing' ? 'BPI-init' :
+                                                           modem.status === 'rangingComplete' ? 'ranging' :
+                                                           modem.status }}
                                                     </span>
                                                 </td>
                                                 <td><code>{{ modem.mac_address }}</code></td>
