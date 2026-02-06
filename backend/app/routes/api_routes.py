@@ -699,7 +699,7 @@ def health_check():
 def pypnm_health_check():
     """Check PyPNM API health by testing connection to pypnm-api service."""
     import requests
-    pypnm_api_url = os.environ.get('PYPNM_API_URL', 'http://eve-li-pypnm:8000')
+    pypnm_api_url = os.environ.get('PYPNM_BASE_URL', os.environ.get('PYPNM_API_URL', 'http://localhost:8000'))
     
     try:
         response = requests.get(f"{pypnm_api_url}/", timeout=3)
