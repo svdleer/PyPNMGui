@@ -618,18 +618,29 @@ def channel_stats(mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    client = PyPNMClient()
-    
     try:
         # Get all channel stats in parallel for better performance
+        # Note: Create separate PyPNMClient for each request to avoid session thread-safety issues
         import concurrent.futures
         
+        def get_scqam():
+            return PyPNMClient().get_ds_scqam_stats(mac_address, modem_ip, community)
+        
+        def get_ofdm():
+            return PyPNMClient().get_ds_ofdm_stats(mac_address, modem_ip, community)
+        
+        def get_atdma():
+            return PyPNMClient().get_us_atdma_stats(mac_address, modem_ip, community)
+        
+        def get_ofdma():
+            return PyPNMClient().get_us_ofdma_stats(mac_address, modem_ip, community)
+        
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit all requests in parallel
-            future_scqam = executor.submit(client.get_ds_scqam_stats, mac_address, modem_ip, community)
-            future_ofdm = executor.submit(client.get_ds_ofdm_stats, mac_address, modem_ip, community)
-            future_atdma = executor.submit(client.get_us_atdma_stats, mac_address, modem_ip, community)
-            future_ofdma = executor.submit(client.get_us_ofdma_stats, mac_address, modem_ip, community)
+            # Submit all requests in parallel with separate client instances
+            future_scqam = executor.submit(get_scqam)
+            future_ofdm = executor.submit(get_ofdm)
+            future_atdma = executor.submit(get_atdma)
+            future_ofdma = executor.submit(get_ofdma)
             
             # Wait for all to complete
             ds_scqam = future_scqam.result()
