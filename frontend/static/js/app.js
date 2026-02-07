@@ -600,12 +600,12 @@ createApp({
             if (Array.isArray(atdmaChannels)) {
                 atdmaChannels.forEach((ch, idx) => {
                     const entry = ch.entry || ch;
-                    // Support both pre-processed (frequency_mhz, power) and raw SNMP fields
+                    // Support both pre-processed (frequency_mhz, power/tx_power) and raw SNMP fields
                     const freq = ch.frequency_mhz || (entry.docsIfUpChannelFrequency ? entry.docsIfUpChannelFrequency / 1000000 : 0);
                     channels.push({
                         channel_id: ch.channel_id || entry.docsIfUpChannelId || idx + 1,
                         frequency_mhz: freq,
-                        power_dbmv: ch.power !== undefined ? ch.power : (entry.docsIf3CmStatusUsTxPower || 0),
+                        power_dbmv: ch.tx_power !== undefined ? ch.tx_power : (ch.power !== undefined ? ch.power : (entry.docsIf3CmStatusUsTxPower || 0)),
                         type: 'ATDMA'
                     });
                 });
