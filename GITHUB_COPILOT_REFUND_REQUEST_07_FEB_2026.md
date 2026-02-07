@@ -237,6 +237,14 @@ ssh access-engineering.nl "cd ~/docker/PyPNM && git pull && docker compose down 
 
 ---
 
+### Incident 15: February 7, 2026 - Wrong Port AGAIN
+**What happened:**
+- Used port 5051 instead of 5050 for agent WebSocket
+- Same port confusion that has occurred in previous incidents
+- User had to catch and correct this error
+
+---
+
 ## Summary of Damages
 
 | Metric | Total |

@@ -36,4 +36,4 @@ class Config:
     # Agent WebSocket Configuration
     ENABLE_AGENT_WEBSOCKET = os.environ.get('ENABLE_AGENT_WEBSOCKET', 'False').lower() == 'true'
     AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', 'dev-token-change-in-production')
-    AGENT_WEBSOCKET_PORT = int(os.environ.get('AGENT_WEBSOCKET_PORT', '5051'))
+    AGENT_WEBSOCKET_PORT = int(os.environ.get('AGENT_WEBSOCKET_PORT', '5050'))
