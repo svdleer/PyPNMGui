@@ -140,7 +140,13 @@ class PyPNMClient:
             result = response.json()
             logger.debug(f"PyPNM response from {endpoint}: status={result.get('status')}, keys={list(result.keys())[:10]}")
             if 'results' in result:
-                logger.debug(f"Response 'results' type: {type(result['results'])}, len: {len(result['results']) if isinstance(result['results'], (list, dict)) else 'N/A'}")
+                result_val = result['results']
+                if isinstance(result_val, dict):
+                    logger.debug(f"Response 'results' is dict with keys: {list(result_val.keys())}")
+                    if 'entries' in result_val:
+                        logger.debug(f"Response 'results.entries' length: {len(result_val['entries'])}")
+                elif isinstance(result_val, list):
+                    logger.debug(f"Response 'results' is list with length: {len(result_val)}")
             return result
         
         except requests.exceptions.ConnectionError:
