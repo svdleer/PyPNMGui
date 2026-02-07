@@ -825,14 +825,21 @@ def _extract_atdma_channels(data: Dict[str, Any]) -> list:
     if data.get('status') != 0:
         logger.warning(f"ATDMA data has non-zero status: {data.get('status')}, message: {data.get('message')}")
         return []
+    
     results = data.get('results', {})
     
-    # Log the raw data for debugging
-    logger.debug(f"ATDMA raw results: {results}")
+    # Results can be either a dict with 'entries' key or a list
+    if isinstance(results, dict):
+        entries_list = results.get('entries', [])
+    else:
+        entries_list = results
     
-    if isinstance(results, list):
+    # Log the raw data for debugging
+    logger.debug(f"ATDMA raw results type: {type(results)}, entries count: {len(entries_list) if isinstance(entries_list, list) else 0}")
+    
+    if isinstance(entries_list, list):
         channels = []
-        for ch in results:
+        for ch in entries_list:
             # Data may be nested in 'entry' object (like OFDM/OFDMA)
             entry = ch.get('entry', ch)
             
