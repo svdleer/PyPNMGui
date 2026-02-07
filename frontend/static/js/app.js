@@ -108,13 +108,15 @@ createApp({
         
         // Check if modem has downstream OFDM channels (DOCSIS 3.1)
         hasOfdmChannels() {
-            return this.channelStats?.downstream?.ofdm?.count > 0;
+            return this.channelStats?.downstream?.ofdm?.count > 0 ||
+                   this.selectedModem?.docsis_version?.includes('3.1');
         },
         
         // Check if modem has upstream OFDMA channels (DOCSIS 3.1)
         hasOfdmaChannels() {
             return this.channelStats?.upstream?.ofdma?.count > 0 || 
-                   this.upstreamInterfaces?.ofdmaChannels?.length > 0;
+                   this.upstreamInterfaces?.ofdmaChannels?.length > 0 ||
+                   this.selectedModem?.upstream_interface?.toLowerCase()?.includes('ofdma');
         },
         
         // Measurements requiring downstream OFDM
