@@ -525,15 +525,16 @@ createApp({
             
             // Handle SC-QAM data from PyPNM response format
             const scqam = dsData.scqam || {};
-            const scqamResults = scqam.results || [];
-            if (Array.isArray(scqamResults)) {
-                scqamResults.forEach((ch, idx) => {
+            const scqamChannels = scqam.channels || scqam.results || [];
+            if (Array.isArray(scqamChannels)) {
+                scqamChannels.forEach((ch, idx) => {
                     const entry = ch.entry || ch;
+                    // Support both pre-processed (frequency_mhz, power) and raw SNMP fields
                     channels.push({
                         channel_id: ch.channel_id || entry.docsIfDownChannelId || idx + 1,
-                        frequency_mhz: entry.docsIfDownChannelFrequency ? entry.docsIfDownChannelFrequency / 1000000 : 0,
-                        power_dbmv: entry.docsIfDownChannelPower || 0,
-                        snr_db: entry.docsIf3SignalQualityExtRxMER ? entry.docsIf3SignalQualityExtRxMER / 10 : 0,
+                        frequency_mhz: ch.frequency_mhz || (entry.docsIfDownChannelFrequency ? entry.docsIfDownChannelFrequency / 1000000 : 0),
+                        power_dbmv: ch.power !== undefined ? ch.power : (entry.docsIfDownChannelPower || 0),
+                        snr_db: ch.snr !== undefined ? ch.snr : (entry.docsIf3SignalQualityExtRxMER ? entry.docsIf3SignalQualityExtRxMER / 10 : 0),
                         type: 'SC-QAM'
                     });
                 });
@@ -595,15 +596,16 @@ createApp({
             
             // Handle ATDMA data
             const atdma = usData.atdma || {};
-            const atdmaResults = atdma.results || [];
-            if (Array.isArray(atdmaResults)) {
-                atdmaResults.forEach((ch, idx) => {
+            const atdmaChannels = atdma.channels || atdma.results || [];
+            if (Array.isArray(atdmaChannels)) {
+                atdmaChannels.forEach((ch, idx) => {
                     const entry = ch.entry || ch;
-                    const freq = entry.docsIfUpChannelFrequency || 0;
+                    // Support both pre-processed (frequency_mhz, power) and raw SNMP fields
+                    const freq = ch.frequency_mhz || (entry.docsIfUpChannelFrequency ? entry.docsIfUpChannelFrequency / 1000000 : 0);
                     channels.push({
                         channel_id: ch.channel_id || entry.docsIfUpChannelId || idx + 1,
-                        frequency_mhz: freq ? freq / 1000000 : null,
-                        power_dbmv: entry.docsIf3CmStatusUsTxPower || 0,
+                        frequency_mhz: freq,
+                        power_dbmv: ch.power !== undefined ? ch.power : (entry.docsIf3CmStatusUsTxPower || 0),
                         type: 'ATDMA'
                     });
                 });

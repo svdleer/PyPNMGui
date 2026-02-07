@@ -604,6 +604,8 @@ def channel_stats(mac_address):
     """
     Get comprehensive channel statistics with profile information.
     
+    Uses optimized PyPNM API endpoint with parallel bulk walks via agent (~10s).
+    
     Returns DS/US channel info including:
     - Channel type (SC-QAM, OFDM, ATDMA, OFDMA)
     - Active profiles
@@ -619,75 +621,101 @@ def channel_stats(mac_address):
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     try:
-        # Get all channel stats in parallel for better performance
-        # Note: Create separate PyPNMClient for each request to avoid session thread-safety issues
-        import concurrent.futures
-        
-        def get_scqam():
-            return PyPNMClient().get_ds_scqam_stats(mac_address, modem_ip, community)
-        
-        def get_ofdm():
-            return PyPNMClient().get_ds_ofdm_stats(mac_address, modem_ip, community)
-        
-        def get_atdma():
-            return PyPNMClient().get_us_atdma_stats(mac_address, modem_ip, community)
-        
-        def get_ofdma():
-            return PyPNMClient().get_us_ofdma_stats(mac_address, modem_ip, community)
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit all requests in parallel with separate client instances
-            future_scqam = executor.submit(get_scqam)
-            future_ofdm = executor.submit(get_ofdm)
-            future_atdma = executor.submit(get_atdma)
-            future_ofdma = executor.submit(get_ofdma)
-            
-            # Wait for all to complete
-            ds_scqam = future_scqam.result()
-            ds_ofdm = future_ofdm.result()
-            us_atdma = future_atdma.result()
-            us_ofdma = future_ofdma.result()
-        
-        # Process and enhance data with profile info
-        downstream = {
-            "scqam": {
-                "type": "SC-QAM (DOCSIS 3.0)",
-                "channels": _extract_scqam_channels(ds_scqam),
-                "count": len(_extract_scqam_channels(ds_scqam))
-            },
-            "ofdm": {
-                "type": "OFDM (DOCSIS 3.1)",
-                "channels": _extract_ofdm_channels(ds_ofdm),
-                "count": len(_extract_ofdm_channels(ds_ofdm))
-            }
-        }
-        
-        upstream = {
-            "atdma": {
-                "type": "ATDMA (DOCSIS 3.0)",
-                "channels": _extract_atdma_channels(us_atdma),
-                "count": len(_extract_atdma_channels(us_atdma))
-            },
-            "ofdma": {
-                "type": "OFDMA (DOCSIS 3.1)",
-                "channels": _extract_ofdma_channels(us_ofdma),
-                "count": len(_extract_ofdma_channels(us_ofdma))
-            }
-        }
-        
-        return jsonify({
-            "mac_address": mac_address,
-            "status": 0,
-            "downstream": downstream,
-            "upstream": upstream
+        # Use optimized PyPNM API endpoint (parallel bulk walks via agent)
+        client = PyPNMClient()
+        result = client._post('/cm/channel-stats', {
+            'mac_address': mac_address,
+            'modem_ip': modem_ip,
+            'community': community
         })
+        
+        if result.get('success'):
+            # Return the result directly - already in correct format
+            return jsonify({
+                "mac_address": mac_address,
+                "status": 0,
+                "downstream": result.get('downstream', {}),
+                "upstream": result.get('upstream', {}),
+                "timing": result.get('timing', {})
+            })
+        else:
+            # Fallback to old method if new endpoint fails
+            logger.warning(f"New channel-stats failed, falling back to legacy: {result.get('error')}")
+            return _channel_stats_legacy(mac_address, modem_ip, community)
         
     except Exception as e:
         logger.error(f"Channel stats failed: {e}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        # Fallback to legacy method on any error
+        try:
+            return _channel_stats_legacy(mac_address, modem_ip, community)
+        except Exception as e2:
+            logger.error(f"Legacy channel stats also failed: {e2}")
+            return jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 500
+
+
+def _channel_stats_legacy(mac_address: str, modem_ip: str, community: str):
+    """Legacy channel stats using 4 separate PyPNMClient calls."""
+    from app.core.pypnm_client import PyPNMClient
+    import concurrent.futures
+    
+    def get_scqam():
+        return PyPNMClient().get_ds_scqam_stats(mac_address, modem_ip, community)
+    
+    def get_ofdm():
+        return PyPNMClient().get_ds_ofdm_stats(mac_address, modem_ip, community)
+    
+    def get_atdma():
+        return PyPNMClient().get_us_atdma_stats(mac_address, modem_ip, community)
+    
+    def get_ofdma():
+        return PyPNMClient().get_us_ofdma_stats(mac_address, modem_ip, community)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        future_scqam = executor.submit(get_scqam)
+        future_ofdm = executor.submit(get_ofdm)
+        future_atdma = executor.submit(get_atdma)
+        future_ofdma = executor.submit(get_ofdma)
+        
+        ds_scqam = future_scqam.result()
+        ds_ofdm = future_ofdm.result()
+        us_atdma = future_atdma.result()
+        us_ofdma = future_ofdma.result()
+    
+    downstream = {
+        "scqam": {
+            "type": "SC-QAM (DOCSIS 3.0)",
+            "channels": _extract_scqam_channels(ds_scqam),
+            "count": len(_extract_scqam_channels(ds_scqam))
+        },
+        "ofdm": {
+            "type": "OFDM (DOCSIS 3.1)",
+            "channels": _extract_ofdm_channels(ds_ofdm),
+            "count": len(_extract_ofdm_channels(ds_ofdm))
+        }
+    }
+    
+    upstream = {
+        "atdma": {
+            "type": "ATDMA (DOCSIS 3.0)",
+            "channels": _extract_atdma_channels(us_atdma),
+            "count": len(_extract_atdma_channels(us_atdma))
+        },
+        "ofdma": {
+            "type": "OFDMA (DOCSIS 3.1)",
+            "channels": _extract_ofdma_channels(us_ofdma),
+            "count": len(_extract_ofdma_channels(us_ofdma))
+        }
+    }
+    
+    return jsonify({
+        "mac_address": mac_address,
+        "status": 0,
+        "downstream": downstream,
+        "upstream": upstream
+    })
 
 
 def _extract_scqam_channels(data: Dict[str, Any]) -> list:
