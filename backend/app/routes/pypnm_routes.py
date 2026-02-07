@@ -830,6 +830,7 @@ def _extract_atdma_channels(data: Dict[str, Any]) -> list:
     
     # Results can be either a dict with 'entries' key or a list
     if isinstance(results, dict):
+        logger.debug(f"ATDMA results is dict with keys: {list(results.keys())}")
         entries_list = results.get('entries', [])
     else:
         entries_list = results
