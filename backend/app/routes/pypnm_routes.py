@@ -819,7 +819,11 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
 
 def _extract_atdma_channels(data: Dict[str, Any]) -> list:
     """Extract ATDMA channel info."""
+    logger.debug(f"_extract_atdma_channels called with data keys: {list(data.keys())}")
+    logger.debug(f"_extract_atdma_channels status check: data.get('status')={data.get('status')}, != 0? {data.get('status') != 0}")
+    
     if data.get('status') != 0:
+        logger.warning(f"ATDMA data has non-zero status: {data.get('status')}, message: {data.get('message')}")
         return []
     results = data.get('results', {})
     
