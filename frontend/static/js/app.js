@@ -551,8 +551,9 @@ createApp({
                     const numSubcarriers = ch.num_subcarriers || entry.docsIf31CmDsOfdmChanNumActiveSubcarriers || 0;
                     const subcarrierSpacing = entry.docsIf31CmDsOfdmChanSubcarrierSpacing || 50000;
                     const bw = ch.bandwidth_mhz || (numSubcarriers * subcarrierSpacing) / 1000000;
-                    const power = ch.power_dbmv !== undefined ? ch.power_dbmv : (entry.docsIf31CmDsOfdmChannelPower ? entry.docsIf31CmDsOfdmChannelPower / 10 : null);
-                    const mer = ch.mer_db !== undefined ? ch.mer_db : (entry.docsIf31CmDsOfdmChanMer ? entry.docsIf31CmDsOfdmChanMer / 10 : null);
+                    // Support power/power_dbmv and mer/mer_db field names
+                    const power = ch.power !== undefined ? ch.power : (ch.power_dbmv !== undefined ? ch.power_dbmv : (entry.docsIf31CmDsOfdmChannelPower ? entry.docsIf31CmDsOfdmChannelPower / 10 : null));
+                    const mer = ch.mer !== undefined ? ch.mer : (ch.mer_db !== undefined ? ch.mer_db : (entry.docsIf31CmDsOfdmChanMer ? entry.docsIf31CmDsOfdmChanMer / 10 : null));
                     
                     channels.push({
                         channel_id: ch.channel_id || entry.docsIf31CmDsOfdmChanChannelId || 100 + idx,
@@ -617,10 +618,10 @@ createApp({
             if (Array.isArray(ofdmaChannels)) {
                 ofdmaChannels.forEach((ch, idx) => {
                     const entry = ch.entry || ch;
-                    // Get values - prefer pre-processed channel data
-                    const freq = ch.frequency_mhz || (entry.docsIf31CmUsOfdmaChanSubcarrierZeroFreq ? entry.docsIf31CmUsOfdmaChanSubcarrierZeroFreq / 1000000 : 0);
+                    // Get values - prefer pre-processed channel data (support both zero_freq_mhz and frequency_mhz)
+                    const freq = ch.zero_freq_mhz || ch.frequency_mhz || (entry.docsIf31CmUsOfdmaChanSubcarrierZeroFreq ? entry.docsIf31CmUsOfdmaChanSubcarrierZeroFreq / 1000000 : 0);
                     const numSubcarriers = ch.num_subcarriers || entry.docsIf31CmUsOfdmaChanNumActiveSubcarriers || 0;
-                    const subcarrierSpacing = entry.docsIf31CmUsOfdmaChanSubcarrierSpacing || 50;  // in kHz
+                    const subcarrierSpacing = ch.subcarrier_spacing_khz || entry.docsIf31CmUsOfdmaChanSubcarrierSpacing || 50;  // in kHz
                     const bw = ch.bandwidth_mhz || (numSubcarriers * subcarrierSpacing) / 1000;
                     const power = ch.tx_power !== undefined ? ch.tx_power : (entry.docsIf31CmUsOfdmaChanTxPower || null);
                     
