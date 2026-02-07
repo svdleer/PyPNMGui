@@ -137,7 +137,11 @@ class PyPNMClient:
                     logger.warning(f"Small response ({content_len} bytes): {response.content[:200]}")
                 return response.content
             
-            return response.json()
+            result = response.json()
+            logger.debug(f"PyPNM response from {endpoint}: status={result.get('status')}, keys={list(result.keys())[:10]}")
+            if 'results' in result:
+                logger.debug(f"Response 'results' type: {type(result['results'])}, len: {len(result['results']) if isinstance(result['results'], (list, dict)) else 'N/A'}")
+            return result
         
         except requests.exceptions.ConnectionError:
             logger.error(f"Cannot connect to PyPNM at {self.config.base_url}")
