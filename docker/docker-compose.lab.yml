@@ -18,6 +18,8 @@ services:
       - PYPNM_USE_AGENT_SNMP=true
     volumes:
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild (read-write for dev)
+      - /home/svdleer/docker/PyPNM/src/pypnm:/app/pypnm
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
