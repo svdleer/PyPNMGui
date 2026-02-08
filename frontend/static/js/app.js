@@ -607,6 +607,13 @@ createApp({
                     this.channelStats = data;
                     console.log('Channel stats loaded:', data.downstream?.ofdm?.count, 'OFDM,', data.upstream?.ofdma?.count, 'OFDMA');
                     
+                    // Set systemInfo for compatibility with old UI code
+                    this.systemInfo = {
+                        downstream: [],
+                        upstream: [],
+                        timestamp: data.timestamp || new Date().toISOString()
+                    };
+                    
                     // Update fiber node if available
                     if (data.fiber_node && this.selectedModem) {
                         this.selectedModem.fiber_node = data.fiber_node;
