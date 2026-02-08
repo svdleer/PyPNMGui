@@ -620,40 +620,28 @@ def channel_stats(mac_address):
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
-    try:
-        # Use optimized PyPNM API endpoint (parallel bulk walks via agent)
-        client = PyPNMClient()
-        result = client._post('/cm/channel-stats', {
-            'mac_address': mac_address,
-            'modem_ip': modem_ip,
-            'community': community
+    # Use optimized PyPNM API endpoint (parallel bulk walks via agent)
+    client = PyPNMClient()
+    result = client._post('/cm/channel-stats', {
+        'mac_address': mac_address,
+        'modem_ip': modem_ip,
+        'community': community
+    })
+    
+    if result.get('success'):
+        # Return the result directly - already in correct format
+        return jsonify({
+            "mac_address": mac_address,
+            "status": 0,
+            "downstream": result.get('downstream', {}),
+            "upstream": result.get('upstream', {}),
+            "timing": result.get('timing', {})
         })
-        
-        if result.get('success'):
-            # Return the result directly - already in correct format
-            return jsonify({
-                "mac_address": mac_address,
-                "status": 0,
-                "downstream": result.get('downstream', {}),
-                "upstream": result.get('upstream', {}),
-                "timing": result.get('timing', {})
-            })
-        else:
-            # Fallback to old method if new endpoint fails
-            logger.warning(f"New channel-stats failed, falling back to legacy: {result.get('error')}")
-            return _channel_stats_legacy(mac_address, modem_ip, community)
-        
-    except Exception as e:
-        logger.error(f"Channel stats failed: {e}")
-        # Fallback to legacy method on any error
-        try:
-            return _channel_stats_legacy(mac_address, modem_ip, community)
-        except Exception as e2:
-            logger.error(f"Legacy channel stats also failed: {e2}")
-            return jsonify({
-                "status": "error",
-                "message": str(e)
-            }), 500
+    else:
+        return jsonify({
+            "status": "error",
+            "message": result.get('error', 'Failed to get channel stats')
+        }), 500
 
 
 def _channel_stats_legacy(mac_address: str, modem_ip: str, community: str):
