@@ -607,10 +607,71 @@ createApp({
                     this.channelStats = data;
                     console.log('Channel stats loaded:', data.downstream?.ofdm?.count, 'OFDM,', data.upstream?.ofdma?.count, 'OFDMA');
                     
+                    // Transform to old format for compatibility with existing UI
+                    const downstream = [];
+                    const upstream = [];
+                    
+                    // Add SC-QAM channels
+                    if (data.downstream?.scqam?.channels) {
+                        data.downstream.scqam.channels.forEach(ch => {
+                            if (ch.frequency_mhz) {  // Only include channels with valid frequency
+                                downstream.push({
+                                    channel_id: ch.channel_id,
+                                    frequency_mhz: ch.frequency_mhz,
+                                    power_dbmv: ch.power,
+                                    snr_db: ch.snr || ch.rxmer,
+                                    type: 'SC-QAM'
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Add OFDM channels
+                    if (data.downstream?.ofdm?.channels) {
+                        data.downstream.ofdm.channels.forEach(ch => {
+                            downstream.push({
+                                channel_id: ch.channel_id,
+                                frequency_mhz: ch.plc_freq_mhz,
+                                power_dbmv: ch.power,
+                                snr_db: ch.mer,
+                                type: 'OFDM',
+                                bandwidth_mhz: ch.bandwidth_mhz,
+                                num_subcarriers: ch.num_subcarriers
+                            });
+                        });
+                    }
+                    
+                    // Add ATDMA channels
+                    if (data.upstream?.atdma?.channels) {
+                        data.upstream.atdma.channels.forEach(ch => {
+                            upstream.push({
+                                channel_id: ch.channel_id,
+                                frequency_mhz: ch.frequency_mhz,
+                                power_dbmv: ch.tx_power,
+                                type: 'ATDMA',
+                                width_mhz: ch.width_mhz
+                            });
+                        });
+                    }
+                    
+                    // Add OFDMA channels
+                    if (data.upstream?.ofdma?.channels) {
+                        data.upstream.ofdma.channels.forEach(ch => {
+                            upstream.push({
+                                channel_id: ch.channel_id,
+                                frequency_mhz: ch.zero_freq_mhz,
+                                power_dbmv: ch.tx_power,
+                                type: 'OFDMA',
+                                bandwidth_mhz: ch.bandwidth_mhz,
+                                num_subcarriers: ch.num_subcarriers
+                            });
+                        });
+                    }
+                    
                     // Set systemInfo for compatibility with old UI code
                     this.systemInfo = {
-                        downstream: [],
-                        upstream: [],
+                        downstream: downstream,
+                        upstream: upstream,
                         timestamp: data.timestamp || new Date().toISOString()
                     };
                     
