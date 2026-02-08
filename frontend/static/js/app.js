@@ -716,6 +716,11 @@ createApp({
                     })
                 });
                 
+                if (!response.ok) {
+                    console.warn(`Upstream interfaces endpoint returned ${response.status}`);
+                    return;
+                }
+                
                 const result = await response.json();
                 if (result.success) {
                     this.upstreamInterfaces.scqamChannels = result.scqam_channels || [];
