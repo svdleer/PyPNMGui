@@ -338,7 +338,7 @@
                                     <i class="bi bi-arrow-up-circle me-1"></i>OFDMA
                                     <i class="bi ms-1" :class="hasOfdmaChannels ? 'bi-check-circle-fill' : 'bi-x-circle-fill'"></i>
                                 </span>
-                                <span class="badge py-2 px-3" :class="selectedModem.status === 'online' || selectedModem.status === 'registrationComplete' ? 'bg-success' : 'bg-danger'" style="font-size: 0.9rem;">
+                                <span class="badge py-2 px-3" :class="selectedModem.status === 'operational' || selectedModem.status === 'online' || selectedModem.status === 'registrationComplete' ? 'bg-success' : 'bg-danger'" style="font-size: 0.9rem;">
                                     <i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>
                                     {{ selectedModem.status === 'registrationComplete' ? 'Online' : selectedModem.status }}
                                 </span>
