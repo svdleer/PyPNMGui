@@ -437,42 +437,6 @@ createApp({
             this.loadingSystemInfo = false;
             return;
         },
-                        timestamp: new Date().toISOString()
-                    };
-                    this.showError('No channel data', 'Could not retrieve channel information from modem');
-                }
-            } catch (error) {
-                console.error('Failed to load system info:', error);
-                this.showError('Failed to load system info', error.message);
-            } finally {
-                this.loadingSystemInfo = false;
-            }
-        },
-        
-        // Helper to transform PyPNM channel data
-        transformChannelData(dsData) {
-            if (!dsData) return [];
-            
-            // Handle SC-QAM data from PyPNM response format
-            const scqam = dsData.scqam || {};
-            const channels = [];
-            
-            // PyPNM returns .results array
-            const results = scqam.results || [];
-            if (Array.isArray(results)) {
-                results.forEach((ch, idx) => {
-                    const entry = ch.entry || ch;
-                    channels.push({
-                        channel_id: ch.channel_id || entry.docsIfDownChannelId || idx + 1,
-                        frequency_mhz: entry.docsIfDownChannelFrequency ? entry.docsIfDownChannelFrequency / 1000000 : 0,
-                        power_dbmv: entry.docsIfDownChannelPower || 0,
-                        snr_db: entry.docsIf3SignalQualityExtRxMER ? entry.docsIf3SignalQualityExtRxMER / 10 : 0
-                    });
-                });
-            }
-            
-            return channels;
-        },
         
         // Helper to transform PyPNM channel data (SC-QAM + OFDM)
         transformChannelData(dsData) {
