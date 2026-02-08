@@ -52,8 +52,8 @@ services:
       - pypnm-data-lab:/app/data
       - pypnm-logs-lab:/app/logs
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
-      # Mount source code for live updates without rebuild
-      - ../backend:/app:ro
+      # Mount source code for live updates without rebuild - specific files only
+      - ../backend/app:/app/app:ro
       - ../frontend:/app/frontend:ro
     restart: unless-stopped
     depends_on:
