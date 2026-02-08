@@ -1265,8 +1265,12 @@
                                                 <h6 class="text-primary border-bottom pb-2">
                                                     <i class="bi bi-arrow-down-circle me-1"></i>Downstream
                                                 </h6>
-                                                <div v-if="channelStats.downstream.scqam.count > 0" class="mb-3">
-                                                    <small class="text-muted">{{ channelStats.downstream.scqam.type }}</small>
+                                                <!-- SC-QAM Section -->
+                                                <div v-if="channelStats.downstream.scqam.count > 0" class="mb-3 p-2 border rounded bg-light">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-reception-4 me-2 text-primary"></i>
+                                                        <strong>SC-QAM (DOCSIS 3.0)</strong>
+                                                    </div>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
                                                         <strong>{{ channelStats.downstream.scqam.count }}</strong>
@@ -1278,8 +1282,12 @@
                                                         </small>
                                                     </div>
                                                 </div>
-                                                <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3">
-                                                    <small class="text-muted">{{ channelStats.downstream.ofdm.type }}</small>
+                                                <!-- OFDM Section -->
+                                                <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3 p-2 border rounded" style="background-color: #e3f2fd;">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-broadcast me-2 text-info"></i>
+                                                        <strong class="text-info">OFDM (DOCSIS 3.1)</strong>
+                                                    </div>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
                                                         <strong>{{ channelStats.downstream.ofdm.count }}</strong>
@@ -1299,8 +1307,12 @@
                                                 <h6 class="text-success border-bottom pb-2">
                                                     <i class="bi bi-arrow-up-circle me-1"></i>Upstream
                                                 </h6>
-                                                <div v-if="channelStats.upstream.atdma.count > 0" class="mb-3">
-                                                    <small class="text-muted">{{ channelStats.upstream.atdma.type }}</small>
+                                                <!-- ATDMA Section -->
+                                                <div v-if="channelStats.upstream.atdma.count > 0" class="mb-3 p-2 border rounded bg-light">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-arrow-up me-2 text-success"></i>
+                                                        <strong>ATDMA (DOCSIS 3.0)</strong>
+                                                    </div>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
                                                         <strong>{{ channelStats.upstream.atdma.count }}</strong>
@@ -1312,8 +1324,12 @@
                                                         </small>
                                                     </div>
                                                 </div>
-                                                <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3">
-                                                    <small class="text-muted">{{ channelStats.upstream.ofdma.type }}</small>
+                                                <!-- OFDMA Section -->
+                                                <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3 p-2 border rounded" style="background-color: #e8f5e9;">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-broadcast-pin me-2 text-success"></i>
+                                                        <strong class="text-success">OFDMA (DOCSIS 3.1)</strong>
+                                                    </div>
                                                     <div class="d-flex justify-content-between">
                                                         <span>Channels:</span>
                                                         <strong>{{ channelStats.upstream.ofdma.count }}</strong>
@@ -1321,7 +1337,7 @@
                                                     <div v-for="ch in channelStats.upstream.ofdma.channels" :key="ch.channel_id" class="ms-3 mt-2">
                                                         <small>
                                                             Ch {{ ch.channel_id }}: 
-                                                            <span class="badge bg-primary" v-if="ch.frequency_mhz">{{ ch.frequency_mhz }} MHz</span>
+                                                            <span class="badge bg-primary" v-if="ch.zero_freq_mhz">{{ ch.zero_freq_mhz }} MHz</span>
                                                             <span class="badge bg-secondary" v-if="ch.bandwidth_mhz">{{ ch.bandwidth_mhz }} MHz BW</span>
                                                             <span class="badge bg-success" v-if="ch.tx_power">{{ ch.tx_power }} dBmV</span>
                                                             <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
