@@ -18,6 +18,8 @@ services:
       - PYPNM_USE_AGENT_SNMP=true
     volumes:
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - /home/svdleer/docker/PyPNM/src/pypnm:/app/pypnm:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
@@ -50,6 +52,9 @@ services:
       - pypnm-data-lab:/app/data
       - pypnm-logs-lab:/app/logs
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - ../backend:/app:ro
+      - ../frontend:/app/frontend:ro
     restart: unless-stopped
     depends_on:
       - pypnm-api
@@ -87,6 +92,9 @@ services:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
       - /var/lib/tftpboot:/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - /home/svdleer/docker/pyPNMAgent/agent.py:/app/agent.py:ro
+      - /home/svdleer/docker/pyPNMAgent/requirements.txt:/app/requirements.txt:ro
     restart: unless-stopped
     depends_on:
       - pypnm-api
