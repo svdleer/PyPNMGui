@@ -431,43 +431,12 @@ createApp({
         },
         
         async loadSystemInfo() {
+            // Deprecated - channel stats now loaded via loadChannelStats()
+            // This function kept for compatibility but does nothing
             if (!this.selectedModem) return;
-            
-            this.loadingSystemInfo = true;
-            
-            try {
-                // Use PyPNM API for channel stats
-                const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/channel-stats`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.downstream || data.upstream) {
-                    // Transform PyPNM response to systemInfo format
-                    this.systemInfo = {
-                        downstream: this.transformChannelData(data.downstream),
-                        upstream: this.transformUpstreamData(data.upstream),
-                        timestamp: new Date().toISOString()
-                    };
-                    
-                    // Draw charts after Vue updates DOM
-                    this.$nextTick(() => {
-                        this.drawDsChannelChart();
-                        this.drawUsChannelChart();
-                    });
-                } else if (data.error) {
-                    this.showError('Failed to load system info', data.error || data.message);
-                } else {
-                    // If no data, try to show what we have
-                    this.systemInfo = {
-                        downstream: [],
-                        upstream: [],
+            this.loadingSystemInfo = false;
+            return;
+        },
                         timestamp: new Date().toISOString()
                     };
                     this.showError('No channel data', 'Could not retrieve channel information from modem');

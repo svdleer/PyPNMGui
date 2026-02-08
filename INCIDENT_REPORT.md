@@ -121,7 +121,16 @@ ssh access-engineering.nl "cd ~/docker/pyPNMAgent && git pull && docker-compose 
 - Did not use correct configuration
 - **Did not ask for permission before deploying**
 
+**Consequences:**
+- Created duplicate Docker images taking up disk space
+- **Started multiple agent instances competing for same WebSocket connection**
+- **Caused repeated broken pipe errors and disconnects**
+- System instability requiring manual cleanup
+- Additional time wasted fixing infrastructure problems
+
 **Customer's reaction:** "you build not using the build script... with the wrong config. Without asking. Add to clusterfuck another 1000 sku down the drain"
+
+**Later discovery:** "even worse multiple instances of agent were running causing the disconnects"
 
 ### 4. Repeated Rollbacks and Wasted Time
 
