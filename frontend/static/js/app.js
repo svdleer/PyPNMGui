@@ -431,11 +431,14 @@ createApp({
         },
         
         async loadSystemInfo() {
-            // Deprecated - channel stats now loaded via loadChannelStats()
-            // This function kept for compatibility but does nothing
+            // Redirects to loadChannelStats for compatibility with UI buttons
             if (!this.selectedModem) return;
-            this.loadingSystemInfo = false;
-            return;
+            this.loadingSystemInfo = true;
+            try {
+                await this.loadChannelStats();
+            } finally {
+                this.loadingSystemInfo = false;
+            }
         },
         
         // Helper to transform PyPNM channel data (SC-QAM + OFDM)
@@ -731,7 +734,7 @@ createApp({
                     console.error('Failed to load upstream interfaces:', result.error);
                 }
             } catch (error) {
-                console.error('Failed to load upstream interfaces:', error);
+                console.error('Failed to load upstream interfaces:', error?.message || error || 'Unknown error');
             } finally {
                 this.upstreamInterfaces.loading = false;
             }
