@@ -621,7 +621,9 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng'
+                        community: this.snmpCommunityModem || 'z1gg0m0n1t0r1ng',
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        cmts_community: this.snmpCommunity || 'Z1gg0@LL'
                     })
                 });
                 
@@ -637,6 +639,11 @@ createApp({
                 if (data.status === 0 || data.downstream || data.upstream) {
                     this.channelStats = data;
                     console.log('Channel stats loaded:', data.downstream?.ofdm?.count, 'OFDM,', data.upstream?.ofdma?.count, 'OFDMA');
+                    
+                    // Update fiber node if available
+                    if (data.fiber_node && this.selectedModem) {
+                        this.selectedModem.fiber_node = data.fiber_node;
+                    }
                 }
                 
                 // Process DS OFDM channels if available

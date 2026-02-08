@@ -616,23 +616,33 @@ def channel_stats(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', get_default_community())
+    cmts_ip = data.get('cmts_ip')
+    cmts_community = data.get('cmts_community', get_cmts_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
     
     # Use optimized PyPNM API endpoint (parallel bulk walks via agent)
     client = PyPNMClient()
-    result = client._post('/cm/channel-stats', {
+    payload = {
         'mac_address': mac_address,
         'modem_ip': modem_ip,
         'community': community
-    })
+    }
+    
+    # Add CMTS info for fiber node lookup if available
+    if cmts_ip:
+        payload['cmts_ip'] = cmts_ip
+        payload['cmts_community'] = cmts_community
+    
+    result = client._post('/cm/channel-stats', payload)
     
     if result.get('success'):
         # Return the result directly - already in correct format
         return jsonify({
             "mac_address": mac_address,
             "status": 0,
+            "fiber_node": result.get('fiber_node'),
             "downstream": result.get('downstream', {}),
             "upstream": result.get('upstream', {}),
             "timing": result.get('timing', {})
