@@ -773,6 +773,9 @@ createApp({
                 return;
             }
             
+            // TODO: Upstream interfaces endpoint not yet implemented in agent
+            // Commenting out to prevent 500 errors
+            /*
             this.upstreamInterfaces.loading = true;
             try {
                 const response = await fetch(`/api/pypnm/upstream/interfaces/${this.selectedModem.mac_address}`, {
@@ -817,6 +820,7 @@ createApp({
             } finally {
                 this.upstreamInterfaces.loading = false;
             }
+            */
         },
         
         async configureUtsc() {

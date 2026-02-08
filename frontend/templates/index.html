@@ -458,7 +458,6 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- Fiber Node card disabled - not yet configured in CMTS
                             <div class="col-md-3 mb-4">
                                 <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #fd7e14 !important;">
                                     <div class="card-body">
@@ -474,7 +473,6 @@
                                     </div>
                                 </div>
                             </div>
-                            -->
                         </div>
 
                         <!-- Modem Details & Quick Actions -->
@@ -514,12 +512,10 @@
                                                 <td class="text-muted">Cable MAC Interface</td>
                                                 <td><code>{{ selectedModem.cable_mac }}</code></td>
                                             </tr>
-                                            <!-- Fiber Node row disabled - not yet configured in CMTS
                                             <tr v-if="selectedModem.fiber_node">
                                                 <td class="text-muted">Fiber Node</td>
                                                 <td><span class="badge bg-info">{{ selectedModem.fiber_node }}</span></td>
                                             </tr>
-                                            -->
                                             <tr v-if="selectedModem.upstream_channel_id">
                                                 <td class="text-muted">Upstream Channel</td>
                                                 <td><span class="badge bg-secondary">{{ selectedModem.upstream_channel_id }}</span></td>
