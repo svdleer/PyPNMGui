@@ -722,6 +722,12 @@ createApp({
                     }
                 }
                 
+                // Render charts after data is loaded
+                this.$nextTick(() => {
+                    this.renderDsChart();
+                    this.renderUsChart();
+                });
+                
             } catch (error) {
                 console.warn('Failed to load channel stats:', error);
                 // Don't show error to user, just skip channel stats
