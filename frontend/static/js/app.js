@@ -415,8 +415,8 @@ createApp({
             // Load system info and channel stats automatically
             try {
                 const promises = [
-                    this.loadSystemInfo(),
-                    this.loadChannelStats()
+                    this.loadSystemInfo()
+                    // loadChannelStats() is called by loadSystemInfo()
                 ];
                 
                 // Also load upstream interfaces if CMTS IP is available (for upstream PNM)
