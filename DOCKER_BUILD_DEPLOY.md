@@ -15,7 +15,7 @@ This builds:
 - `pypnm-gui:latest` - Web GUI server
 - `pypnm-gui-agent:latest` - Agent container
 
-### Step 2: Deploy to appdb-sh.oss.local
+### Step 2: Deploy to deploy-server.example.local
 
 **Option A: Transfer images and deploy directly**
 ```bash
@@ -83,11 +83,11 @@ This pulls latest code on remote server and rebuilds there.
 │ 3. Test locally (optional)                          │
 └─────────────────┬───────────────────────────────────┘
                   │
-                  │ SSH via script3a.oss.local
+                  │ SSH via jumphost.example.local
                   │ (jump server)
                   ▼
 ┌─────────────────────────────────────────────────────┐
-│ appdb-sh.oss.local (Deployment Server)             │
+│ deploy-server.example.local (Deployment Server)             │
 │ /opt/pypnm-gui                                      │
 │                                                     │
 │ Docker Containers:                                  │
@@ -96,7 +96,7 @@ This pulls latest code on remote server and rebuilds there.
 │ │ - Flask web app                             │     │
 │ │ - WebSocket endpoint /ws/agent              │     │
 │ │ - Port 5050                                 │     │
-│ │ - Connects to appdb.oss.local for CMTS      │     │
+│ │ - Connects to cmts-db.example.local for CMTS      │     │
 │ └─────────────────────────────────────────────┘     │
 │                                                     │
 │ Agent (runs separately, not in Docker)              │
@@ -108,7 +108,7 @@ This pulls latest code on remote server and rebuilds there.
 
 ## 🔧 Configuration
 
-### On appdb-sh.oss.local
+### On deploy-server.example.local
 
 Environment file: `/opt/pypnm-gui/docker/.env`
 
@@ -118,7 +118,7 @@ SECRET_KEY=<random-generated>
 AGENT_AUTH_TOKEN=<random-generated>
 FLASK_ENV=production
 LOG_LEVEL=INFO
-APPDB_API_URL=https://appdb.oss.local/isw/api
+APPDB_API_URL=https://cmts-db.example.local/isw/api
 APPDB_API_USER=isw
 APPDB_API_PASS=Spyem_OtGheb4
 ENABLE_AGENT_WEBSOCKET=true
@@ -140,20 +140,20 @@ docker system prune -a
 ### Transfer fails
 ```bash
 # Test SSH jump connection
-ssh -i ~/.ssh/id_rsa svdleer@script3a.oss.local "echo Connected"
+ssh -i ~/.ssh/id_rsa netadmin@jumphost.example.local "echo Connected"
 
 # Test final SSH connection
 ssh -i ~/.ssh/id_rsa \
-  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W localhost:2222 svdleer@script3a.oss.local" \
-  svdleer@localhost "echo Connected"
+  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W localhost:2222 netadmin@jumphost.example.local" \
+  netadmin@localhost "echo Connected"
 ```
 
 ### Container won't start
 ```bash
 # SSH to remote and check
 ssh -i ~/.ssh/id_rsa \
-  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W localhost:2222 svdleer@script3a.oss.local" \
-  svdleer@localhost
+  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W localhost:2222 netadmin@jumphost.example.local" \
+  netadmin@localhost
 
 # On remote server
 cd /opt/pypnm-gui/docker
@@ -163,7 +163,7 @@ docker-compose ps
 
 ### Agent not connecting
 ```bash
-# On appdb-sh.oss.local
+# On deploy-server.example.local
 # Check if GUI container is running
 docker ps | grep pypnm-gui
 
@@ -172,7 +172,7 @@ cd /opt/pypnm-gui/docker
 docker-compose logs -f gui-server | grep -i agent
 
 # Check agent on jump server (if running separately)
-ssh script3a.oss.local
+ssh jumphost.example.local
 cd /opt/pypnm-agent
 ./status.sh
 ```
@@ -186,8 +186,8 @@ curl http://localhost:5050/api/health
 
 # Or SSH to server
 ssh -i ~/.ssh/id_rsa \
-  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W localhost:2222 svdleer@script3a.oss.local" \
-  svdleer@localhost \
+  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W localhost:2222 netadmin@jumphost.example.local" \
+  netadmin@localhost \
   "curl -s http://localhost:5050/api/health | python3 -m json.tool"
 ```
 
@@ -214,14 +214,14 @@ curl http://localhost:5050/api/cmts | python3 -m json.tool
 
 - **Images are built on Mac** - M1/M2 compatible, but buildx can create multi-arch
 - **Transferred via SSH** - Through jump server
-- **Deployed with docker-compose** - On appdb-sh.oss.local
+- **Deployed with docker-compose** - On deploy-server.example.local
 - **Agent runs separately** - Usually not in Docker, runs directly on jump server
-- **CMTS data from AppDB** - GUI connects to https://appdb.oss.local
+- **CMTS data from AppDB** - GUI connects to https://cmts-db.example.local
 
 ## 🎯 Next Steps
 
 After deployment:
-1. Access GUI: http://appdb-sh.oss.local:5050 (or via tunnel)
+1. Access GUI: http://deploy-server.example.local:5050 (or via tunnel)
 2. Deploy agent on jump server with network access
 3. Configure agent to connect to GUI WebSocket
 4. Test modem queries through agent

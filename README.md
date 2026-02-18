@@ -1,6 +1,6 @@
 # PyPNM Web GUI
 
-A modern web-based graphical user interface for [PyPNM](https://github.com/svdleer/PyPNM) - the Proactive Network Maintenance toolkit for DOCSIS cable modems.
+A modern web-based graphical user interface for [PyPNM](https://github.com/your-org/PyPNM) - the Proactive Network Maintenance toolkit for DOCSIS cable modems.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ A modern web-based graphical user interface for [PyPNM](https://github.com/svdle
                │ WebSocket
 ┌──────────────┴─────────────────────┐
 │  PyPNM Agent (Separate Repo)       │
-│  github.com/svdleer/pyPNMAgent     │
+│  github.com/your-org/pyPNMAgent     │
 │  - SNMP operations via pysnmp      │
 │  - Network access to CMTS/modems   │
 │  - PNM measurements                │
@@ -31,8 +31,8 @@ A modern web-based graphical user interface for [PyPNM](https://github.com/svdle
 | Component | Repository | Purpose |
 |-----------|------------|---------|
 | **PyPNM GUI** | This repo | Web interface + API server |
-| **PyPNM Agent** | [github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent) | Remote SNMP agent |
-| **PyPNM** | [github.com/svdleer/PyPNM](https://github.com/svdleer/PyPNM) | PNM library (required) |
+| **PyPNM Agent** | [github.com/your-org/pyPNMAgent](https://github.com/your-org/pyPNMAgent) | Remote SNMP agent |
+| **PyPNM** | [github.com/your-org/PyPNM](https://github.com/your-org/PyPNM) | PNM library (required) |
 
 ## Prerequisites
 
@@ -45,8 +45,8 @@ A modern web-based graphical user interface for [PyPNM](https://github.com/svdle
 
 ```bash
 # Clone both repos
-git clone https://github.com/svdleer/PyPNMGui.git
-git clone https://github.com/svdleer/pyPNMAgent.git
+git clone https://github.com/your-org/PyPNMGui.git
+git clone https://github.com/your-org/pyPNMAgent.git
 
 # Start GUI server
 cd PyPNMGui
@@ -113,7 +113,7 @@ cd PyPNM
 nano src/pypnm/settings/system.json
 ```
 
-See PyPNM repository: https://github.com/svdleer/PyPNM
+See PyPNM repository: https://github.com/your-org/PyPNM
 
 ## Project Structure
 
@@ -153,11 +153,11 @@ PyPNMGui/
 
 The PyPNM Agent runs on a jump server with network access to your DOCSIS equipment.
 
-See: **[github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent)**
+See: **[github.com/your-org/pyPNMAgent](https://github.com/your-org/pyPNMAgent)**
 
 ```bash
 # On your jump server
-git clone https://github.com/svdleer/pyPNMAgent.git
+git clone https://github.com/your-org/pyPNMAgent.git
 cd pyPNMAgent
 cp agent_config.example.json agent_config.json
 # Edit agent_config.json with:
@@ -245,7 +245,7 @@ If PyPNM cannot directly reach cable modems (firewall, network segmentation), yo
 **Solution:**
 1. Configure TFTP in PyPNM's `system.json`
 2. Ensure TFTP server is reachable from cable modems
-3. See: https://github.com/svdleer/PyPNM/blob/main/docs/install/install.md
+3. See: https://github.com/your-org/PyPNM/blob/main/docs/install/install.md
 
 ### No Modems Found
 
@@ -280,7 +280,7 @@ python run.py
 
 ## Resources
 
-- **PyPNM GitHub:** https://github.com/svdleer/PyPNM
+- **PyPNM GitHub:** https://github.com/your-org/PyPNM
 - **PyPNM API Reference:** http://localhost:8000/docs (after install)
 - **Integration Plan:** [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md)
 - **Network Architecture:** [docs/NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md)
@@ -302,4 +302,4 @@ Apache-2.0
 ## Support
 
 - Web GUI Issues: Create an issue in this repository
-- PyPNM Issues: https://github.com/svdleer/PyPNM/issues
+- PyPNM Issues: https://github.com/your-org/PyPNM/issues
