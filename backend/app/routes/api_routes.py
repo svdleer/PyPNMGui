@@ -468,11 +468,11 @@ def cache_stats():
 def agent_status():
     """Get WebSocket agent connection status from PyPNM API."""
     try:
-        from app.core.pypnm_client import get_pypnm_client
-        client = get_pypnm_client()
-        
-        # Try to get agent status from PyPNM API
-        response = client._get('/agents')
+        import requests as _requests
+        from app.core.config import Config
+        base_url = Config.PYPNM_API_URL.rstrip('/')
+        resp = _requests.get(f"{base_url}/agents", timeout=5)
+        response = resp.json() if resp.status_code == 200 else None
         
         # Check if we got a valid response
         if response and isinstance(response, dict):
