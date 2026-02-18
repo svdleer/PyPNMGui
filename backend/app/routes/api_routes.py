@@ -8,6 +8,8 @@ from . import api_bp
 from app.core.cmts_provider import CMTSProvider
 from app.core.pypnm_client import PyPNMClient
 
+logger = logging.getLogger(__name__)
+
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '172.22.147.18')
 
@@ -470,7 +472,7 @@ def agent_status():
         client = get_pypnm_client()
         
         # Try to get agent status from PyPNM API
-        response = client.get('/agents')
+        response = client._get('/agents')
         
         # Check if we got a valid response
         if response and isinstance(response, dict):
