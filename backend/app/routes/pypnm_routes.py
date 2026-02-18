@@ -711,7 +711,8 @@ def channel_stats(mac_address):
     payload = {
         'mac_address': mac_address,
         'modem_ip': modem_ip,
-        'community': community
+        'community': community,
+        'cmts_stats': True  # Fetch CMTS-side OFDMA MeanRxMer and IUC stats
     }
     
     # Add CMTS info for fiber node lookup if available
