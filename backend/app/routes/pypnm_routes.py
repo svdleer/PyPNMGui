@@ -1109,13 +1109,11 @@ def housekeeping():
         import time
         from pathlib import Path
         
-        # PyPNM data directories
+        # PyPNM data directories - PNM files land in tftpboot
         data_dirs = [
-            '/app/.data/pnm',
-            '/app/.data/csv',
-            '/app/.data/json',
-            '/app/.data/png',
-            '/app/.data/archive'
+            '/var/lib/tftpboot',
+            '/app/data',
+            '/app/logs',
         ]
         
         max_age_seconds = max_age_days * 24 * 60 * 60
