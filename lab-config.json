@@ -1,0 +1,38 @@
+{
+  "lab_environment": {
+    "host": "access-engineering.nl",
+    "ssh_command": "ssh access-engineering.nl",
+    "containers": {
+      "pypnm_gui": {
+        "path": "/opt/pypnm-gui-lab",
+        "port": "5050",
+        "url": "http://127.0.0.1:5050"
+      },
+      "pypnm_api": {
+        "path": "/home/svdleer/docker/PyPNM", 
+        "port": "8000",
+        "url": "http://127.0.0.1:8000"
+      },
+      "pypnm_agent": {
+        "path": "/home/svdleer/docker/pyPNMAgent",
+        "port": "N/A"
+      }
+    },
+    "test_data": {
+      "cmts": "mnd-gt0002-ccap002",
+      "cmts_ip": "172.16.6.212",
+      "test_modem": {
+        "mac": "90:32:4b:c8:19:0b",
+        "ip": "10.206.234.92",
+        "type": "DOCSIS 3.1",
+        "ofdm_enabled": true,
+        "ofdma_enabled": true
+      },
+      "snmp_communities": {
+        "cmts_read": "Z1gg0@LL",
+        "cmts_write": "Z1gg0Sp3c1@l", 
+        "modem_rw": "z1gg0m0n1t0r1ng"
+      }
+    }
+  }
+}

@@ -1,0 +1,1892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyPNM Web GUI - Cable Modem PNM Tool</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Navigation -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">
+                    <i class="bi bi-router me-2"></i>PyPNM Web GUI
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: currentView === 'home' }" href="#" @click.prevent="currentView = 'home'">
+                                <i class="bi bi-house-door me-1"></i>Home
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: currentView === 'modems' }" href="#" @click.prevent="currentView = 'modems'">
+                                <i class="bi bi-router me-1"></i>Modems
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: currentView === 'measurements' }" href="#" @click.prevent="currentView = 'measurements'" v-show="selectedModem">
+                                <i class="bi bi-graph-up me-1"></i>Measurements
+                            </a>
+                        </li>
+                    </ul>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge d-flex align-items-center" :class="apiStatus === 'ok' ? 'bg-success' : 'bg-warning text-dark'" style="font-size: 0.75rem; min-width: 60px; height: 32px; padding: 0.5rem 0.75rem;">
+                            <i class="bi me-1" :class="apiStatus === 'ok' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'" style="font-size: 0.75rem;"></i>
+                            <span>{{ apiStatus === 'ok' ? 'API' : 'Mock' }}</span>
+                        </span>
+                        <span class="badge d-flex align-items-center" :class="pypnmHealthy ? 'bg-info' : 'bg-secondary'" style="font-size: 0.75rem; min-width: 85px; height: 32px; padding: 0.5rem 0.75rem;">
+                            <i class="bi me-1" :class="pypnmHealthy ? 'bi-lightning-charge-fill' : 'bi-lightning'" style="font-size: 0.75rem;"></i>
+                            <span>PyPNM</span>
+                        </span>
+                        <span class="badge d-flex align-items-center" 
+                              :class="agentCount > 0 ? 'bg-success' : 'bg-danger'" 
+                              style="font-size: 0.75rem; min-width: 100px; height: 32px; padding: 0.5rem 0.75rem;"
+                              :title="agentCount > 0 ? agentCount + ' agent(s) connected' : 'No agents connected'">
+                            <i class="bi bi-diagram-3-fill me-1" style="font-size: 0.75rem;"></i>
+                            <span>Agent(s) </span>
+                            <span class="badge bg-light text-dark ms-1" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">{{ agentCount }}</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="container-fluid mt-4">
+            <!-- Home View -->
+            <div v-if="currentView === 'home'">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-search me-2"></i>Cable Modem Search</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Search By</label>
+                                        <select v-model="searchType" class="form-select">
+                                            <option value="ip">IP Address</option>
+                                            <option value="mac">MAC Address</option>
+                                            <option value="name">Name</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Search Value</label>
+                                        <input type="text" v-model="searchValue" class="form-control" 
+                                               :placeholder="searchPlaceholder" @keyup.enter="searchModems">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">SNMP Community (Read)</label>
+                                        <select v-model="snmpCommunity" class="form-select">
+                                            <option :value="snmpCommunity">{{ snmpCommunity }} (Read)</option>
+                                            <option :value="snmpCommunityRW">{{ snmpCommunityRW }} (R/W)</option>
+                                            <option value="public">public</option>
+                                            <option value="private">private</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button @click="searchModems" class="btn btn-primary w-100">
+                                            <i class="bi bi-search me-1"></i>Search
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Advanced Filters -->
+                                <div class="row g-3 mt-2">
+                                    <div class="col-md-4">
+                                        <label class="form-label">CMTS Filter</label>
+                                        <select v-model="selectedCmts" class="form-select" @change="loadCmtsInterfaces">
+                                            <option value="">All CMTS ({{ cmtsList.length }})</option>
+                                            <option v-for="cmts in cmtsList" :key="cmts.name" :value="cmts.name">
+                                                {{ cmts.name }} - {{ cmts.vendor }} {{ cmts.type }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Interface Filter</label>
+                                        <select v-model="selectedInterface" class="form-select" :disabled="!selectedCmts">
+                                            <option value="">All Interfaces</option>
+                                            <option v-for="iface in cmtsInterfaces" :key="iface" :value="iface">
+                                                {{ iface }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">CMTS Search</label>
+                                        <input type="text" v-model="cmtsSearch" class="form-control" 
+                                               placeholder="Search by hostname..." @input="filterCmtsList">
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button @click="getLiveModems" class="btn btn-success w-100" :disabled="!selectedCmts || loadingLiveModems">
+                                            <span v-if="loadingLiveModems"><i class="bi bi-arrow-repeat spin me-1"></i>Loading...</span>
+                                            <span v-else><i class="bi bi-router me-1"></i>Get Modems</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="row g-3 mt-2">
+                                    <div class="col-md-4">
+                                        <div class="form-check mt-2">
+                                            <input class="form-check-input" type="checkbox" v-model="enrichModems" id="enrichModems">
+                                            <label class="form-check-label" for="enrichModems">
+                                                <small>Enrich modems (model, firmware, cable-mac)</small>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <small v-if="liveModemSource" class="text-muted">
+                                            <i class="bi bi-broadcast me-1"></i>{{ liveModemSource }}
+                                        </small>
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button @click="clearFilters" class="btn btn-outline-secondary w-100">
+                                            <i class="bi bi-x-circle me-1"></i>Clear
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CMTS Summary Cards -->
+                <div class="row mt-4" v-if="cmtsListFull.length > 0">
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-primary text-white">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-hdd-network me-2"></i>Total CMTS
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-success text-white">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-building me-2"></i>Arris E6000
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.filter(c => c.vendor === 'Arris').length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-info text-white">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-house me-2"></i>Casa C100G
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.filter(c => c.vendor === 'Casa').length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card shadow-sm bg-warning text-dark">
+                            <div class="card-body">
+                                <h6 class="card-title mb-1">
+                                    <i class="bi bi-diagram-3 me-2"></i>Cisco cBR-8
+                                </h6>
+                                <h2 class="mb-0">{{ cmtsListFull.filter(c => c.vendor === 'Cisco').length }}</h2>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Results -->
+                <div class="row mt-4" v-if="modems.length > 0">
+                    <div class="col-12">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0"><i class="bi bi-list me-2"></i>Cable Modems ({{ modems.length }})</h5>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Status</th>
+                                                <th>MAC Address</th>
+                                                <th>IP Address</th>
+                                                <th>Vendor</th>
+                                                <th>Firmware</th>
+                                                <th>DOCSIS</th>
+                                                <th>CableMac</th>
+                                                <th>Upstream</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="modem in modems" :key="modem.mac_address" 
+                                                :class="{ 'table-active': selectedModem && selectedModem.mac_address === modem.mac_address }">
+                                                <td>
+                                                    <span class="badge" :class="{
+                                                        'bg-success': modem.status === 'operational' || modem.status === 'online',
+                                                        'bg-warning text-dark': modem.status === 'registrationComplete' || modem.status === 'ipComplete' || modem.status === 'registeredBPIInitializing',
+                                                        'bg-info': modem.status === 'ranging' || modem.status === 'rangingComplete',
+                                                        'bg-danger': modem.status === 'offline' || modem.status === 'accessDenied' || modem.status === 'rangingAborted',
+                                                        'bg-secondary': !['operational','online','registrationComplete','ipComplete','registeredBPIInitializing','ranging','rangingComplete','offline','accessDenied','rangingAborted'].includes(modem.status)
+                                                    }" :title="modem.status">
+                                                        {{ modem.status === 'registrationComplete' ? 'regComplete' : 
+                                                           modem.status === 'registeredBPIInitializing' ? 'BPI-init' :
+                                                           modem.status === 'rangingComplete' ? 'ranging' :
+                                                           modem.status }}
+                                                    </span>
+                                                </td>
+                                                <td><code>{{ modem.mac_address }}</code></td>
+                                                <td>{{ modem.ip_address }}</td>
+                                                <td>{{ modem.vendor }}</td>
+                                                <td><small>{{ modem.firmware || modem.software_version }}</small></td>
+                                                <td>
+                                                    <span class="badge" :class="{
+                                                        'bg-info': modem.docsis_version >= '3.1',
+                                                        'bg-warning text-dark': modem.docsis_version == '3.0' || modem.docsis_version == 'DOCSIS 3.0',
+                                                        'bg-secondary': modem.docsis_version < '3.0' && modem.docsis_version != 'DOCSIS 3.0'
+                                                    }">
+                                                        {{ modem.docsis_version }}
+                                                    </span>
+                                                    <!-- OFDM Status Box (Downstream) - Only for DOCSIS 3.1+ -->
+                                                    <span v-if="modem.docsis_version && (modem.docsis_version.includes('3.1') || modem.docsis_version.includes('4.0'))" 
+                                                          class="badge ms-1" 
+                                                          :class="{
+                                                              'bg-success': (modem.status === 'operational' || modem.status === 'online') && modem.status !== 'offline',
+                                                              'bg-warning text-dark': modem.status !== 'operational' && modem.status !== 'online' && modem.status !== 'offline' && modem.status !== 'other' && modem.status !== 'unknown',
+                                                              'bg-danger': modem.status === 'offline' || modem.status === 'other'
+                                                          }"
+                                                          :title="(modem.status === 'operational' || modem.status === 'online') ? 'OFDM Operational' : (modem.status === 'offline' ? 'OFDM Offline' : 'OFDM ' + modem.status)">
+                                                        <i class="bi bi-arrow-down"></i>
+                                                    </span>
+                                                    <!-- OFDMA Status Box (Upstream) - Only for DOCSIS 3.1+ -->
+                                                    <span v-if="modem.docsis_version && (modem.docsis_version.includes('3.1') || modem.docsis_version.includes('4.0'))" 
+                                                          class="badge ms-1" 
+                                                          :class="{
+                                                              'bg-success': (modem.upstream_interface && modem.upstream_interface.includes('ofdma')) && modem.status !== 'offline',
+                                                              'bg-danger': !(modem.upstream_interface && modem.upstream_interface.includes('ofdma')) || modem.status === 'offline'
+                                                          }"
+                                                          :title="(modem.upstream_interface && modem.upstream_interface.includes('ofdma')) ? 'OFDMA Active' : 'OFDMA Inactive'">
+                                                        <i class="bi bi-arrow-up"></i>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <small class="text-muted" v-if="modem.cable_mac">
+                                                        {{ modem.cable_mac.replace('cable-mac ', '') }}
+                                                    </small>
+                                                    <small class="text-muted" v-else>-</small>
+                                                </td>
+                                                <td>
+                                                    <small v-if="modem.upstream_interface" 
+                                                           :class="modem.upstream_interface.includes('ofdma') ? 'text-primary fw-bold' : 'text-muted'"
+                                                           :title="modem.upstream_interface">
+                                                        {{ modem.upstream_interface.replace('cable-upstream ', 'US ').replace('cable-us-ofdma ', 'OFDMA ').replace('cable-mac ', '') }}
+                                                    </small>
+                                                    <small v-else class="text-muted">-</small>
+                                                </td>
+                                                <td>
+                                                    <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                    <button @click="quickPing(modem)" class="btn btn-sm btn-outline-secondary" title="Quick Ping">
+                                                        <i class="bi bi-broadcast"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- No Results -->
+                <div class="row mt-4" v-else-if="searchPerformed">
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>No modems found matching your criteria.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modems/Details View - Modern PNM Dashboard -->
+            <div v-if="currentView === 'modems' && selectedModem">
+                <!-- Modem Header -->
+                <div class="card shadow-sm mb-4 border-0" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <div class="card-body text-white py-4">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center">
+                                    <div class="me-4">
+                                        <i class="bi bi-router" style="font-size: 3rem;"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="mb-1">{{ selectedModem.vendor }} {{ selectedModem.model || 'Cable Modem' }}</h3>
+                                        <p class="mb-0 opacity-75">
+                                            <code class="text-white bg-dark bg-opacity-25 px-2 py-1 rounded">{{ selectedModem.mac_address }}</code>
+                                            <span class="ms-3"><i class="bi bi-geo-alt me-1"></i>{{ selectedModem.ip_address }}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4 text-md-end mt-3 mt-md-0">
+                                <!-- DOCSIS Version Badge -->
+                                <div class="mb-2">
+                                    <span class="badge bg-light text-dark py-2 px-3" style="font-size: 0.9rem;">
+                                        <i class="bi bi-cpu me-1"></i>{{ selectedModem.docsis_version || 'DOCSIS 3.1' }}
+                                    </span>
+                                </div>
+                                
+                                <!-- Channel Status Badges -->
+                                <div v-if="channelStats" class="mb-2">
+                                    <span class="badge me-2 py-2 px-3" 
+                                          :class="{
+                                              'bg-success': ofdmStatus === 'green',
+                                              'bg-warning text-dark': ofdmStatus === 'orange',
+                                              'bg-danger': ofdmStatus === 'red'
+                                          }" 
+                                          style="font-size: 0.85rem;"
+                                          :title="'Downstream OFDM: ' + (channelStats?.downstream?.ofdm?.count || 0) + ' channels' + (ofdmStatus === 'orange' ? ' (Partial Service)' : '')">
+                                        <i class="bi bi-arrow-down-circle-fill me-1"></i>OFDM
+                                    </span>
+                                    <span class="badge py-2 px-3" 
+                                          :class="{
+                                              'bg-success': ofdmaStatus === 'green',
+                                              'bg-danger': ofdmaStatus === 'red'
+                                          }" 
+                                          style="font-size: 0.85rem;"
+                                          :title="'Upstream OFDMA: ' + (channelStats?.upstream?.ofdma?.count || 0) + ' channels'">
+                                        <i class="bi bi-arrow-up-circle-fill me-1"></i>OFDMA
+                                    </span>
+                                </div>
+                                
+                                <!-- Status Badge -->
+                                <div>
+                                    <span class="badge py-2 px-3" :class="selectedModem.status === 'operational' || selectedModem.status === 'online' || selectedModem.status === 'registrationComplete' ? 'bg-success' : 'bg-danger'" style="font-size: 0.9rem;">
+                                        <i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>
+                                        {{ selectedModem.status === 'registrationComplete' ? 'Online' : selectedModem.status }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <ul class="nav nav-tabs nav-fill mb-4" id="pnmTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button">
+                            <i class="bi bi-speedometer2 me-2"></i>Overview
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="downstream-tab" data-bs-toggle="tab" data-bs-target="#downstream" type="button">
+                            <i class="bi bi-arrow-down-circle me-2"></i>Downstream
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="upstream-tab" data-bs-toggle="tab" data-bs-target="#upstream" type="button">
+                            <i class="bi bi-arrow-up-circle me-2"></i>Upstream
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="pnm-tab" data-bs-toggle="tab" data-bs-target="#pnm" type="button">
+                            <i class="bi bi-graph-up me-2"></i>PNM Measurements
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="housekeeping-tab" data-bs-toggle="tab" data-bs-target="#housekeeping" type="button">
+                            <i class="bi bi-trash3 me-2"></i>Housekeeping
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="events-tab" data-bs-toggle="tab" data-bs-target="#events" type="button">
+                            <i class="bi bi-journal-text me-2"></i>Event Log
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Tab Content -->
+                <div class="tab-content" id="pnmTabContent">
+                    
+                    <!-- Overview Tab -->
+                    <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                        <!-- Loading Overlay -->
+                        <div v-if="loadingSystemInfo" class="position-relative">
+                            <div class="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style="background: rgba(255,255,255,0.9); z-index: 1000; min-height: 300px;">
+                                <div class="text-center">
+                                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p class="mt-3 text-primary fw-bold">Loading channel information...</p>
+                                    <small class="text-muted">This may take 15-20 seconds</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <!-- Quick Stats -->
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" :style="{
+                                    'border-left': selectedModem.status === 'operational' || selectedModem.status === 'online' ? '4px solid #28a745 !important' : '4px solid #6c757d !important'
+                                }">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">Status</h6>
+                                                <h4 class="mb-0" :class="{
+                                                    'text-success': selectedModem.status === 'operational' || selectedModem.status === 'online',
+                                                    'text-warning': selectedModem.status === 'registrationComplete' || selectedModem.status === 'ipComplete',
+                                                    'text-danger': selectedModem.status === 'offline',
+                                                    'text-secondary': !['operational','online','registrationComplete','ipComplete','offline'].includes(selectedModem.status)
+                                                }">
+                                                    {{ selectedModem.status === 'operational' || selectedModem.status === 'online' ? 'Online' : selectedModem.status }}
+                                                </h4>
+                                            </div>
+                                            <i class="bi" :class="{
+                                                'bi-check-circle-fill text-success': selectedModem.status === 'operational' || selectedModem.status === 'online',
+                                                'bi-exclamation-triangle-fill text-warning': selectedModem.status === 'registrationComplete' || selectedModem.status === 'ipComplete',
+                                                'bi-x-circle-fill text-danger': selectedModem.status === 'offline',
+                                                'bi-question-circle-fill text-secondary': !['operational','online','registrationComplete','ipComplete','offline'].includes(selectedModem.status)
+                                            }" style="font-size: 2rem;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #007bff !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">CMTS</h6>
+                                                <h4 class="mb-0">{{ selectedModem.cmts || 'N/A' }}</h4>
+                                            </div>
+                                            <i class="bi bi-hdd-network text-primary" style="font-size: 2rem;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #6f42c1 !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">Cable MAC</h6>
+                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.cable_mac">
+                                                    {{ selectedModem.cable_mac || 'N/A' }}
+                                                </h5>
+                                                <small v-if="selectedModem.upstream_channel_id" class="text-muted">
+                                                    <span class="badge bg-secondary mt-1">CH: {{ selectedModem.upstream_channel_id }}</span>
+                                                </small>
+                                            </div>
+                                            <i class="bi bi-ethernet text-primary" style="font-size: 2rem; color: #0d6efd;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card border-0 shadow-sm h-100" style="border-left: 4px solid #fd7e14 !important;">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="text-muted mb-2">Fiber Node</h6>
+                                                <h5 class="mb-0 text-truncate" style="max-width: 150px;" :title="selectedModem.fiber_node">
+                                                    {{ selectedModem.fiber_node || 'N/A' }}
+                                                </h5>
+                                            </div>
+                                            <i class="bi bi-diagram-3" style="font-size: 2rem; color: #fd7e14;"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Modem Details & Quick Actions -->
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Modem Details</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="table table-borderless mb-0">
+                                            <tr>
+                                                <td class="text-muted" style="width: 40%;">MAC Address</td>
+                                                <td><code>{{ selectedModem.mac_address }}</code></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">IP Address</td>
+                                                <td>{{ selectedModem.ip_address }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">Vendor</td>
+                                                <td>{{ selectedModem.vendor || 'Unknown' }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">Model</td>
+                                                <td>{{ selectedModem.model || 'Unknown' }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">DOCSIS Version</td>
+                                                <td><span class="badge bg-info">{{ selectedModem.docsis_version || '3.1' }}</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">Firmware</td>
+                                                <td><small>{{ selectedModem.firmware || selectedModem.software_version || 'N/A' }}</small></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.cable_mac">
+                                                <td class="text-muted">Cable MAC Interface</td>
+                                                <td><code>{{ selectedModem.cable_mac }}</code></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.fiber_node">
+                                                <td class="text-muted">Fiber Node</td>
+                                                <td><span class="badge bg-info">{{ selectedModem.fiber_node }}</span></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.upstream_channel_id">
+                                                <td class="text-muted">Upstream Channel</td>
+                                                <td><span class="badge bg-secondary">{{ selectedModem.upstream_channel_id }}</span></td>
+                                            </tr>
+                                            <tr v-if="selectedModem.md_if_index">
+                                                <td class="text-muted">MD-IF-INDEX</td>
+                                                <td><code>{{ selectedModem.md_if_index }}</code></td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>Quick Actions</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-6">
+                                                <button @click="loadSystemInfo" class="btn btn-outline-primary w-100 py-3" :disabled="loadingSystemInfo">
+                                                    <i class="bi bi-arrow-clockwise d-block mb-1" :class="{ 'spin': loadingSystemInfo }" style="font-size: 1.5rem;"></i>
+                                                    <small>Refresh Info</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="loadChannelStats" class="btn btn-outline-info w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-bar-chart d-block mb-1" style="font-size: 1.5rem;"></i>
+                                                    <small>Channel Stats</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="runRxmerTest" class="btn btn-outline-success w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-graph-up d-block mb-1" style="font-size: 1.5rem;"></i>
+                                                    <small>RxMER Test</small>
+                                                </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="loadEventLog" class="btn btn-outline-secondary w-100 py-3" :disabled="runningTest">
+                                                    <i class="bi bi-journal-text d-block mb-1" style="font-size: 1.5rem;"></i>
+                                                    <small>Event Log</small>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Channel Summary -->
+                        <div class="row" v-if="systemInfo">
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-down text-success me-2"></i>Downstream Channels</h5>
+                                        <div>
+                                            <span class="badge bg-secondary me-1" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM').length > 0">
+                                                {{ systemInfo.downstream.filter(c => c.type === 'SC-QAM').length }} SC-QAM
+                                            </span>
+                                            <span class="badge bg-info" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'OFDM').length > 0">
+                                                {{ systemInfo.downstream.filter(c => c.type === 'OFDM').length }} OFDM
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Summary Stats -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).length > 0">
+                                            <div class="col-4">
+                                                <small class="text-muted d-block">SC-QAM Power</small>
+                                                <strong :class="getDsPowerClass(Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }}
+                                                </strong>
+                                                <span class="text-muted mx-1">to</span>
+                                                <strong :class="getDsPowerClass(Math.max(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.max(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }} dBmV
+                                                </strong>
+                                            </div>
+                                            <div class="col-4">
+                                                <small class="text-muted d-block">Avg Power</small>
+                                                <strong :class="getDsPowerClass((systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).length))">
+                                                    {{ (systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.power_dbmv).length).toFixed(1) }} dBmV
+                                                </strong>
+                                            </div>
+                                            <div class="col-4">
+                                                <small class="text-muted d-block">Min SNR</small>
+                                                <strong :class="Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.snr_db).map(c => c.snr_db)) < 35 ? 'text-danger' : 'text-success'">
+                                                    {{ Math.min(...systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.snr_db).map(c => c.snr_db)).toFixed(1) }} dB
+                                                </strong>
+                                            </div>
+                                        </div>
+                                        <!-- OFDM Summary -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'OFDM').length > 0">
+                                            <div class="col-12">
+                                                <small class="text-muted d-block">OFDM Channels</small>
+                                                <div v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id" class="d-inline-block me-3 mb-2">
+                                                    <span class="badge bg-info">Ch {{ ch.channel_id }}: {{ ch.frequency_mhz.toFixed(0) }} MHz</span>
+                                                    <span class="badge bg-secondary" v-if="ch.current_profile !== null && ch.current_profile !== undefined">P{{ ch.current_profile }}</span>
+                                                    <small class="text-muted ms-1">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) + ' MHz' : '' }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <!-- Channel Table (SC-QAM only) -->
+                                        <div class="table-responsive" style="max-height: 180px;" v-if="systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM').length > 0">
+                                            <table class="table table-sm table-hover mb-0">
+                                                <thead class="table-light sticky-top">
+                                                    <tr>
+                                                        <th>Ch</th>
+                                                        <th>Freq</th>
+                                                        <th>Power</th>
+                                                        <th>SNR</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in (systemInfo.downstream || []).filter(c => c.type === 'SC-QAM' && c.frequency_mhz > 0)" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td class="text-muted">{{ ch.frequency_mhz.toFixed(0) }}</td>
+                                                        <td>
+                                                            <span :class="getDsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span :class="ch.snr_db < 35 ? 'text-danger fw-bold' : (ch.snr_db < 38 ? 'text-warning' : 'text-success')">
+                                                                {{ ch.snr_db ? ch.snr_db.toFixed(1) : '-' }}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-up text-primary me-2"></i>Upstream Channels</h5>
+                                        <div>
+                                            <span class="badge bg-secondary me-1" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA').length > 0">
+                                                {{ systemInfo.upstream.filter(c => c.type === 'ATDMA').length }} ATDMA
+                                            </span>
+                                            <span class="badge bg-info" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'OFDMA').length > 0">
+                                                {{ systemInfo.upstream.filter(c => c.type === 'OFDMA').length }} OFDMA
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- ATDMA Summary Stats -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).length > 0">
+                                            <div class="col-6">
+                                                <small class="text-muted d-block">ATDMA TX Power</small>
+                                                <strong :class="getUsPowerClass(Math.min(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.min(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }}
+                                                </strong>
+                                                <span class="text-muted mx-1">to</span>
+                                                <strong :class="getUsPowerClass(Math.max(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)))">
+                                                    {{ Math.max(...systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).map(c => c.power_dbmv)).toFixed(1) }} dBmV
+                                                </strong>
+                                            </div>
+                                            <div class="col-6">
+                                                <small class="text-muted d-block">Avg TX Power</small>
+                                                <strong :class="getUsPowerClass((systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).length))">
+                                                    {{ (systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).reduce((a,c) => a + c.power_dbmv, 0) / systemInfo.upstream.filter(c => c.type === 'ATDMA' && c.power_dbmv).length).toFixed(1) }} dBmV
+                                                </strong>
+                                            </div>
+                                        </div>
+                                        <!-- OFDMA Summary -->
+                                        <div class="row text-center mb-3 border-bottom pb-3" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'OFDMA').length > 0">
+                                            <div class="col-12">
+                                                <small class="text-muted d-block">OFDMA Channels</small>
+                                                <div v-for="ch in systemInfo.upstream.filter(c => c.type === 'OFDMA')" :key="'ofdma-'+ch.channel_id" class="d-inline-block me-3 mb-2">
+                                                    <span class="badge bg-info">Ch {{ ch.channel_id }}: {{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : 'N/A' }} MHz</span>
+                                                    <span class="badge bg-success">{{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : 'N/A' }} dBmV</span>
+                                                    <span class="badge bg-warning text-dark" v-if="ch.active_iucs && ch.active_iucs.length">IUC: {{ ch.active_iucs.join(', ') }}</span>
+                                                    <small class="text-muted ms-1">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(1) + ' MHz' : '' }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <!-- Channel Table (ATDMA only) -->
+                                        <div class="table-responsive" style="max-height: 180px;" v-if="systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA').length > 0">
+                                            <table class="table table-sm table-hover mb-0">
+                                                <thead class="table-light sticky-top">
+                                                    <tr>
+                                                        <th>Ch</th>
+                                                        <th>Freq</th>
+                                                        <th>TX Power</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in (systemInfo.upstream || []).filter(c => c.type === 'ATDMA')" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td class="text-muted">{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : 'N/A' }}</td>
+                                                        <td>
+                                                            <span :class="getUsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Load Channel Info Button -->
+                        <div class="text-center py-4" v-if="!systemInfo">
+                            <i class="bi bi-broadcast text-muted" style="font-size: 3rem;"></i>
+                            <p class="text-muted mt-2">Channel information not loaded</p>
+                            <button @click="loadSystemInfo" class="btn btn-primary" :disabled="loadingSystemInfo">
+                                <i class="bi bi-arrow-clockwise me-2" :class="{ 'spin': loadingSystemInfo }"></i>
+                                Load Channel Info
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Downstream Tab -->
+                    <div class="tab-pane fade" id="downstream" role="tabpanel">
+                        <div class="row">
+                            <!-- DS Channel Chart -->
+                            <div class="col-12 mb-4" v-if="systemInfo && systemInfo.downstream && systemInfo.downstream.length">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>DS Channel Overview</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="chart-container" style="height: 250px;">
+                                            <canvas id="ds-channel-chart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SC-QAM Channels -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-reception-4 me-2"></i>SC-QAM Downstream Channels</h5>
+                                        <span class="badge bg-secondary">DOCSIS 3.0</span>
+                                    </div>
+                                    <div class="card-body" v-if="systemInfo && systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'SC-QAM').length > 0">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-secondary">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Frequency</th>
+                                                        <th>Modulation</th>
+                                                        <th>Power</th>
+                                                        <th>SNR</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.downstream.filter(c => c.type === 'SC-QAM' && c.frequency_mhz > 0)" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz.toFixed(2) }} MHz</td>
+                                                        <td><span class="badge bg-secondary">256 QAM</span></td>
+                                                        <td>
+                                                            <span :class="getDsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span :class="ch.snr_db >= 35 ? 'text-success' : 'text-danger'">
+                                                                {{ ch.snr_db ? ch.snr_db.toFixed(1) : '-' }} dB
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span class="badge" :class="ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 10 ? 'bg-success' : 'bg-warning'">
+                                                                {{ ch.snr_db >= 35 && ch.power_dbmv >= -10 && ch.power_dbmv <= 10 ? 'Good' : 'Check' }}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.downstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No SC-QAM channels found</p>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- OFDM Channels -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0 text-info"><i class="bi bi-broadcast me-2"></i>OFDM Downstream Channels</h5>
+                                        <span class="badge bg-info">DOCSIS 3.1</span>
+                                    </div>
+                                    <div class="card-body" v-if="systemInfo && systemInfo.downstream && systemInfo.downstream.filter(c => c.type === 'OFDM').length > 0">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-info">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>PLC Frequency</th>
+                                                        <th>Bandwidth</th>
+                                                        <th>Subcarriers</th>
+                                                        <th>Power</th>
+                                                        <th>MER</th>
+                                                        <th>Active Profiles</th>
+                                                        <th>Current</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : (ch.plc_freq_mhz ? ch.plc_freq_mhz.toFixed(1) : '-') }} MHz</td>
+                                                        <td><span class="badge bg-info">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) : '-' }} MHz</span></td>
+                                                        <td>
+                                                            {{ ch.num_subcarriers || '-' }}
+                                                            <small class="text-muted d-block" v-if="ch.subcarrier_spacing_khz">{{ ch.subcarrier_spacing_khz }}kHz</small>
+                                                        </td>
+                                                        <td>
+                                                            <span :class="getDsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv !== null && ch.power_dbmv !== undefined ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span :class="ch.mer_db && ch.mer_db >= 30 ? 'text-success' : (ch.mer_db ? 'text-warning' : 'text-muted')">
+                                                                {{ ch.mer_db ? ch.mer_db.toFixed(1) : (ch.snr_db ? ch.snr_db.toFixed(1) : '-') }} dB
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.profiles && ch.profiles.length > 0">
+                                                                <span v-for="p in ch.profiles" :key="'profile-'+p" class="badge bg-primary me-1">{{ p }}</span>
+                                                            </span>
+                                                            <span v-else-if="ch.active_profiles" class="badge bg-secondary">{{ ch.active_profiles }} active</span>
+                                                            <span v-else class="text-muted">-</span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.current_profile !== null && ch.current_profile !== undefined" class="badge bg-success">{{ ch.current_profile }}</span>
+                                                            <span v-else class="text-muted">-</span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.is_partial" class="badge bg-warning text-dark">Partial</span>
+                                                            <span v-else class="badge bg-success">Full</span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.downstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No OFDM channels - This modem may be DOCSIS 3.0 only</p>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upstream Tab -->
+                    <div class="tab-pane fade" id="upstream" role="tabpanel">
+                        <div class="row">
+                            <!-- US Channel Chart -->
+                            <div class="col-12 mb-4" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.length">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>US Channel Power</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="chart-container" style="height: 200px;">
+                                            <canvas id="us-channel-chart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ATDMA Channels -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>ATDMA Upstream Channels</h5>
+                                        <span class="badge bg-secondary">DOCSIS 3.0</span>
+                                    </div>
+                                    <div class="card-body" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'ATDMA').length > 0">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-secondary">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Frequency</th>
+                                                        <th>TX Power</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.upstream.filter(c => c.type === 'ATDMA')" :key="ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(2) : '-' }} MHz</td>
+                                                        <td>
+                                                            <span :class="getUsPowerClass(ch.power_dbmv)">
+                                                                {{ ch.power_dbmv ? ch.power_dbmv.toFixed(1) : '-' }} dBmV
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span class="badge" :class="ch.power_dbmv >= 35 && ch.power_dbmv <= 51 ? 'bg-success' : 'bg-warning'">
+                                                                {{ ch.power_dbmv >= 35 && ch.power_dbmv <= 51 ? 'Good' : 'Check' }}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.upstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No ATDMA channels found</p>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- OFDMA Channels -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0 text-info"><i class="bi bi-broadcast me-2"></i>OFDMA Upstream Channels</h5>
+                                        <span class="badge bg-info">DOCSIS 3.1</span>
+                                    </div>
+                                    <div class="card-body" v-if="systemInfo && systemInfo.upstream && systemInfo.upstream.filter(c => c.type === 'OFDMA').length > 0">
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead class="table-info">
+                                                    <tr>
+                                                        <th>Channel</th>
+                                                        <th>Frequency</th>
+                                                        <th>Bandwidth</th>
+                                                        <th>TX Power</th>
+                                                        <th>CMTS RxMER</th>
+                                                        <th>Active IUCs</th>
+                                                        <th>Current IUC</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="ch in systemInfo.upstream.filter(c => c.type === 'OFDMA')" :key="'ofdma-'+ch.channel_id">
+                                                        <td><strong>{{ ch.channel_id }}</strong></td>
+                                                        <td>{{ ch.frequency_mhz ? ch.frequency_mhz.toFixed(1) : '-' }} MHz</td>
+                                                        <td><span class="badge bg-info">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(1) : '-' }} MHz</span></td>
+                                                        <td>
+                                                            <span :class="getUsPowerClass(ch.tx_power_dbmv)">
+                                                                {{ ch.tx_power_dbmv !== null && ch.tx_power_dbmv !== undefined ? ch.tx_power_dbmv.toFixed(1) : (ch.power_dbmv !== null && ch.power_dbmv !== undefined ? ch.power_dbmv.toFixed(1) : '-') }} dBmV
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.rx_mer !== null && ch.rx_mer !== undefined" :class="{
+                                                                'text-success fw-bold': ch.rx_mer >= 35,
+                                                                'text-warning fw-bold': ch.rx_mer >= 30 && ch.rx_mer < 35,
+                                                                'text-danger fw-bold': ch.rx_mer < 30
+                                                            }">
+                                                                {{ ch.rx_mer.toFixed(1) }} dB
+                                                            </span>
+                                                            <span v-else class="text-muted">-</span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.profiles && ch.profiles.length > 0">
+                                                                <span v-for="p in ch.profiles" :key="'usprofile-'+p" class="badge bg-primary me-1">{{ p }}</span>
+                                                            </span>
+                                                            <span v-else-if="ch.iuc_list && ch.iuc_list.length > 0">
+                                                                <span v-for="iuc in ch.iuc_list" :key="'usiuc-'+iuc" class="badge bg-primary me-1">{{ iuc }}</span>
+                                                            </span>
+                                                            <span v-else class="text-muted">-</span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.current_iuc !== null && ch.current_iuc !== undefined" class="badge bg-success">{{ ch.current_iuc }}</span>
+                                                            <span v-else class="text-muted">-</span>
+                                                        </td>
+                                                        <td>
+                                                            <span v-if="ch.is_partial" class="badge bg-warning text-dark" title="Partial Service">Partial</span>
+                                                            <span v-else class="badge bg-success" title="Active">Active</span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="card-body text-center py-4" v-else-if="systemInfo && systemInfo.upstream">
+                                        <i class="bi bi-x-circle text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">No OFDMA channels - This modem may be DOCSIS 3.0 only</p>
+                                    </div>
+                                    <div class="card-body text-center py-5" v-else>
+                                        <i class="bi bi-arrow-clockwise text-muted" style="font-size: 2rem;"></i>
+                                        <p class="text-muted mt-2">Click "Refresh Info" to load channel data</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PNM Measurements Tab -->
+                    <div class="tab-pane fade" id="pnm" role="tabpanel">
+                        <div class="row">
+                            <!-- PNM Measurement Controls -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>PNM Measurements</h5>
+                                        <div v-if="channelStats">
+                                            <span class="badge" :class="hasOfdmChannels ? 'bg-success' : 'bg-secondary'" title="Downstream OFDM (DOCSIS 3.1)">
+                                                <i class="bi" :class="hasOfdmChannels ? 'bi-check-circle' : 'bi-x-circle'"></i> DS OFDM
+                                            </span>
+                                            <span class="badge ms-1" :class="hasOfdmaChannels ? 'bg-success' : 'bg-secondary'" title="Upstream OFDMA (DOCSIS 3.1)">
+                                                <i class="bi" :class="hasOfdmaChannels ? 'bi-check-circle' : 'bi-x-circle'"></i> US OFDMA
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Info alert when no OFDM -->
+                                        <div v-if="channelStats && !hasOfdmChannels" class="alert alert-info py-2 mb-3">
+                                            <i class="bi bi-info-circle me-2"></i>
+                                            <strong>DOCSIS 3.0 Modem:</strong> No downstream OFDM channels detected. Only Spectrum Analyzer is available for downstream. 
+                                            <span v-if="hasOfdmaChannels">Upstream OFDMA measurements are available.</span>
+                                        </div>
+                                        <div class="row g-3 mb-3">
+                                            <div class="col-md-4">
+                                                <label class="form-label">Measurement Type</label>
+                                                <select v-model="pnmMeasurementType" class="form-select">
+                                                    <option value="rxmer" :disabled="!hasOfdmChannels">RxMER - Per Subcarrier {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="spectrum">Spectrum Analyzer</option>
+                                                    <option value="channel_estimation" :disabled="!hasOfdmChannels">Channel Estimation {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="modulation_profile" :disabled="!hasOfdmChannels">Modulation Profile {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="fec_summary" :disabled="!hasOfdmChannels">FEC Summary {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="histogram" :disabled="!hasOfdmChannels">Histogram {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="constellation" :disabled="!hasOfdmChannels">Constellation Display {{ !hasOfdmChannels ? '(Requires OFDM)' : '' }}</option>
+                                                    <option value="us_pre_eq" :disabled="!hasOfdmaChannels">US Pre-Equalization {{ !hasOfdmaChannels ? '(Requires OFDMA)' : '' }}</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <label class="form-label">Output Format</label>
+                                                <select v-model="pnmOutputType" class="form-select">
+                                                    <option value="archive">Archive (PNG plots + CSV + ZIP download)</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-3 d-flex align-items-end">
+                                                <button @click="runPnmMeasurement(pnmMeasurementType)" 
+                                                        class="btn btn-primary w-100" 
+                                                        :disabled="!canRunMeasurement"
+                                                        :title="requiresOfdm && !hasOfdmChannels ? 'Requires OFDM downstream (DOCSIS 3.1)' : ''">
+                                                    <span v-if="runningTest">
+                                                        <i class="bi bi-arrow-repeat spin me-1"></i>Running...
+                                                    </span>
+                                                    <span v-else-if="requiresOfdm && !hasOfdmChannels">
+                                                        <i class="bi bi-exclamation-triangle me-1"></i>No OFDM
+                                                    </span>
+                                                    <span v-else>
+                                                        <i class="bi bi-play-fill me-1"></i>Run Measurement
+                                                    </span>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-2 d-flex align-items-end">
+                                                <button @click="toggleRawData" 
+                                                        class="btn btn-outline-secondary w-100" 
+                                                        :disabled="!selectedMeasurementData">
+                                                    <i class="bi bi-code-square me-1"></i>Raw Data
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Quick Action Buttons -->
+                                        <div class="row g-2">
+                                            <div class="col-md-3">
+                                                <button @click="runRxmerTest" class="btn btn-sm btn-outline-primary w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
+                                                    <i class="bi bi-graph-up me-1"></i>RxMER
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runChannelEstimation" class="btn btn-sm btn-outline-success w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
+                                                    <i class="bi bi-soundwave me-1"></i>Chan Est
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runModulationProfile" class="btn btn-sm btn-outline-info w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
+                                                    <i class="bi bi-reception-4 me-1"></i>Mod Profile
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button @click="runFecTest" class="btn btn-sm btn-outline-warning w-100" 
+                                                        :disabled="runningTest || !hasOfdmChannels"
+                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
+                                                    <i class="bi bi-shield-check me-1"></i>FEC
+                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Upstream PNM Section (CMTS-side measurements) -->
+                            <div class="col-12 mb-4" v-if="selectedModem && selectedModem.cmts_ip">
+                                <div class="card shadow-sm border-warning">
+                                    <div class="card-header bg-warning bg-opacity-10">
+                                        <h5 class="mb-0 text-warning">
+                                            <i class="bi bi-arrow-up-circle me-2"></i>Upstream PNM (CMTS-side)
+                                            <span class="badge bg-warning text-dark ms-2">DOCSIS 3.1</span>
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-3 mb-3">
+                                            <!-- UTSC Section -->
+                                            <div class="col-md-6">
+                                                <div class="card h-100">
+                                                    <div class="card-header bg-secondary bg-opacity-10 d-flex justify-content-between align-items-center">
+                                                        <h6 class="mb-0"><i class="bi bi-soundwave me-2"></i>UTSC - Upstream Spectrum Capture</h6>
+                                                        <button @click="openSpectrumAnalyzerModal" class="btn btn-sm btn-outline-primary" title="Open Pro Spectrum Analyzer">
+                                                            <i class="bi bi-window-fullscreen me-1"></i>Pro UI
+                                                        </button>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div class="mb-2">
+                                                            <label class="form-label form-label-sm">Trigger Mode</label>
+                                                            <select v-model="utscConfig.triggerMode" class="form-select form-select-sm">
+                                                                <option :value="2">FreeRunning (Wideband)</option>
+                                                                <option :value="5">IdleSID (Quiet Period)</option>
+                                                                <option :value="6">CM MAC (This Modem)</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="row g-2 mb-2">
+                                                            <div class="col-6">
+                                                                <label class="form-label form-label-sm">Center Freq (MHz)</label>
+                                                                <input type="number" v-model.number="utscConfig.centerFreqMhz" class="form-control form-control-sm" min="5" max="200">
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <label class="form-label form-label-sm">Span (MHz)</label>
+                                                                <select v-model.number="utscConfig.spanMhz" class="form-select form-select-sm">
+                                                                    <option :value="40">40 MHz</option>
+                                                                    <option :value="60">60 MHz</option>
+                                                                    <option :value="80">80 MHz</option>
+                                                                    <option :value="160">160 MHz</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row g-2 mb-2">
+                                                            <div class="col-6">
+                                                                <label class="form-label form-label-sm">RF Port / US Channel</label>
+                                                                <select v-model.number="utscConfig.rfPortIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
+                                                                    <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : 'Select channel' }}</option>
+                                                                    <optgroup v-if="upstreamInterfaces.ofdmaChannels.length > 0" label="OFDMA Channels">
+                                                                        <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="'ofdma-' + ch.ifindex" :value="ch.ifindex">
+                                                                            {{ ch.description || 'OFDMA ' + ch.index }} (ifIndex {{ ch.ifindex }})
+                                                                        </option>
+                                                                    </optgroup>
+                                                                    <optgroup v-if="upstreamInterfaces.scqamChannels.length > 0" label="SC-QAM Channels">
+                                                                        <option v-for="ch in upstreamInterfaces.scqamChannels" :key="'scqam-' + ch.ifindex" :value="ch.ifindex">
+                                                                            {{ ch.description || 'RF Port ' + ch.ifindex }} (ifIndex {{ ch.ifindex }})
+                                                                        </option>
+                                                                    </optgroup>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <label class="form-label form-label-sm">Bins</label>
+                                                                <select v-model.number="utscConfig.numBins" class="form-select form-select-sm">
+                                                                    <option :value="200">200</option>
+                                                                    <option :value="400">400</option>
+                                                                    <option :value="800">800</option>
+                                                                    <option :value="1600">1600</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row g-2 mb-2">
+                                                            <div class="col-4">
+                                                                <label class="form-label form-label-sm">Window</label>
+                                                                <select v-model.number="utscConfig.window" class="form-select form-select-sm">
+                                                                    <option :value="2">Rectangular</option>
+                                                                    <option :value="3">Hann</option>
+                                                                    <option :value="4">Blackman-Harris</option>
+                                                                    <option :value="5">Hamming</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-4">
+                                                                <label class="form-label form-label-sm">Output</label>
+                                                                <select v-model.number="utscConfig.outputFormat" class="form-select form-select-sm">
+                                                                    <option :value="2">fftPower</option>
+                                                                    <option :value="5">fftAmplitude</option>
+                                                                    <option :value="1">timeIQ</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-4">
+                                                                <label class="form-label form-label-sm">Runtime</label>
+                                                                <select v-model.number="utscConfig.runtime" class="form-select form-select-sm">
+                                                                    <option :value="20">20 sec</option>
+                                                                    <option :value="30">30 sec</option>
+                                                                    <option :value="60">1 min</option>
+                                                                    <option :value="120">2 min</option>
+                                                                    <option :value="300">5 min</option>
+                                                                    <option :value="600">10 min</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div class="d-flex gap-2">
+                                                            <button @click="startLiveSpectrum" class="btn btn-sm btn-success flex-grow-1" :disabled="liveSpectrumEnabled || !utscConfig.rfPortIfindex">
+                                                                <span v-if="liveSpectrumEnabled"><i class="bi bi-broadcast spin me-1"></i>Live</span>
+                                                                <span v-else><i class="bi bi-broadcast me-1"></i>Live</span>
+                                                            </button>
+                                                            <button @click="stopLiveSpectrum" class="btn btn-sm btn-danger" :disabled="!liveSpectrumEnabled">
+                                                                <i class="bi bi-stop-fill"></i>
+                                                            </button>
+                                                        </div>
+                                                        
+                                                        <div v-if="utscStatus" class="mt-2">
+                                                            <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">
+                                                                Status: {{ utscStatus.meas_status_name }}
+                                                            </small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Upstream RxMER Section -->
+                                            <div class="col-md-6">
+                                                <div class="card h-100">
+                                                    <div class="card-header bg-info bg-opacity-10">
+                                                        <h6 class="mb-0"><i class="bi bi-bar-chart me-2"></i>US OFDMA RxMER</h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div class="mb-2">
+                                                            <label class="form-label form-label-sm">OFDMA Channel</label>
+                                                            <select v-model.number="usRxmerConfig.ofdmaIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
+                                                                <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
+                                                                <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
+                                                                    OFDMA {{ ch.index }} (ifIndex {{ ch.ifindex }})
+                                                                </option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <div class="form-check">
+                                                                <input type="checkbox" v-model="usRxmerConfig.preEq" class="form-check-input" id="usRxmerPreEq">
+                                                                <label class="form-check-label" for="usRxmerPreEq">Enable Pre-Equalization</label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label form-label-sm">Captures</label>
+                                                            <select v-model.number="usRxmerConfig.numCaptures" class="form-select form-select-sm">
+                                                                <option :value="1">1</option>
+                                                                <option :value="3">3</option>
+                                                                <option :value="5">5</option>
+                                                                <option :value="10">10</option>
+                                                                <option :value="20">20</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="d-flex gap-2">
+                                                            <button @click="startUsRxmer" class="btn btn-sm btn-info flex-grow-1" :disabled="runningUsRxmer || !usRxmerConfig.ofdmaIfindex">
+                                                                <span v-if="runningUsRxmer"><i class="bi bi-arrow-repeat spin me-1"></i>Running</span>
+                                                                <span v-else><i class="bi bi-play-fill me-1"></i>Start RxMER</span>
+                                                            </button>
+                                                        </div>
+                                                        <div v-if="usRxmerStatus" class="mt-2">
+                                                            <small :class="{'text-success': usRxmerStatus.is_ready, 'text-warning': usRxmerStatus.is_busy, 'text-danger': usRxmerStatus.is_error}">
+                                                                Status: {{ usRxmerStatus.meas_status_name }}
+                                                            </small>
+                                                        </div>
+                                                        <div class="mt-3 border-top pt-2">
+                                                            <small class="text-muted">
+                                                                <i class="bi bi-info-circle me-1"></i>
+                                                                Requires CMTS IP and OFDMA channel ifIndex. Results stored on CMTS in /pnm/mer/
+                                                            </small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Spectrum Charts Row -->
+                                        <div class="row mt-4" v-if="usRxmerSpectrumData || usRxmerCaptures.length > 0">
+                                            
+                                            <!-- US RxMER Chart -->
+                                            <div class="col-12">
+                                                <div class="card mb-3">
+                                                    <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                                                        <h6 class="mb-0">
+                                                            <i class="bi bi-bar-chart me-2"></i>Upstream OFDMA RxMER
+                                                            <span v-if="usRxmerCaptures.length" class="badge bg-info ms-2">{{ usRxmerDisplayIndex + 1 }} / {{ usRxmerCaptures.length }}</span>
+                                                        </h6>
+                                                        <div class="d-flex gap-2 align-items-center">
+                                                            <button v-if="usRxmerCaptures.length > 1" @click="showUsRxmerCapture(usRxmerDisplayIndex - 1)" class="btn btn-sm btn-outline-info" :disabled="usRxmerDisplayIndex <= 0">
+                                                                <i class="bi bi-chevron-left"></i>
+                                                            </button>
+                                                            <button v-if="usRxmerCaptures.length > 1" @click="showUsRxmerCapture(usRxmerDisplayIndex + 1)" class="btn btn-sm btn-outline-info" :disabled="usRxmerDisplayIndex >= usRxmerCaptures.length - 1">
+                                                                <i class="bi bi-chevron-right"></i>
+                                                            </button>
+                                                            <button @click="closeUsRxmerSpectrum" class="btn btn-sm btn-outline-secondary">
+                                                                <i class="bi bi-x"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <!-- Progress bar -->
+                                                        <div v-if="runningUsRxmer && usRxmerCaptureTotal > 1" class="mb-3">
+                                                            <div class="d-flex justify-content-between mb-1">
+                                                                <small class="text-muted">Capture {{ usRxmerCaptureIndex + 1 }} of {{ usRxmerCaptureTotal }}</small>
+                                                                <small class="text-muted">{{ Math.round(usRxmerCaptures.length / usRxmerCaptureTotal * 100) }}%</small>
+                                                            </div>
+                                                            <div class="progress" style="height: 8px;">
+                                                                <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
+                                                                     :style="{width: (usRxmerCaptures.length / usRxmerCaptureTotal * 100) + '%'}"></div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <!-- Image -->
+                                                        <img v-if="usRxmerSpectrumData" :src="'data:image/png;base64,' + usRxmerSpectrumData" class="img-fluid border rounded shadow-sm" alt="Upstream OFDMA RxMER">
+                                                        
+                                                        <!-- Results table -->
+                                                        <div v-if="usRxmerCaptures.length > 0" class="mt-3">
+                                                            <table class="table table-sm table-hover table-striped mb-0">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th style="width:50px">#</th>
+                                                                        <th>Time</th>
+                                                                        <th>Status</th>
+                                                                        <th style="width:80px">View</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    <tr v-for="(cap, idx) in usRxmerCaptures" :key="idx" 
+                                                                        :class="{'table-active': idx === usRxmerDisplayIndex}"
+                                                                        style="cursor:pointer" @click="showUsRxmerCapture(idx)">
+                                                                        <td>{{ cap.index }}</td>
+                                                                        <td>{{ cap.timestamp }}</td>
+                                                                        <td>
+                                                                            <span v-if="cap.image_data" class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>
+                                                                            <span v-else class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>{{ cap.status }}</span>
+                                                                        </td>
+                                                                        <td>
+                                                                            <button v-if="cap.image_data" @click.stop="showUsRxmerCapture(idx)" class="btn btn-sm btn-outline-info py-0 px-1">
+                                                                                <i class="bi bi-eye"></i>
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- CMTS Info -->
+                                        <div class="alert alert-info mb-0">
+                                            <i class="bi bi-building me-1"></i>
+                                            <strong>CMTS:</strong> {{ selectedModem.cmts_ip || 'Unknown' }}
+                                            <span class="ms-3"><strong>Community:</strong> {{ selectedModem.cmts_community || snmpCommunity }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Channel Stats with Profile Info -->
+                            <div class="col-12 mb-4" v-if="channelStats">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>Channel Overview</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <!-- Downstream Channels -->
+                                            <div class="col-md-6">
+                                                <h6 class="text-primary border-bottom pb-2">
+                                                    <i class="bi bi-arrow-down-circle me-1"></i>Downstream
+                                                </h6>
+                                                <!-- SC-QAM Section -->
+                                                <div v-if="channelStats.downstream.scqam.count > 0" class="mb-3 p-2 border rounded bg-light">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-reception-4 me-2 text-primary"></i>
+                                                        <strong>SC-QAM (DOCSIS 3.0)</strong>
+                                                    </div>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.downstream.scqam.count }}</strong>
+                                                    </div>
+                                                    <div v-if="channelStats.downstream.scqam.channels && channelStats.downstream.scqam.channels.length > 0" class="ms-3 mt-1">
+                                                        <small class="text-muted">
+                                                            Freq: {{ Math.min(...channelStats.downstream.scqam.channels.map(c => c.frequency_mhz || 0)) }} - 
+                                                            {{ Math.max(...channelStats.downstream.scqam.channels.map(c => c.frequency_mhz || 0)) }} MHz
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                                <!-- OFDM Section -->
+                                                <div v-if="channelStats.downstream.ofdm.count > 0" class="mb-3 p-2 border rounded" style="background-color: #e3f2fd;">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-broadcast me-2 text-info"></i>
+                                                        <strong class="text-info">OFDM (DOCSIS 3.1)</strong>
+                                                    </div>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.downstream.ofdm.count }}</strong>
+                                                    </div>
+                                                    <div v-for="ch in channelStats.downstream.ofdm.channels" :key="ch.channel_id" class="ms-3 mt-2">
+                                                        <small>
+                                                            Ch {{ ch.channel_id }}: 
+                                                            <span class="badge bg-primary" v-if="ch.plc_freq_mhz">{{ ch.plc_freq_mhz }} MHz</span>
+                                                            <span class="badge bg-secondary" v-if="ch.bandwidth_mhz">{{ ch.bandwidth_mhz }} MHz BW</span>
+                                                            <span class="badge bg-info" v-if="ch.num_subcarriers">{{ ch.num_subcarriers }} SCs</span>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <!-- Upstream Channels -->
+                                            <div class="col-md-6">
+                                                <h6 class="text-success border-bottom pb-2">
+                                                    <i class="bi bi-arrow-up-circle me-1"></i>Upstream
+                                                </h6>
+                                                <!-- ATDMA Section -->
+                                                <div v-if="channelStats.upstream.atdma.count > 0" class="mb-3 p-2 border rounded bg-light">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-arrow-up me-2 text-success"></i>
+                                                        <strong>ATDMA (DOCSIS 3.0)</strong>
+                                                    </div>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.upstream.atdma.count }}</strong>
+                                                    </div>
+                                                    <div v-if="channelStats.upstream.atdma.channels && channelStats.upstream.atdma.channels.length > 0" class="ms-3 mt-1">
+                                                        <small class="text-muted">
+                                                            Freq: {{ Math.min(...channelStats.upstream.atdma.channels.map(c => c.frequency_mhz || 0)) }} - 
+                                                            {{ Math.max(...channelStats.upstream.atdma.channels.map(c => c.frequency_mhz || 0)) }} MHz
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                                <!-- OFDMA Section -->
+                                                <div v-if="channelStats.upstream.ofdma.count > 0" class="mb-3 p-2 border rounded" style="background-color: #e8f5e9;">
+                                                    <div class="d-flex align-items-center mb-2">
+                                                        <i class="bi bi-broadcast-pin me-2 text-success"></i>
+                                                        <strong class="text-success">OFDMA (DOCSIS 3.1)</strong>
+                                                    </div>
+                                                    <div class="d-flex justify-content-between">
+                                                        <span>Channels:</span>
+                                                        <strong>{{ channelStats.upstream.ofdma.count }}</strong>
+                                                    </div>
+                                                    <div v-for="ch in channelStats.upstream.ofdma.channels" :key="ch.channel_id" class="ms-3 mt-2">
+                                                        <small>
+                                                            Ch {{ ch.channel_id }}: 
+                                                            <span class="badge bg-primary" v-if="ch.zero_freq_mhz">{{ ch.zero_freq_mhz }} MHz</span>
+                                                            <span class="badge bg-secondary" v-if="ch.bandwidth_mhz">{{ ch.bandwidth_mhz }} MHz BW</span>
+                                                            <span class="badge bg-success" v-if="ch.tx_power">{{ ch.tx_power }} dBmV</span>
+                                                            <span class="badge bg-info" v-if="ch.profiles && ch.profiles.length > 0">Profiles: {{ ch.profiles.join(', ') }}</span>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Measurement Charts Container (for spectrum, FEC, histogram, etc.) - Only show when NO matplotlib plots available -->
+                            <div class="col-12 mb-4" v-if="selectedMeasurementData && (!selectedMeasurementData.plots || selectedMeasurementData.plots.length === 0)">
+                                <div class="card shadow-sm">
+                                    <div class="card-body">
+                                        <div id="measurement-charts-container"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Raw Data View -->
+                            <div class="col-12 mb-4" v-if="showRawData && selectedMeasurementData">
+                                <div class="card shadow-sm border-info">
+                                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-code-square me-2"></i>Raw Measurement Data</h5>
+                                        <button @click="showRawData = false" class="btn btn-sm btn-light">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <pre class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto;">{{ JSON.stringify(selectedMeasurementData, null, 2) }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Matplotlib Plots from Archive -->
+                            <div class="col-12 mb-4" v-if="selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>PNM Plots</h5>
+                                        <a v-if="selectedMeasurementData.download_url" 
+                                           :href="selectedMeasurementData.download_url" 
+                                           class="btn btn-sm btn-primary" 
+                                           download>
+                                            <i class="bi bi-download me-1"></i>Download ZIP
+                                        </a>
+                                    </div>
+                                    <div class="card-body">
+                                        <div v-for="plot in selectedMeasurementData.plots" :key="plot.filename" class="mb-4">
+                                            <h5 class="text-primary border-bottom pb-2 mb-3">
+                                                <i class="bi bi-graph-up-arrow me-2"></i>{{ formatPlotTitle(plot.filename) }}
+                                            </h5>
+                                            <img :src="'data:image/png;base64,' + plot.data" class="img-fluid border rounded shadow-sm" :alt="plot.filename">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- RxMER Results (only show when no matplotlib plots available) -->
+                            <div class="col-12 mb-4" v-if="rxmerData && !(selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length)">
+                                <div class="card shadow-sm border-success">
+                                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>RxMER Measurement Results</h5>
+                                        <small>{{ rxmerData.timestamp || new Date().toLocaleString() }}</small>
+                                    </div>
+                                    <div class="card-body">
+                                        <div v-if="rxmerData.data && rxmerData.data.rxmer_measurements">
+                                            <div v-for="meas in rxmerData.data.rxmer_measurements" :key="meas.channel_id" class="mb-4">
+                                                <h6 class="border-bottom pb-2">Channel {{ meas.channel_id }}</h6>
+                                                <div class="row">
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Average MER</small>
+                                                            <h3 class="mb-0 text-primary">{{ meas.average_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Minimum MER</small>
+                                                            <h3 class="mb-0 text-warning">{{ meas.min_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Maximum MER</small>
+                                                            <h3 class="mb-0 text-success">{{ meas.max_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-3">
+                                                        <div class="text-center p-3 bg-light rounded">
+                                                            <small class="text-muted d-block">Std Deviation</small>
+                                                            <h3 class="mb-0 text-secondary">{{ meas.std_dev_mer_db }} dB</h3>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="chart-container mt-3" style="height: 200px;">
+                                                    <canvas :id="'rxmer-chart-' + meas.channel_id"></canvas>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div v-else class="text-center py-3">
+                                            <pre class="text-start bg-light p-3 rounded">{{ JSON.stringify(rxmerData, null, 2) }}</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- FEC Results -->
+                            <div class="col-12 mb-4" v-if="fecData">
+                                <div class="card shadow-sm border-warning">
+                                    <div class="card-header bg-warning text-dark">
+                                        <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>FEC Summary</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow-y: auto;">{{ JSON.stringify(fecData, null, 2) }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Pre-EQ Results -->
+                            <div class="col-12 mb-4" v-if="preEqData && preEqData.results">
+                                <div class="card shadow-sm border-primary">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Pre-Equalization Coefficients</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row" v-for="(chData, chId) in preEqData.results" :key="chId">
+                                            <div class="col-12 mb-3">
+                                                <h6>Channel {{ chId }}</h6>
+                                                <div class="chart-container" style="height: 180px;">
+                                                    <canvas :id="'preeq-chart-' + chId"></canvas>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- No Results -->
+                            <div class="col-12" v-if="!rxmerData && !spectrumData && !fecData && !preEqData">
+                                <div class="card shadow-sm">
+                                    <div class="card-body text-center py-5">
+                                        <i class="bi bi-graph-up text-muted" style="font-size: 4rem;"></i>
+                                        <h5 class="mt-3 text-muted">No PNM Data</h5>
+                                        <p class="text-muted">Run a measurement above to capture PNM data from the modem.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Housekeeping Tab -->
+                    <div class="tab-pane fade" id="housekeeping" role="tabpanel">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0"><i class="bi bi-trash3 me-2"></i>File Housekeeping</h5>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Clean up old PNM measurement files to free disk space.</p>
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Delete files older than (days)</label>
+                                        <input type="number" v-model.number="housekeepingDays" class="form-control" min="1" max="365">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Mode</label>
+                                        <select v-model="housekeepingDryRun" class="form-select">
+                                            <option :value="true">Dry Run (Preview)</option>
+                                            <option :value="false">Delete Files</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3 d-flex align-items-end">
+                                        <button @click="runHousekeeping" class="btn btn-danger w-100">
+                                            <i class="bi bi-trash3 me-1"></i>
+                                            <span v-if="housekeepingDryRun">Preview</span>
+                                            <span v-else>Delete Files</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div v-if="housekeepingResult" class="alert" 
+                                     :class="housekeepingResult.status === 'success' ? 'alert-success' : 'alert-danger'">
+                                    <h6>Housekeeping Results</h6>
+                                    <p class="mb-2">
+                                        <strong>{{ housekeepingResult.deleted_count }}</strong> files 
+                                        {{ housekeepingResult.dry_run ? 'would be' : 'were' }} deleted
+                                        <br>
+                                        <strong>{{ housekeepingResult.total_size_mb }} MB</strong> disk space 
+                                        {{ housekeepingResult.dry_run ? 'would be' : 'was' }} freed
+                                    </p>
+                                    <div v-if="housekeepingResult.files && housekeepingResult.files.length > 0">
+                                        <hr>
+                                        <small class="text-muted">First {{ Math.min(housekeepingResult.files.length, 50) }} files:</small>
+                                        <ul class="small mb-0" style="max-height: 200px; overflow-y: auto;">
+                                            <li v-for="file in housekeepingResult.files" :key="file.path">
+                                                {{ file.path }} 
+                                                <span class="badge bg-secondary">{{ file.age_days }} days</span>
+                                                <span class="badge bg-info">{{ file.size_mb }} MB</span>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Event Log Tab -->
+                    <div class="tab-pane fade" id="events" role="tabpanel">
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Modem Event Log</h5>
+                                <button @click="loadEventLog" class="btn btn-sm btn-outline-primary" :disabled="runningTest">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                                </button>
+                            </div>
+                            <div class="card-body p-0" v-if="eventLog.length > 0">
+                                <div class="table-responsive" style="max-height: 500px;">
+                                    <table class="table table-hover mb-0">
+                                        <thead class="table-dark sticky-top">
+                                            <tr>
+                                                <th style="width: 180px;">Timestamp</th>
+                                                <th style="width: 100px;">Level</th>
+                                                <th>Message</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="event in eventLog" :key="event.event_id" :class="getEventRowClass(event.level)">
+                                                <td class="text-nowrap"><small>{{ formatEventTime(event.timestamp) }}</small></td>
+                                                <td>
+                                                    <span class="badge" :class="getEventBadgeClass(event.level)">{{ event.level }}</span>
+                                                </td>
+                                                <td>{{ event.message }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="card-body text-center py-5" v-else>
+                                <i class="bi bi-journal text-muted" style="font-size: 4rem;"></i>
+                                <h5 class="mt-3 text-muted">No Events Loaded</h5>
+                                <p class="text-muted">Click the Refresh button to load the modem event log.</p>
+                                <button @click="loadEventLog" class="btn btn-primary" :disabled="runningTest">
+                                    <i class="bi bi-journal-text me-2"></i>Load Event Log
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- No Modem Selected -->
+            <div v-if="currentView === 'modems' && !selectedModem">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Please select a modem from the Home page to view details.
+                    <button @click="currentView = 'home'" class="btn btn-sm btn-primary ms-3">Go to Search</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" v-if="isLoading || loadingLiveModems">
+            <div class="text-center">
+                <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div v-if="loadingLiveModems" class="bg-white p-4 rounded shadow">
+                    <h5 class="text-dark"><i class="bi bi-router me-2"></i>Loading Modems from CMTS</h5>
+                    <p class="mb-1 text-dark">Performing SNMP walks on <strong>{{ selectedCmts }}</strong>...</p>
+                    <p class="small text-muted">This may take 1-3 minutes for large CMTS systems</p>
+                    <div v-if="enrichmentProgress && enrichmentProgress.total > 0" class="mt-3">
+                        <p class="small text-dark mb-2">
+                            <strong>Enriching modems:</strong> {{ enrichmentProgress.current }}/{{ enrichmentProgress.total }}
+                            <span class="badge bg-primary ms-2">{{ Math.round((enrichmentProgress.current / enrichmentProgress.total) * 100) }}%</span>
+                        </p>
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                                 :style="{width: ((enrichmentProgress.current / enrichmentProgress.total) * 100) + '%'}">
+                                <span class="fw-bold">{{ enrichmentProgress.current }}/{{ enrichmentProgress.total }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="progress mt-3" style="height: 20px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width: 100%">
+                            <span class="fw-bold">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pro Spectrum Analyzer Modal -->
+    <div class="modal fade" id="spectrumAnalyzerModal" tabindex="-1" aria-labelledby="spectrumAnalyzerModalLabel" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-draggable" style="max-width: 75vw; width: 75vw;">
+            <div class="modal-content bg-dark" style="height: 70vh; overflow: hidden;">
+                <div class="modal-header bg-dark text-light border-secondary py-2" style="cursor: move;">
+                    <h5 class="modal-title" id="spectrumAnalyzerModalLabel">
+                        <i class="bi bi-soundwave me-2"></i>Pro Spectrum Analyzer
+                        <span v-if="selectedModem" class="ms-2 badge bg-secondary">{{ selectedModem.mac_address }}</span>
+                    </h5>
+                    <div>
+                        <a :href="'/spectrum-analyzer?mac=' + (selectedModem?.mac_address || '')" target="_blank" class="btn btn-sm btn-outline-light me-2" title="Open in new window">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" @click="closeSpectrumAnalyzerModal"></button>
+                    </div>
+                </div>
+                <div class="modal-body p-0" style="position:relative">
+                    <!-- Waiting overlay - hidden by postMessage from iframe -->
+                    <div id="spectrumWaitOverlay" class="spectrum-wait-overlay" style="display:none">
+                        <div style="font-size:14px;color:#7eb8ff"><i class="bi bi-broadcast spin me-1"></i>Preparing Spectrum Analyzer</div>
+                        <div style="font-size:12px;color:#8a9cc0">Configuring UTSC &amp; building capture buffer (≈30 s)...</div>
+                        <div style="width:280px;height:6px;background:#0f1724;border-radius:3px;overflow:hidden;margin-top:8px">
+                            <div style="height:100%;width:30%;border-radius:3px;background:linear-gradient(90deg,#1a5cff,#40b0ff);animation:saIndeterminate 1.4s ease-in-out infinite"></div>
+                        </div>
+                        <div style="font-size:11px;color:#6b80b0;margin-top:6px">The spectrum will appear automatically once the buffer is ready</div>
+                    </div>
+                    <iframe id="spectrumAnalyzerFrame" src="" style="width: 100%; height: 100%; border: none;"></iframe>
+                </div>
+                <style>
+                    .spectrum-wait-overlay{position:absolute;inset:0;z-index:10;background:#0b1020;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+                    @keyframes saIndeterminate{0%{transform:translateX(-100%)}50%{transform:translateX(240%)}100%{transform:translateX(-100%)}}
+                    .spin{animation:spin 1s linear infinite;display:inline-block}
+                    @keyframes spin{to{transform:rotate(360deg)}}
+                </style>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Vue.js 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Application JS with cache busting -->
+    <script>
+        // Cache busting: Load app.js with timestamp to always get latest version
+        const appScript = document.createElement('script');
+        appScript.src = '/static/js/app.js?v=' + Date.now();
+        document.head.appendChild(appScript);
+    </script>
+    <!-- Draggable modal -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.modal-dialog-draggable').forEach(function(dialog) {
+                const header = dialog.querySelector('.modal-header');
+                if (!header) return;
+                let isDragging = false, startX, startY, origX, origY;
+                header.addEventListener('mousedown', function(e) {
+                    if (e.target.closest('button, a')) return;
+                    isDragging = true;
+                    startX = e.clientX;
+                    startY = e.clientY;
+                    const rect = dialog.getBoundingClientRect();
+                    origX = rect.left;
+                    origY = rect.top;
+                    dialog.style.margin = '0';
+                    dialog.style.position = 'fixed';
+                    dialog.style.left = origX + 'px';
+                    dialog.style.top = origY + 'px';
+                    e.preventDefault();
+                });
+                document.addEventListener('mousemove', function(e) {
+                    if (!isDragging) return;
+                    dialog.style.left = (origX + e.clientX - startX) + 'px';
+                    dialog.style.top = (origY + e.clientY - startY) + 'px';
+                });
+                document.addEventListener('mouseup', function() { isDragging = false; });
+            });
+        });
+    </script>
+</body>
+</html>

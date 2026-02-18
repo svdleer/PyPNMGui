@@ -1,0 +1,125 @@
+# =============================================================================
+# PyPNM Lab Docker Compose - Standalone Version
+# =============================================================================
+# This compose file manages all PyPNM Lab containers independently.
+# Use the lab-deploy.sh script for proper orchestration.
+# =============================================================================
+
+services:
+  # =========================================================================
+  # Redis - Message broker and cache
+  # =========================================================================
+  redis-lab:
+    image: redis:7-alpine
+    container_name: eve-li-redis-lab
+    network_mode: host
+    volumes:
+      - redis-data-lab:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # =========================================================================
+  # PyPNM API - Core PNM engine
+  # Built from /home/svdleer/docker/PyPNM
+  # =========================================================================
+  pypnm-api:
+    build:
+      context: /home/svdleer/docker/PyPNM
+      dockerfile: Dockerfile
+    image: pypnm:latest
+    container_name: pypnm-api
+    network_mode: host
+    environment:
+      - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
+    volumes:
+      - /var/lib/tftpboot:/var/lib/tftpboot
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/docs || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # =========================================================================
+  # GUI Server - Web interface with WebSocket support
+  # =========================================================================
+  gui-server-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+    container_name: pypnm-gui-lab
+    image: docker_gui-server-lab:latest
+    network_mode: host
+    environment:
+      # LAB MODE - Uses config_lab.py for CMTS list
+      - FLASK_ENV=lab
+      - PYPNM_MODE=lab
+      # API Connection
+      - PYPNM_API_URL=http://127.0.0.1:8000
+      - PYPNM_BASE_URL=http://127.0.0.1:8000
+      # Redis
+      - REDIS_HOST=127.0.0.1
+      - REDIS_PORT=6379
+      # Agent WebSocket
+      - ENABLE_AGENT_WEBSOCKET=true
+      - AGENT_REQUIRED=false
+      - DATA_MODE=agent
+    volumes:
+      - pypnm-data-lab:/app/data
+      - pypnm-logs-lab:/app/logs
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:5050/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # =========================================================================
+  # Agent - SNMP/PNM operations bridge
+  # =========================================================================
+  agent-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: pypnm-agent-lab
+    image: docker_agent-lab:latest
+    network_mode: host
+    environment:
+      - AGENT_ID=lab-agent-local
+      - SERVER_URL=ws://127.0.0.1:5050/ws/agent
+      - PYPNM_API_URL=http://127.0.0.1:8000
+      - AGENT_CAPABILITIES=snmp_get,snmp_walk,snmp_set,snmp_bulk_get,cmts_snmp_direct,cmts_get_modems,cmts_get_modem_info,enrich_modems,execute_pnm,pnm_ofdm_channels,pnm_ofdm_capture,pnm_ofdm_rxmer,pnm_set_tftp,pnm_utsc_configure,pnm_utsc_start,pnm_utsc_stop,pnm_utsc_status,pnm_utsc_data,pnm_us_rxmer_start,pnm_us_rxmer_status,pnm_us_rxmer_data,pnm_us_get_interfaces
+    volumes:
+      - agent-config-lab:/app/config
+      - agent-logs-lab:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python.*agent' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  pypnm-data-lab:
+    driver: local
+  pypnm-logs-lab:
+    driver: local
+  redis-data-lab:
+    driver: local
+  agent-config-lab:
+    driver: local
+  agent-logs-lab:
+    driver: local
