@@ -1,6 +1,6 @@
 # PyPNM Web GUI
 
-A modern web-based graphical user interface for [PyPNM](https://github.com/PyPNMApps/PyPNM) - the Proactive Network Maintenance toolkit for DOCSIS cable modems.
+A modern web-based graphical user interface for [PyPNM](https://github.com/svdleer/PyPNM) - the Proactive Network Maintenance toolkit for DOCSIS cable modems.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ A modern web-based graphical user interface for [PyPNM](https://github.com/PyPNM
 |-----------|------------|---------|
 | **PyPNM GUI** | This repo | Web interface + API server |
 | **PyPNM Agent** | [github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent) | Remote SNMP agent |
-| **PyPNM** | [github.com/PyPNMApps/PyPNM](https://github.com/PyPNMApps/PyPNM) | PNM library (optional) |
+| **PyPNM** | [github.com/svdleer/PyPNM](https://github.com/svdleer/PyPNM) | PNM library (required) |
 
 ## Prerequisites
 
@@ -113,7 +113,7 @@ cd PyPNM
 nano src/pypnm/settings/system.json
 ```
 
-See PyPNM documentation: https://www.pypnm.io/system/system-config/
+See PyPNM repository: https://github.com/svdleer/PyPNM
 
 ## Project Structure
 
@@ -245,7 +245,7 @@ If PyPNM cannot directly reach cable modems (firewall, network segmentation), yo
 **Solution:**
 1. Configure TFTP in PyPNM's `system.json`
 2. Ensure TFTP server is reachable from cable modems
-3. See: https://www.pypnm.io/system/pnm-file-retrieval/
+3. See: https://github.com/svdleer/PyPNM/blob/main/docs/install/install.md
 
 ### No Modems Found
 
@@ -280,9 +280,8 @@ python run.py
 
 ## Resources
 
-- **PyPNM Documentation:** https://www.pypnm.io/
-- **PyPNM GitHub:** https://github.com/PyPNMApps/PyPNM
-- **PyPNM API Reference:** https://www.pypnm.io/api/
+- **PyPNM GitHub:** https://github.com/svdleer/PyPNM
+- **PyPNM API Reference:** http://localhost:8000/docs (after install)
 - **Integration Plan:** [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md)
 - **Network Architecture:** [docs/NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md)
 
@@ -303,5 +302,4 @@ Apache-2.0
 ## Support
 
 - Web GUI Issues: Create an issue in this repository
-- PyPNM Issues: https://github.com/PyPNMApps/PyPNM/issues
-- PyPNM Documentation: https://www.pypnm.io/issues/
+- PyPNM Issues: https://github.com/svdleer/PyPNM/issues

@@ -13,7 +13,7 @@ PyPNM is the backend server that provides all PNM functionality. It MUST be inst
 ```bash
 # Clone PyPNM repository (in a separate directory)
 cd ~ # or wherever you want PyPNM installed
-git clone https://github.com/PyPNMApps/PyPNM.git
+git clone https://github.com/svdleer/PyPNM.git
 cd PyPNM
 
 # Run the installer
@@ -41,7 +41,7 @@ nano src/pypnm/settings/system.json
 # - Network timeouts
 ```
 
-For detailed configuration options, see: https://www.pypnm.io/system/system-config/
+For detailed configuration options, see: https://github.com/svdleer/PyPNM
 
 ## Step 3: Start PyPNM Server
 
@@ -218,7 +218,7 @@ export FLASK_PORT=5051
   }
 }
 ```
-3. See: https://www.pypnm.io/system/pnm-file-retrieval/
+3. See: https://github.com/svdleer/PyPNM/blob/main/docs/install/install.md
 
 ### Cannot Reach Cable Modems
 
@@ -286,15 +286,14 @@ cd PyPNM
 
 ## Resources
 
-- **PyPNM Docs:** https://www.pypnm.io/
-- **PyPNM GitHub:** https://github.com/PyPNMApps/PyPNM
-- **PyPNM API Reference:** https://www.pypnm.io/api/
+- **PyPNM GitHub:** https://github.com/svdleer/PyPNM
+- **PyPNM API Reference:** http://localhost:8000/docs (after install)
 - **This Project's Docs:** [README.md](README.md)
 
 ## Getting Help
 
 1. **Web GUI Issues:** Create issue in this repository
-2. **PyPNM Issues:** https://github.com/PyPNMApps/PyPNM/issues
+2. **PyPNM Issues:** https://github.com/svdleer/PyPNM/issues
 3. **Integration Questions:** Read [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md)
 
 ---
