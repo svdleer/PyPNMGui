@@ -716,9 +716,9 @@ createApp({
                         data.downstream.ofdm.channels.forEach(ch => {
                             downstream.push({
                                 channel_id: ch.channel_id,
-                                frequency_mhz: ch.plc_freq_mhz,
+                                frequency_mhz: ch.plc_freq_mhz || ch.frequency_mhz,
                                 power_dbmv: ch.power,
-                                snr_db: ch.mer,
+                                snr_db: ch.mer || ch.rxmer || ch.snr_db,
                                 type: 'OFDM',
                                 bandwidth_mhz: ch.bandwidth_mhz,
                                 num_subcarriers: ch.num_subcarriers,
@@ -746,12 +746,17 @@ createApp({
                         data.upstream.ofdma.channels.forEach(ch => {
                             upstream.push({
                                 channel_id: ch.channel_id,
-                                frequency_mhz: ch.zero_freq_mhz,
-                                power_dbmv: ch.tx_power,
+                                frequency_mhz: ch.zero_freq_mhz || ch.frequency_mhz,
+                                power_dbmv: ch.tx_power_dbmv || ch.tx_power,
+                                rx_mer: ch.rx_mer,
                                 type: 'OFDMA',
                                 bandwidth_mhz: ch.bandwidth_mhz,
                                 num_subcarriers: ch.num_subcarriers,
-                                active_iucs: ch.active_iucs || [],
+                                // active_iucs = profiles list from backend
+                                active_iucs: ch.active_iucs || ch.profiles || [],
+                                // iuc_list = same profiles for template badge display
+                                iuc_list: ch.iuc_list || ch.active_iucs || ch.profiles || [],
+                                current_iuc: ch.current_iuc,
                                 iuc_stats: ch.iuc_stats || []
                             });
                         });

@@ -72,3 +72,8 @@ def get_simple_agent_manager() -> SimpleAgentManager:
     if _agent_manager is None:
         _agent_manager = SimpleAgentManager()
     return _agent_manager
+
+
+def init_simple_agent_manager(auth_token: Optional[str] = None) -> SimpleAgentManager:
+    """Initialise and return the simple agent manager (alias used by ws_routes)."""
+    return get_simple_agent_manager()

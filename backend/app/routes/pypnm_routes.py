@@ -1057,6 +1057,14 @@ def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
             else:
                 profiles = []
             
+            # iuc_stats: per-profile IUC stats from docsIf31CmUsOfdmaProfileStatsList
+            iuc_stats_raw = entry.get('docsIf31CmUsOfdmaProfileStatsList',
+                           entry.get('iuc_stats', []))
+            if isinstance(iuc_stats_raw, list):
+                iuc_stats = iuc_stats_raw
+            else:
+                iuc_stats = []
+
             channels.append({
                 'channel_id': ch.get('channel_id', entry.get('docsIf31CmUsOfdmaChanChannelId',
                               entry.get('channelId'))),
@@ -1070,7 +1078,11 @@ def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
                 'rx_mer': round(rx_mer / 10, 1) if rx_mer is not None else None,
                 'current_iuc': current_iuc,
                 'is_partial': bool(is_partial),
-                'profiles': profiles
+                'profiles': profiles,
+                # IUC fields for GUI badge display
+                'active_iucs': profiles,          # profiles list doubles as active IUC list
+                'iuc_list': profiles,             # template uses iuc_list for badge loop
+                'iuc_stats': iuc_stats,
             })
         return channels
     
