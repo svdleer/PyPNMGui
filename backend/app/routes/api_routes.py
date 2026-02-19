@@ -477,11 +477,11 @@ def agent_status():
         # Check if we got a valid response
         if response and isinstance(response, dict):
             agents = response.get('agents', [])
-            # Count connected agents - check for various status formats
-            connected_count = len([a for a in agents if 
-                                 a.get('status') == 'connected' or 
-                                 a.get('connected') == True or
-                                 a.get('state') == 'connected'])
+            # Normalize: add status field based on is_alive so frontend filter works
+            for a in agents:
+                if 'status' not in a:
+                    a['status'] = 'connected' if a.get('is_alive') else 'disconnected'
+            connected_count = len([a for a in agents if a.get('status') == 'connected'])
             return jsonify({
                 "status": "ok",
                 "agents": agents,
