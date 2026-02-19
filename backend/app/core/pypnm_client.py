@@ -974,7 +974,7 @@ class PyPNMClient:
         community: str = "public",
         limit: int = 10000,
         enrich: bool = False,
-        modem_community: str = "private"
+        modem_community: str = os.environ.get('MODEM_COMMUNITY', 'private')
     ) -> Dict[str, Any]:
         """
         Get cable modems from CMTS via PyPNM API (which uses agent for SNMP).

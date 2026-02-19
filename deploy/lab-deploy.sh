@@ -506,6 +506,9 @@ clear_cache() {
         echo "[INFO] Flushing Redis cache..."
         docker exec eve-li-redis-lab redis-cli FLUSHALL
         
+        echo "[INFO] Clearing API in-memory cache..."
+        curl -s -X POST http://localhost:8000/cache/clear || true
+        
         if [ $? -eq 0 ]; then
             echo "[SUCCESS] Redis cache cleared!"
         else
