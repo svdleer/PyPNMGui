@@ -42,7 +42,7 @@ services:
       dockerfile: docker/Dockerfile.server
       args:
         CACHEBUST: ${CACHEBUST:-1}
-        # Uses Dutch Debian mirror for apt sources (see Dockerfile.server)
+        # Updates all apt .list files for Dutch Debian mirror (see Dockerfile.server)
     container_name: pypnm-gui-lab
     image: docker_gui-server-lab:latest
     network_mode: host

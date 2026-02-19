@@ -7,7 +7,7 @@ LABEL maintainer="PyPNM Team"
 LABEL description="PyPNM Web GUI Server with WebSocket agent support"
 
 # Install system dependencies
-RUN sed -i 's|http://deb.debian.org/debian|http://ftp.nl.debian.org/debian|g' /etc/apt/sources.list \
+RUN find /etc/apt/ -name '*.list' -exec sed -i 's|http://deb.debian.org/debian|http://ftp.nl.debian.org/debian|g' {} + \
     && apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tzdata \
