@@ -229,7 +229,7 @@ def pnm_measurement(measurement_type, mac_address):
     # Use write community for PNM operations that require SET
     community = data.get('community', get_default_write_community())
     # CM PNM operations (modem-side) always use alternate TFTP
-    tftp_ip = data.get('tftp_ip', get_alternate_tftp())
+    tftp_ip = data.get('tftp_ip', get_tftp_for_cmts(modem_ip or cmts_ip))
     output_type = data.get('output_type', 'json')
     
     # Spectrum analyzer: always use JSON mode from PyPNM, then generate plots ourselves
@@ -1515,7 +1515,7 @@ def start_cmts_us_rxmer(mac_address):
             filename=data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
             pre_eq=data.get('pre_eq', True),
             num_averages=data.get('num_averages', 1),
-            tftp_server=data.get('tftp_server', get_alternate_tftp())
+            tftp_server=data.get('tftp_server', get_tftp_for_cmts(cmts_ip))
         )
         
         result = start_us_rxmer_sync(config)
