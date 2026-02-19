@@ -471,7 +471,7 @@ def agent_status():
         import requests as _requests
         from app.core.config import Config
         base_url = Config.PYPNM_API_URL.rstrip('/')
-        resp = _requests.get(f"{base_url}/agents", timeout=5)
+        resp = _requests.get(f"{base_url}/api/agents", timeout=5)
         response = resp.json() if resp.status_code == 200 else None
         
         # Check if we got a valid response
