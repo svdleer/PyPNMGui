@@ -78,6 +78,15 @@ LAB_CMTS_SYSTEMS = [
         'type': 'CCAP',
         'vendor': 'Commscope',
         'location': 'LAB-MND-GT0002'
+    },
+    {
+        'name': 'asd-gt0003-ccap001',
+        'ip': '172.16.2.210',
+        'snmp_community': SNMP_COMMUNITY_ARRIS,
+        'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
+        'type': 'CCAP',
+        'vendor': 'Arris',
+        'location': 'LAB-ASD-GT0003'
     }
 ]
 
