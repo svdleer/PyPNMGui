@@ -81,7 +81,7 @@ LAB_CMTS_SYSTEMS = [
     },
     {
         'name': 'asd-gt0003-ccap001',
-        'ip': '172.16.6.110',
+        'ip': '172.16.2.110',
         'snmp_community': SNMP_COMMUNITY_ARRIS,
         'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
         'type': 'CCAP',
