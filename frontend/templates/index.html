@@ -44,15 +44,13 @@
                     <div class="d-flex align-items-center gap-2">
                         <span class="badge d-flex align-items-center"
                               :class="(apiStatus === 'ok' && pypnmHealthy) ? 'bg-success' : 'bg-danger'"
-                              style="font-size: 0.75rem; min-width: 100px; height: 32px; padding: 0.5rem 0.75rem;"
+                              style="font-size: 0.75rem; min-width: 110px; height: 32px; padding: 0.5rem 0.75rem;"
                               :title="(apiStatus === 'ok' && pypnmHealthy) ? 'PyPNM API online' : 'PyPNM API offline'">
-                            <i class="bi me-1"
-                               :class="(apiStatus === 'ok' && pypnmHealthy) ? 'bi-check-circle-fill' : 'bi-x-circle-fill'"
-                               style="font-size: 0.75rem;"></i>
+                            <i class="bi bi-hdd-network-fill me-1" style="font-size: 0.85rem;"></i>
                             <span>PyPNM API</span>
-                            <span class="ms-1" style="font-size: 0.7rem; opacity: 0.85;">
-                                {{ (apiStatus === 'ok' && pypnmHealthy) ? 'Online' : 'Offline' }}
-                            </span>
+                            <i class="bi ms-1"
+                               :class="(apiStatus === 'ok' && pypnmHealthy) ? 'bi-check-circle-fill' : 'bi-x-circle-fill'"
+                               style="font-size: 0.75rem; opacity: 0.85;"></i>
                         </span>
                         <span class="badge d-flex align-items-center" 
                               :class="agentCount > 0 ? 'bg-success' : 'bg-danger'" 
