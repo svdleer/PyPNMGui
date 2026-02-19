@@ -346,7 +346,7 @@ quick_deploy() {
         
         echo "[INFO] Restarting containers (no rebuild)..."
         cd /opt/pypnm-gui-lab/
-        docker compose -f docker/docker-compose.lab.yml restart
+        docker compose -f docker/docker-compose.lab.yml up -d --force-recreate
         
         echo "[SUCCESS] Quick deployment complete!"
         
