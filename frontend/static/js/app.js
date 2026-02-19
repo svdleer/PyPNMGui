@@ -470,6 +470,23 @@ createApp({
             }
         },
         
+        async clearCmtsCache() {
+            if (!this.selectedCmts) return;
+            try {
+                const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/clear`, { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    this.modems = [];
+                    this.liveModemSource = '';
+                    this.showSuccess('Cache Cleared', data.message || `Cache cleared for ${this.selectedCmts}`);
+                } else {
+                    this.showError('Cache Clear Failed', data.message || 'Unknown error');
+                }
+            } catch (error) {
+                this.showError('Cache Clear Failed', error.message);
+            }
+        },
+
         clearFilters() {
             this.searchValue = '';
             this.selectedCmts = '';

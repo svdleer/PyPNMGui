@@ -393,6 +393,36 @@ def pypnm_health_check():
 
 # ============== Cache Management ==============
 
+@api_bp.route('/cmts/<cmts_name>/cache/clear', methods=['POST'])
+def clear_cmts_modem_cache(cmts_name):
+    """Clear all cached modem data for a specific CMTS (Redis + API in-memory)."""
+    logger = logging.getLogger(__name__)
+    cleared = []
+
+    # 1. Clear Redis cache for this CMTS
+    if REDIS_AVAILABLE and redis_client:
+        try:
+            key = f"modems:{cmts_name}"
+            if redis_client.delete(key):
+                cleared.append(f"Redis key '{key}'")
+        except Exception as e:
+            logger.warning(f"Redis cache clear error: {e}")
+
+    # 2. Clear PyPNM API in-memory enrichment cache
+    try:
+        import requests
+        pypnm_url = os.environ.get('PYPNM_API_URL', 'http://pypnm-api:8000')
+        resp = requests.post(f"{pypnm_url}/cache/clear", timeout=5)
+        if resp.status_code == 200:
+            cleared.append("API enrichment cache")
+    except Exception as e:
+        logger.warning(f"API cache clear error: {e}")
+
+    msg = f"Cleared cache for {cmts_name}: {', '.join(cleared)}" if cleared else f"No cache found for {cmts_name}"
+    logger.info(msg)
+    return jsonify({"status": "success", "message": msg})
+
+
 @api_bp.route('/cache/flush', methods=['POST'])
 def flush_cache():
     """Flush all Redis cache."""
