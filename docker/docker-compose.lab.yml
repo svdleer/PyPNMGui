@@ -23,17 +23,6 @@ services:
       # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
       - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
-      # SNMP communities
-      - MODEM_COMMUNITY=${MODEM_COMMUNITY:-public}
-      - MODEM_WRITE_COMMUNITY=${MODEM_WRITE_COMMUNITY:-private}
-      - SNMP_COMMUNITY_ARRIS=${CMTS_COMMUNITY:-public}
-      - SNMP_COMMUNITY_CASA=${CMTS_COMMUNITY:-public}
-      - SNMP_COMMUNITY_CISCO=${CMTS_COMMUNITY:-public}
-      - SNMP_COMMUNITY_COMMSCOPE=${CMTS_COMMUNITY:-public}
-      - SNMP_WRITE_COMMUNITY_ARRIS=${CMTS_WRITE_COMMUNITY:-private}
-      - SNMP_WRITE_COMMUNITY_CASA=${CMTS_WRITE_COMMUNITY:-private}
-      - SNMP_WRITE_COMMUNITY_CISCO=${CMTS_WRITE_COMMUNITY:-private}
-      - SNMP_WRITE_COMMUNITY_COMMSCOPE=${CMTS_WRITE_COMMUNITY:-private}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
@@ -71,17 +60,6 @@ services:
       # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
       - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
-      # SNMP communities
-      - MODEM_COMMUNITY=${MODEM_COMMUNITY:-public}
-      - MODEM_WRITE_COMMUNITY=${MODEM_WRITE_COMMUNITY:-private}
-      - SNMP_COMMUNITY_ARRIS=${CMTS_COMMUNITY:-public}
-      - SNMP_COMMUNITY_CASA=${CMTS_COMMUNITY:-public}
-      - SNMP_COMMUNITY_CISCO=${CMTS_COMMUNITY:-public}
-      - SNMP_COMMUNITY_COMMSCOPE=${CMTS_COMMUNITY:-public}
-      - SNMP_WRITE_COMMUNITY_ARRIS=${CMTS_WRITE_COMMUNITY:-private}
-      - SNMP_WRITE_COMMUNITY_CASA=${CMTS_WRITE_COMMUNITY:-private}
-      - SNMP_WRITE_COMMUNITY_CISCO=${CMTS_WRITE_COMMUNITY:-private}
-      - SNMP_WRITE_COMMUNITY_COMMSCOPE=${CMTS_WRITE_COMMUNITY:-private}
     volumes:
       - pypnm-data-lab:/app/data
       - pypnm-logs-lab:/app/logs
