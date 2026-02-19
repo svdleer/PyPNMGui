@@ -1,7 +1,7 @@
 # PyPNM GUI Server Dockerfile
 # SPDX-License-Identifier: Apache-2.0
 
-FROM python:3.11-slim
+FROM python:3.12-slim-bookworm
 
 LABEL maintainer="PyPNM Team"
 LABEL description="PyPNM Web GUI Server with WebSocket agent support"
