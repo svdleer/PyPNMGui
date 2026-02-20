@@ -89,13 +89,7 @@ cat > agent_config.json <<EOF
 {
   "agent_id": "${MODEM_AGENT_ID}",
   "pypnm_api_url": "${PYPNM_API_URL}",
-  "websocket_url": "${PYPNM_WEBSOCKET_URL}",
   "auth_token": "${AGENT_AUTH_TOKEN}",
-  "appdb": {
-    "api_url": "${APPDB_API_URL}",
-    "api_user": "${APPDB_API_USER}",
-    "api_pass": "${APPDB_API_PASS}"
-  },
   "snmp": {
     "community": "${SNMP_COMMUNITY_READ}",
     "write_community": "${SNMP_COMMUNITY_WRITE}",

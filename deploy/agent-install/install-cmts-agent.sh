@@ -78,11 +78,10 @@ echo "Creating agent configuration..."
 cat > agent_config.json <<EOF
 {
   "agent_id": "${CMTS_AGENT_ID}",
-  "pypnm_api_url": "${PYPNM_API_URL}",
-  "websocket_url": "${PYPNM_WEBSOCKET_URL}",
+  "pypnm_api_url": "http://${PYPNM_API_HOST}:8000",
   "auth_token": "${AGENT_AUTH_TOKEN}",
   "appdb": {
-    "api_url": "https://appdb.oss.local/isw/api",
+    "api_url": "${APPDB_API_URL}",
     "api_user": "${APPDB_API_USER}",
     "api_pass": "${APPDB_API_PASS}"
   },
