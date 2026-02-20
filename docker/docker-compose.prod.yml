@@ -84,7 +84,7 @@ services:
     restart: unless-stopped
     depends_on:
       - pypnm-api
-      - redis-prod
+    #  - redis-prod
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
       interval: 30s
@@ -93,19 +93,19 @@ services:
       start_period: 10s
 
   # Redis Cache
-  redis-prod:
-    image: redis:7-alpine
-    container_name: eve-li-redis-prod
-    network_mode: host
-    volumes:
-      - redis-data-prod:/data
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+  #redis-prod:
+  #  image: redis:7-alpine
+  #  container_name: eve-li-redis-prod
+  #  network_mode: host
+  #  volumes:
+  #    - redis-data-prod:/data
+  #  restart: unless-stopped
+  #  command: redis-server --appendonly yes
+  #  healthcheck:
+  #    test: ["CMD", "redis-cli", "ping"]
+  #    interval: 10s
+  #    timeout: 3s
+  #    retries: 3
 
   # ============================================
   # Agent - OPTIONAL (Usually runs on host)
@@ -165,8 +165,8 @@ volumes:
     driver: local
   pypnm-logs-prod:
     driver: local
-  redis-data-prod:
-    driver: local
+  #redis-data-prod:
+  #  driver: local
   # Uncomment if running agent in Docker
   # agent-config-prod:
   #   driver: local
