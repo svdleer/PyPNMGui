@@ -4,8 +4,9 @@
 # Run this on Server A
 
 # Configuration
-PYPNM_SERVER="appdb-sh.oss.local"  # PyPNM API + GUI server
-PYPNM_PORT=8000
+PYPNM_SERVER="appdb-sh.oss.local"  # PyPNM API + GUI server (for display only)
+LOCAL_FORWARD_HOST="127.0.0.1"  # Forward tunnel endpoint on this server
+LOCAL_FORWARD_PORT=8000
 
 MODEM_AGENT_SERVER="hop-access1.ext.oss.local"  # Server B (destination)
 MODEM_AGENT_USER="${USER}"  # SSH user for Server B
@@ -36,11 +37,11 @@ start_tunnel() {
     fi
 
     echo "Starting reverse tunnel to Server B (${MODEM_AGENT_SERVER})..."
-    echo "  ${PYPNM_SERVER}:${PYPNM_PORT} <- Server A <- Server B:localhost:${REMOTE_PORT}"
+    echo "  localhost:${LOCAL_FORWARD_PORT} (forward tunnel) <- Server B:localhost:${REMOTE_PORT}"
     
     autossh -f -M 0 \
         -N \
-        -R ${REMOTE_PORT}:${PYPNM_SERVER}:${PYPNM_PORT} \
+        -R ${REMOTE_PORT}:${LOCAL_FORWARD_HOST}:${LOCAL_FORWARD_PORT} \
         -i "${MODEM_AGENT_SSH_KEY}" \
         -o "ServerAliveInterval=30" \
         -o "ServerAliveCountMax=3" \
@@ -50,7 +51,7 @@ start_tunnel() {
 
     if [ $? -eq 0 ]; then
         sleep 2
-        PID=$(pgrep -f "autossh.*${REMOTE_PORT}:${PYPNM_SERVER}:${PYPNM_PORT}")
+        PID=$(pgrep -f "autossh.*${REMOTE_PORT}:${LOCAL_FORWARD_HOST}:${LOCAL_FORWARD_PORT}")
         if [ -n "$PID" ]; then
             echo "$PID" > "$AUTOSSH_PIDFILE"
             echo "✓ Reverse tunnel created successfully"
@@ -74,7 +75,7 @@ stop_tunnel() {
             echo "Stopping reverse tunnel (PID: $PID)..."
             kill $PID
             sleep 1
-            pkill -f "ssh.*${REMOTE_PORT}:${PYPNM_SERVER}:${PYPNM_PORT}"
+            pkill -f "ssh.*${REMOTE_PORT}:${LOCAL_FORWARD_HOST}:${LOCAL_FORWARD_PORT}"
             rm -f "$AUTOSSH_PIDFILE"
             echo "✓ Reverse tunnel stopped"
         else
@@ -83,7 +84,7 @@ stop_tunnel() {
         fi
     else
         echo "Reverse tunnel not running"
-        pkill -f "autossh.*${REMOTE_PORT}:${PYPNM_SERVER}:${PYPNM_PORT}"
+        pkill -f "autossh.*${REMOTE_PORT}:${LOCAL_FORWARD_HOST}:${LOCAL_FORWARD_PORT}"
     fi
 }
 
@@ -92,7 +93,7 @@ status_tunnel() {
         PID=$(cat "$AUTOSSH_PIDFILE")
         if ps -p $PID > /dev/null 2>&1; then
             echo "✓ Reverse tunnel is running (PID: $PID)"
-            echo "  Server B: localhost:$REMOTE_PORT -> ${PYPNM_SERVER}:${PYPNM_PORT}"
+            echo "  Server B: localhost:$REMOTE_PORT -> Server A:localhost:${LOCAL_FORWARD_PORT}"
             return 0
         else
             echo "✗ Reverse tunnel is not running (stale PID)"
