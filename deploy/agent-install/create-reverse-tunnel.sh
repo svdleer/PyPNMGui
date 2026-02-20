@@ -50,22 +50,17 @@ start_tunnel() {
         > "${HOME}/.ssh-reverse-tunnel.log" 2>&1 &
     
     SSH_PID=$!
-        if ps -p $SSH_PID > /dev/null 2>&1; then
-            echo "✓ Reverse tunnel created successfully"
-            echo "  Server B can now connect to: http://localhost:$REMOTE_PORT"
-            echo "  (This tunnels back to localhost:${LOCAL_FORWARD_PORT})"
-            echo "  PID: $SSH_PID"
-        else
-            echo "✗ SSH process died immediately"
-            cat "${HOME}/.ssh-reverse-tunnel.log"to: http://localhost:$REMOTE_PORT"
-            echo "  (This tunnels back to ${PYPNM_SERVER}:${PYPNM_PORT})"
-            echo "  PID: $PID"
-        else
-            echo "✗ Failed to get tunnel PID"
-            return 1
-        fi
+    echo $SSH_PID > "$AUTOSSH_PIDFILE"
+    
+    sleep 2
+    if ps -p $SSH_PID > /dev/null 2>&1; then
+        echo "✓ Reverse tunnel created successfully"
+        echo "  Server B can now connect to: http://localhost:$REMOTE_PORT"
+        echo "  (This tunnels back to localhost:${LOCAL_FORWARD_PORT})"
+        echo "  PID: $SSH_PID"
     else
-        echo "✗ Failed to create reverse tunnel"
+        echo "✗ SSH process died immediately"
+        cat "${HOME}/.ssh-reverse-tunnel.log"
         return 1
     fi
 }
