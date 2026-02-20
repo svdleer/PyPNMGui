@@ -52,8 +52,9 @@ services:
       - FLASK_ENV=production
       - PYPNM_MODE=production
       - PYPNM_BASE_URL=http://localhost:8000
-      - REDIS_HOST=localhost
-      - REDIS_PORT=6379
+      # Redis is optional - uncomment if you have Redis running
+      # - REDIS_HOST=localhost
+      # - REDIS_PORT=6379
       # Application root for transparent proxy support (e.g., /cmtool)
       - APPLICATION_ROOT=${APPLICATION_ROOT:-/}
       # Agent WebSocket support (for future agent connections if needed)

@@ -18,7 +18,7 @@ def get_frontend_path():
 @main_bp.route('/')
 def index():
     """Serve the main application page."""
-    base_path = os.environ.get('APPLICATION_ROOT', '/').rstrip('/')
+    base_path = current_app.config.get('APP_ROOT', '')
     return render_template('index.html', base_path=base_path)
 
 
@@ -49,7 +49,7 @@ def settings():
 @main_bp.route('/ofdm-spectrum')
 def ofdm_spectrum():
     """Serve the OFDM spectrum analysis page."""
-    base_path = os.environ.get('APPLICATION_ROOT', '/').rstrip('/')
+    base_path = current_app.config.get('APP_ROOT', '')
     return render_template('ofdm_spectrum.html', base_path=base_path)
 
 

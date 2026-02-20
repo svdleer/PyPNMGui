@@ -2,6 +2,7 @@
 
 from flask import Flask, request
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 
 class CustomFlask(Flask):
@@ -34,8 +35,28 @@ def create_app():
                 static_folder=os.path.join(frontend_dir, 'static'),
                 template_folder=os.path.join(frontend_dir, 'templates'))
     
-    # Configure APPLICATION_ROOT for transparent proxy support
-    app.config['APPLICATION_ROOT'] = os.environ.get('APPLICATION_ROOT', '/')
+    # Handle proxy headers
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+    
+    # Get application root for transparent proxy (e.g., /cmtool)
+    app_root = os.environ.get('APPLICATION_ROOT', '').rstrip('/')
+    app.config['APP_ROOT'] = app_root
+    
+    # Add middleware to handle base path prefix
+    if app_root:
+        def prefix_middleware(wsgi_app):
+            def application(environ, start_response):
+                script_name = environ.get('SCRIPT_NAME', '')
+                path_info = environ.get('PATH_INFO', '')
+                
+                if path_info.startswith(app_root):
+                    environ['SCRIPT_NAME'] = script_name + app_root
+                    environ['PATH_INFO'] = path_info[len(app_root):]
+                
+                return wsgi_app(environ, start_response)
+            return application
+        
+        app.wsgi_app = prefix_middleware(app.wsgi_app)
     
     # Add no-cache headers to prevent browser caching issues
     @app.after_request
