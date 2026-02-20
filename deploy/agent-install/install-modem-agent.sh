@@ -43,11 +43,28 @@ echo "✓ Python 3 is available"
 
 # Install pyPNMAgent
 if [ ! -d "pyPNMAgent" ]; then
-    echo "Cloning pyPNMAgent..."
-    if [ -d "${SCRIPT_DIR}/../../pyPNMAgent" ]; then
-        cp -r "${SCRIPT_DIR}/../../pyPNMAgent" .
-    else
+    echo "Installing pyPNMAgent..."
+    
+    # Check if git is available
+    if command -v git &> /dev/null; then
+        echo "Cloning from git..."
+        git clone https://github.com/your-org/pyPNMAgent.git || {
+            echo "✗ Git clone failed. Trying local copy..."
+        }
+    fi
+    
+    # If git failed or not available, check for bundled copy
+    if [ ! -d "pyPNMAgent" ] && [ -d "${SCRIPT_DIR}/pyPNMAgent" ]; then
+        echo "Using bundled copy..."
+        cp -r "${SCRIPT_DIR}/pyPNMAgent" .
+    fi
+    
+    # Final check
+    if [ ! -d "pyPNMAgent" ]; then
         echo "✗ pyPNMAgent source not found"
+        echo "Please either:"
+        echo "  1. Install git: sudo apt-get install git"
+        echo "  2. Or manually copy pyPNMAgent directory here"
         exit 1
     fi
 fi
