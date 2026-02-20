@@ -102,55 +102,61 @@ services:
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-  # Agent - Production Version
-  agent-prod:
-    build:
-      context: /home/svdleer/docker/pyPNMAgent
-      dockerfile: docker/Dockerfile
-    container_name: pypnm-agent-prod
-    image: pypnm-
-  agent-config-prod:
-    driver: local
-  agent-logs-prod:
-    driver: localagent:latest
-    network_mode: host
-    env_file:
-      - .env.pypnm
-    environment:
-      - TZ=Europe/Amsterdam
-      - AGENT_ID=prod-agent-01
-      - PYPNM_SERVER_URL=ws://localhost:8000/api/ws/agent
-      - PYPNM_AGENT_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
-      - PYPNM_CM_COMMUNITY=${MODEM_COMMUNITY:-private}
-      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
-      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
-      # Per-vendor SNMP communities
-      - SNMP_COMMUNITY_ARRIS=${SNMP_COMMUNITY_ARRIS:-public}
-      - SNMP_COMMUNITY_CASA=${SNMP_COMMUNITY_CASA:-public}
-      - SNMP_COMMUNITY_CISCO=${SNMP_COMMUNITY_CISCO:-public}
-      - SNMP_COMMUNITY_COMMSCOPE=${SNMP_COMMUNITY_COMMSCOPE:-public}
-      - SNMP_WRITE_COMMUNITY_ARRIS=${SNMP_WRITE_COMMUNITY_ARRIS:-private}
-      - SNMP_WRITE_COMMUNITY_CASA=${SNMP_WRITE_COMMUNITY_CASA:-private}
-      - SNMP_WRITE_COMMUNITY_CISCO=${SNMP_WRITE_COMMUNITY_CISCO:-private}
-      - SNMP_WRITE_COMMUNITY_COMMSCOPE=${SNMP_WRITE_COMMUNITY_COMMSCOPE:-private}
-    volumes:
-      - agent-config-prod:/app/config
-      - agent-logs-prod:/app/logs
-      - /var/lib/tftpboot:/tftpboot:ro
-      # Mount source code for live updates without rebuild
-      - /home/svdleer/docker/pyPNMAgent/agent.py:/app/agent.py:ro
-      - /home/svdleer/docker/pyPNMAgent/requirements.txt:/app/requirements.txt:ro
-    restart: unless-stopped
-    depends_on:
-      - pypnm-api
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f agent.py || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
       timeout: 3s
       retries: 3
+
+  # ============================================
+  # Agent - OPTIONAL (Usually runs on host)
+  # ============================================
+  # Uncomment below ONLY if you want to run agent in Docker
+  # Typically, the agent runs directly on the jump server/host
+  # outside of Docker for better network access to CMTS devices.
+  #
+  # To run agent on host instead:
+  #   cd /home/svdleer/docker/pyPNMAgent
+  #   ./run_in_tmux.sh
+  #
+  # agent-prod:
+  #   build:
+  #     context: /home/svdleer/docker/pyPNMAgent
+  #     dockerfile: docker/Dockerfile
+  #   container_name: pypnm-agent-prod
+  #   image: pypnm-agent:latest
+  #   network_mode: host
+  #   env_file:
+  #     - .env.pypnm
+  #   environment:
+  #     - TZ=Europe/Amsterdam
+  #     - AGENT_ID=prod-agent-01
+  #     - PYPNM_SERVER_URL=ws://localhost:8000/api/ws/agent
+  #     - PYPNM_AGENT_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+  #     - PYPNM_CM_COMMUNITY=${MODEM_COMMUNITY:-private}
+  #     - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+  #     - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
+  #     # Per-vendor SNMP communities
+  #     - SNMP_COMMUNITY_ARRIS=${SNMP_COMMUNITY_ARRIS:-public}
+  #     - SNMP_COMMUNITY_CASA=${SNMP_COMMUNITY_CASA:-public}
+  #     - SNMP_COMMUNITY_CISCO=${SNMP_COMMUNITY_CISCO:-public}
+  #     - SNMP_COMMUNITY_COMMSCOPE=${SNMP_COMMUNITY_COMMSCOPE:-public}
+  #     - SNMP_WRITE_COMMUNITY_ARRIS=${SNMP_WRITE_COMMUNITY_ARRIS:-private}
+  #     - SNMP_WRITE_COMMUNITY_CASA=${SNMP_WRITE_COMMUNITY_CASA:-private}
+  #     - SNMP_WRITE_COMMUNITY_CISCO=${SNMP_WRITE_COMMUNITY_CISCO:-private}
+  #     - SNMP_WRITE_COMMUNITY_COMMSCOPE=${SNMP_WRITE_COMMUNITY_COMMSCOPE:-private}
+  #   volumes:
+  #     - agent-config-prod:/app/config
+  #     - agent-logs-prod:/app/logs
+  #     - /var/lib/tftpboot:/tftpboot:ro
+  #     # Mount source code for live updates without rebuild
+  #     - /home/svdleer/docker/pyPNMAgent/agent.py:/app/agent.py:ro
+  #     - /home/svdleer/docker/pyPNMAgent/requirements.txt:/app/requirements.txt:ro
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - pypnm-api
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pgrep -f agent.py || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
 volumes:
   pypnm-data-prod:
@@ -159,3 +165,8 @@ volumes:
     driver: local
   redis-data-prod:
     driver: local
+  # Uncomment if running agent in Docker
+  # agent-config-prod:
+  #   driver: local
+  # agent-logs-prod:
+  #   driver: local

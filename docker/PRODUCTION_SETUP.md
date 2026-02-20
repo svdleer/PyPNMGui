@@ -9,9 +9,9 @@ The production stack includes:
 1. **PyPNM API** - FastAPI server for PNM operations
 2. **GUI Server** - Flask web interface with ISW API integration
 3. **Redis** - Cache for modem data and ISW API responses
-4. **Agent** - SNMP agent for querying CMTS devices
+4. **Agent** - SNMP agent (runs on host, **not** in Docker)
 
-**Note:** PyPNM API routes SNMP operations through the agent for better network isolation.
+**Important:** The agent typically runs directly on the jump server/host machine (not in Docker) for better network access to CMTS devices. See [Running Agent on Host](#running-agent-on-host) section below.
 
 ## Prerequisites
 
@@ -196,29 +196,41 @@ docker-compose -f docker-compose.prod.yml up -d
 ### Stop Services
 Agent not connecting
 
-Check agent logs and ensure it can reach PyPNM API:
+Check agent logs on the host and ensure it can reach PyPNM API:
 
 ```bash
-docker-compose -f docker-compose.prod.yml logs agent-prod
-
-# Check agent status
+# Check agent status via API
 curl http://localhost:8000/api/agents/status
 
-# Verify WebSocket connection
-docker exec pypnm-agent-prod ping -c 3 localhost
-```
+# Check agent logs on host
+# If running as systemd:
+sudo systemctl status pypnm-agent
+sudo journalctl -u pypnm-agent -n 50
 
-### GUI shows "No agents connected"
+# If running in tmux:
+tmux attach -t pypnm-agent
 
-1. Check agent is running:
+# Test WebSocket connecti on host:
 ```bash
-docker-compose -f docker-compose.prod.yml ps agent-prod
+# For systemd:
+sudo systemctl status pypnm-agent
+
+# For tmux:
+tmux list-sessions | grep pypnm-agent
+
+# For background process:
+ps aux | grep agent.py
 ```
 
 2. Verify agent token matches:
 ```bash
+# Check GUI token
 docker exec pypnm-gui-prod env | grep AGENT_AUTH_TOKEN
-docker exec pypnm-agent-prod env | grep PYPNM_AGENT_TOKEN
+
+# Check agent token on host
+cat /home/svdleer/docker/pyPNMAgent/agent_config.json | grep token
+# Or check environment
+echo $PYPNM_AGENT_TOKEN
 ```
 
 3. Check PyPNM API logs:
@@ -226,7 +238,28 @@ docker exec pypnm-agent-prod env | grep PYPNM_AGENT_TOKEN
 docker-compose -f docker-compose.prod.yml logs pypnm-api | grep -i agent
 ```
 
-# Also remove volumes (caution: deletes cached data)
+4. Restart agent on host:
+```bash
+sudo systemctl restart pypnm-agent
+# Or reconnect to tmux and restar
+2. Verify agent token matches:
+```bash
+docker exec pypnm-gui-prod env | grep AGENT_AUTH_TOKEN
+docker exec pypnm-agent-prod env | grep PYPNM_AGENT_TOKEN
+```
+# Restart GUI or API
+docker-compose -f docker-compose.prod.yml restart gui-server-prod
+docker-compose -f docker-compose.prod.yml restart pypnm-api
+
+# Restart agent on host
+sudo systemctl restart pypnm-agent
+```
+
+For Flask changes, the gunicorn worker will auto-reload if files change.
+
+### Running Agent in Docker (Optional)
+
+If you really need to run the agent in Docker, uncomment the `agent-prod` service in [docker-compose.prod.yml](docker-compose.prod.yml) and the agent volume definitions. This is **not recommended** for production as it may have network access limitations.
 docker-compose -f docker-compose.prod.yml down -v
 ```
 
