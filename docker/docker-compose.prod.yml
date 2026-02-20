@@ -56,7 +56,7 @@ services:
       # - REDIS_HOST=localhost
       # - REDIS_PORT=6379
       # Application root for transparent proxy support (e.g., /cmtool)
-      - APPLICATION_ROOT=${APPLICATION_ROOT:-/}
+      - APPLICATION_ROOT=/cmtool
       # Agent WebSocket support (for future agent connections if needed)
       - ENABLE_AGENT_WEBSOCKET=true
       - DATA_MODE=agent

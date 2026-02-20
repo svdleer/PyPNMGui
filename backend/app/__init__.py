@@ -42,6 +42,9 @@ def create_app():
     app_root = os.environ.get('APPLICATION_ROOT', '').rstrip('/')
     app.config['APP_ROOT'] = app_root
     
+    print(f"[INFO] APPLICATION_ROOT env var: '{os.environ.get('APPLICATION_ROOT', 'NOT SET')}'")
+    print(f"[INFO] APP_ROOT config: '{app_root}'")
+    
     # Add middleware to handle base path prefix
     if app_root:
         def prefix_middleware(wsgi_app):

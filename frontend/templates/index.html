@@ -7,7 +7,9 @@
     
     <!-- Base path configuration for frontend -->
     <script>
-        window.BASE_PATH = '[[ base_path ]]';
+        // Set base path for URLs (e.g., '/cmtool' or empty string for root)
+        window.BASE_PATH = '[[ base_path ]]' || '';
+        console.log('BASE_PATH:', window.BASE_PATH);
     </script>
     
     <!-- Bootstrap 5 CSS -->
@@ -1867,7 +1869,9 @@
     <script>
         // Cache busting: Load app.js with timestamp to always get latest version
         const appScript = document.createElement('script');
-        appScript.src = window.BASE_PATH + '/static/js/app.js?v=' + Date.now();
+        const basePath = window.BASE_PATH || '';
+        appScript.src = basePath + '/static/js/app.js?v=' + Date.now();
+        console.log('Loading app.js from:', appScript.src);
         document.head.appendChild(appScript);
     </script>
     <!-- Draggable modal -->
