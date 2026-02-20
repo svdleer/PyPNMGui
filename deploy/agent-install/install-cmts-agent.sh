@@ -78,18 +78,20 @@ echo "Creating agent configuration..."
 cat > agent_config.json <<EOF
 {
   "agent_id": "${CMTS_AGENT_ID}",
-  "pypnm_api_url": "http://localhost:8000",
-  "auth_token": "${AGENT_AUTH_TOKEN}",
-  "snmp": {
-    "community": "${SNMP_COMMUNITY_READ}",
-    "write_community": "${SNMP_COMMUNITY_WRITE}",
-    "timeout": 5,
-    "retries": 3
+  "pypnm_server": {
+    "url": "ws://localhost:8000/api/agents/ws",
+    "auth_token": "${AGENT_AUTH_TOKEN}"
   },
-  "tftp": {
-    "ipv4": "${TFTP_IPV4}",
-    "ipv4_alt": "${TFTP_IPV4_ALT}",
-    "path": "${TFTP_PATH}"
+  "cmts_access": {
+    "enabled": true,
+    "community": "${SNMP_COMMUNITY_READ}",
+    "write_community": "${SNMP_COMMUNITY_WRITE}"
+  },
+  "cm_access": {
+    "enabled": false
+  },
+  "tftp_server": {
+    "tftp_path": "${TFTP_PATH}"
   }
 }
 EOF
