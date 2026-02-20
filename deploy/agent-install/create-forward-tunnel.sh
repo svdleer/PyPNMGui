@@ -49,19 +49,14 @@ start_tunnel() {
     SSH_PID=$!
     echo $SSH_PID > "$AUTOSSH_PIDFILE"
 
-    if [if ps -p $SSH_PID > /dev/null 2>&1; then
-            echo "✓ Forward tunnel started successfully"
-            echo "  CMTS Agent can connect to: http://localhost:$LOCAL_PORT"
-            echo "  PID: $SSH_PID"
-        else
-            echo "✗ SSH process died immediately"
-            cat "${HOME}/.ssh-forward-tunnel.log
-        else
-            echo "✗ Failed to get tunnel PID"
-            return 1
-        fi
+    sleep 2
+    if ps -p $SSH_PID > /dev/null 2>&1; then
+        echo "✓ Forward tunnel started successfully"
+        echo "  CMTS Agent can connect to: http://localhost:$LOCAL_PORT"
+        echo "  PID: $SSH_PID"
     else
-        echo "✗ Failed to start forward tunnel"
+        echo "✗ SSH process died immediately"
+        cat "${HOME}/.ssh-forward-tunnel.log"
         return 1
     fi
 }
