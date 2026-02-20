@@ -34,6 +34,9 @@ def create_app():
                 static_folder=os.path.join(frontend_dir, 'static'),
                 template_folder=os.path.join(frontend_dir, 'templates'))
     
+    # Configure APPLICATION_ROOT for transparent proxy support
+    app.config['APPLICATION_ROOT'] = os.environ.get('APPLICATION_ROOT', '/')
+    
     # Add no-cache headers to prevent browser caching issues
     @app.after_request
     def add_no_cache_headers(response):

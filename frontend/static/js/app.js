@@ -2,7 +2,9 @@
 
 const { createApp } = Vue;
 
-const API_BASE = '/api';
+// Get base path from window object (set by backend template)
+const BASE_PATH = window.BASE_PATH || '';
+const API_BASE = BASE_PATH + '/api';
 
 createApp({
     data() {

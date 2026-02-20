@@ -1,6 +1,6 @@
 # PyPNM Web GUI - Main Routes (Frontend Serving)
 
-from flask import send_from_directory, current_app
+from flask import send_from_directory, current_app, render_template
 import os
 from . import main_bp
 
@@ -18,7 +18,8 @@ def get_frontend_path():
 @main_bp.route('/')
 def index():
     """Serve the main application page."""
-    return send_from_directory(get_frontend_path(), 'index.html')
+    base_path = os.environ.get('APPLICATION_ROOT', '/').rstrip('/')
+    return render_template('index.html', base_path=base_path)
 
 
 @main_bp.route('/modem/<mac_address>')
@@ -48,12 +49,14 @@ def settings():
 @main_bp.route('/ofdm-spectrum')
 def ofdm_spectrum():
     """Serve the OFDM spectrum analysis page."""
-    return send_from_directory(get_frontend_path(), 'ofdm_spectrum.html')
+    base_path = os.environ.get('APPLICATION_ROOT', '/').rstrip('/')
+    return render_template('ofdm_spectrum.html', base_path=base_path)
 
 
 @main_bp.route('/spectrum-analyzer')
 def spectrum_analyzer():
     """Serve the HTML5 live spectrum analyzer page."""
+    base_path = os.environ.get('APPLICATION_ROOT', '/').rstrip('/')
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     static_path = os.path.join(base_dir, '..', 'frontend', 'static')
     if not os.path.exists(static_path):

@@ -33,6 +33,8 @@ services:
       - FLASK_ENV=production
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - AGENT_AUTH_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+      # Application root for transparent proxy support (e.g., /cmtool)
+      - APPLICATION_ROOT=${APPLICATION_ROOT:-/}
       # Enable WebSocket agent support
       - ENABLE_AGENT_WEBSOCKET=true
       - DATA_MODE=agent
