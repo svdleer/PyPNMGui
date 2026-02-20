@@ -14,13 +14,12 @@ REMOTE_HOST="localhost"
 REMOTE_PORT=8000
 
 # AutoSSH configuration
-AUTOSSH_POLL=60
-AUTOSSH_FIRST_POLL=30
-AUTOSSH_GATETIME=0
-AUTOSSH_LOGFILE="${HOME}/.autossh-pypnm-forward.log"
-AUTOSSH_PIDFILE="${HOME}/.autossh-pypnm-forward.pid"
-
-export AUTOSSH_POLL AUTOSSH_FIRST_POLL AUTOSSH_GATETIME AUTOSSH_LOGFILE AUTOSSH_PIDFILE
+export AUTOSSH_POLL=60
+export AUTOSSH_FIRST_POLL=30
+export AUTOSSH_GATETIME=0
+export AUTOSSH_LOGFILE="${HOME}/.autossh-pypnm-forward.log"
+export AUTOSSH_PIDFILE="${HOME}/.autossh-pypnm-forward.pid"
+export AUTOSSH_DEBUG=1
 
 start_tunnel() {
     if [ -f "$AUTOSSH_PIDFILE" ]; then
@@ -37,25 +36,26 @@ start_tunnel() {
     echo "Starting forward tunnel to ${PYPNM_SERVER}..."
     echo "  localhost:$LOCAL_PORT -> ${PYPNM_SERVER}:localhost:${REMOTE_PORT}"
     
-    autossh -f -M 0 \
-        -N \
+    # Use plain SSH with auto-restart via systemd
+    nohup ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+        -o ExitOnForwardFailure=yes \
+        -o StrictHostKeyChecking=accept-new \
         -L ${LOCAL_PORT}:${REMOTE_HOST}:${REMOTE_PORT} \
-        -p ${PYPNM_SERVER_SSH_PORT} \
         -i "${SSH_KEY}" \
-        -o "ServerAliveInterval=30" \
-        -o "ServerAliveCountMax=3" \
-        -o "ExitOnForwardFailure=yes" \
-        -o "StrictHostKeyChecking=accept-new" \
-        ${PYPNM_SERVER_USER}@${PYPNM_SERVER}
+        -p ${PYPNM_SERVER_SSH_PORT} \
+        ${PYPNM_SERVER_USER}@${PYPNM_SERVER} \
+        > "${HOME}/.ssh-forward-tunnel.log" 2>&1 &
+    
+    SSH_PID=$!
+    echo $SSH_PID > "$AUTOSSH_PIDFILE"
 
-    if [ $? -eq 0 ]; then
-        sleep 2
-        PID=$(pgrep -f "autossh.*${LOCAL_PORT}:${REMOTE_HOST}:${REMOTE_PORT}")
-        if [ -n "$PID" ]; then
-            echo "$PID" > "$AUTOSSH_PIDFILE"
+    if [if ps -p $SSH_PID > /dev/null 2>&1; then
             echo "✓ Forward tunnel started successfully"
             echo "  CMTS Agent can connect to: http://localhost:$LOCAL_PORT"
-            echo "  PID: $PID"
+            echo "  PID: $SSH_PID"
+        else
+            echo "✗ SSH process died immediately"
+            cat "${HOME}/.ssh-forward-tunnel.log
         else
             echo "✗ Failed to get tunnel PID"
             return 1

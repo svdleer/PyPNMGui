@@ -16,13 +16,12 @@ MODEM_AGENT_SSH_KEY="${HOME}/.ssh/id_rsa"
 REMOTE_PORT=18000  # Port on Server B that will forward back to PyPNM API
 
 # AutoSSH configuration
-AUTOSSH_POLL=60
-AUTOSSH_FIRST_POLL=30
-AUTOSSH_GATETIME=0
-AUTOSSH_LOGFILE="${HOME}/.autossh-reverse-modem.log"
-AUTOSSH_PIDFILE="${HOME}/.autossh-reverse-modem.pid"
-
-export AUTOSSH_POLL AUTOSSH_FIRST_POLL AUTOSSH_GATETIME AUTOSSH_LOGFILE AUTOSSH_PIDFILE
+export AUTOSSH_POLL=60
+export AUTOSSH_FIRST_POLL=30
+export AUTOSSH_GATETIME=0
+export AUTOSSH_LOGFILE="${HOME}/.autossh-reverse-modem.log"
+export AUTOSSH_PIDFILE="${HOME}/.autossh-reverse-modem.pid"
+export AUTOSSH_DEBUG=1
 
 start_tunnel() {
     if [ -f "$AUTOSSH_PIDFILE" ]; then
@@ -39,23 +38,26 @@ start_tunnel() {
     echo "Starting reverse tunnel to Server B (${MODEM_AGENT_SERVER})..."
     echo "  localhost:${LOCAL_FORWARD_PORT} (forward tunnel) <- Server B:localhost:${REMOTE_PORT}"
     
-    autossh -f -M 0 \
-        -N \
+    # Use plain SSH with auto-restart via systemd instead of autossh
+    # This is more reliable for reverse tunnels
+    nohup ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+        -o ExitOnForwardFailure=yes \
+        -o StrictHostKeyChecking=accept-new \
         -R ${REMOTE_PORT}:${LOCAL_FORWARD_HOST}:${LOCAL_FORWARD_PORT} \
         -i "${MODEM_AGENT_SSH_KEY}" \
-        -o "ServerAliveInterval=30" \
-        -o "ServerAliveCountMax=3" \
-        -o "ExitOnForwardFailure=yes" \
-        -o "StrictHostKeyChecking=accept-new" \
-        ${MODEM_AGENT_USER}@${MODEM_AGENT_SERVER}
-
-    if [ $? -eq 0 ]; then
-        sleep 2
-        PID=$(pgrep -f "autossh.*${REMOTE_PORT}:${LOCAL_FORWARD_HOST}:${LOCAL_FORWARD_PORT}")
-        if [ -n "$PID" ]; then
-            echo "$PID" > "$AUTOSSH_PIDFILE"
+        -p 22 \
+        ${MODEM_AGENT_USER}@${MODEM_AGENT_SERVER} \
+        > "${HOME}/.ssh-reverse-tunnel.log" 2>&1 &
+    
+    SSH_PID=$!
+        if ps -p $SSH_PID > /dev/null 2>&1; then
             echo "✓ Reverse tunnel created successfully"
             echo "  Server B can now connect to: http://localhost:$REMOTE_PORT"
+            echo "  (This tunnels back to localhost:${LOCAL_FORWARD_PORT})"
+            echo "  PID: $SSH_PID"
+        else
+            echo "✗ SSH process died immediately"
+            cat "${HOME}/.ssh-reverse-tunnel.log"to: http://localhost:$REMOTE_PORT"
             echo "  (This tunnels back to ${PYPNM_SERVER}:${PYPNM_PORT})"
             echo "  PID: $PID"
         else
