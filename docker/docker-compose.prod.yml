@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  # PyPNM API - Built from fork at /home/svdleer/docker/PyPNM
+  pypnm-api:
+    build:
+      context: /home/svdleer/docker/PyPNM
+      dockerfile: Dockerfile
+    image: pypnm:latest
+    container_name: pypnm-api-prod
+    network_mode: host
+    env_file:
+      - .env.pypnm
+    environment:
+      # Timezone - sync with host
+      - TZ=Europe/Amsterdam
+      # Pysnmp MIB configuration - Include pysnmp-mibs package directory
+      - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
+      # Agent authentication token
+      - PYPNM_AGENT_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+      # Enable agent-based SNMP routing
+      - PYPNM_USE_AGENT_SNMP=true
+      # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
+      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - /home/svdleer/docker/PyPNM/src/pypnm:/app/pypnm
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+  # GUI Server - Production Version with ISW API
+  gui-server-prod:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+    container_name: pypnm-gui-prod
+    image: docker_gui-server-prod:latest
+    network_mode: host
+    env_file:
+      - .env.pypnm
+    environment:
+      - TZ=Europe/Amsterdam
+      - FLASK_ENV=production
+      - PYPNM_MODE=production
+      - PYPNM_BASE_URL=http://localhost:8000
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+      # Agent WebSocket support (for future agent connections if needed)
+      - ENABLE_AGENT_WEBSOCKET=true
+      - DATA_MODE=agent
+      # ISW API Configuration for device list
+      - APPDB_API_URL=${APPDB_API_URL:-https://appdb.oss.local/isw/api}
+      - APPDB_API_USER=${APPDB_API_USER:-isw}
+      - APPDB_API_PASS=${APPDB_API_PASS:-Spyem_OtGheb4}
+      # Proxy bypass for internal services
+      - NO_PROXY=localhost,127.0.0.1,appdb.oss.local,.oss.local
+      - no_proxy=localhost,127.0.0.1,appdb.oss.local,.oss.local
+      # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
+      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
+      # SNMP Communities
+      - CMTS_COMMUNITY=${CMTS_COMMUNITY:-public}
+      - MODEM_COMMUNITY=${MODEM_COMMUNITY:-private}
+      - CMTS_SNMP_COMMUNITY=${CMTS_SNMP_COMMUNITY:-public}
+      - CM_SNMP_COMMUNITY=${CM_SNMP_COMMUNITY:-private}
+    volumes:
+      - pypnm-data-prod:/app/data
+      - pypnm-logs-prod:/app/logs
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - ../backend/app:/app/app:ro
+      - ../frontend:/app/frontend:ro
+    restart: unless-stopped
+    depends_on:
+      - pypnm-api
+      - redis-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Redis Cache
+  redis-prod:
+    image: redis:7-alpine
+    container_name: eve-li-redis-prod
+    network_mode: host
+    volumes:
+      - redis-data-prod:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+  # Agent - Production Version
+  agent-prod:
+    build:
+      context: /home/svdleer/docker/pyPNMAgent
+      dockerfile: docker/Dockerfile
+    container_name: pypnm-agent-prod
+    image: pypnm-
+  agent-config-prod:
+    driver: local
+  agent-logs-prod:
+    driver: localagent:latest
+    network_mode: host
+    env_file:
+      - .env.pypnm
+    environment:
+      - TZ=Europe/Amsterdam
+      - AGENT_ID=prod-agent-01
+      - PYPNM_SERVER_URL=ws://localhost:8000/api/ws/agent
+      - PYPNM_AGENT_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
+      - PYPNM_CM_COMMUNITY=${MODEM_COMMUNITY:-private}
+      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
+      # Per-vendor SNMP communities
+      - SNMP_COMMUNITY_ARRIS=${SNMP_COMMUNITY_ARRIS:-public}
+      - SNMP_COMMUNITY_CASA=${SNMP_COMMUNITY_CASA:-public}
+      - SNMP_COMMUNITY_CISCO=${SNMP_COMMUNITY_CISCO:-public}
+      - SNMP_COMMUNITY_COMMSCOPE=${SNMP_COMMUNITY_COMMSCOPE:-public}
+      - SNMP_WRITE_COMMUNITY_ARRIS=${SNMP_WRITE_COMMUNITY_ARRIS:-private}
+      - SNMP_WRITE_COMMUNITY_CASA=${SNMP_WRITE_COMMUNITY_CASA:-private}
+      - SNMP_WRITE_COMMUNITY_CISCO=${SNMP_WRITE_COMMUNITY_CISCO:-private}
+      - SNMP_WRITE_COMMUNITY_COMMSCOPE=${SNMP_WRITE_COMMUNITY_COMMSCOPE:-private}
+    volumes:
+      - agent-config-prod:/app/config
+      - agent-logs-prod:/app/logs
+      - /var/lib/tftpboot:/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - /home/svdleer/docker/pyPNMAgent/agent.py:/app/agent.py:ro
+      - /home/svdleer/docker/pyPNMAgent/requirements.txt:/app/requirements.txt:ro
+    restart: unless-stopped
+    depends_on:
+      - pypnm-api
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f agent.py || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+      timeout: 3s
+      retries: 3
+
+volumes:
+  pypnm-data-prod:
+    driver: local
+  pypnm-logs-prod:
+    driver: local
+  redis-data-prod:
+    driver: local

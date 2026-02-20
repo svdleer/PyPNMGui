@@ -1,0 +1,310 @@
+# PyPNM GUI - Production Setup
+
+This guide explains how to deploy PyPNM GUI in production using `docker-compose.prod.yml`.
+
+## Components
+
+The production stack includes:
+
+1. **PyPNM API** - FastAPI server for PNM operations
+2. **GUI Server** - Flask web interface with ISW API integration
+3. **Redis** - Cache for modem data and ISW API responses
+4. **Agent** - SNMP agent for querying CMTS devices
+
+**Note:** PyPNM API routes SNMP operations through the agent for better network isolation.
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- Network access to:
+  - CMTS devices (SNMP)
+  - ISW API at `appdb.oss.local`
+  - TFTP server
+- PyPNM source code at `/home/svdleer/docker/PyPNM`
+- pyPNMAgent source code at `/home/svdleer/docker/pyPNMAgent`
+
+## Source Code Mounts
+
+This setup uses **live source mounts** for development flexibility:
+
+- **PyPNM API:** `/home/svdleer/docker/PyPNM/src/pypnm` → `/app/pypnm`
+- **GUI Backend:** `../backend/app` → `/app/app`
+- **GUI Frontend:** `../frontend` → `/app/frontend`
+- **Agent:** `/home/svdleer/docker/pyPNMAgent/agent.py` → `/app/agent.py`
+
+Changes to source code are reflected immediately without rebuilding containers.
+
+## Configuration
+
+### 1. Copy Environment File
+
+```bash
+cd /Users/silvester/PythonDev/Git/PyPNMGui/docker
+cp .env.pypnm .env
+```
+
+### 2. Edit `.env` File
+
+**Required changes:**
+
+```bash
+# Security - CHANGE THESE!
+AGENT_AUTH_TOKEN=your-secure-token-here
+SECRET_KEY=your-flask-secret-here
+
+
+# Per-vendor SNMP communities (for agent)
+SNMP_COMMUNITY_ARRIS=public
+SNMP_COMMUNITY_CASA=public
+SNMP_COMMUNITY_CISCO=public
+SNMP_COMMUNITY_COMMSCOPE=public
+# ISW API - Update if different
+APPDB_API_URL=https://appdb.oss.local/isw/api
+APPDB_API_USER=isw
+APPDB_API_PASS=your-password-here
+
+# TFTP Servers - Update for your network
+TFTP_IPV4=172.16.6.101
+TFTP_IPV4_ALT=172.22.147.18
+
+# SNMP Communities - Update for your network
+CMTS_COMMUNITY=public
+MODEM_COMMUNITY=private
+```
+
+## Deployment
+
+### Start Services
+
+```bash
+cd /Users/silvester/PythonDev/Git/PyPNMGui/docker
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+# Check agent connection
+docker-compose -f docker-compose.prod.yml logs agent-prod | tail -20
+
+### Check Status
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
+### Health Checks
+
+
+# Check agent status via API
+curl http://localhost:8000/api/agents/status
+```bash
+# PyPNM API
+curl http://localhost:8000/health
+
+# GUI Server
+curl http://localhost:5050/api/health
+
+# Redis
+docker exec eve-li-redis-prod redis-cli ping
+```
+
+## Access
+
+- **Web GUI:** http://localhost:5050
+- **PyPNM API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
+via PyPNM API → Agent → SNMP
+## Usage
+
+1. Open http://localhost:5050 in your browser
+2. The CMTS dropdown will be populated from ISW API automatically
+3. Select a CMTS and click "Get Modems"
+4. The system will query the CMTS directly via PyPNM API (no agent required)
+
+## Data Flow
+
+```
+Frontend (Browser)
+    ↓
+GUI Server (Flask)
+    ↓ Routes request to Agent via WebSocket
+Agent (pypnm-agent-prod)
+    ↓ SNMP queriesS list from ISW API
+ISW API (appdb.oss.local/isw/api)
+    ↓ Returns CMTS inventory
+GUI Server
+    ↓ User selects CMTS and clicks "Get Modems"
+PyPNM API
+    ↓ Direct SNMP to CMTS
+CMTS Device
+    ↓ Returns modem list
+Redis Cache (24h TTL)
+```
+
+## Maintenance
+
+### View Logs
+
+```bash
+# All services
+docker-compose -f docker-compose.prod.yml logs -f agent-prod
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Specific service
+docker-compose -f docker-compose.prod.yml logs -f gui-server-prod
+docker-compose -f docker-compose.prod.yml logs -f pypnm-api
+```
+
+### Restart Services
+
+```bash
+# Restart all
+docker-compose -f docker-compose.prod.yml restart
+
+# Restart specific service
+docker-compose -f docker-compose.prod.yml restart gui-server-prod
+```
+
+### Clear Redis Cache
+
+```bash
+docker exec eve-li-redis-prod redis-cli FLUSHALL
+```
+
+### Update Containers
+home/svdleer/docker/pyPNMAgent
+git pull
+
+cd /Users/silvester/PythonDev/Git/PyPNMGui
+git pull
+
+# With source mounts, changes are live - no rebuild needed!
+# Only restart containers to reload Python modules:
+cd docker
+docker-compose -f docker-compose.prod.yml restart
+
+# Or rebuild if Dockerfile changed:
+
+cd /Users/silvester/PythonDev/Git/PyPNMGui
+git pull
+
+# Rebuild and restart
+cd docker
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### Stop Services
+Agent not connecting
+
+Check agent logs and ensure it can reach PyPNM API:
+
+```bash
+docker-compose -f docker-compose.prod.yml logs agent-prod
+
+# Check agent status
+curl http://localhost:8000/api/agents/status
+
+# Verify WebSocket connection
+docker exec pypnm-agent-prod ping -c 3 localhost
+```
+
+### GUI shows "No agents connected"
+
+1. Check agent is running:
+```bash
+docker-compose -f docker-compose.prod.yml ps agent-prod
+```
+
+2. Verify agent token matches:
+```bash
+docker exec pypnm-gui-prod env | grep AGENT_AUTH_TOKEN
+docker exec pypnm-agent-prod env | grep PYPNM_AGENT_TOKEN
+```
+
+3. Check PyPNM API logs:
+```bash
+docker-compose -f docker-compose.prod.yml logs pypnm-api | grep -i agent
+```
+
+# Also remove volumes (caution: deletes cached data)
+docker-compose -f docker-compose.prod.yml down -v
+```
+
+## Troubleshooting
+
+### GUI shows "No agents connected"
+# Source code changes not reflected
+
+The containers mount source code directories, but Python needs to reload modules:
+
+```bash
+# Restart the affected service
+docker-compose -f docker-compose.prod.yml restart gui-server-prod
+docker-compose -f docker-compose.prod.yml restart pypnm-api
+docker-compose -f docker-compose.prod.yml restart agent-prod
+```
+
+For Flask changes, the gunicorn worker will auto-reload if files change.
+
+##
+This is expected. The production setup uses PyPNM API direct SNMP mode, not agent mode.
+
+### ISW API connection fails
+
+1. Check network connectivity to `appdb.oss.local`:
+```bash
+docker exec pypnm-gui-prod curl -I https://appdb.oss.local/isw/api
+```
+
+2. Verify credentials in `.env` file
+
+3. Check GUI logs:
+```bash
+docker-compose -f docker-compose.prod.yml logs gui-server-prod | grep -i "appdb\|isw"
+```
+
+### CMTS list is empty
+
+1. Check ISW API response:
+```bash
+curl -u isw:password https://appdb.oss.local/isw/api/search?type=hostname&q=*
+```
+
+2. Check Flask is in production mode:
+```bash
+docker exec pypnm-gui-prod env | grep FLASK_ENV
+# Should show: FLASK_ENV=production
+```
+
+### Redis not working
+
+Check Redis container:
+```bash
+docker-compose -f docker-compose.prod.yml ps redis-prod
+docker exec eve-li-redis-prod redis-cli ping
+```
+
+## Network Mode
+
+This setup uses `network_mode: host` for all services, meaning containers share the host's network stack. This provides:
+
+- Direct access to CMTS devices
+- No port mapping needed
+- Better performance
+
+If you need isolated networking, change to bridge mode and add port mappings.
+
+## Security Notes
+
+1. **Change default tokens** in `.env` file
+2. **Use HTTPS** in production (add nginx/traefik reverse proxy)
+3. **Restrict network access** to trusted IPs only
+4. **Rotate ISW API credentials** regularly
+5. **Monitor logs** for unauthorized access attempts
+
+## Support
+
+For issues, check:
+- [PyPNMGui Documentation](../README.md)
+- [Docker Deployment Guide](./README.md)
+- Container logs with `docker-compose logs`
