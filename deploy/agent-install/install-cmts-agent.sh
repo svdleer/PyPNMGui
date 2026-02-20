@@ -12,28 +12,21 @@ echo "PyPNM CMTS Agent Installation"
 echo "=========================================="
 echo "Host: ${PYPNM_API_HOST}"
 echo "Agent ID: ${CMTS_AGENT_ID}"
+echo "Installing as user: $(whoami)"
 echo ""
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    echo "Please run as root or with sudo"
-    exit 1
-fi
-
-# Create installation directory
-INSTALL_DIR="/opt/pypnm-agent"
+# Create installation directory in user home
+INSTALL_DIR="${HOME}/pypnm-agent"
 echo "Creating installation directory: ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
 
 # Check for Python
 if ! command -v python3 &> /dev/null; then
-    echo "✗ Python 3 not found. Installing..."
-    if command -v apt-get &> /dev/null; then
-        apt-get install -y python3 python3-pip python3-venv
-    elif command -v yum &> /dev/null; then
-        yum install -y python3 python3-pip
-    fi
+    echo "✗ Python 3 not found. Please install it:"
+    echo "  Ubuntu/Debian: sudo apt-get install python3 python3-pip python3-venv"
+    echo "  RHEL/CentOS: sudo yum install python3 python3-pip"
+    exit 1
 fi
 
 echo "✓ Python 3 is available"
@@ -90,17 +83,19 @@ cat > agent_config.json <<EOF
 }
 EOF
 
-# Create systemd service (no tunnel needed for CMTS agent)
-echo "Creating systemd service..."
+# Create systemd user service (no tunnel needed for CMTS agent)
+echo "Creating systemd user service..."
 
-cat > /etc/systemd/system/pypnm-agent.service <<EOF
+# Create user systemd directory
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/pypnm-agent.service <<EOF
 [Unit]
 Description=PyPNM CMTS Agent
 After=network.target
 
 [Service]
 Type=simple
-User=root
 WorkingDirectory=${INSTALL_DIR}/pyPNMAgent
 ExecStart=${INSTALL_DIR}/pyPNMAgent/venv/bin/python agent.py --config agent_config.json
 Restart=always
@@ -109,14 +104,17 @@ StandardOutput=append:${INSTALL_DIR}/pyPNMAgent/logs/agent.log
 StandardError=append:${INSTALL_DIR}/pyPNMAgent/logs/agent.error.log
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
 
 # Create logs directory
 mkdir -p logs
 
-# Reload systemd
-systemctl daemon-reload
+# Reload systemd user daemon
+systemctl --user daemon-reload
+
+# Enable lingering (allows user services to run at boot)
+loginctl enable-linger $(whoami) 2>/dev/null || echo "Note: Could not enable lingering (may need admin to run: sudo loginctl enable-linger $(whoami))"
 
 echo ""
 echo "=========================================="
@@ -125,13 +123,13 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo "1. Edit ${INSTALL_DIR}/pyPNMAgent/agent_config.json if needed"
-echo "2. Start the agent: systemctl start pypnm-agent"
-echo "3. Enable auto-start: systemctl enable pypnm-agent"
+echo "2. Start the agent: systemctl --user start pypnm-agent"
+echo "3. Enable auto-start: systemctl --user enable pypnm-agent"
 echo ""
 echo "Check status:"
-echo "  systemctl status pypnm-agent"
+echo "  systemctl --user status pypnm-agent"
 echo ""
 echo "View logs:"
-echo "  journalctl -u pypnm-agent -f"
+echo "  journalctl --user -u pypnm-agent -f"
 echo "  tail -f ${INSTALL_DIR}/pyPNMAgent/logs/agent.log"
 echo ""
