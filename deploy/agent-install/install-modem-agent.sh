@@ -88,7 +88,7 @@ echo "Creating agent configuration..."
 cat > agent_config.json <<EOF
 {
   "agent_id": "${MODEM_AGENT_ID}",
-  "pypnm_api_url": "${PYPNM_API_URL}",
+  "pypnm_api_url": "http://localhost:18000",
   "auth_token": "${AGENT_AUTH_TOKEN}",
   "snmp": {
     "community": "${SNMP_COMMUNITY_READ}",

@@ -94,15 +94,72 @@ cat > agent_config.json <<EOF
 }
 EOF
 
-# Create systemd user service (no tunnel needed for CMTS agent)
-echo "Creating systemd user service..."
+# Copy forward tunnel script
+echo "Installing forward tunnel script..."
+cp "${SCRIPT_DIR}/create-forward-tunnel.sh" .
+chmod +x create-forward-tunnel.sh
+
+# Copy reverse tunnel script (for Server B)
+echo "Installing reverse tunnel script (for Server B)..."
+cp "${SCRIPT_DIR}/create-reverse-tunnel.sh" .
+chmod +x create-reverse-tunnel.sh
+
+# Create systemd user services
+echo "Creating systemd user services..."
 
 # Create user systemd directory
 mkdir -p ~/.config/systemd/user
 
-cat > ~/.config/systemd/user/pypnm-agent.service <<EOF
+# Forward tunnel service
+cat > ~/.config/systemd/user/pypnm-forward-tunnel.service <<EOF
 [Unit]
-Description=PyPNM CMTS Agent
+Description=PyPNM Fo pypnm-forward-tunnel.service pypnm-reverse-tunnel.service
+Requires=pypnm-forward-tunnel.service pypnm-reverse-tunnel.servicerward Tunnel to API Server
+After=network.target
+
+[Service]
+Type=forking
+WorkingDirectory=${INSTALL_DIR}/pyPNMAgent
+ExecStart=${INSTALL_DIR}/pyPNMAgent/create-forward-tunnel.sh start
+ExecStop=${INSTALL_DIR}/pyPNMAgent/create-forward-tunnel.sh stop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Reverse tunnel service
+cat > ~/.config/systemd/user/pypnm-reverse-tunnel.service <<EOF
+[Unit]
+Description=PyPNM Reverse Tunnel to Server B
+After=network.target
+
+[Service]
+Type=forking
+WorkingDirectory=${INSTALL_DIR}/pyPNMAgent
+ExecStart=${INSTALL_DIR}/pyPNMAgent/create-reverse-tunnel.sh start
+ExecStop=${INSTALL_DIR}/pyPNMAgent/create-reverse-tunnel.sh stop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.taforward tunnel: systemctl --user start pypnm-forward-tunnel"
+echo "3. Start the reverse tunnel: systemctl --user start pypnm-reverse-tunnel"
+echo "4. Start the agent: systemctl --user start pypnm-agent"
+echo "5. Enable auto-start:"
+echo "   systemctl --user enable pypnm-forward-tunnel"
+echo "   systemctl --user enable pypnm-reverse-tunnel"
+echo "   systemctl --user enable pypnm-agent"
+echo ""
+echo "Check status:"
+echo "  systemctl --user status pypnm-forward-tunnel"
+echo "  systemctl --user status pypnm-reverse-tunnel"
+echo "  systemctl --user status pypnm-agent"
+echo ""
+echo "View logs:"
+echo "  journalctl --user -u pypnm-forward-tunnel -f"
+echo "  journalctl --user -u pypnm-reverse-tunnel -fM CMTS Agent
 After=network.target
 
 [Service]
