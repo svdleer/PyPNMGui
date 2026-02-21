@@ -162,11 +162,16 @@ createApp({
         // OFDMA status: 'green' (operational), 'red' (offline/no channels)
         // Note: OFDMA doesn't typically have partial service flag
         ofdmaStatus() {
-            if (!this.channelStats || this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
+            if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
                 return 'red';
             }
-            const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
-            return ofdmaChannels.length > 0 ? 'green' : 'red';
+            // If channel stats loaded, check actual channels
+            if (this.channelStats) {
+                const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
+                return ofdmaChannels.length > 0 ? 'green' : 'red';
+            }
+            // Fallback: use ofdma_enabled flag from modem list  
+            return this.selectedModem?.ofdma_enabled ? 'green' : 'red';
         },
         
         // Measurements requiring downstream OFDM
