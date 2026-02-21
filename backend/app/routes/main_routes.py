@@ -1,6 +1,6 @@
 # PyPNM Web GUI - Main Routes (Frontend Serving)
 
-from flask import send_from_directory, current_app, render_template
+from flask import send_from_directory, current_app, render_template, make_response
 import os
 from . import main_bp
 
@@ -20,7 +20,12 @@ def index():
     """Serve the main application page."""
     base_path = current_app.config.get('APP_ROOT', '') or os.environ.get('APPLICATION_ROOT', '').rstrip('/')
     current_app.logger.info(f"Rendering index with base_path: '{base_path}'")
-    return render_template('index.html', base_path=base_path)
+    response = make_response(render_template('index.html', base_path=base_path))
+    # Prevent browser caching of HTML template
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @main_bp.route('/modem/<mac_address>')
