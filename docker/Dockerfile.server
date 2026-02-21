@@ -1,20 +1,14 @@
 # PyPNM GUI Server Dockerfile
 # SPDX-License-Identifier: Apache-2.0
 
-FROM ubuntu:24.04
-
-# Proxy support for pip/apt
-ARG http_proxy
-ARG https_proxy
-ENV http_proxy=$http_proxy
-ENV https_proxy=$https_proxy
+FROM python:3.12-slim-bookworm
 
 LABEL maintainer="PyPNM Team"
 LABEL description="PyPNM Web GUI Server with WebSocket agent support"
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv  \
+RUN find /etc/apt/ -name '*.list' -exec sed -i 's|http://deb.debian.org/debian|http://ftp.nl.debian.org/debian|g' {} + \
+    && apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tzdata \
     snmp \
