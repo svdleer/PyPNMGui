@@ -1,8 +1,8 @@
-# POST-MORTEM: Casa UTSC Bulk Data Control - Repeated Wrong OIDs
+# POST-MORTEM: Casa UTSC - Repeated Wrong OIDs + OFDMA ifIndex Parsing Bug
 ## Date: 21 February 2026
-## Duration: ~2 hours wasted (3 wrong OID attempts, 1 wrong SNMP community)
-## Impact: UTSC bulk data control not being configured on Casa CCAP
-## Root Cause: AI assistant repeatedly fabricated OIDs instead of using snmptranslate or user-provided data
+## Duration: ~3 hours (3 wrong OID attempts, 1 wrong SNMP community, 1 OID parsing bug)
+## Impact: UTSC bulk data control misconfigured + wrong RF port sent (ifindex=1 instead of 4000048)
+## Root Cause: AI fabricated OIDs; OFDMA parser matched cm_index inside base OID string
 
 ---
 
@@ -62,6 +62,16 @@ The Casa CCAP UTSC bulk data control table was configured with the wrong OID **t
 - Manual SET with write community succeeded: `AC 16 93 12` (172.22.147.18)
 - Code fixed, committed (`3bc018c`), deployed, verified
 
+### ~08:48 - UTSC configure still fails: `commitFailed at 1` (INCIDENT 4)
+- Logs showed `rf_port_ifindex: 1` being sent to PyPNM API
+- API ports endpoint returned correct values (4000048)
+- `discoverRfPort` endpoint returned `rf_port_ifindex: 1, description: "eth 6/0"`
+- Root cause: OFDMA ifIndex parser searched for `.{cm_index}.` in full OID string
+- CM index `2` matched `4491.2.1.28` in base OID `CM_OFDMA_STATUS = 1.3.6.1.4.1.4491.2.1.28.1.4.1.2`
+- Parser took next part after match = `1` (from `.2.1.28`) → `ofdma_ifindex = 1` → `eth 6/0`
+- Fix: Strip base OID before parsing instance suffix `{cm_index}.{ofdma_ifindex}`
+- Committed (`bead872`), deployed, verified: `rf_port_ifindex: 4000048` ✓
+
 ---
 
 ## ROOT CAUSE ANALYSIS
@@ -72,6 +82,7 @@ The Casa CCAP UTSC bulk data control table was configured with the wrong OID **t
 | 2 | Used parent OID `...1.1.1` instead of entry `...1.1.1.5.1` | AI guessed column structure instead of using `snmptranslate` output |
 | 3 | Used read community for SET | AI didn't check `.env` files for write communities |
 | 4 | Ignored user-provided data multiple times | AI ran own SNMP walks instead of using data already on screen |
+| 5 | OFDMA ifIndex parser matched base OID | Searched `.{cm_index}.` in full OID without stripping base prefix |
 
 ## ALL COMMITS THIS SESSION
 
@@ -83,6 +94,7 @@ The Casa CCAP UTSC bulk data control table was configured with the wrong OID **t
 | `b56068f` | fix(utsc): Casa bulk data TFTP dest_ip to 172.22.147.18 (backbone) |
 | `ce20d9d` | fix(utsc): OID attempt 2 — `4491.2.1.27.1.1.1` (still wrong) |
 | `3bc018c` | fix(utsc): OID attempt 3 — `4491.2.1.27.1.1.1.5.1` (correct, verified via snmptranslate) |
+| `bead872` | fix(utsc): OFDMA ifindex parser matched cm_index inside base OID — returned ifindex=1 |
 
 ## LESSONS LEARNED
 
@@ -91,3 +103,4 @@ The Casa CCAP UTSC bulk data control table was configured with the wrong OID **t
 3. **Check `.env` for communities** before any SNMP SET — read != write
 4. **Standard DOCS-PNM-MIB first** — vendor OIDs under `4998.*` should never be assumed
 5. **Verify OID = entry, not parent** — `snmpwalk` resolves names but the numeric OID includes the entry node
+6. **Strip base OID before parsing instance** — searching `.{index}.` in a full OID matches the base OID itself when the index value appears in the enterprise prefix (e.g. cm_index=2 matches `4491.2.1`)
