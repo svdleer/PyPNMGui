@@ -288,9 +288,10 @@ def pnm_measurement(measurement_type, mac_address):
                 logger.warning(f"Failed to stop existing UTSC (may not be running): {e}")
             
             # Convert repeat_period_ms to microseconds for the API
-            repeat_period_ms = data.get('repeat_period_ms', 3000)
+            # Casa minimum: 400ms (satisfies both 100ms floor and 120s/300files constraints)
+            repeat_period_ms = data.get('repeat_period_ms', 400)
             repeat_period_us = repeat_period_ms * 1000
-            
+
             # Configure UTSC
             result = client.configure_utsc(
                 cmts_ip=cmts_ip,
@@ -300,9 +301,9 @@ def pnm_measurement(measurement_type, mac_address):
                 center_freq_hz=center_freq_hz,
                 span_hz=span_hz,
                 num_bins=num_bins,
-                output_format=data.get('output_format', 5),
+                output_format=data.get('output_format') or None,  # None = auto-detect
                 repeat_period_us=repeat_period_us,
-                freerun_duration_ms=data.get('freerun_duration_ms', 0),
+                freerun_duration_ms=data.get('freerun_duration_ms', 0),  # 0 = auto (service clamps to 120s min)
                 filename=filename,
                 cm_mac_address=cm_mac,
                 logical_ch_ifindex=logical_ch_ifindex
@@ -1680,11 +1681,11 @@ def validate_utsc_parameters():
     POST body:
     {
         "center_freq_hz": 30000000,
-        "span_hz": 80000000,
+        "span_hz": 60000000,
         "num_bins": 800,
         "trigger_mode": 2,
-        "repeat_period_ms": 1000,
-        "freerun_duration_ms": 60000,
+        "repeat_period_ms": 400,
+        "freerun_duration_ms": 120000,
         "trigger_count": 10
     }
     
@@ -1751,27 +1752,25 @@ def configure_utsc(mac_address):
         cm_mac = mac_address if trigger_mode == 6 else None
         
         # Convert repeat_period_ms to microseconds for the API
-        # E6000 minimum: 50ms (50000µs), default: 50ms for optimal performance
-        repeat_period_ms = data.get('repeat_period_ms', 50)
+        # Casa minimum: 400ms satisfies both 100ms floor and 120s/300files constraints
+        repeat_period_ms = data.get('repeat_period_ms', 400)
         repeat_period_us = repeat_period_ms * 1000
-        
-        # Get output_format from request, default to 0 (auto-detect) instead of hardcoded 5
-        # Format 5 (FFT_AMPLITUDE) is not supported by E6000, only Cisco
-        output_format = data.get('output_format', 0)  # 0 = auto-detect
-        
+
+        output_format = data.get('output_format') or None  # None = auto-detect per vendor
+
         result = client.configure_utsc(
             cmts_ip=cmts_ip,
             rf_port_ifindex=rf_port_ifindex,
             community=community,
             write_community=write_community,
             trigger_mode=trigger_mode,
-            center_freq_hz=data.get('center_freq_hz', 45000000),
-            span_hz=data.get('span_hz', 80000000),
+            center_freq_hz=data.get('center_freq_hz', 30000000),
+            span_hz=data.get('span_hz', 60000000),
             num_bins=data.get('num_bins', 800),
             output_format=output_format,
-            window_function=data.get('window_function', 4),
+            window_function=data.get('window_function', 2),
             repeat_period_us=repeat_period_us,
-            freerun_duration_ms=data.get('freerun_duration_ms', 60000),  # Default 1 minute
+            freerun_duration_ms=data.get('freerun_duration_ms', 0),  # 0 = auto (service clamps to 120s min)
             trigger_count=data.get('trigger_count', 10),
             filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
             cm_mac_address=cm_mac,

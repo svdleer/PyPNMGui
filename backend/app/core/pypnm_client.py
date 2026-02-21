@@ -795,8 +795,8 @@ class PyPNMClient:
         community: str = "private",
         write_community: Optional[str] = None,
         trigger_mode: int = 2,
-        center_freq_hz: int = 50000000,
-        span_hz: int = 80000000,
+        center_freq_hz: int = 30000000,
+        span_hz: int = 60000000,
         num_bins: int = 800,
         output_format: Optional[int] = None,  # None = auto-detect
         window_function: int = 2,
@@ -906,8 +906,8 @@ class PyPNMClient:
         filename: str = "utsc_capture",
         cm_mac: Optional[str] = None,
         logical_ch_ifindex: Optional[int] = None,
-        repeat_period_ms: int = 1000,
-        freerun_duration_ms: int = 300000,  # Default 5 minutes
+        repeat_period_ms: int = 400,       # 400ms: satisfies Casa 100ms floor + 120s/300files
+        freerun_duration_ms: int = 120000,  # 120s: Casa minimum (is_freerun_trigger_valid)
         trigger_count: Optional[int] = None  # None = omit from payload, fixes E6000 freerun bug
     ) -> Dict[str, Any]:
         """

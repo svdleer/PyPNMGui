@@ -35,14 +35,19 @@ class UtscLimits:
     SUPPORTED_BIN_COUNTS: List[int] = None   # Populated in __post_init__
     
     # Timing Parameters (milliseconds)
-    MIN_REPEAT_PERIOD_MS: int = 0            # 0 = single capture
-    MAX_REPEAT_PERIOD_MS: int = 1000         # E6000 limit: 1 second max
-    DEFAULT_REPEAT_PERIOD_MS: int = 1000     # 1 second default
-    
-    MIN_FREERUN_DURATION_MS: int = 0         # 0 = use trigger_count instead
+    # Casa E6000 constraints (most restrictive):
+    #   RepeatPeriod >= 100ms, FreeRunDuration >= 120s, files = FreeRun/Repeat <= 300
+    MIN_REPEAT_PERIOD_MS: int = 100          # Casa minimum: 100ms
+    MAX_REPEAT_PERIOD_MS: int = 60_000       # 60 seconds max
+    DEFAULT_REPEAT_PERIOD_MS: int = 400      # 400ms: satisfies 120s/300files constraint
+
+    MIN_FREERUN_DURATION_MS: int = 120_000   # Casa minimum: 120 seconds
     MAX_FREERUN_DURATION_MS: int = 600_000   # 10 minutes max
-    DEFAULT_FREERUN_DURATION_MS: int = 60_000 # 60 seconds
-    
+    DEFAULT_FREERUN_DURATION_MS: int = 120_000  # 120 seconds (Casa minimum)
+
+    # Casa file count: FreeRunDuration / RepeatPeriod <= 300
+    MAX_CAPTURE_FILE_COUNT: int = 300
+
     # Trigger Parameters
     MIN_TRIGGER_COUNT: int = 1
     MAX_TRIGGER_COUNT: int = 10              # E6000 hardware limit
@@ -176,10 +181,10 @@ def validate_repeat_period(repeat_period_ms: int) -> Tuple[bool, Optional[str]]:
         (is_valid, error_message)
     """
     if repeat_period_ms < LIMITS.MIN_REPEAT_PERIOD_MS:
-        return False, f"Repeat period {repeat_period_ms}ms is below minimum {LIMITS.MIN_REPEAT_PERIOD_MS}ms"
-    
+        return False, f"Repeat period {repeat_period_ms}ms is below minimum {LIMITS.MIN_REPEAT_PERIOD_MS}ms (Casa E6000 minimum)"
+
     if repeat_period_ms > LIMITS.MAX_REPEAT_PERIOD_MS:
-        return False, f"Repeat period {repeat_period_ms}ms exceeds E6000 maximum of {LIMITS.MAX_REPEAT_PERIOD_MS}ms (1 second)"
+        return False, f"Repeat period {repeat_period_ms}ms exceeds maximum of {LIMITS.MAX_REPEAT_PERIOD_MS}ms"
     
     return True, None
 
