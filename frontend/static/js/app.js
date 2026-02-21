@@ -165,12 +165,13 @@ createApp({
             if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
                 return 'red';
             }
-            // If channel stats loaded, check actual channels
-            if (this.channelStats) {
-                const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
-                return ofdmaChannels.length > 0 ? 'green' : 'red';
+            // If channel stats loaded with actual OFDMA data, check channels
+            const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
+            if (ofdmaChannels.length > 0) {
+                return 'green';
             }
-            // Fallback: use ofdma_enabled flag from modem list  
+            // If channelStats loaded but no OFDMA channels, still trust ofdma_enabled flag
+            // (may be timing issue or SNMP issue)
             return this.selectedModem?.ofdma_enabled ? 'green' : 'red';
         },
         
