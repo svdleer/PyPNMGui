@@ -109,8 +109,21 @@ chmod +x create-reverse-tunnel.sh
 # Create systemd user services
 echo "Creating systemd user services..."
 
-# Create user systemd directory
-mkdir -p ~/.config/systemd/user
+# Check if systemd user session is available
+if ! systemctl --user status >/dev/null 2>&1; then
+    echo "⚠ Warning: systemd user session not available"
+    echo "  You may need to run this script in a login shell (not via sudo)"
+    echo "  Or enable lingering: sudo loginctl enable-linger $USER"
+    echo ""
+    echo "For now, you can start tunnels manually:"
+    echo "  ./create-forward-tunnel.sh start"
+    echo "  ./create-reverse-tunnel.sh start"
+    echo "  cd pyPNMAgent && ../venv/bin/python agent.py --config agent_config.json"
+    echo ""
+    echo "Skipping systemd service creation..."
+else
+    # Create user systemd directory
+    mkdir -p ~/.config/systemd/user
 
 # Forward tunnel service
 cat > ~/.config/systemd/user/pypnm-forward-tunnel.service <<EOF

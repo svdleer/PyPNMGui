@@ -113,8 +113,19 @@ chmod +x autossh-tunnel-appdb.sh
 # Create systemd user services
 echo "Creating systemd user services..."
 
-# Create user systemd directory
-mkdir -p ~/.config/systemd/user
+# Check if systemd user session is available
+if ! systemctl --user status >/dev/null 2>&1; then
+    echo "⚠ Warning: systemd user session not available"
+    echo "  You may need to run this script in a login shell (not via sudo)"
+    echo "  Or enable lingering: sudo loginctl enable-linger $USER"
+    echo ""
+    echo "For now, you can start agent manually:"
+    echo "  cd pyPNMAgent && ../venv/bin/python agent.py --config agent_config.json"
+    echo ""
+    echo "Skipping systemd service creation..."
+else
+    # Create user systemd directory
+    mkdir -p ~/.config/systemd/user
 
 # Tunnel service
 cat > ~/.config/systemd/user/pypnm-tunnel.service <<EOF
