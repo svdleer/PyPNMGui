@@ -286,10 +286,10 @@
                                                     <span v-if="modem.docsis_version && (modem.docsis_version.includes('3.1') || modem.docsis_version.includes('4.0'))" 
                                                           class="badge ms-1" 
                                                           :class="{
-                                                              'bg-success': (modem.upstream_interface && modem.upstream_interface.includes('ofdma')) && modem.status !== 'offline',
-                                                              'bg-danger': !(modem.upstream_interface && modem.upstream_interface.includes('ofdma')) || modem.status === 'offline'
+                                                              'bg-success': (modem.upstream_interface && modem.upstream_interface.toLowerCase().includes('ofdma')) && modem.status !== 'offline',
+                                                              'bg-danger': !(modem.upstream_interface && modem.upstream_interface.toLowerCase().includes('ofdma')) || modem.status === 'offline'
                                                           }"
-                                                          :title="(modem.upstream_interface && modem.upstream_interface.includes('ofdma')) ? 'OFDMA Active' : 'OFDMA Inactive'">
+                                                          :title="(modem.upstream_interface && modem.upstream_interface.toLowerCase().includes('ofdma')) ? 'OFDMA Active' : 'OFDMA Inactive'">
                                                         <i class="bi bi-arrow-up"></i>
                                                     </span>
                                                 </td>
@@ -301,7 +301,7 @@
                                                 </td>
                                                 <td>
                                                     <small v-if="modem.upstream_interface" 
-                                                           :class="modem.upstream_interface.includes('ofdma') ? 'text-primary fw-bold' : 'text-muted'"
+                                                           :class="modem.upstream_interface.toLowerCase().includes('ofdma') ? 'text-primary fw-bold' : 'text-muted'"
                                                            :title="modem.upstream_interface">
                                                         {{ modem.upstream_interface.replace('cable-upstream ', 'US ').replace('cable-us-ofdma ', 'OFDMA ').replace('cable-mac ', '') }}
                                                     </small>
