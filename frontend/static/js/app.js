@@ -924,6 +924,17 @@ createApp({
                                 selected = this.upstreamInterfaces.ofdmaChannels.find(ch => {
                                     return ch.name === this.selectedModem.upstream_interface || ch.mac === this.selectedModem.mac_address;
                                 });
+                                
+                                // Casa: if modem is on OFDMA logical (16M range), map to physical port (4M range)
+                                // Mapping: physical_ifindex = logical_ifindex - 12000000
+                                if (!selected && this.selectedModem.upstream_interface.includes('OFDMA Upstream')) {
+                                    // Try to find physical port by extracting slot/port from "OFDMA Upstream 0/6.0"
+                                    const match = this.selectedModem.upstream_interface.match(/(\d+)\/(\d+)\.(\d+)/);
+                                    if (match) {
+                                        const targetName = `Upstream Physical Interface ${match[1]}/${match[2]}.${match[3]}`;
+                                        selected = this.upstreamInterfaces.ofdmaChannels.find(ch => ch.name === targetName);
+                                    }
+                                }
                             }
                             this.utscConfig.rfPortIfindex = selected?.ifindex || this.upstreamInterfaces.ofdmaChannels[0].ifindex;
                         }
