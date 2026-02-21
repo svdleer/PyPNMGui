@@ -58,6 +58,7 @@ services:
       - AGENT_REQUIRED=false
       - ENABLE_AGENT_WEBSOCKET=true
       - DATA_MODE=agent
+      - MODEM_COMMUNITY=${MODEM_COMMUNITY:-z1gg0m0n1t0r1ng}
       # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
       - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-172.22.147.18}
