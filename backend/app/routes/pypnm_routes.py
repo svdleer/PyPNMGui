@@ -1359,11 +1359,23 @@ def get_upstream_interfaces(mac_address):
             if rf_modem_result and rf_modem_result.get('success'):
                 cm_index = rf_modem_result.get('cm_index')
                 modem_rf_ifindex = rf_modem_result.get('rf_port_ifindex')
+                rf_port_description = rf_modem_result.get('rf_port_description', '')
+                
+                # Casa CCAP mapping: OFDMA logical (16M) → physical port (4M)
+                # If ifIndex is in 16M range and description contains "OFDMA", map to physical
+                if modem_rf_ifindex and 16000000 <= modem_rf_ifindex < 17000000:
+                    if 'OFDMA' in rf_port_description:
+                        physical_ifindex = modem_rf_ifindex - 12000000  # Map to physical port
+                        logger.info(f"Casa OFDMA port {modem_rf_ifindex} mapped to physical {physical_ifindex}")
+                        modem_rf_ifindex = physical_ifindex
+                        # Update description to match physical port
+                        rf_port_description = rf_port_description.replace('OFDMA Upstream', 'Upstream Physical Interface')
+                
                 if modem_rf_ifindex:
                     modem_rf_port = {
                         "ifindex": modem_rf_ifindex,
                         "rf_port_ifindex": modem_rf_ifindex,
-                        "description": rf_modem_result.get('rf_port_description', ''),
+                        "description": rf_port_description,
                         "cfg_index": 1,
                         "is_modem_port": True
                     }
