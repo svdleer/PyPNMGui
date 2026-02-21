@@ -309,8 +309,12 @@ def pnm_measurement(measurement_type, mac_address):
             )
             
             if result.get('success'):
-                # Start the capture
-                start_result = client.start_utsc(cmts_ip, rf_port_ifindex, community)
+                # Start the capture — use cfg_index returned by configure (probed index)
+                resolved_cfg_index = result.get('cfg_index', 1)
+                start_result = client.start_utsc(
+                    cmts_ip, rf_port_ifindex, community,
+                    cfg_index=resolved_cfg_index
+                )
                 if not start_result.get('success'):
                     result = start_result
             

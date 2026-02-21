@@ -800,7 +800,7 @@ class PyPNMClient:
         num_bins: int = 800,
         output_format: Optional[int] = None,  # None = auto-detect
         window_function: int = 2,
-        repeat_period_us: int = 50000,  # 50ms = E6000 minimum
+        repeat_period_us: int = 100000,  # 100ms = Casa minimum (E6000 minimum is 50ms)
         freerun_duration_ms: int = 0,  # 0 = auto-calculate
         trigger_count: int = 10,
         filename: str = "utsc_capture",
