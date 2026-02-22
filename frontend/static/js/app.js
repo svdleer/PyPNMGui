@@ -1367,6 +1367,10 @@ createApp({
             this.spectrumAnalyzerModalOpen = false;
             const ov = document.getElementById('spectrumWaitOverlay');
             if (ov) ov.style.display = 'none';
+            // Stop UTSC when modal is closed so we don't leave a running capture on the CMTS
+            if (this.runningUtsc) {
+                this.stopUtsc();
+            }
         },
         
         renderUtscChart() {

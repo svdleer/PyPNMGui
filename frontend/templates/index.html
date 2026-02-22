@@ -1826,7 +1826,7 @@
                 <div class="modal-header bg-dark text-light border-secondary py-2" style="cursor: move;">
                     <h5 class="modal-title" id="spectrumAnalyzerModalLabel">
                         <i class="bi bi-soundwave me-2"></i>Pro Spectrum Analyzer
-                        <span v-if="selectedModem" class="ms-2 badge bg-secondary">{{ selectedModem.mac_address }}</span>
+                        <span v-if="selectedModem" class="ms-2 badge bg-secondary" v-text="selectedModem.mac_address"></span>
                     </h5>
                     <div>
                         <a :href="BASE_PATH + '/spectrum-analyzer?mac=' + (selectedModem?.mac_address || '')" target="_blank" class="btn btn-sm btn-outline-light me-2" title="Open in new window">
