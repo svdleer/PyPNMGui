@@ -92,6 +92,30 @@ class CmtsPnmClient:
         except Exception as e:
             logger.error(f"PyPNM API request failed: {e}")
             return {"success": False, "error": str(e)}
+
+    def _get(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Make GET request to PyPNM API."""
+        url = f"{self.base_url}{endpoint}"
+
+        try:
+            logger.debug(f"GET {url} params={params}")
+            response = self.session.get(url, params=params, timeout=self.timeout)
+
+            if response.status_code >= 400:
+                logger.error(f"PyPNM API error {response.status_code}: {response.text[:500]}")
+                return {"success": False, "error": f"API error: {response.status_code}"}
+
+            return response.json()
+
+        except requests.exceptions.Timeout:
+            logger.error(f"PyPNM API timeout: {url}")
+            return {"success": False, "error": "Request timeout"}
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"PyPNM API connection error: {e}")
+            return {"success": False, "error": f"Connection error: {e}"}
+        except Exception as e:
+            logger.error(f"PyPNM API request failed: {e}")
+            return {"success": False, "error": str(e)}
     
     def discover_modem_ofdma(
         self,
@@ -181,16 +205,16 @@ class CmtsPnmClient:
         Returns:
             Dict with measurement status
         """
-        payload = {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community
-            },
-            "ofdma_ifindex": ofdma_ifindex
+        # GET /pnm/us/ofdma/rxmer/status?cmts_ip=...&ofdma_ifindex=...
+        params = {
+            "cmts_ip": cmts_ip,
+            "ofdma_ifindex": ofdma_ifindex,
+            "community": community,
         }
-        
-        result = self._post("/pnm/us/ofdma/rxmer/status", payload)
+        if write_community:
+            params["write_community"] = write_community
+
+        result = self._get("/pnm/us/ofdma/rxmer/status", params=params)
         
         # Normalize response
         if "success" not in result:
