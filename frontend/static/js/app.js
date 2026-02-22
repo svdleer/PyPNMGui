@@ -1468,11 +1468,10 @@ createApp({
             this.liveSpectrumLastFile = null;  // Track last file to skip duplicates
             this.liveSpectrumStats = { captures: 0, lastUpdate: null, avgRefreshMs: 0 };
             
-            // Configure UTSC for FreeRunning mode
-            // repeatPeriodMs controls CMTS capture interval — NOT the GUI poll interval.
-            // E6000 minimum: 50ms. Use 400ms to match proven working parameters.
+            // Configure UTSC for FreeRunning mode.
+            // repeatPeriodMs is NOT overwritten here — use the value from utscConfig (default 50ms).
+            // PyPNM service clamps vendor-specifically: E6000 min=50ms, Casa min=100ms.
             this.utscConfig.triggerMode = 2; // FreeRunning
-            this.utscConfig.repeatPeriodMs = 400;   // 400ms between captures on CMTS
             this.utscConfig.freerunDurationMs = 600000; // 10 min max
             
             try {
