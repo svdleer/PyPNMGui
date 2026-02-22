@@ -2063,59 +2063,46 @@ def get_utsc_data(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
 
     try:
-        from app.core.pypnm_client import PyPNMClient
-        client = PyPNMClient()
-
-        # TFTP files are mounted at /var/lib/tftpboot (root, not subdirectories)
+        # TFTP root — files always land here regardless of CMTS-internal path prefix
         tftp_base = '/var/lib/tftpboot'
-
-        # Find the most recent UTSC file matching vendor-specific patterns:
-        # 1. CommScope/Arris E6000: CMTS may prefix path e.g. /pnm/utsc/ to filename
-        #    Files land at /var/lib/tftpboot/<cmts_path>/<filename_base>_<timestamp>
-        # 2. Casa CCAP: same, root only
-        # 3. Cisco cBR-8: PNMCcapUsSpecAn_{hostname}_{timestamp}_{rfport}
-
-        # Query actual CMTS filename so we search the right path even if our SET failed
         rf_port_ifindex = data.get('rf_port_ifindex')
-        cfg_index = data.get('cfg_index', 1)
-        actual_filename_base = filename_base  # default to what GUI sent
-        if cmts_ip and rf_port_ifindex:
-            try:
-                cmts_cfg = client.get_utsc_config(
-                    cmts_ip=cmts_ip,
-                    rf_port_ifindex=int(rf_port_ifindex),
-                    community=data.get('community', get_cmts_community()),
-                    cfg_index=int(cfg_index)
-                )
-                cmts_fn = cmts_cfg.get('filename', '')
-                if cmts_fn:
-                    actual_filename_base = os.path.basename(cmts_fn.strip('/'))
-                    logger.info(f"CMTS-reported filename: '{cmts_fn}' → searching for basename '{actual_filename_base}'")
-                    # Build search path from CMTS-reported path prefix
-                    cmts_prefix = os.path.dirname(cmts_fn.strip('/'))
-                    if cmts_prefix:
-                        tftp_base = os.path.join('/var/lib/tftpboot', cmts_prefix)
-                        logger.info(f"Adjusted TFTP search dir to: {tftp_base}")
-            except Exception as e:
-                logger.warning(f"Could not query CMTS config for filename: {e}")
 
-        # Try exact basename match with timestamp suffix
-        pattern = f"{tftp_base}/{actual_filename_base}_*"
-        files = sorted(glob.glob(pattern), reverse=True)
+        # Find the most recent UTSC file — search root AND common subdirs
+        # Arris E6000 stores /pnm/utsc/<name> in SNMP but writes to tftpboot root
+        # or /var/lib/tftpboot/pnm/utsc/ depending on firmware config
+        search_dirs = [
+            tftp_base,
+            os.path.join(tftp_base, 'pnm', 'utsc'),
+            os.path.join(tftp_base, 'pnm'),
+        ]
 
-        # Also try root in case CMTS path prefix wasn't reflected in actual write location
-        if not files and tftp_base != '/var/lib/tftpboot':
-            root_pattern = f"/var/lib/tftpboot/{actual_filename_base}_*"
-            files = sorted(glob.glob(root_pattern), reverse=True)
+        files = []
+        matched_dir = tftp_base
+
+        for search_dir in search_dirs:
+            if not os.path.isdir(search_dir):
+                continue
+            # Match by MAC-based filename prefix
+            candidates = sorted(glob.glob(f"{search_dir}/{filename_base}*"), reverse=True)
+            if candidates:
+                files = candidates
+                matched_dir = search_dir
+                logger.info(f"Found UTSC files in {search_dir}: {[os.path.basename(f) for f in files[:3]]}")
+                break
+            # Also try bare name (E6000 may use static name like utsc_spectrum)
+            candidates = sorted(glob.glob(f"{search_dir}/utsc_spectrum*"), reverse=True)
+            if candidates:
+                files = candidates
+                matched_dir = search_dir
+                logger.info(f"Found UTSC static-name files in {search_dir}")
+                break
+
+        # Cisco cBR-8 fallback
+        if not files and rf_port_ifindex:
+            cisco_pattern = f"{tftp_base}/PNMCcapUsSpecAn_*_{rf_port_ifindex}"
+            files = sorted(glob.glob(cisco_pattern), reverse=True)
             if files:
-                logger.info(f"Found files in tftpboot root despite CMTS path prefix")
-
-        # If still no files, try Cisco cBR-8 format
-        if not files:
-            if rf_port_ifindex:
-                cisco_pattern = f"/var/lib/tftpboot/PNMCcapUsSpecAn_*_{rf_port_ifindex}"
-                files = sorted(glob.glob(cisco_pattern), reverse=True)
-                logger.info(f"Trying Cisco cBR-8 pattern: {cisco_pattern}, found {len(files)} files")
+                logger.info(f"Found Cisco cBR-8 files: {len(files)}")
         
         if not files:
             # No files yet - return empty result (not an error)
