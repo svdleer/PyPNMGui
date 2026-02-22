@@ -77,7 +77,7 @@ def get_tftp_for_cmts(cmts_ip: str) -> str:
     return get_default_tftp()
 
 
-def get_modem_tftp() -> str:
+def get_tftp_for_cm() -> str:
     """Return TFTP IP for CM modem-side PNM uploads.
     
     Modems upload to the alternate TFTP server which is reachable
@@ -187,7 +187,7 @@ def modem_pre_eq(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', get_default_write_community())
-    tftp_ip = data.get('tftp_ip', get_modem_tftp())
+    tftp_ip = data.get('tftp_ip', get_tftp_for_cm())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -243,7 +243,7 @@ def pnm_measurement(measurement_type, mac_address):
     community = data.get('community', get_default_write_community())
     # CM PNM operations (modem-side) always use alternate TFTP —
     # modems upload to a server reachable from the modem subnet.
-    tftp_ip = data.get('tftp_ip', get_modem_tftp())
+    tftp_ip = data.get('tftp_ip', get_tftp_for_cm())
     output_type = data.get('output_type', 'json')
     
     # Spectrum analyzer: always use JSON mode from PyPNM, then generate plots ourselves
