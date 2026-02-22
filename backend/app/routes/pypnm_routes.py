@@ -355,6 +355,10 @@ def pnm_measurement(measurement_type, mac_address):
             result = client.get_modulation_profile(
                 mac_address, modem_ip, tftp_ip, community
             )
+            # New endpoint returns success bool, normalize to status int for downstream handling
+            if 'status' not in result:
+                result['status'] = 0 if result.get('success') else 1
+                result['message'] = result.get('error') or 'Modulation profile captured'
         elif measurement_type == 'fec_summary':
             fec_type = data.get('fec_summary_type', 2)
             result = client.get_fec_summary(
