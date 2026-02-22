@@ -2055,27 +2055,65 @@ def get_utsc_data(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     filename_base = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
-    
+    # CMTS may prepend a path prefix (e.g. /pnm/utsc/) to the filename internally.
+    # Strip to basename so we search correctly in /var/lib/tftpboot.
+    filename_base = os.path.basename(filename_base.strip('/'))
+
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
-    
+
     try:
-        # TFTP files are mounted at /var/lib/tftpboot
+        from app.core.pypnm_client import PyPNMClient
+        client = PyPNMClient()
+
+        # TFTP files are mounted at /var/lib/tftpboot (root, not subdirectories)
         tftp_base = '/var/lib/tftpboot'
-        
+
         # Find the most recent UTSC file matching vendor-specific patterns:
-        # 1. CommScope E6000/Casa: utsc_{mac}_YYYYMMDD_HHMMSS
-        # 2. Cisco cBR-8: PNMCcapUsSpecAn_{hostname}_{timestamp}_{rfport}
-        
-        # Try CommScope/Casa format first (most common)
-        pattern = f"{tftp_base}/{filename_base}_*"
+        # 1. CommScope/Arris E6000: CMTS may prefix path e.g. /pnm/utsc/ to filename
+        #    Files land at /var/lib/tftpboot/<cmts_path>/<filename_base>_<timestamp>
+        # 2. Casa CCAP: same, root only
+        # 3. Cisco cBR-8: PNMCcapUsSpecAn_{hostname}_{timestamp}_{rfport}
+
+        # Query actual CMTS filename so we search the right path even if our SET failed
+        rf_port_ifindex = data.get('rf_port_ifindex')
+        cfg_index = data.get('cfg_index', 1)
+        actual_filename_base = filename_base  # default to what GUI sent
+        if cmts_ip and rf_port_ifindex:
+            try:
+                cmts_cfg = client.get_utsc_config(
+                    cmts_ip=cmts_ip,
+                    rf_port_ifindex=int(rf_port_ifindex),
+                    community=data.get('community', get_cmts_community()),
+                    cfg_index=int(cfg_index)
+                )
+                cmts_fn = cmts_cfg.get('filename', '')
+                if cmts_fn:
+                    actual_filename_base = os.path.basename(cmts_fn.strip('/'))
+                    logger.info(f"CMTS-reported filename: '{cmts_fn}' → searching for basename '{actual_filename_base}'")
+                    # Build search path from CMTS-reported path prefix
+                    cmts_prefix = os.path.dirname(cmts_fn.strip('/'))
+                    if cmts_prefix:
+                        tftp_base = os.path.join('/var/lib/tftpboot', cmts_prefix)
+                        logger.info(f"Adjusted TFTP search dir to: {tftp_base}")
+            except Exception as e:
+                logger.warning(f"Could not query CMTS config for filename: {e}")
+
+        # Try exact basename match with timestamp suffix
+        pattern = f"{tftp_base}/{actual_filename_base}_*"
         files = sorted(glob.glob(pattern), reverse=True)
-        
-        # If no files found, try Cisco cBR-8 format
+
+        # Also try root in case CMTS path prefix wasn't reflected in actual write location
+        if not files and tftp_base != '/var/lib/tftpboot':
+            root_pattern = f"/var/lib/tftpboot/{actual_filename_base}_*"
+            files = sorted(glob.glob(root_pattern), reverse=True)
+            if files:
+                logger.info(f"Found files in tftpboot root despite CMTS path prefix")
+
+        # If still no files, try Cisco cBR-8 format
         if not files:
-            rf_port_ifindex = data.get('rf_port_ifindex')
             if rf_port_ifindex:
-                cisco_pattern = f"{tftp_base}/PNMCcapUsSpecAn_*_{rf_port_ifindex}"
+                cisco_pattern = f"/var/lib/tftpboot/PNMCcapUsSpecAn_*_{rf_port_ifindex}"
                 files = sorted(glob.glob(cisco_pattern), reverse=True)
                 logger.info(f"Trying Cisco cBR-8 pattern: {cisco_pattern}, found {len(files)} files")
         
