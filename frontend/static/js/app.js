@@ -1005,7 +1005,11 @@ createApp({
                         result.success = false;
                     } else {
                         this.utscConfig.cfgIndex = cfgIdx;
-                        this.$toast?.success(`UTSC configured (cfg_index=${cfgIdx})`);
+                        // Store CMTS-confirmed filename (may differ from what we sent
+                        // if CMTS rejected the SET on an active row)
+                        const confirmedFn = result.filename ? result.filename.split('/').pop() : null;
+                        this.utscConfig.confirmedFilename = confirmedFn || `utsc_${this.selectedModem?.mac_address?.replace(/:/g, '')}`;
+                        this.$toast?.success(`UTSC configured (cfg_index=${cfgIdx}, file=${this.utscConfig.confirmedFilename})`);
                     }
                 } else {
                     this.$toast?.error(result.error || 'Failed to configure UTSC');
@@ -1242,8 +1246,9 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.snmpCommunityRW,  // UTSC needs SNMP write access
-                        include_plot: true  // Single-shot: include matplotlib plot
+                        community: this.snmpCommunityRW,
+                        filename: this.utscConfig.confirmedFilename || `utsc_${this.selectedModem.mac_address.replace(/:/g, '')}`,
+                        include_plot: true
                     })
                 });
                 
@@ -1548,7 +1553,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.snmpCommunityRW
+                        community: this.snmpCommunityRW,
+                        filename: this.utscConfig.confirmedFilename || `utsc_${this.selectedModem.mac_address.replace(/:/g, '')}`
                     })
                 });
                 
