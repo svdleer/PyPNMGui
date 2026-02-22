@@ -1523,10 +1523,15 @@ createApp({
             // Initial fetch after short delay
             setTimeout(() => this.fetchLiveSpectrumData(), 1000);
             
-            // Set up polling interval
+            // Set up polling interval — stop automatically if no longer running
             this.liveSpectrumIntervalId = setInterval(() => {
                 if (this.liveSpectrumEnabled && this.runningUtsc) {
                     this.fetchLiveSpectrumData();
+                } else {
+                    // State was cleared (e.g. modal closed, backend restart) — stop the interval
+                    clearInterval(this.liveSpectrumIntervalId);
+                    this.liveSpectrumIntervalId = null;
+                    this.liveSpectrumPolling = false;
                 }
             }, this.liveSpectrumIntervalMs + 100);
         },
