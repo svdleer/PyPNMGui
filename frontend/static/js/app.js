@@ -1468,9 +1468,11 @@ createApp({
             this.liveSpectrumLastFile = null;  // Track last file to skip duplicates
             this.liveSpectrumStats = { captures: 0, lastUpdate: null, avgRefreshMs: 0 };
             
-            // Configure UTSC for FreeRunning mode with fast repeat
+            // Configure UTSC for FreeRunning mode
+            // repeatPeriodMs controls CMTS capture interval — NOT the GUI poll interval.
+            // E6000 minimum: 50ms. Use 400ms to match proven working parameters.
             this.utscConfig.triggerMode = 2; // FreeRunning
-            this.utscConfig.repeatPeriodMs = this.liveSpectrumIntervalMs;
+            this.utscConfig.repeatPeriodMs = 400;   // 400ms between captures on CMTS
             this.utscConfig.freerunDurationMs = 600000; // 10 min max
             
             try {
