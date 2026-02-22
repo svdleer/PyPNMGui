@@ -178,6 +178,33 @@ class PyPNMClient:
                 "message": f"Unexpected error: {str(e)}"
             }
     
+    def _get(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Make GET request to PyPNM API."""
+        url = f"{self.config.base_url}{endpoint}"
+        try:
+            logger.debug(f"GET {url} params={params}")
+            response = self.session.get(url, params=params, timeout=self.config.timeout)
+            if response.status_code >= 400:
+                try:
+                    logger.error(f"PyPNM returned {response.status_code}: {response.json()}")
+                except Exception:
+                    logger.error(f"PyPNM returned {response.status_code}: {response.text[:500]}")
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Cannot connect to PyPNM at {self.config.base_url}")
+            return {"status": "error", "message": f"PyPNM server not reachable at {self.config.base_url}."}
+        except requests.exceptions.Timeout:
+            logger.error("Timeout connecting to PyPNM")
+            return {"status": "error", "message": "Request to PyPNM timed out"}
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error from PyPNM: {e}")
+            return {"status": "error", "message": f"PyPNM returned error: {e.response.status_code}",
+                    "detail": e.response.text if e.response else None}
+        except Exception as e:
+            logger.exception("Unexpected error calling PyPNM")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
     # ============== Agent Management ==============
     
     def get_agents(self) -> Dict[str, Any]:
@@ -445,32 +472,16 @@ class PyPNMClient:
     ) -> Dict[str, Any]:
         """
         Get modulation profile.
-        
-        Uses the classic PNM endpoint which handles the full SNMP trigger/wait/TFTP flow
-        via agent transport.
-        
-        Endpoint: POST /docs/pnm/ds/ofdm/modulationProfile/getCapture
+
+        Endpoint: POST /pnm/ds/modulation-profile
         """
         payload = {
-            "cable_modem": {
-                "mac_address": mac_address,
-                "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
-                "pnm_parameters": {
-                    "tftp": {
-                        "ipv4": tftp_ipv4,
-                        "ipv6": tftp_ipv6 if tftp_ipv6 else "::1"
-                    }
-                }
-            },
-            "analysis": {
-                "type": "basic",
-                "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
-            }
+            "mac_address": mac_address,
+            "modem_ip": ip_address,
+            "community": community,
+            "tftp_server": tftp_ipv4,
         }
-        
-        return self._post("/docs/pnm/ds/ofdm/modulationProfile/getCapture", payload)
+        return self._post("/pnm/ds/modulation-profile", payload)
     
     def get_fec_summary(
         self,
@@ -684,19 +695,14 @@ class PyPNMClient:
     ) -> Dict[str, Any]:
         """
         Discover UTSC RF ports on a CMTS via PyPNM API.
-        
-        Endpoint: POST /pnm/us/utsc/ports
-        
+
+        Endpoint: GET /pnm/us/utsc/ports
+
         Returns RF ports and their configurations.
         """
-        payload = {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
-            }
-        }
-        return self._post("/pnm/us/utsc/ports", payload)
+        params = {"cmts_ip": cmts_ip, "community": community,
+                  "write_community": write_community or community}
+        return self._get("/pnm/us/utsc/ports", params)
 
     def discover_modem_rf_port(
         self,
@@ -742,6 +748,56 @@ class PyPNMClient:
         }
         return self._post("/pnm/us/ofdma/rxmer/discover", payload)
     
+    def configure_bulk_destination(
+        self,
+        cmts_ip: str,
+        dest_ip: str,
+        community: str = "public",
+        write_community: Optional[str] = None,
+        dest_path: str = "./",
+        index: int = 1,
+        pnm_types: Optional[list] = None
+    ) -> Dict[str, Any]:
+        """
+        Configure CMTS bulk data destination for PNM file uploads.
+
+        Auto-detects vendor and configures the correct table(s):
+        - All vendors: docsPnmBulkDataTransferCfgTable (standard)
+        - Casa only:   additionally docsPnmCcapBulkDataControlTable + PnmTestSelector
+
+        Must be called once before UTSC or US RxMER captures will upload to TFTP.
+        /pnm/us/utsc/configure no longer calls this internally — caller is responsible.
+
+        Endpoint: POST /pnm/us/bulk-destination
+
+        Args:
+            cmts_ip: CMTS IP address
+            dest_ip: TFTP server IP
+            community: SNMP read community
+            write_community: SNMP write community
+            dest_path: TFTP destination path (default: './')
+            index: Table row index (default: 1)
+            pnm_types: Casa PnmTestSelector bits:
+                       'utsc'  - usTriggeredSpectrumCapture (bit8)
+                       'rxmer' - usOfdmaRxMerPerSubcarrier (bit5)
+                       'both'  - bit5 + bit8
+                       Defaults to ['utsc', 'rxmer'] (both enabled).
+        """
+        if pnm_types is None:
+            pnm_types = ['utsc', 'rxmer']
+        payload = {
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community,
+                "write_community": write_community or community
+            },
+            "dest_ip": dest_ip,
+            "dest_path": dest_path,
+            "index": index,
+            "pnm_types": pnm_types
+        }
+        return self._post("/pnm/us/bulk-destination", payload)
+
     def stop_utsc(
         self,
         cmts_ip: str,
@@ -871,25 +927,52 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "private",
+        community: str = "public",
         write_community: Optional[str] = None,
         cfg_index: int = 1
     ) -> Dict[str, Any]:
         """
         Get UTSC test status via PyPNM API.
-        
-        Endpoint: POST /pnm/us/utsc/status
+
+        Endpoint: GET /pnm/us/utsc/status
         """
-        payload = {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
-            },
-            "rf_port_ifindex": rf_port_ifindex,
-            "cfg_index": cfg_index
-        }
-        return self._post("/pnm/us/utsc/status", payload)
+        params = {"cmts_ip": cmts_ip, "community": community,
+                  "write_community": write_community or community,
+                  "rf_port_ifindex": rf_port_ifindex, "cfg_index": cfg_index}
+        return self._get("/pnm/us/utsc/status", params)
+
+    def get_utsc_config(
+        self,
+        cmts_ip: str,
+        rf_port_ifindex: int,
+        community: str = "public",
+        write_community: Optional[str] = None,
+        cfg_index: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Get current UTSC configuration for an RF port.
+
+        Endpoint: GET /pnm/us/utsc/config
+        """
+        params = {"cmts_ip": cmts_ip, "community": community,
+                  "write_community": write_community or community,
+                  "rf_port_ifindex": rf_port_ifindex, "cfg_index": cfg_index}
+        return self._get("/pnm/us/utsc/config", params)
+
+    def get_bulk_destinations(
+        self,
+        cmts_ip: str,
+        community: str = "public",
+        write_community: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        List configured rows in docsPnmBulkDataTransferCfgTable.
+
+        Endpoint: GET /pnm/us/bulk-destination
+        """
+        params = {"cmts_ip": cmts_ip, "community": community,
+                  "write_community": write_community or community}
+        return self._get("/pnm/us/bulk-destination", params)
     
     def get_upstream_spectrum_capture(
         self,
