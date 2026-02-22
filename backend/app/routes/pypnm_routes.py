@@ -53,17 +53,20 @@ def get_cmts_write_community():
 
 
 def get_default_tftp():
-    """Get default TFTP IP (general - used for most CMTS operations)."""
+    """Get default TFTP IP (used for CMTS-side operations like UTSC/RxMER)."""
     return os.environ.get('TFTP_IPV4', '172.16.6.101')
 
 
 def get_alternate_tftp():
-    """Get alternate TFTP IP (used for Cisco CMTS and CM modem operations)."""
+    """Get alternate TFTP IP (used for CM modem-side PNM operations)."""
     return os.environ.get('TFTP_IPV4_ALT', '172.22.147.18')
 
 
 def get_tftp_for_cmts(cmts_ip: str) -> str:
-    """Return TFTP IP based on CMTS vendor - Cisco uses alternate, all others use general."""
+    """Return TFTP IP for CMTS-side bulk upload (UTSC/US RxMER).
+    
+    Cisco uses alternate TFTP; all others use default.
+    """
     from app.core.cmts_provider import CMTSProvider
     try:
         cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
@@ -72,6 +75,16 @@ def get_tftp_for_cmts(cmts_ip: str) -> str:
     except Exception:
         pass
     return get_default_tftp()
+
+
+def get_modem_tftp() -> str:
+    """Return TFTP IP for CM modem-side PNM uploads.
+    
+    Modems upload to the alternate TFTP server which is reachable
+    from the modem subnet (10.x / 172.22.x networks).
+    Always returns TFTP_IPV4_ALT regardless of CMTS vendor.
+    """
+    return get_alternate_tftp()
 
 
 def get_community_for_cmts(cmts_ip: str) -> str:
@@ -174,7 +187,7 @@ def modem_pre_eq(mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     community = data.get('community', get_default_write_community())
-    tftp_ip = data.get('tftp_ip', get_default_tftp())
+    tftp_ip = data.get('tftp_ip', get_modem_tftp())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -228,8 +241,9 @@ def pnm_measurement(measurement_type, mac_address):
     modem_ip = data.get('modem_ip')
     # Use write community for PNM operations that require SET
     community = data.get('community', get_default_write_community())
-    # CM PNM operations (modem-side) always use alternate TFTP
-    tftp_ip = data.get('tftp_ip', get_tftp_for_cmts(modem_ip or cmts_ip))
+    # CM PNM operations (modem-side) always use alternate TFTP —
+    # modems upload to a server reachable from the modem subnet.
+    tftp_ip = data.get('tftp_ip', get_modem_tftp())
     output_type = data.get('output_type', 'json')
     
     # Spectrum analyzer: always use JSON mode from PyPNM, then generate plots ourselves
