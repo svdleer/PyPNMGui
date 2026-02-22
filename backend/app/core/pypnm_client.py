@@ -405,7 +405,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                "snmp": {"snmp_v2c": {"community": community}},
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
