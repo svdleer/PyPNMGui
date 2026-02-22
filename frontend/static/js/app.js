@@ -1005,11 +1005,7 @@ createApp({
                         result.success = false;
                     } else {
                         this.utscConfig.cfgIndex = cfgIdx;
-                        // Store CMTS-confirmed filename (may differ from what we sent
-                        // if CMTS rejected the SET on an active row)
-                        const confirmedFn = result.filename ? result.filename.split('/').pop() : null;
-                        this.utscConfig.confirmedFilename = confirmedFn || `utsc_${this.selectedModem?.mac_address?.replace(/:/g, '')}`;
-                        this.$toast?.success(`UTSC configured (cfg_index=${cfgIdx}, file=${this.utscConfig.confirmedFilename})`);
+                        this.$toast?.success(`UTSC configured (cfg_index=${cfgIdx})`);
                     }
                 } else {
                     this.$toast?.error(result.error || 'Failed to configure UTSC');
@@ -1246,9 +1242,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.snmpCommunityRW,
-                        filename: this.utscConfig.confirmedFilename || `utsc_${this.selectedModem.mac_address.replace(/:/g, '')}`,
-                        include_plot: true
+                        community: this.snmpCommunityRW,  // UTSC needs SNMP write access
+                        include_plot: true  // Single-shot: include matplotlib plot
                     })
                 });
                 
@@ -1468,10 +1463,9 @@ createApp({
             this.liveSpectrumLastFile = null;  // Track last file to skip duplicates
             this.liveSpectrumStats = { captures: 0, lastUpdate: null, avgRefreshMs: 0 };
             
-            // Configure UTSC for FreeRunning mode.
-            // repeatPeriodMs is NOT overwritten here — use the value from utscConfig (default 50ms).
-            // PyPNM service clamps vendor-specifically: E6000 min=50ms, Casa min=100ms.
+            // Configure UTSC for FreeRunning mode with fast repeat
             this.utscConfig.triggerMode = 2; // FreeRunning
+            this.utscConfig.repeatPeriodMs = this.liveSpectrumIntervalMs;
             this.utscConfig.freerunDurationMs = 600000; // 10 min max
             
             try {
@@ -1529,15 +1523,10 @@ createApp({
             // Initial fetch after short delay
             setTimeout(() => this.fetchLiveSpectrumData(), 1000);
             
-            // Set up polling interval — stop automatically if no longer running
+            // Set up polling interval
             this.liveSpectrumIntervalId = setInterval(() => {
                 if (this.liveSpectrumEnabled && this.runningUtsc) {
                     this.fetchLiveSpectrumData();
-                } else {
-                    // State was cleared (e.g. modal closed, backend restart) — stop the interval
-                    clearInterval(this.liveSpectrumIntervalId);
-                    this.liveSpectrumIntervalId = null;
-                    this.liveSpectrumPolling = false;
                 }
             }, this.liveSpectrumIntervalMs + 100);
         },
@@ -1554,8 +1543,7 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.snmpCommunityRW,
-                        filename: this.utscConfig.confirmedFilename || `utsc_${this.selectedModem.mac_address.replace(/:/g, '')}`
+                        community: this.snmpCommunityRW
                     })
                 });
                 

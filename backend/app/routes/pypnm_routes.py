@@ -2055,54 +2055,29 @@ def get_utsc_data(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     filename_base = data.get('filename', f'utsc_{mac_address.replace(":", "")}')
-    # CMTS may prepend a path prefix (e.g. /pnm/utsc/) to the filename internally.
-    # Strip to basename so we search correctly in /var/lib/tftpboot.
-    filename_base = os.path.basename(filename_base.strip('/'))
-
+    
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
-
+    
     try:
-        # TFTP root — files always land here regardless of CMTS-internal path prefix
+        # TFTP files are mounted at /var/lib/tftpboot
         tftp_base = '/var/lib/tftpboot'
-        rf_port_ifindex = data.get('rf_port_ifindex')
-
-        # Find the most recent UTSC file — search root AND common subdirs
-        # Arris E6000 stores /pnm/utsc/<name> in SNMP but writes to tftpboot root
-        # or /var/lib/tftpboot/pnm/utsc/ depending on firmware config
-        search_dirs = [
-            tftp_base,
-            os.path.join(tftp_base, 'pnm', 'utsc'),
-            os.path.join(tftp_base, 'pnm'),
-        ]
-
-        files = []
-        matched_dir = tftp_base
-
-        for search_dir in search_dirs:
-            if not os.path.isdir(search_dir):
-                continue
-            # Match by MAC-based filename prefix
-            candidates = sorted(glob.glob(f"{search_dir}/{filename_base}*"), reverse=True)
-            if candidates:
-                files = candidates
-                matched_dir = search_dir
-                logger.info(f"Found UTSC files in {search_dir}: {[os.path.basename(f) for f in files[:3]]}")
-                break
-            # Also try bare name (E6000 may use static name like utsc_spectrum)
-            candidates = sorted(glob.glob(f"{search_dir}/utsc_spectrum*"), reverse=True)
-            if candidates:
-                files = candidates
-                matched_dir = search_dir
-                logger.info(f"Found UTSC static-name files in {search_dir}")
-                break
-
-        # Cisco cBR-8 fallback
-        if not files and rf_port_ifindex:
-            cisco_pattern = f"{tftp_base}/PNMCcapUsSpecAn_*_{rf_port_ifindex}"
-            files = sorted(glob.glob(cisco_pattern), reverse=True)
-            if files:
-                logger.info(f"Found Cisco cBR-8 files: {len(files)}")
+        
+        # Find the most recent UTSC file matching vendor-specific patterns:
+        # 1. CommScope E6000/Casa: utsc_{mac}_YYYYMMDD_HHMMSS
+        # 2. Cisco cBR-8: PNMCcapUsSpecAn_{hostname}_{timestamp}_{rfport}
+        
+        # Try CommScope/Casa format first (most common)
+        pattern = f"{tftp_base}/{filename_base}_*"
+        files = sorted(glob.glob(pattern), reverse=True)
+        
+        # If no files found, try Cisco cBR-8 format
+        if not files:
+            rf_port_ifindex = data.get('rf_port_ifindex')
+            if rf_port_ifindex:
+                cisco_pattern = f"{tftp_base}/PNMCcapUsSpecAn_*_{rf_port_ifindex}"
+                files = sorted(glob.glob(cisco_pattern), reverse=True)
+                logger.info(f"Trying Cisco cBR-8 pattern: {cisco_pattern}, found {len(files)} files")
         
         if not files:
             # No files yet - return empty result (not an error)
