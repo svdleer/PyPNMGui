@@ -995,10 +995,22 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
-                    this.$toast?.success('UTSC configured successfully');
+                    const cfgIdx = result.cfg_index;
+                    // Valid cfg_index ranges by vendor:
+                    //   Casa CCAP   : 1 (row index in cfgTable)
+                    //   CommScope / Arris / Cisco : ifIndex-based, typically > 10000
+                    // Any positive integer is acceptable; 0 / null / negative is not.
+                    if (!cfgIdx || cfgIdx <= 0) {
+                        this.$toast?.error(`Configure returned invalid cfg_index: ${cfgIdx}`);
+                        result.success = false;
+                    } else {
+                        this.utscConfig.cfgIndex = cfgIdx;
+                        this.$toast?.success(`UTSC configured (cfg_index=${cfgIdx})`);
+                    }
                 } else {
                     this.$toast?.error(result.error || 'Failed to configure UTSC');
                 }
+                return result;
             } catch (error) {
                 console.error('Configure UTSC error:', error);
                 this.$toast?.error('Failed to configure UTSC');
@@ -1014,16 +1026,28 @@ createApp({
             this.utscStatus = null;
             
             try {
-                // First configure, then start
-                await this.configureUtsc();
+                // First configure (vendor-aware defaults applied in PyPNM), then start
+                const configResult = await this.configureUtsc();
+                if (!configResult || !configResult.success) {
+                    this.runningUtsc = false;
+                    return;
+                }
                 
+                const cfgIndexForStart = this.utscConfig.cfgIndex;
+                if (!cfgIndexForStart || cfgIndexForStart <= 0) {
+                    this.$toast?.error(`Invalid cfg_index (${cfgIndexForStart}) — cannot start`);
+                    this.runningUtsc = false;
+                    return;
+                }
+
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.snmpCommunityRW  // UTSC needs SNMP write access
+                        cfg_index: cfgIndexForStart,
+                        community: this.snmpCommunityRW
                     })
                 });
                 
@@ -1106,8 +1130,14 @@ createApp({
         },
         
         async startUsRxmer() {
-            if (!this.selectedModem || !this.selectedModem.cmts_ip || !this.usRxmerConfig.ofdmaIfindex) {
-                this.$toast?.error('CMTS IP and OFDMA ifIndex required');
+            if (!this.selectedModem || !this.selectedModem.cmts_ip) {
+                this.$toast?.error('No CMTS IP available for this modem');
+                return;
+            }
+            // ofdmaIfindex is always an ifIndex-based value (> 10000 for all vendors)
+            const ofdmaIdx = this.usRxmerConfig.ofdmaIfindex;
+            if (!ofdmaIdx || ofdmaIdx <= 0) {
+                this.$toast?.error(`Invalid OFDMA ifIndex (${ofdmaIdx}) — select a valid OFDMA channel first`);
                 return;
             }
             
@@ -1435,15 +1465,27 @@ createApp({
             this.utscConfig.freerunDurationMs = 600000; // 10 min max
             
             try {
-                // Configure and start UTSC
-                await this.configureUtsc();
+                // Configure and start UTSC (vendor-aware defaults applied in PyPNM)
+                const liveConfigResult = await this.configureUtsc();
+                if (!liveConfigResult || !liveConfigResult.success) {
+                    this.liveSpectrumEnabled = false;
+                    return;
+                }
                 
+                const liveCfgIndex = this.utscConfig.cfgIndex;
+                if (!liveCfgIndex || liveCfgIndex <= 0) {
+                    this.$toast?.error(`Invalid cfg_index (${liveCfgIndex}) — cannot start live spectrum`);
+                    this.liveSpectrumEnabled = false;
+                    return;
+                }
+
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        cfg_index: liveCfgIndex,
                         community: this.snmpCommunityRW
                     })
                 });

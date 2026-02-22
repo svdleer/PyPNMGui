@@ -1833,32 +1833,10 @@ def start_utsc(mac_address):
     
     try:
         client = PyPNMClient()
-        
-        # Step 1: Configure with optimal defaults FIRST
-        logger.info(f"Configuring UTSC: trigger_mode={trigger_mode}, repeat_period={repeat_period_ms}ms, freerun={freerun_duration_ms}ms")
-        
-        # Build config params - omit output_format to trigger auto-detection
-        config_params = {
-            'cmts_ip': cmts_ip,
-            'rf_port_ifindex': rf_port_ifindex,
-            'community': community,
-            'write_community': write_community,
-            'trigger_mode': trigger_mode,
-            'repeat_period_us': repeat_period_ms * 1000,  # Convert ms to µs
-            'freerun_duration_ms': freerun_duration_ms,
-            'trigger_count': 0,  # Will be auto-cleared by PyPNM for FreeRunning mode
-            'window_function': 2,  # rectangular
-            'filename': f"utsc_{mac_address.replace(':', '')}",
-        }
-        # Note: output_format omitted - API will auto-detect (tries FFT_AMPLITUDE(5), falls back to FFT_POWER(2))
-        
-        configure_result = client.configure_utsc(**config_params)
-        
-        if not configure_result.get('success'):
-            return jsonify({"success": False, "error": f"Configuration failed: {configure_result.get('error')}"}), 500
-        
-        # Step 2: Start the test
-        result = client.start_utsc(cmts_ip, rf_port_ifindex, community, write_community)
+        cfg_index = data.get('cfg_index', 1)
+
+        # Just start — configure was already done by the caller
+        result = client.start_utsc(cmts_ip, rf_port_ifindex, community, write_community, cfg_index=cfg_index)
         logger.info(f"UTSC start result: {result}")
         return jsonify(result)
         
