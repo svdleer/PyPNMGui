@@ -272,19 +272,31 @@ def get_cmts_modems(cmts_name):
                 m['cmts_ip'] = cmts_ip
                 m['cmts_community'] = community
 
-            # Only cache in Redis if enrichment is complete (not still in progress)
             is_enriched = result.get('enriched', False)
             is_enriching = result.get('enriching', False)
-            
-            if REDIS_AVAILABLE and redis_client and is_enriched and not is_enriching:
+
+            # Cache in Redis:
+            # - Always cache the base modem list immediately (short TTL = 5 min)
+            #   so subsequent page opens don't refetch from scratch.
+            # - Cache with full TTL only when enrichment is complete.
+            if REDIS_AVAILABLE and redis_client:
                 try:
                     cache_key = f"modems:{cmts_name}"
-                    redis_client.setex(cache_key, REDIS_TTL, json.dumps({
+                    cache_payload = json.dumps({
                         "cmts": cmts_name,
                         "modems": modems,
                         "timestamp": result.get('timestamp')
-                    }))
-                    logger.info(f"Cached {len(modems)} enriched modems for {cmts_name}")
+                    })
+                    if is_enriched and not is_enriching:
+                        # Full enriched data — cache with full TTL
+                        redis_client.setex(cache_key, REDIS_TTL, cache_payload)
+                        logger.info(f"Cached {len(modems)} enriched modems for {cmts_name} (TTL={REDIS_TTL}s)")
+                    else:
+                        # Base data only — cache with short TTL so enrichment
+                        # can refresh it without stale data living too long
+                        short_ttl = min(REDIS_TTL, 300)
+                        redis_client.setex(cache_key, short_ttl, cache_payload)
+                        logger.info(f"Cached {len(modems)} base modems for {cmts_name} (TTL={short_ttl}s, enriching={is_enriching})")
                 except Exception as e:
                     logger.warning(f"Redis cache error: {e}")
             
