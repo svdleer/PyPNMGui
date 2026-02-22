@@ -24,7 +24,7 @@ pypnm
 
 # Optional dependencies
 # Uncomment if you need caching support:
-# redis>=5.0.0
+redis>=5.0.0
 
 # Optional: For agent WebSocket support (SocketIO - more complex)
 # flask-socketio>=5.3.0

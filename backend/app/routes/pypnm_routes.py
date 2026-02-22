@@ -351,10 +351,9 @@ def pnm_measurement(measurement_type, mac_address):
                 mac_address, modem_ip, tftp_ip, community,
                 tftp_ipv6="::1", output_type=output_type
             )
-        elif measurement_type == 'modulation_profile':
+        if measurement_type == 'modulation_profile':
             result = client.get_modulation_profile(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6="::1", output_type=output_type
+                mac_address, modem_ip, tftp_ip, community
             )
         elif measurement_type == 'fec_summary':
             fec_type = data.get('fec_summary_type', 2)
