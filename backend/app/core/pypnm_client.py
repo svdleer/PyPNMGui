@@ -1072,17 +1072,16 @@ class PyPNMClient:
         Returns:
             Dictionary with 'success', 'modems', and optional 'error'
         """
-        payload = {
+        params = {
             "cmts_ip": cmts_ip,
             "community": community,
             "limit": limit,
-            "enrich": enrich,
+            "enrich": str(enrich).lower(),
             "modem_community": modem_community
         }
-        
+
         try:
-            # PyPNM API will route this through the agent
-            response = self._post("/cmts/modems", payload)
+            response = self._get("/cmts/modems", params)
             return response
         except Exception as e:
             logger.error(f"Error getting modems from CMTS {cmts_ip}: {e}")
