@@ -135,38 +135,48 @@ createApp({
         // Check if modem has downstream OFDM channels (DOCSIS 3.1)
         hasOfdmChannels() {
             return this.channelStats?.downstream?.ofdm?.count > 0 ||
-                   this.selectedModem?.docsis_version?.includes('3.1');
+                   this.selectedModem?.ofdm_enabled ||
+                   this.selectedModem?.docsis_version?.includes('3.1') ||
+                   this.selectedModem?.docsis_version?.includes('4.0');
         },
-        
+
         // Check if modem has upstream OFDMA channels (DOCSIS 3.1)
         hasOfdmaChannels() {
-            return this.channelStats?.upstream?.ofdma?.count > 0 || 
+            return this.channelStats?.upstream?.ofdma?.count > 0 ||
                    this.upstreamInterfaces?.ofdmaChannels?.length > 0 ||
+                   this.selectedModem?.ofdma_enabled ||
                    this.selectedModem?.upstream_interface?.toLowerCase()?.includes('ofdma');
         },
         
         // OFDM status: 'green' (operational), 'orange' (partial service), 'red' (offline/no channels)
         ofdmStatus() {
-            if (!this.channelStats || this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
+            if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
                 return 'red';
             }
+            // Use enriched modem flag if channelStats not yet loaded
             const ofdmChannels = this.channelStats?.downstream?.ofdm?.channels || [];
-            if (ofdmChannels.length === 0) {
-                return 'red';
+            if (ofdmChannels.length > 0) {
+                const hasPartialService = ofdmChannels.some(ch => ch.is_partial === true || ch.ncp_profile === true);
+                return hasPartialService ? 'orange' : 'green';
             }
-            // Check if any channel has partial service
-            const hasPartialService = ofdmChannels.some(ch => ch.is_partial === true || ch.ncp_profile === true);
-            return hasPartialService ? 'orange' : 'green';
+            // Fall back to modem-level flag from enrichment
+            if (this.selectedModem?.ofdm_enabled) return 'green';
+            if (this.selectedModem?.docsis_version?.includes('3.1') || this.selectedModem?.docsis_version?.includes('4.0')) return 'green';
+            return 'red';
         },
-        
+
         // OFDMA status: 'green' (operational), 'red' (offline/no channels)
-        // Only show green if channel stats actually loaded with OFDMA channels
         ofdmaStatus() {
-            if (!this.channelStats || this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
+            if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
                 return 'red';
             }
+            // Use channelStats if loaded
             const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
-            return ofdmaChannels.length > 0 ? 'green' : 'red';
+            if (ofdmaChannels.length > 0) return 'green';
+            // Fall back to enriched modem flag
+            if (this.selectedModem?.ofdma_enabled) return 'green';
+            if (this.selectedModem?.upstream_interface?.toLowerCase()?.includes('ofdma')) return 'green';
+            return 'red';
         },
         
         // Measurements requiring downstream OFDM
