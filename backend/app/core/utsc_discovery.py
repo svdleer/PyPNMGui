@@ -155,7 +155,7 @@ def discover_rf_port_for_modem(cmts_ip, community, mac_address):
     try:
         logger.debug(f"Trying PyPNM API at {pypnm_api_url}")
         response = requests.post(
-            f"{pypnm_api_url}/pnm/us/spectrumAnalyzer/discoverRfPort",
+            f"{pypnm_api_url}/pnm/us/utsc/discover",
             json={
                 "cmts_ip": cmts_ip,
                 "cm_mac_address": mac_address,

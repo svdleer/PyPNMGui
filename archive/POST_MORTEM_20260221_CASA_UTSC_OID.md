@@ -95,6 +95,23 @@ The Casa CCAP UTSC bulk data control table was configured with the wrong OID **t
 | `ce20d9d` | fix(utsc): OID attempt 2 — `4491.2.1.27.1.1.1` (still wrong) |
 | `3bc018c` | fix(utsc): OID attempt 3 — `4491.2.1.27.1.1.1.5.1` (correct, verified via snmptranslate) |
 | `bead872` | fix(utsc): OFDMA ifindex parser matched cm_index inside base OID — returned ifindex=1 |
+| `b8a9455` | UTSC: split vendor constraints — Casa vs E6000/Cisco |
+| `3c59a42` | UTSC configure: return warnings[] and applied{} when values are clamped |
+| `b19c639` | UTSC: detect Casa via sysDescr instead of unreliable bulk data OID |
+| `7484c20` | UTSC Casa: fix constraint order — raise repeat after flooring freerun |
+| `6466074` | UTSC: tri-vendor detection (Casa/Arris/Cisco) via sysDescr |
+| `2fa82d2` | **MISTAKE**: UTSC list_rf_ports: added Arris cable-upstream pattern (unnecessary, broke working code) |
+| `01e1f55` | Revert list_rf_ports changes — Arris/CommScope port detection was already working |
+
+## INCIDENT 5: AI modified working port detection code without being asked
+
+**What happened**: AI was asked "how about Arris/CommScope and Cisco [vendor detection]". Instead of just answering, it ran an `snmpwalk` on the Arris CMTS (`172.16.6.212`), saw `cable-upstream 1/scq/0` in ifDescr output, and immediately added a new regex pattern to `list_rf_ports` and changed the 840M ifindex skip logic — without asking whether port detection was already working for Arris.
+**Result**: Port discovery broken for Arris. Reverted in commit `01e1f55`.
+**Risk**: The change was committed and deployed to production before the problem was caught. Had it not been caught immediately, it would have broken UTSC for all Arris/CommScope customers.
+**User fix**: "the port detection worked perfectly fine for arris and commscope...would you please roll that back and ask next time"
+**AI failure**: Assumed that because a new vendor pattern was visible in SNMP output, the existing code must be broken. Did not check whether the existing code already handled it. Did not ask before modifying working functionality.
+
+---
 
 ## LESSONS LEARNED
 
@@ -104,3 +121,4 @@ The Casa CCAP UTSC bulk data control table was configured with the wrong OID **t
 4. **Standard DOCS-PNM-MIB first** — vendor OIDs under `4998.*` should never be assumed
 5. **Verify OID = entry, not parent** — `snmpwalk` resolves names but the numeric OID includes the entry node
 6. **Strip base OID before parsing instance** — searching `.{index}.` in a full OID matches the base OID itself when the index value appears in the enterprise prefix (e.g. cm_index=2 matches `4491.2.1`)
+7. **ASK before touching working code** — if the user asks about vendor X, verify whether existing code already handles it before making any changes. "Does this work for vendor X?" requires an answer, not a code change.
