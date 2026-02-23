@@ -332,28 +332,15 @@ def get_cmts_modems(cmts_name):
 
 @api_bp.route('/modem/<mac_address>/system-info', methods=['POST'])
 def get_system_info(mac_address):
-    """Get system information for a modem via PyPNM API."""
-    request_data = request.get_json() or {}
-    modem_ip = request_data.get('modem_ip')
-    community = request_data.get('community', get_default_community())
-    
-    if not modem_ip:
-        return jsonify({"status": "error", "message": "modem_ip required"}), 400
-    
-    try:
-        # Use PyPNM API - it will route through agent automatically
-        client = PyPNMClient()
-        result = client._post(
-            '/docs/pnm/ds/status/getChannelStatus',
-            client._build_cable_modem_request(mac_address, modem_ip, community)
-        )
-        
-        if result.get('status_code') == 200:
-            return jsonify({"status": 0, "success": True, **result})
-        else:
-            return jsonify({"status": 1, "error": result.get('message', 'Unknown error')}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    """Get system information for a modem.
+
+    NOTE: Disabled — /docs/pnm/ds/status/getChannelStatus does not exist in PyPNM.
+    Endpoint returns 501 until a /pnm equivalent is implemented.
+    """
+    return jsonify({
+        "status": "error",
+        "message": "system-info endpoint not yet implemented (backing route /docs/pnm/ds/status/getChannelStatus removed)"
+    }), 501
 
 
 # ============== Removed Endpoints ==============
