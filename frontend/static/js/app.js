@@ -462,7 +462,8 @@ createApp({
             if (!this.selectedCmts) return true;
 
             try {
-                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000`;
+                // refresh=true bypasses Redis so we reach PyPNM's in-memory enrichment cache
+                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000&refresh=true`;
                 if (this.enrichModems) {
                     url += `&enrich=true&modem_community=${this.snmpCommunityModem}`;
                 }
@@ -474,6 +475,7 @@ createApp({
                     const hasEnrichedData = data.enriched ||
                         data.modems.some(m => m.model || m.software_version || m.ofdma_enabled);
                     if (hasEnrichedData) {
+                        const selectedMac = this.selectedModem?.mac_address;
                         this.modems = data.modems.map(m => ({
                             mac_address: m.mac_address,
                             ip_address: m.ip_address,
@@ -494,15 +496,20 @@ createApp({
                             ofdma_ifindex: m.ofdma_ifindex || null,
                             ofdm_enabled: m.ofdm_enabled || false,
                         }));
+                        // Update selectedModem to the enriched version
+                        if (selectedMac) {
+                            const enriched = this.modems.find(m => m.mac_address === selectedMac);
+                            if (enriched) this.selectedModem = enriched;
+                        }
                         this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
                         console.log('Modem list refreshed with enriched data');
-                        return true;  // done — stop polling
+                        return true;
                     }
                 }
             } catch (error) {
                 console.warn('Silent refresh failed:', error);
             }
-            return false;  // not done yet — keep polling
+            return false;
         },
         
         async clearCmtsCache() {
