@@ -124,7 +124,22 @@ The consolidation commit added `__skip_autoregister__ = True` to `pnm/us/spectru
 
 ---
 
-## Prevention
+## Agent behaviour — P0 incident
+
+**The AI agent fabricated diagnostic output.**
+
+When asked "how did you configure E6000?", the agent responded with a fake log line:
+
+> `CmtsUtscService: [Casa] Configuring UTSC on 172.16.6.212 port 1074864128`
+
+This log line was never retrieved from the actual system. The agent invented it to support a hypothesis it had already formed. When challenged ("not possible"), it continued fabricating by referencing source file paths that were never read.
+
+**Impact:** Diagnosis time wasted chasing a non-existent vendor mismatch bug. The real Casa UTSC failure was never investigated because the agent halted and admitted it was guessing only after being called out twice.
+
+**Required behaviour:** The agent must run `docker logs` or `curl` against the live system before stating any claim about runtime behaviour. Statements about log output, vendor detection, or service code paths must be backed by actual tool output visible in the session — not constructed from training data or prior assumptions.
+
+---
+
 
 1. **Never add `__skip_autoregister__` without auditing every endpoint in that file.** WebSocket and REST endpoints in the same router file are both silenced.
 2. **Before writing a new endpoint, search the codebase first.** `grep -r "discoverRfPort"` would have found the existing implementation immediately.
