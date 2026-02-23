@@ -276,9 +276,10 @@ def get_cmts_modems(cmts_name):
             is_enriching = result.get('enriching', False)
 
             # Cache in Redis:
-            # - Always cache the base modem list immediately (short TTL = 5 min)
-            #   so subsequent page opens don't refetch from scratch.
-            # - Cache with full TTL only when enrichment is complete.
+            # - Enriched data: always write with full TTL.
+            # - Base data: only write if no enriched entry already exists in
+            #   Redis — prevents a background-enriching response from evicting
+            #   a previously cached enriched result.
             if REDIS_AVAILABLE and redis_client:
                 try:
                     cache_key = f"modems:{cmts_name}"
@@ -288,15 +289,16 @@ def get_cmts_modems(cmts_name):
                         "timestamp": result.get('timestamp')
                     })
                     if is_enriched and not is_enriching:
-                        # Full enriched data — cache with full TTL
                         redis_client.setex(cache_key, REDIS_TTL, cache_payload)
                         logger.info(f"Cached {len(modems)} enriched modems for {cmts_name} (TTL={REDIS_TTL}s)")
                     else:
-                        # Base data only — cache with short TTL so enrichment
-                        # can refresh it without stale data living too long
-                        short_ttl = min(REDIS_TTL, 300)
-                        redis_client.setex(cache_key, short_ttl, cache_payload)
-                        logger.info(f"Cached {len(modems)} base modems for {cmts_name} (TTL={short_ttl}s, enriching={is_enriching})")
+                        # Only write base data if no entry exists yet
+                        if not redis_client.exists(cache_key):
+                            short_ttl = min(REDIS_TTL, 300)
+                            redis_client.setex(cache_key, short_ttl, cache_payload)
+                            logger.info(f"Cached {len(modems)} base modems for {cmts_name} (TTL={short_ttl}s, enriching={is_enriching})")
+                        else:
+                            logger.info(f"Redis already has data for {cmts_name}, not overwriting with base list")
                 except Exception as e:
                     logger.warning(f"Redis cache error: {e}")
             

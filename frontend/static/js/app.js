@@ -396,7 +396,10 @@ createApp({
                         cable_mac: m.cable_mac || '',
                         upstream_interface: m.upstream_interface || '',
                         fiber_node: m.fiber_node || '',
-                        partial_service: Boolean(m.partial_service) && m.partial_service !== 'false' && m.partial_service !== '0'
+                        partial_service: Boolean(m.partial_service) && m.partial_service !== 'false' && m.partial_service !== '0',
+                        ofdma_enabled: m.ofdma_enabled || false,
+                        ofdma_ifindex: m.ofdma_ifindex || null,
+                        ofdm_enabled: m.ofdm_enabled || false,
                     }));
                     
                     // Set enrichment progress if available
@@ -411,11 +414,12 @@ createApp({
                     const enrichInfo = data.enriched ? ' [enriched]' : (data.enriching ? ' [enriching in background...]' : '');
                     this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems${cacheInfo}${enrichInfo}`;
                     this.searchPerformed = true;
-                    
-                    // Auto-refresh after 15s to get enriched data
-                    if (this.enrichModems && !data.enriched && !data.cached) {
-                        console.log('Scheduling auto-refresh in 15s for enriched data...');
-                        setTimeout(() => this.refreshEnrichedModems(), 15000);
+
+                    // Poll for enriched data — retry every 15s until enriched or max 8 attempts
+                    if (this.enrichModems && !data.enriched) {
+                        console.log('Enrichment pending — polling every 15s (max 8 attempts)...');
+                        this._enrichPollAttempts = 0;
+                        this._scheduleEnrichPoll();
                     }
                 } else {
                     this.showError('Failed to get modems', data.message || 'Unknown error');
@@ -429,22 +433,36 @@ createApp({
             }
         },
         
+        _scheduleEnrichPoll() {
+            const MAX_ATTEMPTS = 8;
+            if (this._enrichPollAttempts >= MAX_ATTEMPTS) {
+                console.warn('Enrichment polling gave up after', MAX_ATTEMPTS, 'attempts');
+                return;
+            }
+            this._enrichPollAttempts++;
+            setTimeout(async () => {
+                const done = await this.refreshEnrichedModems();
+                if (!done) this._scheduleEnrichPoll();
+            }, 15000);
+        },
+
         async refreshEnrichedModems() {
-            // Silently refresh modem list to get enriched data (no loading spinner)
-            if (!this.selectedCmts) return;
-            
+            // Silently refresh modem list to get enriched data (no loading spinner).
+            // Returns true when enriched data is received, false while still pending.
+            if (!this.selectedCmts) return true;
+
             try {
                 let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000`;
                 if (this.enrichModems) {
                     url += `&enrich=true&modem_community=${this.snmpCommunityModem}`;
                 }
-                
+
                 const response = await fetch(url);
                 const data = await response.json();
-                
+
                 if (data.status === 'success' && data.modems) {
-                    // Check if we got enriched data (any modem has model)
-                    const hasEnrichedData = data.modems.some(m => m.model || m.software_version);
+                    const hasEnrichedData = data.enriched ||
+                        data.modems.some(m => m.model || m.software_version || m.ofdma_enabled);
                     if (hasEnrichedData) {
                         this.modems = data.modems.map(m => ({
                             mac_address: m.mac_address,
@@ -461,15 +479,20 @@ createApp({
                             cable_mac: m.cable_mac || '',
                             upstream_interface: m.upstream_interface || '',
                             fiber_node: m.fiber_node || '',
-                            partial_service: Boolean(m.partial_service) && m.partial_service !== 'false' && m.partial_service !== '0'
+                            partial_service: Boolean(m.partial_service) && m.partial_service !== 'false' && m.partial_service !== '0',
+                            ofdma_enabled: m.ofdma_enabled || false,
+                            ofdma_ifindex: m.ofdma_ifindex || null,
+                            ofdm_enabled: m.ofdm_enabled || false,
                         }));
                         this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
                         console.log('Modem list refreshed with enriched data');
+                        return true;  // done — stop polling
                     }
                 }
             } catch (error) {
                 console.warn('Silent refresh failed:', error);
             }
+            return false;  // not done yet — keep polling
         },
         
         async clearCmtsCache() {
