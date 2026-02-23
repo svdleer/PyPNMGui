@@ -70,7 +70,7 @@ createApp({
                 repeatPeriodMs: 50,       // 50ms between captures (20 fps)
                 freerunDurationMs: 600000, // 10 min max (E6000 ignores this for file count)
                 outputFormat: 0,          // 0=auto-detect (tries 5 then 2), 5=fftAmplitude (best for visualisation)
-                window: 4,                // 4=blackmanHarris
+                window: 2,                // 2=rectangular (E6000 RRPS HF only supports rectangular; safe default for all vendors)
                 runtime: 60               // seconds - streaming runtime for spectrum analyzer
             },
             usRxmerConfig: {
