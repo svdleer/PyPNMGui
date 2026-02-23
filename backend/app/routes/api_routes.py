@@ -275,12 +275,11 @@ def get_cmts_modems(cmts_name):
             is_enriched = result.get('enriched', False)
             is_enriching = result.get('enriching', False)
 
-            # Cache in Redis:
-            # - Enriched data: always write with full TTL.
-            # - Base data: only write if no enriched entry already exists in
-            #   Redis — prevents a background-enriching response from evicting
-            #   a previously cached enriched result.
-            if REDIS_AVAILABLE and redis_client:
+            # Cache in Redis only when enrichment is fully complete.
+            # Never cache base/in-progress data — that would intercept the
+            # enrichment poll and prevent it from reaching PyPNM's in-memory
+            # enrichment cache.
+            if REDIS_AVAILABLE and redis_client and is_enriched and not is_enriching:
                 try:
                     cache_key = f"modems:{cmts_name}"
                     cache_payload = json.dumps({
@@ -288,17 +287,8 @@ def get_cmts_modems(cmts_name):
                         "modems": modems,
                         "timestamp": result.get('timestamp')
                     })
-                    if is_enriched and not is_enriching:
-                        redis_client.setex(cache_key, REDIS_TTL, cache_payload)
-                        logger.info(f"Cached {len(modems)} enriched modems for {cmts_name} (TTL={REDIS_TTL}s)")
-                    else:
-                        # Only write base data if no entry exists yet
-                        if not redis_client.exists(cache_key):
-                            short_ttl = min(REDIS_TTL, 300)
-                            redis_client.setex(cache_key, short_ttl, cache_payload)
-                            logger.info(f"Cached {len(modems)} base modems for {cmts_name} (TTL={short_ttl}s, enriching={is_enriching})")
-                        else:
-                            logger.info(f"Redis already has data for {cmts_name}, not overwriting with base list")
+                    redis_client.setex(cache_key, REDIS_TTL, cache_payload)
+                    logger.info(f"Cached {len(modems)} enriched modems for {cmts_name} (TTL={REDIS_TTL}s)")
                 except Exception as e:
                     logger.warning(f"Redis cache error: {e}")
             
