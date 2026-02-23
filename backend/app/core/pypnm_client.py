@@ -905,7 +905,8 @@ class PyPNMClient:
         rf_port_ifindex: int,
         community: str = "private",
         write_community: Optional[str] = None,
-        cfg_index: int = 1
+        cfg_index: int = 0,  # 0 = auto-probe by TriggerMode (required for Casa)
+        trigger_mode: int = 2
     ) -> Dict[str, Any]:
         """
         Start UTSC test via PyPNM API.
@@ -919,7 +920,8 @@ class PyPNMClient:
                 "write_community": write_community or community
             },
             "rf_port_ifindex": rf_port_ifindex,
-            "cfg_index": cfg_index
+            "cfg_index": cfg_index,
+            "trigger_mode": trigger_mode
         }
         return self._post("/pnm/us/utsc/start", payload)
 

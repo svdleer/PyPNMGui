@@ -1833,10 +1833,11 @@ def start_utsc(mac_address):
     
     try:
         client = PyPNMClient()
-        cfg_index = data.get('cfg_index', 1)
+        cfg_index = data.get('cfg_index', 0)  # 0 = auto-probe by TriggerMode
+        trigger_mode = data.get('trigger_mode', 2)
 
         # Just start — configure was already done by the caller
-        result = client.start_utsc(cmts_ip, rf_port_ifindex, community, write_community, cfg_index=cfg_index)
+        result = client.start_utsc(cmts_ip, rf_port_ifindex, community, write_community, cfg_index=cfg_index, trigger_mode=trigger_mode)
         logger.info(f"UTSC start result: {result}")
         return jsonify(result)
         
