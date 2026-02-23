@@ -1074,11 +1074,7 @@ createApp({
                 }
                 
                 const cfgIndexForStart = this.utscConfig.cfgIndex;
-                if (!cfgIndexForStart || cfgIndexForStart <= 0) {
-                    this.$toast?.error(`Invalid cfg_index (${cfgIndexForStart}) — cannot start`);
-                    this.runningUtsc = false;
-                    return;
-                }
+                // cfg_index=0 sent to server — auto-probe by TriggerMode, no client-side block needed
 
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
@@ -1086,7 +1082,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        cfg_index: cfgIndexForStart,
+                        cfg_index: 0,  // always auto-probe by TriggerMode — avoids stale cfgIndex across vendors
+                        trigger_mode: this.utscConfig.triggerMode || 2,
                         community: this.snmpCommunityRW
                     })
                 });
@@ -1516,20 +1513,14 @@ createApp({
                     return;
                 }
                 
-                const liveCfgIndex = this.utscConfig.cfgIndex;
-                if (!liveCfgIndex || liveCfgIndex <= 0) {
-                    this.$toast?.error(`Invalid cfg_index (${liveCfgIndex}) — cannot start live spectrum`);
-                    this.liveSpectrumEnabled = false;
-                    return;
-                }
-
                 const response = await fetch(`/api/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        cfg_index: liveCfgIndex,
+                        cfg_index: 0,  // auto-probe by TriggerMode
+                        trigger_mode: this.utscConfig.triggerMode || 2,
                         community: this.snmpCommunityRW
                     })
                 });
