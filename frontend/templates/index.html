@@ -1247,9 +1247,15 @@
                                                                 <label class="form-label form-label-sm">Bins</label>
                                                                 <select v-model.number="utscConfig.numBins" class="form-select form-select-sm">
                                                                     <option :value="200">200</option>
+                                                                    <option :value="256">256</option>
                                                                     <option :value="400">400</option>
+                                                                    <option :value="512">512</option>
                                                                     <option :value="800">800</option>
+                                                                    <option :value="1024">1024</option>
                                                                     <option :value="1600">1600</option>
+                                                                    <option :value="2048">2048</option>
+                                                                    <option :value="3200">3200</option>
+                                                                    <option :value="4096">4096</option>
                                                                 </select>
                                                             </div>
                                                         </div>
@@ -1261,14 +1267,18 @@
                                                                     <option :value="3">Hann</option>
                                                                     <option :value="4">Blackman-Harris</option>
                                                                     <option :value="5">Hamming</option>
+                                                                    <option :value="6">Flat Top &#x2020;</option>
                                                                 </select>
                                                             </div>
                                                             <div class="col-4">
                                                                 <label class="form-label form-label-sm">Output</label>
                                                                 <select v-model.number="utscConfig.outputFormat" class="form-select form-select-sm">
+                                                                    <option :value="0">Auto</option>
                                                                     <option :value="2">fftPower</option>
-                                                                    <option :value="5">fftAmplitude</option>
+                                                                    <option :value="5">fftAmplitude &#x2020;</option>
+                                                                    <option :value="4">fftIQ</option>
                                                                     <option :value="1">timeIQ</option>
+                                                                    <option :value="6">fftDb &#x2020;</option>
                                                                 </select>
                                                             </div>
                                                             <div class="col-4">
@@ -1297,6 +1307,9 @@
                                                             <small :class="{'text-success': utscStatus.is_ready, 'text-warning': utscStatus.is_busy, 'text-danger': utscStatus.is_error}">
                                                                 Status: {{ utscStatus.meas_status_name }}
                                                             </small>
+                                                        </div>
+                                                        <div class="mt-1">
+                                                            <small class="text-muted">&#x2020; Casa only &mdash; clamped on E6000/Cisco</small>
                                                         </div>
                                                     </div>
                                                 </div>
