@@ -722,7 +722,7 @@ class PyPNMClient:
             "community": community,
             "cm_mac_address": cm_mac_address
         }
-        return self._post("/pnm/us/utsc/discover", payload)
+        return self._post("/pnm/us/spectrumAnalyzer/discoverRfPort", payload)
 
     def discover_modem_ofdma(
         self,
