@@ -1029,7 +1029,8 @@ createApp({
                         repeat_period_ms: this.utscConfig.repeatPeriodMs,
                         freerun_duration_ms: this.utscConfig.freerunDurationMs,
                         runtime: this.utscConfig.runtime,
-                        community: this.snmpCommunityRW  // UTSC needs SNMP write access
+                        community: this.snmpCommunityRW,
+                        write_community: this.snmpCommunityRW  // UTSC SETs need write community
                     })
                 });
                 
@@ -1084,7 +1085,8 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         cfg_index: 0,  // always auto-probe by TriggerMode — avoids stale cfgIndex across vendors
                         trigger_mode: this.utscConfig.triggerMode || 2,
-                        community: this.snmpCommunityRW
+                        community: this.snmpCommunityRW,
+                        write_community: this.snmpCommunityRW
                     })
                 });
                 
@@ -1521,7 +1523,8 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         cfg_index: 0,  // auto-probe by TriggerMode
                         trigger_mode: this.utscConfig.triggerMode || 2,
-                        community: this.snmpCommunityRW
+                        community: this.snmpCommunityRW,
+                        write_community: this.snmpCommunityRW
                     })
                 });
                 
