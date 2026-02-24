@@ -126,3 +126,32 @@ without direct evidence from `utsc_freerun_param_check()` or similar Casa syslog
 2. **The constant 600_000 was wrong on the day it was committed (768cff2)**
 3. **RowStatus reverting = parameter validation failure, not a RowStatus bug**
 4. **Do not chase symptoms (RowStatus, cfg_index, atomic PDU) without reading device logs**
+
+---
+
+## INCIDENT 2 (same day): Cisco cBR-8 UTSC commitFailed — missing write_community in frontend
+
+**Score: 4 out of 4 UTSC endpoints broken. All from copy-paste errors in the same PR.**
+
+### Root Cause
+`app.js` sent `community: this.snmpCommunityRW` but **no `write_community`** in the
+configure, start, and live-spectrum-start UTSC request bodies. The route fell back to
+`get_cmts_write_community()` (env default), which is the Casa write community — wrong for
+Cisco cBR-8. Cisco's InitiateTest SET returned `commitFailed` due to noAccess.
+
+### Pattern
+This is **identical to POST_MORTEM_20260221 Incident 3** (used read community for SET).
+The fix was applied to the backend but the frontend was never updated to pass write_community.
+
+### Fix
+Added `write_community: this.snmpCommunityRW` to all three UTSC call sites in `app.js`:
+- `utsc/configure`
+- `utsc/start` (normal)
+- `utsc/start` (live spectrum)
+
+Commit: `fix: send write_community in all UTSC configure+start calls`
+
+### Rule Added
+**Every SNMP SET from the frontend must explicitly send both `community` AND `write_community`.**
+The backend `get_cmts_write_community()` fallback is CMTS-agnostic and will be wrong for
+any vendor that isn't the default in `.env`.
