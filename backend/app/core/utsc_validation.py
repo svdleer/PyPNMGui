@@ -42,7 +42,7 @@ class UtscLimits:
     DEFAULT_REPEAT_PERIOD_MS: int = 400      # 400ms: satisfies 120s/300files constraint
 
     MIN_FREERUN_DURATION_MS: int = 120_000   # Casa minimum: 120 seconds
-    MAX_FREERUN_DURATION_MS: int = 600_000   # 10 minutes max
+    MAX_FREERUN_DURATION_MS: int = 300_000   # Casa hard max: 300s (syslog: >300000 rejected)
     DEFAULT_FREERUN_DURATION_MS: int = 120_000  # 120 seconds (Casa minimum)
 
     # Casa file count: FreeRunDuration / RepeatPeriod <= 300
@@ -203,7 +203,7 @@ def validate_freerun_duration(freerun_duration_ms: int) -> Tuple[bool, Optional[
         return False, f"Free-run duration {freerun_duration_ms}ms is below minimum {LIMITS.MIN_FREERUN_DURATION_MS}ms"
     
     if freerun_duration_ms > LIMITS.MAX_FREERUN_DURATION_MS:
-        return False, f"Free-run duration {freerun_duration_ms}ms exceeds maximum {LIMITS.MAX_FREERUN_DURATION_MS}ms (10 minutes)"
+        return False, f"Free-run duration {freerun_duration_ms}ms exceeds maximum {LIMITS.MAX_FREERUN_DURATION_MS}ms (Casa hard max 300s)"
     
     return True, None
 
