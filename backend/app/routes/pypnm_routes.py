@@ -2370,58 +2370,50 @@ def get_cmts_us_rxmer_fibernode_scan():
                 })
                 _set_scan_progress(scan_id, done='true', action=action, pct=pct)
 
-            # Collect online modems from all requested channels.
-            # Track every channel per modem so each registration is captured.
-            mac_info: dict[str, dict] = {}        # mac -> first modem dict
+            # Build modem list + per-modem channel mapping.
+            mac_info: dict[str, dict] = {}        # mac -> modem dict
             mac_ifindices: dict[str, list] = {}   # mac -> [ifidx, ...]
-            modem_query_limit = max(max_modems * 10, 500) if selected_macs else max_modems
-            for ifidx in ofdma_ifindices:
-                modem_resp = req.get(
-                    f"{base_url}/pnm/us/ofdma/rxmer/channel/modems",
-                    params={
-                        "cmts_ip":       cmts_ip,
-                        "community":     community,
-                        "ofdma_ifindex": ifidx,
-                        "max_modems":    modem_query_limit,
-                    },
-                    timeout=60
-                )
-                if modem_resp.status_code != 200:
-                    logger.warning(f"Could not list modems for ifindex {ifidx}: {modem_resp.status_code}")
-                    continue
-                for m in modem_resp.json().get('modems', []):
-                    mac = m.get('cm_mac_address') or m.get('mac_address') or ''
+
+            if selected_macs:
+                # User already selected specific modems — use them directly
+                # with the provided ifindices. No SNMP walk needed.
+                for raw_mac in (data.get('selected_macs') or []):
+                    mac = (raw_mac or '').strip()
                     if not mac:
                         continue
-                    if mac not in mac_info:
-                        mac_info[mac] = m
-                    mac_ifindices.setdefault(mac, [])
-                    if ifidx not in mac_ifindices[mac]:
-                        mac_ifindices[mac].append(ifidx)
+                    mac_info[mac] = {'cm_mac_address': mac}
+                    mac_ifindices[mac] = list(ofdma_ifindices)
+                logger.info(f"FN scan: using {len(mac_info)} pre-selected modems on ifindices {ofdma_ifindices}")
+            else:
+                # No selection — discover modems via SNMP walk.
+                for ifidx in ofdma_ifindices:
+                    modem_resp = req.get(
+                        f"{base_url}/pnm/us/ofdma/rxmer/channel/modems",
+                        params={
+                            "cmts_ip":       cmts_ip,
+                            "community":     community,
+                            "ofdma_ifindex": ifidx,
+                            "max_modems":    max_modems,
+                        },
+                        timeout=60
+                    )
+                    if modem_resp.status_code != 200:
+                        logger.warning(f"Could not list modems for ifindex {ifidx}: {modem_resp.status_code}")
+                        continue
+                    for m in modem_resp.json().get('modems', []):
+                        mac = m.get('cm_mac_address') or m.get('mac_address') or ''
+                        if not mac:
+                            continue
+                        if mac not in mac_info:
+                            mac_info[mac] = m
+                        mac_ifindices.setdefault(mac, [])
+                        if ifidx not in mac_ifindices[mac]:
+                            mac_ifindices[mac].append(ifidx)
 
             modems = list(mac_info.values())
-            if selected_macs:
-                all_macs_found = {_norm_mac(m.get('cm_mac_address') or m.get('mac_address') or '') for m in modems}
-                logger.info(f"FN scan: {len(all_macs_found)} modems from CMTS across ifindices {ofdma_ifindices}, "
-                            f"filtering for {len(selected_macs)} selected MACs")
-                missing = selected_macs - all_macs_found
-                if missing:
-                    logger.warning(f"FN scan: {len(missing)} selected MACs not found on channel(s): {list(missing)[:5]}")
-                modems = [
-                    m for m in modems
-                    if (_norm_mac(m.get('cm_mac_address') or m.get('mac_address') or '') in selected_macs)
-                ]
-                keep = {
-                    _norm_mac(m.get('cm_mac_address') or m.get('mac_address') or '')
-                    for m in modems
-                }
-                mac_ifindices = {
-                    mac: ifs for mac, ifs in mac_ifindices.items()
-                    if _norm_mac(mac) in keep
-                }
             if not modems:
                 _set_scan_progress(scan_id, done='true', action='No modems found')
-                _store_scan_result(scan_id, {"success": False, "error": "No matching modems found for selection" if selected_macs else "No modems found on requested OFDMA channel(s)"})
+                _store_scan_result(scan_id, {"success": False, "error": "No modems found on requested OFDMA channel(s)"})
                 return
 
             if _aborted():
