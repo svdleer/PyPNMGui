@@ -1,0 +1,1328 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Console - PyPNM{% endblock %}
+
+{% block extra_head %}
+    <style>
+        :root {
+            --admin-blue-1: #0d6efd;
+            --admin-blue-2: #0284c7;
+            --admin-bg: #eef3fb;
+            --admin-card: #ffffff;
+            --admin-border: #e6ebf3;
+        }
+        body { background: radial-gradient(1200px 500px at 10% -10%, rgba(13,110,253,0.12), transparent 50%), linear-gradient(180deg, #f2f6fd 0%, var(--admin-bg) 100%); }
+        .page-shell {
+            max-width: 1500px;
+            margin: 0 auto;
+        }
+        .card {
+            border: 1px solid var(--admin-border);
+            border-radius: 14px;
+            box-shadow: 0 10px 24px rgba(2, 12, 27, 0.06) !important;
+            background: var(--admin-card);
+        }
+        .card-header {
+            border-bottom: 1px solid var(--admin-border);
+            border-radius: 14px 14px 0 0 !important;
+            font-weight: 600;
+            background: linear-gradient(180deg, #fbfdff 0%, #f4f8ff 100%) !important;
+        }
+        .table thead th {
+            font-size: 0.78rem;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            color: #5b6472;
+            background: #f8fafc;
+            border-bottom: 1px solid #e9edf5;
+        }
+        .table tbody td { border-color: #eef2f7; }
+        .chip {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+        .chip-admin { background: #ffe8cc; color: #8a4b07; }
+        .chip-user  { background: #dbeafe; color: #1e40af; }
+        .admin-hero {
+            background: linear-gradient(135deg, var(--admin-blue-1) 0%, var(--admin-blue-2) 60%, #0ea5e9 100%);
+            color: #fff;
+            border-radius: 14px;
+            padding: 0.9rem 1rem;
+            box-shadow: 0 10px 24px rgba(13, 110, 253, 0.25);
+        }
+        .admin-hero .text-muted { color: rgba(255,255,255,0.85) !important; }
+        .admin-soft {
+            border: 1px solid var(--admin-border);
+            border-radius: 12px;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+        }
+        .users-table td { vertical-align: middle; }
+        .user-role-form { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.5rem; }
+        .user-role-form .form-select { min-width: 120px; max-width: 130px; }
+        .user-role-form .form-check { margin: 0; display: inline-flex; align-items: center; gap: 0.35rem; }
+        .user-pass-form { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0; }
+        .user-pass-form .form-control { min-width: 190px; }
+        /* Match compact icon feel used across modem/PNM pages. */
+        .page-shell .bi { font-size: 0.9rem; line-height: 1; }
+        .icon-btn { width: 2rem; height: 2rem; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+        .user-cell { display: flex; align-items: center; gap: 0.4rem; min-width: 175px; }
+        .user-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .user-role-badge { min-width: 56px; text-align: center; margin-left: auto; }
+        /* Layout improvements - better width usage */
+        @media (min-width: 1400px) {
+            .container-fluid { max-width: 1600px; margin: 0 auto; }
+        }
+        /* Better form spacing */
+        .form-label-sm { font-size: 0.85rem; font-weight: 500; }
+        /* Improved tables */
+        .table tbody td, .table tbody th { padding: 0.6rem 0.75rem; }
+        .table { font-size: 0.9rem; }
+        /* Better button consistency */
+        .btn-sm { font-size: 0.875rem; padding: 0.35rem 0.75rem; }
+        .icon-btn { width: 2.2rem; height: 2.2rem; }
+        /* Improved chip spacing */
+        .chip { font-size: 0.75rem; padding: 0.25rem 0.6rem; }
+        /* Tab styling - clean and simple */
+        .nav-tabs {
+            border: none;
+            border-bottom: 2px solid var(--admin-border);
+            background: transparent;
+            margin-bottom: 1.5rem;
+        }
+        .nav-tabs .nav-link {
+            color: #6b7280;
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-weight: 500;
+            padding: 0.75rem 1.25rem;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+        .nav-tabs .nav-link:hover {
+            color: var(--admin-blue-1);
+            border-bottom-color: var(--admin-blue-1);
+        }
+        .nav-tabs .nav-link.active {
+            color: var(--admin-blue-1);
+            border-bottom-color: var(--admin-blue-1);
+            background: transparent;
+        }
+        .nav-tabs .nav-link i {
+            font-size: 1.1rem;
+        }
+        .tab-pane {
+            animation: fadeIn 0.15s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0.9; }
+            to { opacity: 1; }
+        }
+        .tab-content { background: transparent; }
+        .queue-age-ok { color: #475569; }
+        .queue-age-warn { color: #b45309; font-weight: 600; }
+        .queue-age-danger { color: #b91c1c; font-weight: 700; }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4 px-3 px-md-4 page-shell">
+    <div class="admin-hero d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0"><i class="bi bi-shield-lock me-2"></i>Admin Console</h4>
+            <div class="small text-muted">Users, API keys, maintenance, and data collection in one place.</div>
+        </div>
+        <a class="btn btn-light btn-sm" href="[[ base_path ]]/"><i class="bi bi-arrow-left me-1"></i>Back</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-[[ 'danger' if category == 'danger' else 'success' ]] py-2">[[ message ]]</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Tabs Navigation -->
+    <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="poller-tab" data-bs-toggle="tab" data-bs-target="#poller-pane" type="button" role="tab" aria-controls="poller-pane" aria-selected="true">
+                <i class="bi bi-hdd-network"></i> Poller
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users-pane" type="button" role="tab" aria-controls="users-pane" aria-selected="false">
+                <i class="bi bi-person-badge"></i> Users
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="apikeys-tab" data-bs-toggle="tab" data-bs-target="#apikeys-pane" type="button" role="tab" aria-controls="apikeys-pane" aria-selected="false">
+                <i class="bi bi-key"></i> API Keys
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="maintenance-tab" data-bs-toggle="tab" data-bs-target="#maintenance-pane" type="button" role="tab" aria-controls="maintenance-pane" aria-selected="false">
+                <i class="bi bi-cone-striped"></i> Maintenance
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content" id="adminTabContent">
+        <!-- POLLER TAB -->
+        <div class="tab-pane fade show active" id="poller-pane" role="tabpanel" aria-labelledby="poller-tab">
+    <div class="row g-3">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex align-items-center gap-2">
+                    <strong><i class="bi bi-hdd-network me-1"></i>Poller Settings</strong>
+                    <span class="chip" style="background:#e2e8f0;color:#334155">[[ data_store_backend ]]</span>
+                    <span class="chip" style="background:[[ '#dcfce7' if poller_scheduler_status.enabled else '#fee2e2' ]];color:[[ '#166534' if poller_scheduler_status.enabled else '#991b1b' ]]">
+                        Scheduler: [[ 'ON' if poller_scheduler_status.enabled else 'OFF' ]]
+                    </span>
+                    <span class="chip" style="background:[[ '#dbeafe' if poller_scheduler_status.running else '#f1f5f9' ]];color:[[ '#1e40af' if poller_scheduler_status.running else '#334155' ]]">
+                        Worker: [[ 'running' if poller_scheduler_status.running else 'idle' ]]
+                    </span>
+                    <span class="small text-muted">last tick: [[ poller_scheduler_status.last_tick or '—' ]]</span>
+                    <span class="small text-muted">poll: [[ poller_scheduler_status.poll_sec or 60 ]]s</span>
+                    <span class="small text-muted">agent load: [[ poller_scheduler_status.agent_load if poller_scheduler_status.agent_load is not none else '—' ]]</span>
+                    {% if data_store_error %}
+                        <span class="chip" style="background:#fee2e2;color:#991b1b">Error</span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    {% if data_store_error %}
+                        <div class="alert alert-danger py-2">[[ data_store_error ]]</div>
+                    {% endif %}
+
+                    <div class="admin-soft p-3 mb-3">
+                        <div class="fw-semibold mb-2">Poller Scheduler</div>
+                        <div class="small text-muted mb-2">Polling starts when scheduler is enabled and worker is running. "Run now" executes one immediate scheduler tick.</div>
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <form method="post" action="[[ base_path ]]/admin/poller-scheduler/toggle" class="d-flex align-items-center gap-2">
+                                <label class="form-check-label small">
+                                    <input class="form-check-input" type="checkbox" name="enabled" onchange="this.form.submit()" {% if poller_scheduler_status.enabled %}checked{% endif %}>
+                                    enabled
+                                </label>
+                            </form>
+                            <form method="post" action="[[ base_path ]]/admin/poller-scheduler/poll" class="d-flex align-items-center gap-2">
+                                <label class="small text-muted mb-0">poll sec</label>
+                                <input class="form-control form-control-sm" style="width:90px" type="number" min="5" name="poll_sec" value="[[ poller_scheduler_status.poll_sec or 60 ]]">
+                                <button class="btn btn-outline-primary btn-sm icon-btn" type="submit" title="Set poll interval"><i class="bi bi-check-lg"></i></button>
+                            </form>
+                            <form method="post" action="[[ base_path ]]/admin/poller-scheduler/run-once" class="m-0">
+                                <button class="btn btn-outline-success btn-sm icon-btn" type="submit" title="Run now"><i class="bi bi-lightning-charge"></i></button>
+                            </form>
+                            <form method="post" action="[[ base_path ]]/admin/poller-scheduler/decisions/clear" class="m-0" onsubmit="return confirm('Clear scheduler decisions history?');">
+                                <button class="btn btn-outline-danger btn-sm icon-btn" type="submit" title="Clear decisions"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
+
+                        <div class="mt-3">
+                            <div class="small fw-semibold mb-1">Last Scheduler Decisions</div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-4"><input id="sched-filter-poller" class="form-control form-control-sm" placeholder="Filter poller"></div>
+                                <div class="col-md-4"><input id="sched-filter-reason" class="form-control form-control-sm" placeholder="Filter reason/detail"></div>
+                                <div class="col-md-3">
+                                    <select id="sched-filter-decision" class="form-select form-select-sm">
+                                        <option value="">all decisions</option>
+                                        <option value="queued">queued</option>
+                                        <option value="skip">skip</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2 d-flex align-items-center gap-1">
+                                    <input class="form-check-input mt-0" type="checkbox" id="sched-hide-not-due" checked>
+                                    <label class="form-check-label small text-muted mb-0" for="sched-hide-not-due">hide interval_not_due</label>
+                                </div>
+                                <div class="col-md-1"><button type="button" id="sched-filter-clear" class="btn btn-outline-secondary btn-sm w-100">x</button></div>
+                            </div>
+                                <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+                                <table class="table table-sm mb-0 align-middle">
+                                        <thead class="sticky-top bg-white"><tr><th>Poller</th><th>Decision</th><th>Reason</th><th>Detail</th><th>Load</th><th>Threshold</th></tr></thead>
+                                    <tbody id="sched-decisions-body">
+                                        {% for d in poller_scheduler_status.decisions or [] %}
+                                        <tr class="sched-decision-row" data-poller="[[ (d.poller_name or '')|lower ]]" data-reason="[[ (d.reason or '')|lower ]]" data-detail="[[ (d.detail or '')|lower ]]" data-decision="[[ (d.decision or '')|lower ]]">
+                                            <td>[[ d.poller_name ]]</td>
+                                            <td>
+                                                <span class="chip" style="background:[[ '#dcfce7' if d.decision == 'queued' else '#fee2e2' ]];color:[[ '#166534' if d.decision == 'queued' else '#991b1b' ]]">
+                                                    [[ d.decision ]]
+                                                </span>
+                                            </td>
+                                            <td class="small">[[ d.reason ]]</td>
+                                            <td class="small text-muted">[[ d.detail or '—' ]]</td>
+                                            <td class="small">[[ d.effective_load if d.effective_load is not none else '—' ]]</td>
+                                            <td class="small">[[ d.threshold if d.threshold is not none else '—' ]]</td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% if not poller_scheduler_status.decisions %}
+                                        <tr><td colspan="6" class="text-muted small">No tick yet — scheduler runs every [[ poller_scheduler_status.poll_sec or 60 ]]s. Decisions persist to DB between restarts.</td></tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="mt-3">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <div class="small fw-semibold">Queue Head (Live)</div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span id="queue-head-updated" class="small text-muted">updated: —</span>
+                                    <button type="button" id="queue-head-refresh" class="btn btn-outline-secondary btn-sm icon-btn" title="Refresh queue head"><i class="bi bi-arrow-clockwise"></i></button>
+                                </div>
+                            </div>
+                            <div class="table-responsive" style="max-height:240px;overflow-y:auto">
+                                <table class="table table-sm mb-0 align-middle">
+                                    <thead class="sticky-top bg-white">
+                                        <tr>
+                                            <th>Queue</th>
+                                            <th>Queued</th>
+                                            <th>Running</th>
+                                            <th>Queued Head</th>
+                                            <th>Running Head</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="queue-head-body">
+                                        <tr><td colspan="6" class="text-muted small">Loading queue head…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <div class="admin-soft p-3">
+                                <div class="fw-semibold mb-1">Create Poller Setting</div>
+                                <div class="small text-muted mb-3">Use this form to create a new poller. Use the <strong>Edit</strong> button in the table to change an existing poller.</div>
+                                <form id="poller-form" method="post" action="[[ base_path ]]/admin/poller-settings/upsert">
+                                    <input type="hidden" name="id" id="poller-id">
+
+                                    <!-- Section 1: Identity & Scope -->
+                                    <div class="small fw-semibold text-uppercase text-muted mb-2" style="letter-spacing:.05em">Identity &amp; Scope</div>
+                                    <div class="row g-2 mb-1">
+                                        <div class="col-md-5">
+                                            <label class="form-label form-label-sm mb-1" for="poller-name">Poller name <span class="text-danger">*</span></label>
+                                            <input class="form-control form-control-sm" id="poller-name" name="name" placeholder="e.g. daily-identity" required>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label form-label-sm mb-1" for="poller-scope-type">Scope type</label>
+                                            <select class="form-select form-select-sm" id="poller-scope-type" name="scope_type">
+                                                <option value="all_cmts">all_cmts — every CMTS</option>
+                                                <option value="cmts_list">cmts_list — pick below</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label form-label-sm mb-1" for="poller-scope-json">CMTS list <span class="text-muted">(cmts_list only)</span></label>
+                                            <input class="form-control form-control-sm" id="poller-scope-json" name="scope_json" placeholder='["cmts-1","10.0.0.1"]'>
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-1">
+                                        <div class="col-md-12">
+                                            <label class="form-label form-label-sm mb-1" for="poller-cmts-picker">CMTS selector</label>
+                                            <select id="poller-cmts-picker" class="form-select form-select-sm" multiple size="6">
+                                                {% for c in cmts_systems %}
+                                                <option value="[[ c.HostName or c.IPAddress ]]">[[ c.HostName or 'unknown' ]] ([[ c.IPAddress or 'no-ip' ]])</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="d-flex align-items-center gap-2 mt-2">
+                                                <button type="button" id="poller-add-selected-cmts" class="btn btn-outline-primary btn-sm icon-btn" title="Use selected CMTS"><i class="bi bi-check-lg"></i></button>
+                                                <button type="button" id="poller-clear-selected-cmts" class="btn btn-outline-secondary btn-sm icon-btn" title="Clear list"><i class="bi bi-x-circle"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3"><small class="text-muted">Leave CMTS list blank when using <em>all_cmts</em>. For <em>cmts_list</em>, enter a JSON array of hostnames or IPs.</small></div>
+
+                                    <!-- Section 2: Schedule -->
+                                    <div class="small fw-semibold text-uppercase text-muted mb-2" style="letter-spacing:.05em">Schedule</div>
+                                    <div class="row g-2 mb-1 align-items-end">
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-interval" title="How often the scheduler re-runs this poller">Interval (min)</label>
+                                            <input class="form-control form-control-sm" id="poller-interval" type="number" name="interval_minutes" value="1440" min="1">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-run-start" title="Only start a run after this time (24h, local). Leave blank for anytime.">Run from</label>
+                                            <input class="form-control form-control-sm" id="poller-run-start" type="time" name="run_window_start">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-run-end" title="Do not start a new run after this time. Leave blank for anytime.">Run until</label>
+                                            <input class="form-control form-control-sm" id="poller-run-end" type="time" name="run_window_end">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-max-concurrency" title="Max simultaneous CMTS walks per job tick">Max concurrent</label>
+                                            <input class="form-control form-control-sm" id="poller-max-concurrency" type="number" name="max_concurrency" value="4" min="1">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-max-queue" title="Skip queuing this poller if the agent already has more than this many jobs pending">Max queue depth</label>
+                                            <input class="form-control form-control-sm" id="poller-max-queue" type="number" name="max_agent_queue_depth" value="20" min="1">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-retention" title="Delete modem inventory rows not seen for this many days (and apply the same horizon to snapshot cleanup)">Retention (days)</label>
+                                            <input class="form-control form-control-sm" id="poller-retention" type="number" name="retention_days" value="30" min="1">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3"><small class="text-muted">Run window is optional — leave both blank to allow anytime. Max queue depth skips scheduling when the agent is backed up.</small></div>
+
+                                    <!-- Section 3: Heavy collection window (SC-QAM / RxMER) -->
+                                    <div class="small fw-semibold text-uppercase text-muted mb-2" style="letter-spacing:.05em">Heavy Collection <span class="text-muted fw-normal">(SC-QAM &amp; RxMER)</span></div>
+                                    <div class="row g-2 mb-1 align-items-end">
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-heavy-start" title="Earliest time heavy collection (SC-QAM/RxMER) may run. Default 00:30.">Window start</label>
+                                            <input class="form-control form-control-sm" id="poller-heavy-start" type="time" name="heavy_window_start" value="00:30">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-heavy-end" title="Latest time heavy collection may run. Default 05:30.">Window end</label>
+                                            <input class="form-control form-control-sm" id="poller-heavy-end" type="time" name="heavy_window_end" value="05:30">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label form-label-sm mb-1" for="poller-heavy-max" title="Maximum number of modems to run heavy collection on per job run">Max modems</label>
+                                            <input class="form-control form-control-sm" id="poller-heavy-max" type="number" min="1" name="heavy_max_modems" value="300">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label form-label-sm mb-1" for="poller-heavy-delay" title="Milliseconds to wait between each modem during heavy collection. 0 = no delay.">Delay between modems (ms)</label>
+                                            <input class="form-control form-control-sm" id="poller-heavy-delay" type="number" min="0" name="heavy_delay_ms" value="0">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label form-label-sm mb-1" for="poller-max-runtime" title="Mark job as timed_out if it exceeds this many seconds. Set to 0 to disable.">Max job runtime (sec, 0=off)</label>
+                                            <input class="form-control form-control-sm" id="poller-max-runtime" type="number" min="0" name="max_runtime_sec" value="14400">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3"><small class="text-muted">SC-QAM and RxMER only run when the clock is inside the heavy window. Set max runtime to <strong>0</strong> to never cut off — useful for large CMTS batches.</small></div>
+
+                                    <!-- Section 4: What to collect + flags -->
+                                    <div class="small fw-semibold text-uppercase text-muted mb-2" style="letter-spacing:.05em">What to Collect</div>
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-auto">
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="poller-enabled" type="checkbox" name="enabled" checked>
+                                                <label class="form-check-label small" for="poller-enabled">
+                                                    <strong>Enabled</strong><br>
+                                                    <span class="text-muted">Scheduler picks up this poller</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-auto">
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="poller-identity" type="checkbox" name="collect_identity" checked>
+                                                <label class="form-check-label small" for="poller-identity">
+                                                    <strong>Identity</strong><br>
+                                                    <span class="text-muted">Modem status, vendor, model → inventory table</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-auto">
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="poller-scqam" type="checkbox" name="collect_scqam">
+                                                <label class="form-check-label small" for="poller-scqam">
+                                                    <strong>SC-QAM</strong> <span class="badge text-bg-warning" style="font-size:.65em">heavy</span><br>
+                                                    <span class="text-muted">Downstream level snapshots</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-auto">
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="poller-rxmer" type="checkbox" name="collect_rxmer">
+                                                <label class="form-check-label small" for="poller-rxmer">
+                                                    <strong>RxMER</strong> <span class="badge text-bg-warning" style="font-size:.65em">heavy</span><br>
+                                                    <span class="text-muted">Per-subcarrier MER capture</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-primary btn-sm icon-btn" id="poller-save-btn" type="submit" title="Create poller"><i class="bi bi-plus-circle"></i></button>
+                                        <button class="btn btn-outline-secondary btn-sm icon-btn" id="poller-reset-btn" type="button" title="Reset"><i class="bi bi-x-circle"></i></button>
+                                    </div>
+                                </form>
+                            </div>
+
+                        </div>
+
+                        <div class="col-12">
+                            <div class="admin-soft p-3">
+                                <div class="fw-semibold mb-2">Poller Settings</div>
+                                <div class="small text-muted mb-2">Times are shown in 24h format.</div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0 align-middle">
+                                        <thead><tr><th>ID</th><th>Name</th><th>Enabled</th><th>Interval</th><th>Run Window</th><th>Heavy Window</th><th>Collects</th><th>Action</th></tr></thead>
+                                        <tbody>
+                                            {% for p in poller_settings %}
+                                            <tr>
+                                                <td>[[ p.id ]]</td>
+                                                <td><strong>[[ p.name ]]</strong></td>
+                                                <td>[[ 'yes' if p.enabled else 'no' ]]</td>
+                                                <td>[[ p.interval_minutes ]] min</td>
+                                                <td class="small">[[ p.run_window_start or '—' ]]-[[ p.run_window_end or '—' ]]</td>
+                                                <td class="small">[[ p.heavy_window_start or '00:30' ]]-[[ p.heavy_window_end or '05:30' ]]</td>
+                                                <td class="small">
+                                                    {% set collects = [] %}
+                                                    {% if p.collect_identity %}{% set _ = collects.append('Identity') %}{% endif %}
+                                                    {% if p.collect_scqam %}{% set _ = collects.append('SC-QAM') %}{% endif %}
+                                                    {% if p.collect_rxmer %}{% set _ = collects.append('RxMER') %}{% endif %}
+                                                    [[ collects|join(', ') if collects else '—' ]]
+                                                </td>
+                                                <td class="d-flex gap-1">
+                                                    <button
+                                                        class="btn btn-outline-primary btn-sm icon-btn poller-edit-btn"
+                                                        type="button"
+                                                        title="Edit"
+                                                        data-bs-toggle="modal"
+                                                        data-bs-target="#pollerEditModal"
+                                                        data-id="[[ p.id ]]"
+                                                        data-name="[[ p.name ]]"
+                                                        data-enabled="[[ 1 if p.enabled else 0 ]]"
+                                                        data-scope-type="[[ p.scope_type or 'all_cmts' ]]"
+                                                        data-scope-json="[[ p.scope_json or '' ]]"
+                                                        data-collect-identity="[[ 1 if p.collect_identity else 0 ]]"
+                                                        data-collect-scqam="[[ 1 if p.collect_scqam else 0 ]]"
+                                                        data-collect-rxmer="[[ 1 if p.collect_rxmer else 0 ]]"
+                                                        data-interval="[[ p.interval_minutes or 1440 ]]"
+                                                        data-run-start="[[ p.run_window_start or '' ]]"
+                                                        data-run-end="[[ p.run_window_end or '' ]]"
+                                                        data-max-concurrency="[[ p.max_concurrency or 1 ]]"
+                                                        data-max-queue="[[ p.max_agent_queue_depth or 20 ]]"
+                                                        data-retention="[[ p.retention_days or 30 ]]"
+                                                        data-heavy-start="[[ p.heavy_window_start or '00:30' ]]"
+                                                        data-heavy-end="[[ p.heavy_window_end or '05:30' ]]"
+                                                        data-heavy-max="[[ p.heavy_max_modems or 300 ]]"
+                                                        data-heavy-delay="[[ p.heavy_delay_ms or 0 ]]"
+                                                        data-max-runtime="[[ p.max_runtime_sec or 3600 ]]"
+                                                    ><i class="bi bi-pencil"></i></button>
+                                                    <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/run" class="m-0">
+                                                        <button class="btn btn-outline-success btn-sm icon-btn" type="submit" title="Run"><i class="bi bi-play"></i></button>
+                                                    </form>
+                                                    <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/delete" class="m-0" onsubmit="return confirm('Delete poller setting [[ p.id ]]?');">
+                                                        <button class="btn btn-outline-danger btn-sm icon-btn" type="submit" title="Delete"><i class="bi bi-trash"></i></button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="admin-soft p-3 mt-3">
+                                <div class="fw-semibold mb-2">Recent Poller Jobs</div>
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <label class="small text-muted mb-0">rows</label>
+                                    <select id="jobs-page-size" class="form-select form-select-sm" style="width:90px">
+                                        <option value="5">5</option>
+                                        <option value="10" selected>10</option>
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                    </select>
+                                    <button type="button" id="jobs-prev" class="btn btn-outline-secondary btn-sm">Prev</button>
+                                    <button type="button" id="jobs-next" class="btn btn-outline-secondary btn-sm">Next</button>
+                                    <span id="jobs-page-info" class="small text-muted"></span>
+                                    <div class="ms-auto d-flex align-items-center gap-2">
+                                        <form method="post" action="[[ base_path ]]/admin/poller-jobs/clear" onsubmit="return confirm('Clear finished/failed jobs? Running and queued jobs will be kept.');">
+                                            <button class="btn btn-outline-danger btn-sm icon-btn" type="submit" title="Clear finished"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                        <form method="post" action="[[ base_path ]]/admin/poller-jobs/clear-all" onsubmit="return confirm('Clear ALL jobs? Only running and queued jobs will be kept.');">
+                                            <button class="btn btn-danger btn-sm icon-btn" type="submit" title="Clear all"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0 align-middle">
+                                        <thead><tr><th>ID</th><th>Poller</th><th>Status</th><th>Rows</th><th>Att/Suc/Fail</th><th>CMTS</th><th>Duration</th><th>Trigger</th><th>Created</th><th>Log</th><th>Kill</th><th>Error</th></tr></thead>
+                                        <tbody id="jobs-body">
+                                            {% for j in poller_jobs %}
+                                            <tr class="job-row" data-job-id="[[ j.id ]]">
+                                                <td>[[ j.id ]]</td>
+                                                <td>[[ j.poller_id ]]</td>
+                                                <td>
+                                                    {% if j.status == 'completed' %}<span class="chip" style="background:#dcfce7;color:#166534">completed</span>
+                                                    {% elif j.status == 'timed_out' %}<span class="chip" style="background:#fef3c7;color:#92400e">timed_out</span>
+                                                    {% elif j.status == 'failed' %}<span class="chip" style="background:#fee2e2;color:#991b1b">failed</span>
+                                                    {% elif j.status == 'running' %}<span class="chip" style="background:#dbeafe;color:#1e40af">running</span>
+                                                    {% elif j.status == 'queued' %}<span class="chip" style="background:#e0f2fe;color:#0c4a6e">queued</span>
+                                                    {% else %}<span class="chip" style="background:#f1f5f9;color:#334155">[[ j.status ]]</span>{% endif %}
+                                                </td>
+                                                <td>[[ j.rows_collected or 0 ]]</td>
+                                                <td class="small">[[ j.modems_attempted or 0 ]]/[[ j.modems_succeeded or 0 ]]/[[ j.modems_failed or 0 ]]</td>
+                                                <td class="d-flex align-items-center">
+                                                    {% if j.cmts_breakdown_obj %}
+                                                    <button type="button" class="btn btn-sm btn-primary me-1 job-toggle-breakdown" data-job-id="[[ j.id ]]" title="View Details">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                    {% else %}
+                                                    —
+                                                    {% endif %}
+                                                </td>
+                                                <td>[[ (j.duration_seconds|string) + 's' if j.duration_seconds is not none else '—' ]]</td>
+                                                <td>[[ j.trigger_type ]]</td>
+                                                <td class="small text-muted ts-24h">[[ j.created_at ]]</td>
+                                                <td class="d-flex align-items-center">
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-sm btn-outline-secondary job-show-log"
+                                                        data-job-id="[[ j.id ]]"
+                                                        data-job-status="[[ j.status or '' ]]"
+                                                        data-job-log="[[ (j.error_text or '')|e ]]"
+                                                        title="View Log Snippet"
+                                                    ><i class="bi bi-journal-text"></i></button>
+                                                </td>
+                                                <td class="d-flex align-items-center">
+                                                    {% if j.status in ['running', 'queued'] %}
+                                                    <form method="post" action="[[ base_path ]]/admin/poller-jobs/[[ j.id ]]/kill" class="m-0" onsubmit="return confirm('Kill job [[ j.id ]]?');">
+                                                        <button class="btn btn-sm btn-outline-danger icon-btn" type="submit" title="Kill job"><i class="bi bi-stop-circle"></i></button>
+                                                    </form>
+                                                    {% else %}
+                                                    <span class="text-muted">—</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="small [[ 'text-muted' if j.status == 'running' else 'text-danger' ]]">
+                                                    [[ ('progress: ' + j.error_text) if j.status == 'running' and j.error_text else (j.error_text or '—') ]]
+                                                </td>
+                                            </tr>
+                                            {% if j.cmts_breakdown_obj %}
+                                            <tr class="job-detail-row" data-parent-job-id="[[ j.id ]]" style="display:none">
+                                                <td colspan="12" class="bg-light">
+                                                    <div class="small fw-semibold mb-1">CMTS Breakdown</div>
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm mb-0">
+                                                            <thead><tr><th>CMTS</th><th>Rows</th><th>RF Snapshots</th><th>Error</th></tr></thead>
+                                                            <tbody>
+                                                                {% for cmts_name, stats in j.cmts_breakdown_obj.items() %}
+                                                                <tr>
+                                                                    <td>[[ cmts_name ]]</td>
+                                                                    <td>[[ stats.rows or 0 ]]</td>
+                                                                    <td>[[ stats.rf_snapshots or 0 ]]</td>
+                                                                    <td class="text-danger">[[ stats.error or '—' ]]</td>
+                                                                </tr>
+                                                                {% endfor %}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endif %}
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="admin-soft p-3 mt-3">
+                                <div class="fw-semibold mb-2">Snapshot Count by Poller / Day</div>
+                                <div class="small text-muted mb-2">Last 14 days (quick growth/retention check)</div>
+                                {% if snapshot_analytics.daily_series %}
+                                <div class="mb-2" style="height:40px;overflow:hidden">
+                                    {% set series = snapshot_analytics.daily_series %}
+                                    {% set max_val = namespace(v=1) %}
+                                    {% for r in series %}{% if r.total > max_val.v %}{% set max_val.v = r.total %}{% endif %}{% endfor %}
+                                    <svg width="100%" height="40" preserveAspectRatio="none" viewBox="0 0 {{ series|length * 20 }} 40">
+                                        <polyline fill="none" stroke="#3b82f6" stroke-width="2" points="{% for r in series %}{{ loop.index0 * 20 + 10 }},{{ (38 - ((r.total / max_val.v) * 34))|int }} {% endfor %}" />
+                                        {% for r in series %}
+                                        <circle cx="{{ loop.index0 * 20 + 10 }}" cy="{{ (38 - ((r.total / max_val.v) * 34))|int }}" r="2" fill="#3b82f6"><title>[[ r.day ]]: [[ r.total ]]</title></circle>
+                                        {% endfor %}
+                                    </svg>
+                                </div>
+                                {% endif %}
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <span class="chip" style="background:#dbeafe;color:#1e40af">total: [[ snapshot_analytics.total_snapshots_window or 0 ]]</span>
+                                    <span class="chip" style="background:#e0f2fe;color:#0c4a6e">avg/day: [[ snapshot_analytics.avg_per_day or 0 ]]</span>
+                                    <span class="chip" style="background:#ecfeff;color:#155e75">growth: [[ snapshot_analytics.growth_pct or 0 ]]%</span>
+                                    <span class="chip" style="background:#fef3c7;color:#92400e">deleted 24h: [[ snapshot_analytics.deleted_last_24h or 0 ]]</span>
+                                </div>
+                                <div class="table-responsive" style="max-height:300px;overflow-y:auto">
+                                    <table class="table table-sm mb-0 align-middle">
+                                        <thead class="sticky-top bg-white"><tr><th>Day</th><th>Poller</th><th>Snapshots</th></tr></thead>
+                                        <tbody>
+                                            {% for r in snapshot_counts %}
+                                            <tr>
+                                                <td>[[ r.day ]]</td>
+                                                <td>[[ r.poller_name ]]</td>
+                                                <td>[[ r.snapshots ]]</td>
+                                            </tr>
+                                            {% endfor %}
+                                            {% if not snapshot_counts %}
+                                            <tr><td colspan="3" class="text-muted">No snapshots yet.</td></tr>
+                                            {% endif %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+        </div> <!-- End Poller Tab -->
+
+        <!-- USERS TAB -->
+        <div class="tab-pane fade" id="users-pane" role="tabpanel" aria-labelledby="users-tab">
+    <div class="row g-3">
+        <!-- Left Column: Auth DB -->
+        <div class="col-12 col-lg-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex align-items-center gap-2">
+                    <strong><i class="bi bi-database me-1"></i>Database</strong>
+                    {% if db_status.backend == 'mysql' %}
+                        <span class="chip" style="background:#dbeafe;color:#1e40af">MySQL</span>
+                    {% else %}
+                        <span class="chip" style="background:#f1f5f9;color:#334155">SQLite</span>
+                    {% endif %}
+                    {% if db_status.connected %}
+                        <span class="chip" style="background:#dcfce7;color:#166534">Connected</span>
+                    {% else %}
+                        <span class="chip" style="background:#fee2e2;color:#991b1b">Disconnected</span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    {% if db_status.backend == 'sqlite' %}
+                        <div class="alert alert-warning py-2 mb-3">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            User and API-key management is currently running on local SQLite.
+                            To use shared/persistent authentication across instances, switch to MySQL.
+                        </div>
+                        <div class="small text-muted mb-2">Current SQLite path:</div>
+                        <code>[[ db_status.sqlite_path or 'N/A' ]]</code>
+                    {% elif not db_status.connected %}
+                        <div class="alert alert-danger py-2 mb-3">
+                            <i class="bi bi-x-circle me-1"></i>
+                            MySQL is selected but connection failed.
+                            Check host/port/credentials and restart the GUI container.
+                            <div class="small mt-1"><code>[[ db_status.error or 'unknown error' ]]</code></div>
+                        </div>
+                    {% endif %}
+                    <hr class="my-3">
+                    <div class="d-flex align-items-center gap-3 flex-wrap">
+                        <div>
+                            <div class="small fw-bold mb-1">Export current users &amp; API keys as MySQL SQL</div>
+                            <div class="small text-muted mb-2">Downloads a <code>.sql</code> file with <code>CREATE TABLE</code> + <code>INSERT IGNORE</code> statements you can run directly on your MySQL server. Password hashes are preserved — no passwords are exposed.</div>
+                            <a href="[[ base_path ]]/admin/export-sql" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-download me-1"></i>Download SQL export
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Users Management -->
+        <div class="col-12 col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white"><strong>Create User</strong></div>
+                <div class="card-body">
+                    <form method="post" action="[[ base_path ]]/admin/users/create" class="row g-2">
+                        <div class="col-md-4"><input class="form-control" name="username" placeholder="username" required></div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="role">
+                                <option value="user">user</option>
+                                <option value="admin">admin</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4"><input class="form-control" type="password" name="password" placeholder="password (min 8)" minlength="8" required></div>
+                        <div class="col-md-1 d-flex align-items-center"><button class="btn btn-primary btn-sm icon-btn" type="submit" title="Create user"><i class="bi bi-save"></i></button></div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card shadow-sm mt-3">
+                <div class="card-header bg-white"><strong>Users</strong></div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0 align-middle users-table">
+                            <thead><tr><th>User</th><th>Role/Status</th><th>Password</th></tr></thead>
+                            <tbody>
+                                {% for u in users %}
+                                <tr>
+                                    <td>
+                                        <div class="user-cell">
+                                            <strong class="user-name">[[ u.username ]]</strong>
+                                            <span class="chip user-role-badge [[ 'chip-admin' if u.role == 'admin' else 'chip-user' ]]">[[ u.role ]]</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <form method="post" action="[[ base_path ]]/admin/users/[[ u.id ]]/update" class="user-role-form">
+                                            <select class="form-select form-select-sm" name="role" style="max-width:120px;" {% if u.role == 'admin' %}disabled{% endif %}>
+                                                <option value="user" {% if u.role == 'user' %}selected{% endif %}>user</option>
+                                                <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+                                            </select>
+                                            <label class="form-check small">
+                                                <input class="form-check-input" type="checkbox" name="is_active" {% if u.is_active %}checked{% endif %} {% if u.role == 'admin' %}disabled{% endif %}>
+                                                <span>active</span>
+                                            </label>
+                                            {% if u.role == 'admin' %}
+                                                <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Locked</button>
+                                            {% else %}
+                                                <button class="btn btn-outline-primary btn-sm" type="submit">Save</button>
+                                            {% endif %}
+                                        </form>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                                            <form method="post" action="[[ base_path ]]/admin/users/[[ u.id ]]/password" class="d-flex align-items-center gap-2">
+                                                <input class="form-control form-control-sm" type="password" name="new_password" placeholder="new password" minlength="8" required>
+                                                <button class="btn btn-outline-warning btn-sm icon-btn" type="submit" title="Set password"><i class="bi bi-key"></i></button>
+                                            </form>
+                                            {% if u.role != 'admin' %}
+                                            <form method="post" action="[[ base_path ]]/admin/users/[[ u.id ]]/delete" class="m-0" onsubmit="return confirm('Delete user [[ u.username ]]?');">
+                                                <button class="btn btn-outline-danger btn-sm icon-btn" type="submit" title="Delete user">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                            {% else %}
+                                            <small class="text-muted">Admin user cannot be deleted</small>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+        </div> <!-- End Users Tab -->
+
+        <!-- API KEYS TAB -->
+        <div class="tab-pane fade" id="apikeys-pane" role="tabpanel" aria-labelledby="apikeys-tab">
+    <div class="row g-3">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white"><strong>Create API Key (for later API auth)</strong></div>
+                <div class="card-body">
+                    <form method="post" action="[[ base_path ]]/admin/apikeys/create" class="row g-2">
+                        <div class="col-md-4"><input class="form-control" name="name" placeholder="Key name" required></div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="role">
+                                <option value="user">user</option>
+                                <option value="admin">admin</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4"><input class="form-control" name="description" placeholder="Description"></div>
+                        <div class="col-md-1 d-flex align-items-center"><button class="btn btn-primary btn-sm icon-btn" type="submit" title="Create API key"><i class="bi bi-save"></i></button></div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card shadow-sm mt-3">
+                <div class="card-header bg-white"><strong>API Keys</strong></div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0 align-middle">
+                            <thead><tr><th>Name</th><th>Prefix</th><th>Role</th><th>Status</th></tr></thead>
+                            <tbody>
+                                {% for k in api_keys %}
+                                <tr>
+                                    <td>
+                                        <div><strong>[[ k.name ]]</strong></div>
+                                    </td>
+                                    <td><code>[[ k.key_prefix ]]</code></td>
+                                    <td>[[ k.role ]]</td>
+                                    <td>
+                                        <form method="post" action="[[ base_path ]]/admin/apikeys/[[ k.id ]]/update" class="d-flex gap-2 align-items-center">
+                                            <input type="hidden" name="name" value="[[ k.name ]]">
+                                            <input type="hidden" name="role" value="[[ k.role ]]">
+                                            <input type="hidden" name="description" value="[[ k.description or '' ]]">
+                                            <label class="form-check-label small">
+                                                <input class="form-check-input" type="checkbox" name="is_active" {% if k.is_active %}checked{% endif %} onchange="this.form.submit()"> active
+                                            </label>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+        </div> <!-- End API Keys Tab -->
+
+        <!-- MAINTENANCE TAB -->
+        <div class="tab-pane fade" id="maintenance-pane" role="tabpanel" aria-labelledby="maintenance-tab">
+    <div class="row g-3">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex align-items-center gap-2">
+                    <strong><i class="bi bi-cone-striped me-1"></i>Maintenance Mode</strong>
+                    {% if maintenance_active %}
+                        <span class="chip" style="background:#fee2e2;color:#991b1b">ACTIVE</span>
+                    {% else %}
+                        <span class="chip" style="background:#dcfce7;color:#166534">OFF</span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        When enabled, all non-admin users see the maintenance page. Admins can still log in and use the site normally.
+                    </p>
+                    {% if maintenance_active %}
+                        <form method="post" action="[[ base_path ]]/admin/maintenance">
+                            <input type="hidden" name="action" value="disable">
+                            <button class="btn btn-success btn-sm icon-btn" title="Disable maintenance mode"><i class="bi bi-check-circle"></i></button>
+                        </form>
+                    {% else %}
+                        <form method="post" action="[[ base_path ]]/admin/maintenance">
+                            <input type="hidden" name="action" value="enable">
+                            <button class="btn btn-warning btn-sm icon-btn" title="Enable maintenance mode"><i class="bi bi-cone-striped"></i></button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+        </div> <!-- End Maintenance Tab -->
+    </div> <!-- End Tab Content -->
+</div> <!-- End Container -->
+
+<div class="modal fade" id="pollerEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form id="poller-edit-form" method="post" action="[[ base_path ]]/admin/poller-settings/upsert">
+                <div class="modal-header">
+                      <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Edit Poller Setting</h5>
+                      <div class="small text-muted">Changes here update the existing poller only.</div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="id" id="modal-poller-id">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-7">
+                            <label class="form-label form-label-sm mb-1">Name</label>
+                            <input class="form-control form-control-sm" id="modal-poller-name" name="name" required>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label form-label-sm mb-1">Scope type</label>
+                            <select class="form-select form-select-sm" id="modal-poller-scope-type" name="scope_type">
+                                <option value="all_cmts">all_cmts</option>
+                                <option value="cmts_list">cmts_list</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label form-label-sm mb-1">Scope JSON</label>
+                        <input class="form-control form-control-sm" id="modal-poller-scope-json" name="scope_json" placeholder='["cmts-1","10.0.0.1"]'>
+                    </div>
+                    <div class="row g-2 mb-2 align-items-end">
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Interval (min)</label><input class="form-control form-control-sm" type="number" id="modal-poller-interval" name="interval_minutes" min="1"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Run from</label><input class="form-control form-control-sm" type="time" id="modal-poller-run-start" name="run_window_start"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Run until</label><input class="form-control form-control-sm" type="time" id="modal-poller-run-end" name="run_window_end"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Max concurrent</label><input class="form-control form-control-sm" type="number" id="modal-poller-max-concurrency" name="max_concurrency" min="1"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Max queue</label><input class="form-control form-control-sm" type="number" id="modal-poller-max-queue" name="max_agent_queue_depth" min="1"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Retention (days)</label><input class="form-control form-control-sm" type="number" id="modal-poller-retention" name="retention_days" min="1"></div>
+                    </div>
+                    <div class="row g-2 mb-2 align-items-end">
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Heavy start</label><input class="form-control form-control-sm" type="time" id="modal-poller-heavy-start" name="heavy_window_start"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Heavy end</label><input class="form-control form-control-sm" type="time" id="modal-poller-heavy-end" name="heavy_window_end"></div>
+                        <div class="col-md-2"><label class="form-label form-label-sm mb-1">Max modems</label><input class="form-control form-control-sm" type="number" id="modal-poller-heavy-max" name="heavy_max_modems" min="1"></div>
+                        <div class="col-md-3"><label class="form-label form-label-sm mb-1">Modem delay (ms)</label><input class="form-control form-control-sm" type="number" id="modal-poller-heavy-delay" name="heavy_delay_ms" min="0"></div>
+                        <div class="col-md-3"><label class="form-label form-label-sm mb-1">Max runtime (sec, 0=off)</label><input class="form-control form-control-sm" type="number" id="modal-poller-max-runtime" name="max_runtime_sec" min="0"></div>
+                    </div>
+                    <div class="small fw-semibold text-uppercase text-muted mb-2 mt-1" style="letter-spacing:.05em">What to Collect</div>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="modal-poller-enabled" name="enabled">
+                            <label class="form-check-label small" for="modal-poller-enabled"><strong>Enabled</strong><br><span class="text-muted">Scheduler picks up this poller</span></label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="modal-poller-identity" name="collect_identity">
+                            <label class="form-check-label small" for="modal-poller-identity"><strong>Identity</strong><br><span class="text-muted">Modem status, vendor, model &rarr; inventory</span></label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="modal-poller-scqam" name="collect_scqam">
+                            <label class="form-check-label small" for="modal-poller-scqam"><strong>SC-QAM</strong> <span class="badge text-bg-warning" style="font-size:.65em">heavy</span><br><span class="text-muted">Downstream level snapshots</span></label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="modal-poller-rxmer" name="collect_rxmer">
+                            <label class="form-check-label small" for="modal-poller-rxmer"><strong>RxMER</strong> <span class="badge text-bg-warning" style="font-size:.65em">heavy</span><br><span class="text-muted">Per-subcarrier MER capture</span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm icon-btn" data-bs-dismiss="modal" title="Cancel"><i class="bi bi-x-circle"></i></button>
+                    <button type="submit" class="btn btn-primary btn-sm icon-btn" title="Save changes"><i class="bi bi-save"></i></button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="jobLogModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-journal-text me-2"></i>Job Log Snippet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-2" id="job-log-meta">Job —</div>
+                <pre id="job-log-text" class="mb-0" style="white-space:pre-wrap;word-break:break-word;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">—</pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+    const byId = (id) => document.getElementById(id);
+    const form = byId('poller-form');
+    if (!form) return;
+
+    const queueHeadBody = byId('queue-head-body');
+    const queueHeadUpdated = byId('queue-head-updated');
+    const queueHeadRefresh = byId('queue-head-refresh');
+    const queueHeadUrl = '[[ base_path ]]/api/admin/queue-head';
+    const QUEUED_WARN_SEC = 60;
+    const QUEUED_DANGER_SEC = 120;
+    const RUNNING_WARN_SEC = 300;
+    const RUNNING_DANGER_SEC = 600;
+
+    const headAgeClass = (age, warnSec, dangerSec) => {
+        if (age === null || age === undefined || Number.isNaN(Number(age))) return 'queue-age-ok';
+        const n = Number(age);
+        if (n >= dangerSec) return 'queue-age-danger';
+        if (n >= warnSec) return 'queue-age-warn';
+        return 'queue-age-ok';
+    };
+
+    const fmtHead = (rec, warnSec, dangerSec) => {
+        if (!rec) return '<span class="queue-age-ok">—</span>';
+        const id = rec.id ?? '?';
+        const age = rec.age_sec ?? '—';
+        const poller = rec.poller_id ? `poller ${rec.poller_id}` : (rec.mac || rec.cmts || '');
+        const cls = headAgeClass(rec.age_sec, warnSec, dangerSec);
+        return `<span class="${cls}">#${id} (${poller}) age ${age}s</span>`;
+    };
+
+    const queueCancelUrl = (queueName, id) => {
+        if (!id) return null;
+        if (queueName === 'poller_job') return `[[ base_path ]]/api/admin/poller-jobs/${id}/cancel`;
+        if (queueName === 'modem_refresh_request') return `[[ base_path ]]/api/admin/modem-refresh/${id}/cancel`;
+        return null;
+    };
+
+    const renderQueueRow = (name, q) => {
+        const queued = q?.queued_count ?? 0;
+        const running = q?.running_count ?? 0;
+        const qId = q?.queued_head?.id || '';
+        const rId = q?.running_head?.id || '';
+        return `<tr>
+            <td class="small"><strong>${name}</strong></td>
+            <td class="small">${queued}</td>
+            <td class="small">${running}</td>
+            <td class="small">${fmtHead(q?.queued_head, QUEUED_WARN_SEC, QUEUED_DANGER_SEC)}</td>
+            <td class="small">${fmtHead(q?.running_head, RUNNING_WARN_SEC, RUNNING_DANGER_SEC)}</td>
+            <td class="small">
+                <div class="d-flex align-items-center gap-1">
+                    <button type="button" class="btn btn-outline-danger btn-sm icon-btn queue-cancel-btn" data-queue="${name}" data-id="${qId}" ${qId ? '' : 'disabled'} title="Delete queued head"><i class="bi bi-trash"></i></button>
+                    <button type="button" class="btn btn-outline-warning btn-sm icon-btn queue-cancel-btn" data-queue="${name}" data-id="${rId}" ${rId ? '' : 'disabled'} title="Stop running head"><i class="bi bi-stop-circle"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    };
+
+    const bindQueueButtons = () => {
+        document.querySelectorAll('.queue-cancel-btn').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const queue = btn.dataset.queue;
+                const id = btn.dataset.id;
+                const url = queueCancelUrl(queue, id);
+                if (!url) return;
+                const ok = window.confirm(`Delete task ${id} from ${queue}?`);
+                if (!ok) return;
+                btn.disabled = true;
+                try {
+                    const resp = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ reason: 'Cancelled from admin queue-head panel' }),
+                    });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    await loadQueueHead();
+                } catch (err) {
+                    alert(`Task delete failed: ${err?.message || err}`);
+                    btn.disabled = false;
+                }
+            });
+        });
+    };
+
+    const loadQueueHead = async () => {
+        if (!queueHeadBody) return;
+        try {
+            const resp = await fetch(queueHeadUrl, { credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const q = data?.queue || {};
+            queueHeadBody.innerHTML = [
+                renderQueueRow('poller_job', q.poller_job),
+                renderQueueRow('modem_refresh_request', q.modem_refresh_request),
+            ].join('');
+            bindQueueButtons();
+            if (queueHeadUpdated) {
+                queueHeadUpdated.textContent = `updated: ${new Date().toLocaleTimeString([], { hour12: false })}`;
+            }
+        } catch (err) {
+            queueHeadBody.innerHTML = `<tr><td colspan="6" class="text-danger small">Queue head load failed: ${err?.message || err}</td></tr>`;
+        }
+    };
+
+    const fields = {
+        id: byId('poller-id'),
+        name: byId('poller-name'),
+        scopeType: byId('poller-scope-type'),
+        scopeJson: byId('poller-scope-json'),
+        interval: byId('poller-interval'),
+        runStart: byId('poller-run-start'),
+        runEnd: byId('poller-run-end'),
+        maxConcurrency: byId('poller-max-concurrency'),
+        maxQueue: byId('poller-max-queue'),
+        retention: byId('poller-retention'),
+        heavyStart: byId('poller-heavy-start'),
+        heavyEnd: byId('poller-heavy-end'),
+        heavyMax: byId('poller-heavy-max'),
+        heavyDelay: byId('poller-heavy-delay'),
+        maxRuntime: byId('poller-max-runtime'),
+        enabled: byId('poller-enabled'),
+        identity: byId('poller-identity'),
+        scqam: byId('poller-scqam'),
+        rxmer: byId('poller-rxmer'),
+        saveBtn: byId('poller-save-btn'),
+    };
+
+    const modalFields = {
+        id: byId('modal-poller-id'),
+        name: byId('modal-poller-name'),
+        scopeType: byId('modal-poller-scope-type'),
+        scopeJson: byId('modal-poller-scope-json'),
+        interval: byId('modal-poller-interval'),
+        runStart: byId('modal-poller-run-start'),
+        runEnd: byId('modal-poller-run-end'),
+        maxConcurrency: byId('modal-poller-max-concurrency'),
+        maxQueue: byId('modal-poller-max-queue'),
+        retention: byId('modal-poller-retention'),
+        heavyStart: byId('modal-poller-heavy-start'),
+        heavyEnd: byId('modal-poller-heavy-end'),
+        heavyMax: byId('modal-poller-heavy-max'),
+        heavyDelay: byId('modal-poller-heavy-delay'),
+        maxRuntime: byId('modal-poller-max-runtime'),
+        enabled: byId('modal-poller-enabled'),
+        identity: byId('modal-poller-identity'),
+        scqam: byId('modal-poller-scqam'),
+        rxmer: byId('modal-poller-rxmer'),
+    };
+
+    const cmtsPicker = byId('poller-cmts-picker');
+    const addSelectedCmtsBtn = byId('poller-add-selected-cmts');
+    const clearSelectedCmtsBtn = byId('poller-clear-selected-cmts');
+
+    const resetForm = () => {
+        fields.id.value = '';
+        fields.name.value = '';
+        fields.scopeType.value = 'all_cmts';
+        fields.scopeJson.value = '';
+        fields.interval.value = 1440;
+        fields.runStart.value = '';
+        fields.runEnd.value = '';
+        fields.maxConcurrency.value = 1;
+        fields.maxQueue.value = 20;
+        fields.retention.value = 30;
+        fields.heavyStart.value = '00:30';
+        fields.heavyEnd.value = '05:30';
+        fields.heavyMax.value = 300;
+        fields.heavyDelay.value = 0;
+        fields.maxRuntime.value = 14400;
+        fields.enabled.checked = true;
+        fields.identity.checked = true;
+        fields.scqam.checked = false;
+        fields.rxmer.checked = false;
+        fields.saveBtn.innerHTML = '<i class="bi bi-plus-circle"></i>';
+    };
+
+    byId('poller-reset-btn')?.addEventListener('click', resetForm);
+    resetForm();
+
+    document.querySelectorAll('.poller-edit-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            modalFields.id.value = btn.dataset.id || '';
+            modalFields.name.value = btn.dataset.name || '';
+            modalFields.scopeType.value = btn.dataset.scopeType || 'all_cmts';
+            modalFields.scopeJson.value = btn.dataset.scopeJson || '';
+            modalFields.interval.value = btn.dataset.interval || 1440;
+            modalFields.runStart.value = (btn.dataset.runStart || '').slice(0, 5);
+            modalFields.runEnd.value = (btn.dataset.runEnd || '').slice(0, 5);
+            modalFields.maxConcurrency.value = btn.dataset.maxConcurrency || 1;
+            modalFields.maxQueue.value = btn.dataset.maxQueue || 20;
+            modalFields.retention.value = btn.dataset.retention || 30;
+            modalFields.heavyStart.value = (btn.dataset.heavyStart || '00:30').slice(0, 5);
+            modalFields.heavyEnd.value = (btn.dataset.heavyEnd || '05:30').slice(0, 5);
+            modalFields.heavyMax.value = btn.dataset.heavyMax || 300;
+            modalFields.heavyDelay.value = btn.dataset.heavyDelay || 0;
+            modalFields.maxRuntime.value = btn.dataset.maxRuntime || 14400;
+            modalFields.enabled.checked = btn.dataset.enabled === '1';
+            modalFields.identity.checked = btn.dataset.collectIdentity === '1';
+            modalFields.scqam.checked = btn.dataset.collectScqam === '1';
+            modalFields.rxmer.checked = btn.dataset.collectRxmer === '1';
+        });
+    });
+
+    // Build scope JSON from selected CMTS values.
+    addSelectedCmtsBtn?.addEventListener('click', () => {
+        const selected = Array.from(cmtsPicker?.selectedOptions || []).map((o) => o.value).filter(Boolean);
+        fields.scopeType.value = 'cmts_list';
+        fields.scopeJson.value = JSON.stringify(selected);
+    });
+    clearSelectedCmtsBtn?.addEventListener('click', () => {
+        if (cmtsPicker) Array.from(cmtsPicker.options).forEach((o) => { o.selected = false; });
+        fields.scopeJson.value = '';
+    });
+
+    // 24h timestamp formatting
+    document.querySelectorAll('.ts-24h').forEach((td) => {
+        const raw = (td.textContent || '').trim();
+        if (!raw) return;
+        try {
+            const dt = new Date(raw);
+            if (isNaN(dt.getTime())) return;
+            td.textContent = dt.toLocaleString(undefined, { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch(_) {}
+    });
+
+    // Scheduler history filter (client-side)
+    const filterPoller = byId('sched-filter-poller');
+    const filterReason = byId('sched-filter-reason');
+    const filterDecision = byId('sched-filter-decision');
+    const filterClear = byId('sched-filter-clear');
+    const hideNotDue = byId('sched-hide-not-due');
+    const rows = Array.from(document.querySelectorAll('.sched-decision-row'));
+    const applySchedulerFilter = () => {
+        const qp = (filterPoller?.value || '').trim().toLowerCase();
+        const qr = (filterReason?.value || '').trim().toLowerCase();
+        const qd = (filterDecision?.value || '').trim().toLowerCase();
+        const hideND = hideNotDue?.checked;
+        rows.forEach((row) => {
+            const p = row.dataset.poller || '';
+            const r = row.dataset.reason || '';
+            const d = row.dataset.detail || '';
+            const k = row.dataset.decision || '';
+            const okP = !qp || p.includes(qp);
+            const okR = !qr || r.includes(qr) || d.includes(qr);
+            const okD = !qd || k === qd;
+            const okND = !hideND || r !== 'interval_not_due';
+            row.style.display = okP && okR && okD && okND ? '' : 'none';
+        });
+    };
+    [filterPoller, filterReason, filterDecision].forEach((el) => el?.addEventListener('input', applySchedulerFilter));
+    hideNotDue?.addEventListener('change', applySchedulerFilter);
+    filterClear?.addEventListener('click', () => {
+        if (filterPoller) filterPoller.value = '';
+        if (filterReason) filterReason.value = '';
+        if (filterDecision) filterDecision.value = '';
+        if (hideNotDue) hideNotDue.checked = true;
+        applySchedulerFilter();
+    });
+    applySchedulerFilter();
+
+    // Recent jobs pagination + CMTS breakdown toggle
+    const jobsBody = byId('jobs-body');
+    const jobsPageSize = byId('jobs-page-size');
+    const jobsPrev = byId('jobs-prev');
+    const jobsNext = byId('jobs-next');
+    const jobsPageInfo = byId('jobs-page-info');
+    const jobRows = Array.from(document.querySelectorAll('.job-row'));
+    const jobDetailRows = Array.from(document.querySelectorAll('.job-detail-row'));
+    let jobsPage = 1;
+
+    const hideAllDetailRows = () => {
+        jobDetailRows.forEach((r) => { r.style.display = 'none'; });
+    };
+
+    const renderJobsPage = () => {
+        const pageSize = Math.max(1, parseInt(jobsPageSize?.value || '20', 10));
+        const total = jobRows.length;
+        const pages = Math.max(1, Math.ceil(total / pageSize));
+        jobsPage = Math.min(Math.max(1, jobsPage), pages);
+        const start = (jobsPage - 1) * pageSize;
+        const end = start + pageSize;
+        jobRows.forEach((row, idx) => {
+            row.style.display = (idx >= start && idx < end) ? '' : 'none';
+        });
+        // Hide detail rows when changing page to avoid visual overlap.
+        hideAllDetailRows();
+        if (jobsPageInfo) jobsPageInfo.textContent = `page ${jobsPage}/${pages} (${total} jobs)`;
+        if (jobsPrev) jobsPrev.disabled = jobsPage <= 1;
+        if (jobsNext) jobsNext.disabled = jobsPage >= pages;
+    };
+
+    jobsPageSize?.addEventListener('change', () => { jobsPage = 1; renderJobsPage(); });
+    jobsPrev?.addEventListener('click', () => { jobsPage -= 1; renderJobsPage(); });
+    jobsNext?.addEventListener('click', () => { jobsPage += 1; renderJobsPage(); });
+
+    document.querySelectorAll('.job-toggle-breakdown').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const jobId = btn.dataset.jobId;
+            const row = document.querySelector(`.job-detail-row[data-parent-job-id="${jobId}"]`);
+            if (!row) return;
+            const visible = row.style.display !== 'none';
+            hideAllDetailRows();
+            row.style.display = visible ? 'none' : '';
+        });
+    });
+
+    const jobLogMeta = byId('job-log-meta');
+    const jobLogText = byId('job-log-text');
+    const jobLogModalEl = byId('jobLogModal');
+    const jobLogModal = (window.bootstrap && jobLogModalEl) ? new bootstrap.Modal(jobLogModalEl) : null;
+    document.querySelectorAll('.job-show-log').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const jobId = btn.dataset.jobId || '?';
+            const status = btn.dataset.jobStatus || 'unknown';
+            const text = (btn.dataset.jobLog || '').trim();
+            if (jobLogMeta) jobLogMeta.textContent = `Job ${jobId} • status: ${status}`;
+            if (jobLogText) jobLogText.textContent = text || 'No log snippet available.';
+            if (jobLogModal) jobLogModal.show();
+        });
+    });
+
+    // While jobs are running, refresh periodically so progress snippets update without manual reload.
+    const hasActiveJob = () => Array.from(document.querySelectorAll('#jobs-body .job-row')).some((row) => {
+        const statusCell = row.children && row.children.length > 2 ? row.children[2] : null;
+        const t = (statusCell?.textContent || '').toLowerCase();
+        return t.includes('running') || t.includes('queued');
+    });
+    if (hasActiveJob()) {
+        setTimeout(() => {
+            if (!document.querySelector('.modal.show')) {
+                window.location.reload();
+            }
+        }, 10000);
+    }
+
+    queueHeadRefresh?.addEventListener('click', () => { loadQueueHead(); });
+    loadQueueHead();
+    setInterval(loadQueueHead, 10000);
+
+    // Tab persistence via localStorage
+    const adminTabsEl = byId('adminTabs');
+    if (adminTabsEl) {
+        const STORAGE_KEY = 'admin_active_tab';
+        const savedTab = localStorage.getItem(STORAGE_KEY);
+        if (savedTab) {
+            const savedBtn = adminTabsEl.querySelector('[data-bs-target="' + savedTab + '"]');
+            if (savedBtn) bootstrap.Tab.getOrCreateInstance(savedBtn).show();
+        }
+        adminTabsEl.addEventListener('shown.bs.tab', (e) => {
+            localStorage.setItem(STORAGE_KEY, e.target.dataset.bsTarget);
+        });
+    }
+
+    renderJobsPage();
+})();
+</script>
+{% endblock %}

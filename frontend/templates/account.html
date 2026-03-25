@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Account - PyPNM{% endblock %}
+
+{% block extra_head %}
+    <style>
+        body {
+            background: radial-gradient(circle at 15% 10%, #f7fbff 0%, #eef4ff 42%, #edf2fb 100%);
+        }
+        .account-wrap {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+        .card {
+            border: 0;
+            border-radius: 16px;
+            box-shadow: 0 12px 34px rgba(15, 23, 42, 0.08) !important;
+        }
+        .identity-pill {
+            background: #eef2ff;
+            color: #1e3a8a;
+            border: 1px solid #dbe7ff;
+            border-radius: 999px;
+            display: inline-block;
+            padding: 0.3rem 0.7rem;
+            font-size: 0.82rem;
+            margin-bottom: 0.6rem;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4 account-wrap">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0"><i class="bi bi-person me-2"></i>[[ t('account.title') ]]</h4>
+        <a class="btn btn-outline-secondary btn-sm" href="[[ base_path ]]/"><i class="bi bi-arrow-left me-1"></i>[[ t('search.back') ]]</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-[[ 'danger' if category == 'danger' else 'success' ]] py-2">[[ message ]]</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="identity-pill"><i class="bi bi-person-check me-1"></i>[[ t('account.identity') ]] • [[ auth_username ]] • [[ auth_role ]]</div>
+            <h5 class="mb-3">[[ t('account.preferences') ]]</h5>
+            <form method="post" action="[[ base_path ]]/account/language" class="row g-3 mb-4">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">[[ t('language.label') ]]</label>
+                    <select class="form-select" name="language_preference">
+                        {% for locale_code, locale_label in supported_locales.items() %}
+                        <option value="[[ locale_code ]]" {% if locale_code == current_locale %}selected{% endif %}>[[ locale_label ]]</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 d-flex align-items-end">
+                    <button class="btn btn-outline-primary" type="submit"><i class="bi bi-translate me-1"></i>[[ t('account.save_preferences') ]]</button>
+                </div>
+            </form>
+            <h5 class="mb-3">[[ t('account.change_password') ]]</h5>
+            <form method="post" action="[[ base_path ]]/account/password" class="row g-3">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">[[ t('account.current_password') ]]</label>
+                    <input class="form-control" type="password" name="current_password" required>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label">[[ t('account.new_password') ]]</label>
+                    <input class="form-control" type="password" name="new_password" minlength="8" required>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label">[[ t('account.confirm_password') ]]</label>
+                    <input class="form-control" type="password" name="confirm_password" minlength="8" required>
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-check2-circle me-1"></i>[[ t('account.update_password') ]]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
