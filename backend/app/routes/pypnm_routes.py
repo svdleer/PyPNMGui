@@ -2376,14 +2376,19 @@ def get_cmts_us_rxmer_fibernode_scan():
 
             if selected_macs:
                 # User already selected specific modems — use them directly
-                # with the provided ifindices. No SNMP walk needed.
+                # with the primary ofdma_ifindex. No SNMP walk needed.
+                # Use only the primary ifindex; the capture loop will try
+                # each modem on it. If a FN has multiple channels, each
+                # modem is typically on just one — we rely on the CMTS to
+                # resolve via the cm_mac_address in the capture request.
+                primary_ifidx = ofdma_ifindex or ofdma_ifindices[0]
                 for raw_mac in (data.get('selected_macs') or []):
                     mac = (raw_mac or '').strip()
                     if not mac:
                         continue
                     mac_info[mac] = {'cm_mac_address': mac}
-                    mac_ifindices[mac] = list(ofdma_ifindices)
-                logger.info(f"FN scan: using {len(mac_info)} pre-selected modems on ifindices {ofdma_ifindices}")
+                    mac_ifindices[mac] = [primary_ifidx]
+                logger.info(f"FN scan: using {len(mac_info)} pre-selected modems on ifindex {primary_ifidx}")
             else:
                 # No selection — discover modems via SNMP walk.
                 for ifidx in ofdma_ifindices:
