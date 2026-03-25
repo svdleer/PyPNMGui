@@ -2477,6 +2477,12 @@
                             <div class="mb-2">
                                 <label class="form-label small fw-bold">Fiber Node / Service Group
                                     <span v-if="fnScanChannelsLoading" class="spinner-border spinner-border-sm ms-1" style="width:0.8rem;height:0.8rem;"></span>
+                                    <span v-if="fnScanChannelsCached && !fnScanChannelsLoading" class="badge bg-secondary ms-1" style="font-size:0.6rem;" title="Served from cache">cached</span>
+                                    <button v-if="fnScanSortedFiberNodes.length && !fnScanChannelsLoading" type="button"
+                                            class="btn btn-link btn-sm p-0 ms-1" style="font-size:0.75rem;"
+                                            @click="refreshFnScanChannels()" title="Refresh from CMTS (SNMP walk)">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                 </label>
                                 <div class="dropdown w-100" v-if="fnScanSortedFiberNodes.length">
                                     <button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start"

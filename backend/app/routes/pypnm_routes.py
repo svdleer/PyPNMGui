@@ -2217,16 +2217,20 @@ def get_cmts_ofdma_channels():
     data = request.get_json() or {}
     cmts_ip   = data.get('cmts_ip')
     community = data.get('community', 'public')
+    refresh   = data.get('refresh', False)
 
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
 
     try:
         base_url = get_pypnm_api_url()
+        params = {"cmts_ip": cmts_ip, "community": community}
+        if refresh:
+            params["refresh"] = "true"
         r = req.get(
             f"{base_url}/pnm/us/ofdma/rxmer/channel/list",
-            params={"cmts_ip": cmts_ip, "community": community},
-            timeout=45
+            params=params,
+            timeout=90 if refresh else 45,
         )
         if r.status_code != 200:
             return jsonify({"success": False, "error": f"PyPNM channel list failed: {r.status_code}"}), 500
@@ -2234,7 +2238,12 @@ def get_cmts_ofdma_channels():
         d = r.json()
         channels    = d.get('channels', [])
         fiber_nodes = d.get('fiber_nodes', [])
-        return jsonify({"success": True, "channels": channels, "fiber_nodes": fiber_nodes})
+        cached      = d.get('_cached', False)
+        result = {"success": True, "channels": channels, "fiber_nodes": fiber_nodes}
+        if cached:
+            result["_cached"] = True
+            result["_cache_age_s"] = d.get("_cache_age_s", 0)
+        return jsonify(result)
 
     except Exception as e:
         logger.error(f"OFDMA channel walk failed: {e}")

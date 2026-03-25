@@ -154,6 +154,7 @@ createApp({
             fnScanChannels: [],        // [{ifindex, description, mac_domain}]
             fnScanFiberNodes: [],      // [{name, mac_domain, channels:[]}]
             fnScanChannelsLoading: false,
+            fnScanChannelsCached: false,
             fnScanIfindex: '',
             fnScanExtraIfindices: [],  // Additional channels for multi-channel scan
             fnScanFiberNode: '',
@@ -1271,7 +1272,7 @@ createApp({
                         const mFn = String(m.fiber_node || '').trim().toUpperCase();
                         if (mFn !== selFn) continue;
                         const nid = (m.topology_node_id || '').trim();
-                        const sg = nmMeta[nid]?.serving_group || '';
+                        const sg = (nmMeta[nid]?.serving_group || '').trim();
                         if (sg) { expectedSg = sg; break; }
                     }
 
@@ -1279,7 +1280,7 @@ createApp({
                         this.fnScanExpectedServingGroup = expectedSg;
                         this.modems = (this.modems || []).map(m => {
                             const nid = (m.topology_node_id || '').trim();
-                            const sg = nmMeta[nid]?.serving_group || '';
+                            const sg = (nmMeta[nid]?.serving_group || '').trim();
                             const mismatch = !!(sg && sg !== expectedSg);
                             return {
                                 ...m,
@@ -3972,25 +3973,27 @@ createApp({
             this.refreshFnSelectorModems(true);
         },
 
-        async loadFnScanChannels() {
+        async loadFnScanChannels(refresh = false) {
             if (!this.fnScanCmtsIp || !this.fnScanCommunity) return;
             this.fnScanChannelsLoading = true;
             try {
                 const r = await fetch(`${API_BASE}/pypnm/cmts/ofdma/channels`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cmts_ip: this.fnScanCmtsIp, community: this.fnScanCommunity })
+                    body: JSON.stringify({ cmts_ip: this.fnScanCmtsIp, community: this.fnScanCommunity, refresh })
                 });
                 const d = await r.json();
                 if (d.success) {
                     this.fnScanChannels   = d.channels   || [];
                     this.fnScanFiberNodes = d.fiber_nodes || [];
+                    this.fnScanChannelsCached = d._cached || false;
                     this._fnTrace('load_channels.success', {
                         cmts_ip: this.fnScanCmtsIp,
                         channels: this.fnScanChannels.length,
                         fiber_nodes: this.fnScanFiberNodes.length,
                         selected_fn: this.fnScanFiberNode,
                         selected_ifindex: this.fnScanIfindex,
+                        cached: d._cached || false,
                     });
                 } else {
                     this.$toast?.error(d.error || 'Could not load OFDMA channels');
@@ -4002,6 +4005,11 @@ createApp({
             } finally {
                 this.fnScanChannelsLoading = false;
             }
+        },
+
+        async refreshFnScanChannels() {
+            await this.loadFnScanChannels(true);
+            this.$toast?.success('FiberNode channels refreshed from CMTS');
         },
 
         selectFnChannel(ch) {
