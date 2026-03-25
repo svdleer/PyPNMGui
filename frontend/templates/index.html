@@ -11,7 +11,7 @@
         window.BASE_PATH = '[[ base_path ]]' || '';
         window.GUI_LOCALE = '[[ current_locale ]]';
         window.GUI_I18N = [[ locale_messages|tojson ]];
-        window.ENABLE_TOPOLOGY = {{ 'true' if enable_topology else 'false' }};
+        window.ENABLE_TOPOLOGY = [[ 'true' if enable_topology else 'false' ]];
         console.log('BASE_PATH:', window.BASE_PATH);
     </script>
     
