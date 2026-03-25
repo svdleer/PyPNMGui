@@ -594,8 +594,8 @@ createApp({
                 docsis_version: this.resolveDocsisVersion(m, m.docsis_version || ''),
             });
             const hasSgMismatch = unique.some(m => m._linked_node_mismatch === true);
-            if (hasSgMismatch) {
-                // Enrichment already flagged mismatches — pass through as new objects.
+            if (hasSgMismatch || this.fnScanExpectedServingGroup) {
+                // SG-based detection ran — trust its result (even if no mismatches).
                 return unique.map(m => resolve(m));
             }
             // Fallback: dominant topology_node_id frequency.
