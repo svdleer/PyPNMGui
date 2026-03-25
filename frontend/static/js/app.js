@@ -1263,25 +1263,25 @@ createApp({
                     const nmData = await nmResp.json();
                     const nmMeta = (nmData?.status === 'success' && nmData?.node_meta) ? nmData.node_meta : {};
 
-                    // Determine expected serving_group from node-meta of modems
-                    // that belong to the selected FN. Each FN maps to exactly one
-                    // serving group (but a serving group can have multiple nodes).
+                    // Determine expected serving_group(s) from node-meta of modems
+                    // that belong to the selected FN. DAA/RPHY topologies can have
+                    // multiple serving groups per FN (one per DAA), so collect all.
                     const selFn = String(this.fnScanFiberNode || '').trim().toUpperCase();
-                    let expectedSg = '';
+                    const expectedSgs = new Set();
                     for (const m of (this.modems || [])) {
                         const mFn = String(m.fiber_node || '').trim().toUpperCase();
                         if (mFn !== selFn) continue;
                         const nid = (m.topology_node_id || '').trim();
                         const sg = (nmMeta[nid]?.serving_group || '').trim();
-                        if (sg) { expectedSg = sg; break; }
+                        if (sg) expectedSgs.add(sg);
                     }
 
-                    if (expectedSg) {
-                        this.fnScanExpectedServingGroup = expectedSg;
+                    if (expectedSgs.size > 0) {
+                        this.fnScanExpectedServingGroup = [...expectedSgs].join(', ');
                         this.modems = (this.modems || []).map(m => {
                             const nid = (m.topology_node_id || '').trim();
                             const sg = (nmMeta[nid]?.serving_group || '').trim();
-                            const mismatch = !!(sg && sg !== expectedSg);
+                            const mismatch = !!(sg && !expectedSgs.has(sg));
                             return {
                                 ...m,
                                 topology_serving_group: sg || m.topology_serving_group || '',
