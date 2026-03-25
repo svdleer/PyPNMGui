@@ -1,0 +1,155 @@
+<!-- Sticky Navigation Bar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary py-0 navbar-compact" style="position: sticky; top: 0; z-index: 1030; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    <div class="container-fluid">
+        <a class="navbar-brand py-1" href="[[ base_path ]]/">
+            <img src="[[ base_path ]]/static/images/logo.png" alt="PyPNM" class="navbar-logo" style="height: 32px;">
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.path == (base_path ~ '/') or request.path == base_path or request.endpoint == 'main.index' %}active{% endif %}" href="[[ base_path ]]/?view=home">
+                        <i class="bi bi-house-door me-1"></i>[[ t('nav.home') ]]
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="[[ base_path ]]/?view=modems">
+                        <i class="bi bi-router me-1"></i>[[ t('nav.modems') ]]
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="[[ base_path ]]/?view=measurements">
+                        <i class="bi bi-graph-up me-1"></i>[[ t('nav.measurements') ]]
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="[[ base_path ]]/?view=fibernode">
+                        <i class="bi bi-diagram-3 me-1"></i>[[ t('nav.fiber_node') ]]
+                    </a>
+                </li>
+                {% if enable_topology %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.path.endswith('/topology') %}active{% endif %}" href="[[ base_path ]]/topology">
+                        <i class="bi bi-share me-1"></i>[[ t('nav.topology') ]]
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+            <div class="d-flex align-items-center gap-2" id="shared-header-status">
+                <span class="badge d-flex align-items-center bg-secondary" id="shared-api-badge" style="font-size: 0.75rem; min-width: 110px; height: 32px; padding: 0.5rem 0.75rem;" title="Checking PyPNM API status">
+                    <i class="bi bi-hdd-network-fill me-1" style="font-size: 0.85rem;"></i>
+                    <span>PyPNM API</span>
+                    <i class="bi bi-question-circle-fill ms-1" id="shared-api-icon" style="font-size: 0.75rem; opacity: 0.85;"></i>
+                </span>
+                <span class="badge d-flex align-items-center bg-secondary" id="shared-cmts-badge" style="font-size: 0.75rem; min-width: 110px; height: 32px; padding: 0.5rem 0.75rem;" title="Checking CMTS agents">
+                    <i class="bi bi-router-fill me-1" style="font-size: 0.85rem;"></i>
+                    <span>CMTS</span>
+                    <span class="badge bg-light text-dark ms-1" id="shared-cmts-count" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">?</span>
+                </span>
+                <span class="badge d-flex align-items-center bg-secondary" id="shared-cm-badge" style="font-size: 0.75rem; min-width: 100px; height: 32px; padding: 0.5rem 0.75rem;" title="Checking CM agents">
+                    <i class="bi bi-hdd-fill me-1" style="font-size: 0.75rem;"></i>
+                    <span>CM</span>
+                    <span class="badge bg-light text-dark ms-1" id="shared-cm-count" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">?</span>
+                </span>
+                <span class="badge d-flex align-items-center bg-secondary" id="shared-file-badge" style="font-size: 0.75rem; min-width: 100px; height: 32px; padding: 0.5rem 0.75rem;" title="Checking File agents">
+                    <i class="bi bi-file-earmark-arrow-down me-1" style="font-size: 0.75rem;"></i>
+                    <span>[[ t('badges.file') ]]</span>
+                    <span class="badge bg-light text-dark ms-1" id="shared-file-count" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">?</span>
+                </span>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-person-circle me-1"></i>[[ auth_username ]] ( [[ auth_role ]] )
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="[[ base_path ]]/account"><i class="bi bi-person me-2"></i>[[ t('nav.account') ]]</a></li>
+                        <li>
+                            <form method="post" action="[[ base_path ]]/account/language" class="px-3 py-2">
+                                <label class="form-label form-label-sm mb-1">[[ t('language.label') ]]</label>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <select class="form-select form-select-sm" name="language_preference">
+                                        {% for locale_code, locale_label in supported_locales.items() %}
+                                        <option value="[[ locale_code ]]" {% if locale_code == current_locale %}selected{% endif %}>[[ locale_label ]]</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-primary">OK</button>
+                                </div>
+                            </form>
+                        </li>
+                        <li><a class="dropdown-item" href="[[ base_path ]]/account"><i class="bi bi-key me-2"></i>[[ t('nav.change_password') ]]</a></li>
+                        {% if auth_role == 'admin' %}
+                        <li><a class="dropdown-item" href="[[ base_path ]]/admin"><i class="bi bi-gear me-2"></i>[[ t('nav.admin') ]]</a></li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <form method="post" action="[[ base_path ]]/logout" class="m-0 px-2">
+                                <button type="submit" class="btn btn-sm btn-outline-danger w-100">
+                                    <i class="bi bi-box-arrow-right me-1"></i>[[ t('nav.logout') ]]
+                                </button>
+                            </form>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<script>
+(() => {
+    const basePath = window.BASE_PATH || '[[ base_path ]]' || '';
+    const setBadge = (badgeId, ok, countId, countVal, title) => {
+        const badge = document.getElementById(badgeId);
+        if (!badge) return;
+        badge.classList.remove('bg-secondary', 'bg-success', 'bg-danger', 'bg-warning', 'text-dark');
+        if (ok === true) badge.classList.add('bg-success');
+        else if (ok === false) badge.classList.add('bg-danger');
+        else { badge.classList.add('bg-warning', 'text-dark'); }
+        if (title) badge.title = title;
+        if (countId) {
+            const countEl = document.getElementById(countId);
+            if (countEl) countEl.textContent = String(countVal ?? '?');
+        }
+    };
+
+    const apiBadge = document.getElementById('shared-api-badge');
+    const apiIcon = document.getElementById('shared-api-icon');
+    const setApi = (ok) => {
+        if (!apiBadge || !apiIcon) return;
+        apiBadge.classList.remove('bg-secondary', 'bg-success', 'bg-danger');
+        apiIcon.className = 'bi ms-1';
+        if (ok) {
+            apiBadge.classList.add('bg-success');
+            apiIcon.classList.add('bi-check-circle-fill');
+            apiBadge.title = 'PyPNM API online';
+        } else {
+            apiBadge.classList.add('bg-danger');
+            apiIcon.classList.add('bi-x-circle-fill');
+            apiBadge.title = 'PyPNM API offline';
+        }
+    };
+
+    Promise.all([
+        fetch(basePath + '/api/health', { credentials: 'same-origin' }).then((r) => r.json()),
+        fetch(basePath + '/api/pypnm/health', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ pypnm_healthy: false })),
+        fetch(basePath + '/api/agent/status', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ agents: [] })),
+    ])
+        .then(([health, pypnm, agentData]) => {
+            setApi(health.status === 'ok' && !!pypnm.pypnm_healthy);
+            const agents = Array.isArray(agentData.agents) ? agentData.agents.filter((a) => a.status === 'connected') : [];
+            const cmts = agents.filter((a) => (a.capabilities || []).includes('cmts_reachable')).length;
+            const cm = agents.filter((a) => (a.capabilities || []).includes('cm_reachable')).length;
+            const file = agents.filter((a) => String(a.agent_id || a.name || '').startsWith('file-agent')).length;
+            setBadge('shared-cmts-badge', cmts > 0, 'shared-cmts-count', cmts, cmts > 0 ? cmts + ' CMTS agent(s) connected' : 'No CMTS agent');
+            setBadge('shared-cm-badge', cm > 0, 'shared-cm-count', cm, cm > 0 ? cm + ' CM agent(s) connected' : 'No CM agent');
+            setBadge('shared-file-badge', file > 0, 'shared-file-count', file, file > 0 ? file + ' File agent(s) connected' : 'No File agent');
+        })
+        .catch(() => {
+            setApi(false);
+            setBadge('shared-cmts-badge', false, 'shared-cmts-count', 0, 'Unable to load CMTS agent status');
+            setBadge('shared-cm-badge', false, 'shared-cm-count', 0, 'Unable to load CM agent status');
+            setBadge('shared-file-badge', false, 'shared-file-count', 0, 'Unable to load File agent status');
+        });
+})();
+</script>
