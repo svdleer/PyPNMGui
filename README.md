@@ -1,136 +1,88 @@
 # PyPNM Web GUI
 
-A modern web-based graphical user interface for [PyPNM](https://github.com/svdleer/PyPNM) - the Proactive Network Maintenance toolkit for DOCSIS cable modems.
+Web-based management interface for [PyPNM](https://github.com/svdleer/PyPNM) — Proactive Network Maintenance for DOCSIS HFC networks.
 
-## Architecture
+## Overview
+
+PyPNM Web GUI provides operators with a single-pane-of-glass for cable plant monitoring, PNM diagnostics, and modem management. It acts as a Backend-for-Frontend (BFF) that proxies and orchestrates calls to the PyPNM API.
+
+### System Architecture
 
 ```
-┌────────────────────────────────────┐
-│  PyPNM Web GUI (This Project)      │
-│  Flask on port 5050                │
-│  - Modern Vue.js interface         │
-│  - WebSocket agent management      │
-│  - CMTS management                 │
-└──────────────▲─────────────────────┘
-               │ WebSocket
-┌──────────────┴─────────────────────┐
-│  PyPNM Agent (Separate Repo)       │
-│  github.com/svdleer/pyPNMAgent     │
-│  - SNMP operations via pysnmp      │
-│  - Network access to CMTS/modems   │
-│  - PNM measurements                │
-└──────────────▲─────────────────────┘
-               │ SNMP
-       ┌───────┴───────┐
-       │  CMTS/Modems  │
-       └───────────────┘
+Browser ──► PyPNM Web GUI (Flask, port 5050)
+                 │
+                 ├── PyPNM API (FastAPI, port 8000) ──► CMTS / Cable Modems (SNMP)
+                 │
+                 └── pyPNM Agent (optional, SNMP relay on jump server)
 ```
 
-## Components
-
-| Component | Repository | Purpose |
-|-----------|------------|---------|
-| **PyPNM GUI** | This repo | Web interface + API server |
-| **PyPNM Agent** | [github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent) | Remote SNMP agent |
-| **PyPNM** | [github.com/svdleer/PyPNM](https://github.com/svdleer/PyPNM) | PNM library (required) |
-
-## Prerequisites
-
-1. **Python 3.10+** (or Docker)
-2. **PyPNM Agent** deployed on a server with network access to CMTS/modems
-
-## Quick Start
-## Auth DB Init Script
-
-Role-based login uses an auth database (MySQL or SQLite fallback). To initialize
-tables and verify connectivity, run:
-
-```bash
-python backend/scripts/init_auth_db.py
-```
-
-Useful env vars:
-
-- `AUTH_DB_BACKEND=mysql` (optional, auto-detected when `AUTH_DB_HOST` is set)
-- `AUTH_DB_HOST`, `AUTH_DB_PORT`, `AUTH_DB_USER`, `AUTH_DB_PASSWORD`, `AUTH_DB_NAME`
-- `AUTH_BOOTSTRAP_ADMIN_USER`, `AUTH_BOOTSTRAP_ADMIN_PASS`
-
-The script prints `AUTH_DB_OK ...` with user/admin counts on success.
-
-
-### Docker (Recommended)
-
-```bash
-# Clone both repos
-git clone https://github.com/svdleer/PyPNMGui.git
-git clone https://github.com/svdleer/pyPNMAgent.git
-
-# Start GUI server
-cd PyPNMGui
-docker compose -f docker/docker-compose.yml up -d
-
-# Configure and start agent (on jump server)
-cd ../pyPNMAgent
-cp agent_config.example.json config/agent_config.json
-# Edit config/agent_config.json with your CMTS details
-docker compose up -d
-```
-
-### Manual Installation
-
-```bash
-# 1. Start the GUI server
-cd PyPNMGui
-python3 -m venv venv
-source venv/bin/activate
-pip install -r backend/requirements.txt
-cd backend && python run.py
-
-# 2. Start the agent (on jump server)
-cd pyPNMAgent
-pip install -r requirements.txt
-cp agent_config.example.json agent_config.json
-python agent.py -c agent_config.json
-```
-
-Open http://localhost:5050 in your browser.
+| Component | Port | Purpose |
+|-----------|------|---------|
+| **PyPNM Web GUI** (this repo) | 5050 | Web UI + BFF layer |
+| **[PyPNM](https://github.com/svdleer/PyPNM)** | 8000 | Core PNM API — SNMP, spectrum analysis, modem inventory |
+| **[pyPNM Agent](https://github.com/svdleer/pyPNMAgent)** | — | Remote SNMP agent for network-segmented environments |
 
 ## Features
 
-- 🔍 **Cable Modem Search** - Search by IP, MAC, CMTS, or interface
-- 📊 **Real-time Statistics** - View downstream/upstream channel stats via PyPNM
-- 🔬 **PNM Measurements** - Run RxMER, Spectrum Analysis, Constellation Display
-- 📋 **Event Log Viewer** - Browse modem event logs
-- 📈 **Data Visualization** - Charts for RxMER and other measurements
-- 🎨 **Modern UI** - Bootstrap 5 + Vue.js 3 + SweetAlert2
-- 🔄 **PyPNM Integration** - Seamless proxy to PyPNM FastAPI
+- **Modem Search** — Find modems by IP, MAC, hostname, or fiber node
+- **RF Diagnostics** — Downstream/upstream channel statistics, OFDM/OFDMA status
+- **PNM Measurements** — RxMER capture, upstream spectrum analysis (UTSC), constellation display
+- **FiberNode Analysis** — Per-fiber-node RxMER scans, downstream suckout detection, plant assessment
+- **Topology Module** — Network graph explorer with CSV-imported topology data (optional)
+- **CMTS Management** — Multi-CMTS support with Redis-cached modem inventories
+- **Modem Inventory** — Polled modem database with enrichment (DOCSIS version, OFDM/OFDMA capability)
+- **Authentication** — Role-based access control with MySQL or SQLite backend
+- **Internationalisation** — Multi-language UI (English, Dutch)
+
+## Quick Start
+
+### Docker (recommended)
+
+```bash
+git clone https://github.com/svdleer/PyPNMGui.git
+cd PyPNMGui/docker
+cp .env.example .env          # Edit with your CMTS/SNMP settings
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Manual
+
+```bash
+git clone https://github.com/svdleer/PyPNMGui.git
+cd PyPNMGui
+python3 -m venv venv && source venv/bin/activate
+pip install -r backend/requirements.txt
+cd backend && python run.py
+```
+
+Open `http://localhost:5050` in your browser.
+
+> **Prerequisite:** PyPNM API must be running. See [PyPNM install guide](https://github.com/svdleer/PyPNM).
 
 ## Configuration
 
 ### Environment Variables
 
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PYPNM_API_URL` | `http://127.0.0.1:8000` | PyPNM API base URL |
+| `FLASK_PORT` | `5050` | Web GUI listen port |
+| `APPLICATION_ROOT` | `/` | Base path for reverse proxy (e.g. `/cmtool`) |
+| `DATA_MODE` | `direct` | `direct` / `agent` / `mock` |
+| `ENABLE_TOPOLOGY` | `false` | Enable topology module with CSV data |
+| `REDIS_HOST` | — | Redis host for CMTS modem cache |
+| `REDIS_PORT` | `6379` | Redis port |
+| `AUTH_DB_HOST` | — | MySQL host for auth DB (SQLite fallback) |
+| `SNMP_COMMUNITY` | — | Default SNMP read community |
+
+### Authentication Setup
+
 ```bash
-# PyPNM server URL (default: http://127.0.0.1:8000)
-export PYPNM_BASE_URL=http://127.0.0.1:8000
-
-# Flask server port (default: 5050)
-export FLASK_PORT=5050
-
-# Redis cache (optional, for CMTS data caching)
-export REDIS_HOST=localhost
-export REDIS_PORT=6379
-export REDIS_TTL=21600
+# Initialise auth database and bootstrap admin user
+python backend/scripts/init_auth_db.py
 ```
 
-### PyPNM Configuration
-
-For PyPNM configuration (SNMP settings, TFTP servers, etc.), edit PyPNM's `system.json`:
-```bash
-cd PyPNM
-nano src/pypnm/settings/system.json
-```
-
-See PyPNM repository: https://github.com/svdleer/PyPNM
+Set `AUTH_DB_HOST`, `AUTH_DB_USER`, `AUTH_DB_PASSWORD`, `AUTH_DB_NAME` for MySQL, or omit for SQLite fallback.
 
 ## Project Structure
 
@@ -138,185 +90,56 @@ See PyPNM repository: https://github.com/svdleer/PyPNM
 PyPNMGui/
 ├── backend/
 │   ├── app/
-│   │   ├── __init__.py          # Flask app factory
-│   │   ├── core/
-│   │   │   ├── config.py        # Configuration settings
-│   │   │   ├── simple_ws.py     # WebSocket agent manager
-│   │   │   └── cmts_provider.py # CMTS list provider
-│   │   └── routes/
-│   │       ├── main_routes.py   # Frontend serving
-│   │       └── api_routes.py    # API endpoints
-│   ├── run.py                   # Entry point
-│   └── requirements.txt         # Python dependencies
+│   │   ├── __init__.py              # Flask app factory
+│   │   ├── core/                    # Config, clients, plotters, auth
+│   │   └── routes/                  # Flask routes (api, auth, pypnm, topology, ws)
+│   ├── run.py                       # Entry point
+│   └── requirements.txt
 ├── frontend/
-│   ├── templates/
-│   │   └── index.html           # Main HTML template
+│   ├── templates/                   # Jinja2 templates (index, topology, admin)
 │   └── static/
-│       ├── css/
-│       │   └── style.css        # Custom styles
-│       └── js/
-│           └── app.js           # Vue.js application
+│       ├── css/style.css
+│       └── js/app.js                # Vue.js 3 SPA
 ├── docker/
-│   ├── docker-compose.yml       # Docker deployment
-│   └── Dockerfile               # GUI server image
-├── deploy/
-│   └── lab-deploy.sh            # Lab deployment script
-├── docs/
-│   └── ...                      # Documentation
-└── README.md                    # This file
+│   ├── docker-compose.prod.yml      # Production deployment
+│   ├── Dockerfile.server            # GUI container image
+│   └── .env.example
+├── deploy/                          # Agent installation scripts
+├── config/                          # System configuration
+└── docs/                            # Additional documentation
 ```
 
-## Agent Setup
+## Deployment
 
-The PyPNM Agent runs on a jump server with network access to your DOCSIS equipment.
-
-See: **[github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent)**
+Deploy via git — never copy files manually:
 
 ```bash
-# On your jump server
-git clone https://github.com/svdleer/pyPNMAgent.git
-cd pyPNMAgent
-cp agent_config.example.json agent_config.json
-# Edit agent_config.json with:
-#   - pypnm_server.url: ws://your-gui-server:5050/ws/agent
-#   - cmts_access.community: your-cmts-snmp-community
-docker compose up -d
+ssh your-server
+cd /path/to/PyPNMGui && git pull
+cd docker && docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-## API Endpoints
+See [docker/README.md](docker/README.md) for production setup details.
 
-This Web GUI proxies requests to PyPNM's FastAPI endpoints. All data comes from PyPNM.
+## Documentation
 
-### Web GUI Endpoints (proxy layer)
-
-| Endpoint | Method | Description | PyPNM Target |
-|----------|--------|-------------|--------------|
-| `/api/health` | GET | Check PyPNM connectivity | - |
-| `/api/modem/<mac>/system-info` | POST | Get sysDescr | `/system/sysDescr` |
-| `/api/modem/<mac>/uptime` | POST | Get uptime | `/system/upTime` |
-| `/api/modem/<mac>/event-log` | POST | Get event log | `/docs/dev/eventLog` |
-| `/api/modem/<mac>/ds-channels` | POST | Downstream stats | `/docs/if30/ds/*` + `/docs/if31/ds/*` |
-| `/api/modem/<mac>/us-channels` | POST | Upstream stats | `/docs/if30/us/*` + `/docs/if31/us/*` |
-| `/api/modem/<mac>/rxmer` | POST | RxMER measurement | `/docs/pnm/ds/ofdm/rxmer/getCapture` |
-| `/api/modem/<mac>/spectrum` | POST | Spectrum analysis | `/docs/pnm/spectrumAnalyzer/getCapture` |
-| `/api/modem/<mac>/constellation` | POST | Constellation | `/docs/pnm/ds/ofdm/const_display/getCapture` |
-
-### PyPNM Direct Endpoints
-
-For complete API documentation, see PyPNM's Swagger UI at: **http://127.0.0.1:8000/docs**
-
-### Request Format
-
-Example POST request to Web GUI:
-```bash
-curl -X POST http://localhost:5050/api/modem/aa:bb:cc:dd:ee:ff/system-info \
-  -H "Content-Type: application/json" \
-  -d '{
-    "modem_ip": "192.168.100.10",
-    "community": "private"
-  }'
-```
-
-This is proxied to PyPNM as:
-```bash
-curl -X POST http://127.0.0.1:8000/system/sysDescr \
-  -H "Content-Type: application/json" \
-  -d '{
-    "cable_modem": {
-      "mac_address": "aa:bb:cc:dd:ee:ff",
-      "ip_address": "192.168.100.10",
-      "snmp": {
-        "snmpV2C": {
-          "community": "private"
-        }
-      }
-    }
-  }'
-```
-
-## Remote Agent (Optional)
-
-If PyPNM cannot directly reach cable modems (firewall, network segmentation), you can deploy a remote agent on a Jump Server. See:
-
-- [github.com/svdleer/pyPNMAgent](https://github.com/svdleer/pyPNMAgent) - Agent deployment guide
-- [docs/PYPNM_INTEGRATION.md](docs/PYPNM_INTEGRATION.md) - Detailed architecture
-
-## Troubleshooting
-
-### PyPNM Not Reachable
-
-**Error:** `PyPNM server not reachable at http://127.0.0.1:8000`
-
-**Solution:**
-1. Verify PyPNM is running: `curl http://127.0.0.1:8000/docs`
-2. Check PyPNM logs: `cd PyPNM && tail -f logs/pypnm.log`
-3. Start PyPNM if not running: `cd PyPNM && source venv/bin/activate && pypnm`
-
-### TFTP Required for PNM Measurements
-
-**Error:** `tftp_ipv4 required for PNM measurements`
-
-**Reason:** PNM measurements (RxMER, Spectrum, etc.) require the cable modem to upload capture files to a TFTP server.
-
-**Solution:**
-1. Configure TFTP in PyPNM's `system.json`
-2. Ensure TFTP server is reachable from cable modems
-3. See: https://github.com/svdleer/PyPNM/blob/main/docs/install/install.md
-
-### No Modems Found
-
-This Web GUI does not query modems from CMTS directly. You need to either:
-1. Use PyPNM's Python library to query CMTS
-2. Maintain a separate database of modems
-3. Search by specific MAC/IP address
+- [Proxy Setup](docs/PROXY_SETUP.md) — Reverse proxy with custom base path
+- [Network Architecture](docs/NETWORK_ARCHITECTURE.md) — Detailed system topology
+- [PyPNM Integration](docs/PYPNM_INTEGRATION.md) — BFF ↔ API communication
+- [SSH Tunnel Setup](docs/SSH_TUNNEL_SETUP.md) — Secure access to remote CMTS
+- [Redis Caching](docs/REDIS_OPTIONAL.md) — Optional Redis for modem inventory cache
 
 ## Development
 
-### Running in Development Mode
-
 ```bash
-# Terminal 1: PyPNM server
-cd PyPNM
-source venv/bin/activate
-pypnm
+# Terminal 1: PyPNM API
+cd PyPNM && source .venv/bin/activate && pypnm
 
-# Terminal 2: Web GUI
-cd PyPNMGui
-source venv/bin/activate
-export FLASK_DEBUG=1
-cd backend
-python run.py
+# Terminal 2: Web GUI (debug mode)
+cd PyPNMGui && source venv/bin/activate
+FLASK_DEBUG=1 python backend/run.py
 ```
-
-### Adding New Features
-
-1. Check PyPNM API docs: http://127.0.0.1:8000/docs
-2. Add proxy endpoint in `backend/app/routes/api_routes.py`
-3. Add method to `backend/app/core/pypnm_client.py`
-4. Update frontend in `frontend/static/js/app.js`
-
-## Resources
-
-- **PyPNM GitHub:** https://github.com/svdleer/PyPNM
-- **PyPNM API Reference:** http://localhost:8000/docs (after install)
-- **Integration Plan:** [docs/PYPNM_INTEGRATION.md](docs/PYPNM_INTEGRATION.md)
-- **Network Architecture:** [docs/NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md)
-
-## Contributing
-
-This project provides a Web GUI for PyPNM. For PyPNM core features (SNMP, PNM measurements, etc.), contribute to the main PyPNM project.
-
-For Web GUI improvements:
-1. Fork this repository
-2. Create a feature branch
-3. Test with PyPNM
-4. Submit a pull request
 
 ## License
 
 Apache-2.0
-
-## Support
-
-- Web GUI Issues: Create an issue in this repository
-- PyPNM Issues: https://github.com/svdleer/PyPNM/issues

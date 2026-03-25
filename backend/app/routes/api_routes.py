@@ -509,6 +509,11 @@ def get_modems():
                     or search_value in str(m.get('hostname', '')).lower()
                     or search_value in str(m.get('alias', '')).lower()
                 ]
+            elif search_type == 'fiber_node':
+                modems = [
+                    m for m in modems
+                    if search_value in str(m.get('fiber_node', '')).lower()
+                ]
 
         # Apply interface filter (if requested)
         if iface_filter:

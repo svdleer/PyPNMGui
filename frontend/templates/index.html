@@ -11,6 +11,7 @@
         window.BASE_PATH = '[[ base_path ]]' || '';
         window.GUI_LOCALE = '[[ current_locale ]]';
         window.GUI_I18N = [[ locale_messages|tojson ]];
+        window.ENABLE_TOPOLOGY = {{ 'true' if enable_topology else 'false' }};
         console.log('BASE_PATH:', window.BASE_PATH);
     </script>
     
@@ -170,6 +171,7 @@
                                             <option value="ip">{{ t('search.ip') }}</option>
                                             <option value="mac">{{ t('search.mac') }}</option>
                                             <option value="name">{{ t('search.name') }}</option>
+                                            <option value="fiber_node">FiberNode</option>
                                             <option v-if="useTopologySearch" value="fibernode">FiberNode (topology)</option>
                                             <option v-if="useTopologySearch" value="postal_house">PostalCode + HouseNr (topology)</option>
                                             <option v-if="useTopologySearch" value="customer_id">Customer ID (topology)</option>
@@ -211,7 +213,7 @@
                                     </div>
                                 </div>
                                 <div class="row g-3 mt-1">
-                                    <div class="col-md-12">
+                                    <div class="col-md-12" v-if="topologyEnabled">
                                         <div class="form-check form-switch">
                                             <input class="form-check-input" type="checkbox" id="useTopologySearch" v-model="useTopologySearch">
                                             <label class="form-check-label" for="useTopologySearch">Use topology lookup (FiberNode / Postal+House / Customer ID)</label>

@@ -7,6 +7,7 @@ const BASE_PATH = window.BASE_PATH || '';
 const API_BASE = BASE_PATH + '/api';
 const GUI_LOCALE = window.GUI_LOCALE || 'en-US';
 const GUI_I18N = window.GUI_I18N || {};
+const TOPOLOGY_ENABLED = window.ENABLE_TOPOLOGY || false;
 
 createApp({
     data() {
@@ -50,7 +51,9 @@ createApp({
             showSearchSuggestions: false,
             searchSeedMacs: [],
             searchSeedIps: [],
+            searchSeedFiberNodes: [],
             useTopologySearch: false,
+            topologyEnabled: TOPOLOGY_ENABLED,
             searchHouseNumber: '',
             topologySuggestions: [],
             snmpCommunity: 'public',
@@ -254,6 +257,7 @@ createApp({
                 'ip': this.t('placeholder.ip'),
                 'mac': this.t('placeholder.mac'),
                 'name': this.t('placeholder.name'),
+                'fiber_node': 'e.g. FN55',
                 'fibernode': 'e.g. ASV-RC0004.ASV-0034-1A',
                 'postal_house': 'e.g. 1234AB',
                 'customer_id': 'e.g. RES-1234567'
@@ -267,6 +271,13 @@ createApp({
             }
             const q = (this.searchValue || '').trim();
             if (!q || this.searchType === 'name') return [];
+
+            if (this.searchType === 'fiber_node') {
+                const qq = q.toLowerCase();
+                return this.searchSeedFiberNodes
+                    .filter(v => String(v || '').toLowerCase().includes(qq))
+                    .slice(0, 10);
+            }
 
             if (this.searchType === 'ip') {
                 const qq = q.toLowerCase();
@@ -1287,14 +1298,18 @@ createApp({
             if (!Array.isArray(modems) || !modems.length) return;
             const macSet = new Set(this.searchSeedMacs || []);
             const ipSet = new Set(this.searchSeedIps || []);
+            const fnSet = new Set(this.searchSeedFiberNodes || []);
             for (const m of modems) {
                 const mac = (m?.mac_address || '').trim();
                 const ip = (m?.ip_address || '').trim();
+                const fn = (m?.fiber_node || '').trim();
                 if (mac) macSet.add(mac);
                 if (ip) ipSet.add(ip);
+                if (fn) fnSet.add(fn);
             }
             this.searchSeedMacs = Array.from(macSet).sort();
             this.searchSeedIps = Array.from(ipSet).sort();
+            this.searchSeedFiberNodes = Array.from(fnSet).sort();
         },
 
         async preloadSearchSeed() {
