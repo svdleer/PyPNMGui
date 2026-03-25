@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  # PyPNM API - Built from fork at ${PYPNM_SRC:-/home/svdleer/docker/PyPNM}
+  pypnm-api:
+    build:
+      context: ${PYPNM_SRC:-/home/svdleer/docker/PyPNM}
+      dockerfile: Dockerfile
+    image: pypnm:latest
+    container_name: pypnm-api
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      # Timezone - sync with host
+      - TZ=Europe/Amsterdam
+      # Pysnmp MIB configuration - Include pysnmp-mibs package directory
+      - PYSNMP_MIB_DIRS=/usr/local/lib/python3.12/dist-packages/pysnmp_mibs
+      # Agent authentication token
+      - PYPNM_AGENT_TOKEN=dev-token-change-me
+      # Enable agent-based SNMP routing
+      - PYPNM_USE_AGENT_SNMP=true
+      # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
+      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild (read-write for dev)
+      - ${PYPNM_SRC:-/home/svdleer/docker/PyPNM}/src/pypnm:/app/pypnm
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+  # GUI Server - LAB Version
+  gui-server-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+        # Updates all apt .list files for Dutch Debian mirror (see Dockerfile.server)
+    container_name: pypnm-gui-lab
+    image: docker_gui-server-lab:latest
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Amsterdam
+      - FLASK_ENV=lab
+      - PYPNM_MODE=lab
+      - PYPNM_BASE_URL=http://localhost:8000
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+      - AGENT_REQUIRED=false
+      - ENABLE_AGENT_WEBSOCKET=true
+      - DATA_MODE=agent
+      - MODEM_COMMUNITY=${MODEM_COMMUNITY:-z1gg0m0n1t0r1ng}
+      # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
+      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
+    volumes:
+      - pypnm-data-lab:/app/data
+      - pypnm-logs-lab:/app/logs
+      - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      # Mount source code for live updates without rebuild - specific files only
+      - ../backend/app:/app/app:ro
+      - ../frontend:/app/frontend:ro
+    restart: unless-stopped
+    depends_on:
+      - pypnm-api
+      - redis-lab
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  redis-lab:
+    image: redis:7-alpine
+    container_name: eve-li-redis-lab
+    network_mode: host
+    volumes:
+      - redis-data-lab:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  agent-lab:
+    build:
+      context: ${AGENT_SRC:-/home/svdleer/docker/pyPNMAgent}
+      dockerfile: docker/Dockerfile
+    container_name: pypnm-agent-lab
+    image: pypnm-agent:latest
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Amsterdam
+      - AGENT_ID=lab-agent-local
+      - PYPNM_SERVER_URL=ws://pypnm-api:8000/api/agents/ws
+      - PYPNM_CM_COMMUNITY=${MODEM_COMMUNITY:-z1gg0m0n1t0r1ng}
+      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
+      # Per-vendor SNMP communities
+      - SNMP_COMMUNITY_ARRIS=${SNMP_COMMUNITY_ARRIS:-public}
+      - SNMP_COMMUNITY_CASA=${SNMP_COMMUNITY_CASA:-public}
+      - SNMP_COMMUNITY_CISCO=${SNMP_COMMUNITY_CISCO:-public}
+      - SNMP_COMMUNITY_COMMSCOPE=${SNMP_COMMUNITY_COMMSCOPE:-public}
+      - SNMP_WRITE_COMMUNITY_ARRIS=${SNMP_WRITE_COMMUNITY_ARRIS:-private}
+      - SNMP_WRITE_COMMUNITY_CASA=${SNMP_WRITE_COMMUNITY_CASA:-private}
+      - SNMP_WRITE_COMMUNITY_CISCO=${SNMP_WRITE_COMMUNITY_CISCO:-private}
+      - SNMP_WRITE_COMMUNITY_COMMSCOPE=${SNMP_WRITE_COMMUNITY_COMMSCOPE:-private}
+    volumes:
+      - agent-config-lab:/app/config
+      - agent-logs-lab:/app/logs
+      - /var/lib/tftpboot:/tftpboot:ro
+      # Mount source code for live updates without rebuild
+      - ${AGENT_SRC:-/home/svdleer/docker/pyPNMAgent}/agent.py:/app/agent.py:ro
+      - ${AGENT_SRC:-/home/svdleer/docker/pyPNMAgent}/requirements.txt:/app/requirements.txt:ro
+    restart: unless-stopped
+    depends_on:
+      - pypnm-api
+
+volumes:
+  pypnm-data-lab:
+    driver: local
+  pypnm-logs-lab:
+    driver: local
+  redis-data-lab:
+    driver: local
+  agent-config-lab:
+    driver: local
+  agent-logs-lab:
+    driver: local
