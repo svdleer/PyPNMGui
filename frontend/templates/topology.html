@@ -1,0 +1,476 @@
+{% extends "base.html" %}
+
+{% block title %}Topology Explorer - PyPNM{% endblock %}
+
+{% block extra_head %}
+<style>
+.topology-shell { max-width: 1500px; margin: 0 auto; }
+.stat-card {
+    border: 1px solid #d6dfec;
+    border-radius: 12px;
+    background: linear-gradient(160deg, #f7fbff 0%, #eef4fb 100%);
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .06);
+    padding: 0.9rem;
+    text-align: center;
+}
+.stat-value { font-size: 1.2rem; font-weight: 700; }
+.stat-grid .stat-card { height: 100%; display: flex; flex-direction: column; justify-content: space-between; }
+.stat-grid .stat-value { line-height: 1.2; }
+.stat-grid { justify-content: center; }
+.stat-grid .text-muted.small { font-size: .875rem !important; }
+.topology-toast-wrap { position: fixed; top: 1rem; right: 1rem; z-index: 2100; min-width: 280px; max-width: 420px; }
+#topoProgressWrap { display: none; }
+#topoProgressWrap.active { display: block; }
+.bar-track { height: 10px; background: #edf2f7; border-radius: 999px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 999px; }
+.kpi-grid .mini-kpi {
+    border: 1px solid #d6dfec;
+    border-radius: 10px;
+    padding: .65rem .75rem;
+    background: linear-gradient(160deg, #f7fbff 0%, #eef4fb 100%);
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .06);
+    height: 100%;
+    min-height: 92px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: .35rem;
+    text-align: center;
+}
+.kpi-grid { justify-content: center; }
+.mini-kpi .label { color: #6b7280; font-size: .875rem; }
+.mini-kpi .value { font-weight: 700; font-size: 1.2rem; line-height: 1.2; }
+.joined-preview-wrap { margin: .75rem 0 0 0; }
+.joined-preview-card { border: 1px solid #dbe4f0; box-shadow: 0 1px 3px rgba(15, 23, 42, .05); }
+.joined-preview-card .card-header { background: #f3f7fd; border-bottom: 1px solid #dbe4f0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3 topology-shell">
+    <div id="topologyToastWrap" class="topology-toast-wrap"></div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Topology Explorer</h4>
+            <div class="text-muted small">Strict date-paired topology/modem mapping (no cross-date assumptions).</div>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+            <select id="topologyDateSelect" class="form-select form-select-sm" style="min-width: 180px;">
+                {% for d in topology.files.available_pair_dates or [] %}
+                <option value="[[ d ]]" [[ 'selected' if (topology.files.selected_date == d or (not topology.files.selected_date and topology.files.pair_date == d)) else '' ]]>
+                    [[ d ]]
+                </option>
+                {% endfor %}
+            </select>
+            <button id="topologyLoadBtn" type="button" class="btn btn-sm btn-outline-secondary">Load</button>
+            {% if auth_role == 'admin' %}
+            <button id="topologyImportBtn" type="button" class="btn btn-sm btn-primary">Import Selected</button>
+            <button id="topologyOverwriteBtn" type="button" class="btn btn-sm btn-outline-danger">Overwrite Selected</button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if auth_role == 'admin' %}
+    <div id="topoProgressWrap" class="mb-3">
+        <div class="card border-primary">
+            <div class="card-body py-2 px-3">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-semibold small"><i class="bi bi-arrow-repeat me-1"></i>Import in progress</span>
+                    <span id="topoProgressPct" class="badge bg-primary">0%</span>
+                </div>
+                <div class="progress" style="height: 10px;">
+                    <div id="topoProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                         role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div id="topoProgressStage" class="text-muted small mt-1"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if topology.files.warnings %}
+    <div class="alert alert-warning py-2">
+        <div class="fw-semibold mb-1">Warnings</div>
+        <ul class="mb-0">
+        {% for w in topology.files.warnings %}
+            <li>[[ w ]]</li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="row g-3 mb-3 stat-grid align-items-stretch">
+        <div class="col-6 col-lg-2"><div class="stat-card"><div class="text-muted small">Pair Date</div><div class="stat-value">[[ topology.files.pair_date or '—' ]]</div></div></div>
+        <div class="col-6 col-lg-2"><div class="stat-card"><div class="text-muted small">Nodes</div><div class="stat-value">[[ topology.stats.topology_nodes ]]</div></div></div>
+        <div class="col-6 col-lg-2"><div class="stat-card"><div class="text-muted small">Edges</div><div class="stat-value">[[ topology.stats.topology_edges ]]</div></div></div>
+        <div class="col-6 col-lg-2"><div class="stat-card"><div class="text-muted small">Modems</div><div class="stat-value">[[ topology.stats.modems ]]</div></div></div>
+        <div class="col-6 col-lg-2"><div class="stat-card"><div class="text-muted small">Link Matches</div><div class="stat-value">[[ topology.stats.matched_by_linkid ]]</div></div></div>
+        <div class="col-6 col-lg-2"><div class="stat-card"><div class="text-muted small">Unmatched</div><div class="stat-value">[[ topology.stats.unmatched_modems ]]</div></div></div>
+    </div>
+
+    <div class="row g-3 mb-3 kpi-grid align-items-stretch">
+        <div class="col-6 col-lg-2">
+            <div class="mini-kpi">
+                <div class="label">Avg. edges per node</div>
+                <div class="value">[[ '%.2f'|format((topology.stats.topology_edges / topology.stats.topology_nodes) if topology.stats.topology_nodes else 0) ]]</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-2">
+            <div class="mini-kpi">
+                <div class="label">Modems per fiber node</div>
+                <div class="value">[[ '%.2f'|format((topology.stats.modems / topology.stats.fiber_nodes) if topology.stats.fiber_nodes else 0) ]]</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-2">
+            <div class="mini-kpi">
+                <div class="label">Avg. amps per fiber node</div>
+                <div class="value">[[ '%.2f'|format(topology.stats.avg_amp_per_node or 0) ]]</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-2">
+            <div class="mini-kpi">
+                <div class="label">Avg. taps per fiber node</div>
+                <div class="value">[[ '%.2f'|format(topology.stats.avg_tap_per_node or 0) ]]</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-2">
+            <div class="mini-kpi">
+                <div class="label">Matched coverage</div>
+                <div class="value text-success">[[ '%.1f'|format(((topology.stats.matched_by_linkid or 0) * 100.0 / (topology.stats.modems or 1)) if (topology.stats.modems or 0) else 0) ]]%</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-2">
+            <div class="mini-kpi">
+                <div class="label">Unmatched rate</div>
+                <div class="value text-danger">[[ '%.1f'|format(((topology.stats.unmatched_modems or 0) * 100.0 / (topology.stats.modems or 1)) if (topology.stats.modems or 0) else 0) ]]%</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-7">
+            <div class="card">
+                <div class="card-header bg-white"><strong>Node Type Counts</strong></div>
+                <div class="card-body p-0">
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Node Type</th><th>Count</th></tr></thead>
+                        <tbody>
+                        {% for k,v in topology.stats.node_type_counts.items() %}
+                            <tr><td>[[ k ]]</td><td>[[ v ]]</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-5">
+            {% set total_modems = topology.stats.modems or 0 %}
+            {% set matched = topology.stats.matched_by_linkid or 0 %}
+            {% set unmatched = topology.stats.unmatched_modems or 0 %}
+            {% set matched_pct = ((matched * 100.0 / total_modems) if total_modems else 0) %}
+            {% set unmatched_pct = ((unmatched * 100.0 / total_modems) if total_modems else 0) %}
+
+            <div class="card">
+                <div class="card-header bg-white"><strong>Join Quality Breakdown</strong></div>
+                <div class="card-body">
+                    <div class="small text-muted mb-3">
+                        Distribution of modem join results for the selected paired dataset.
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span><i class="bi bi-check-circle text-success me-1"></i>Exact LINKID matches</span>
+                            <span>[[ matched ]] ([[ '%.1f'|format(matched_pct) ]]%)</span>
+                        </div>
+                        <div class="bar-track"><div class="bar-fill bg-success" style="width: [[ matched_pct ]]%;"></div></div>
+                    </div>
+
+                    <div>
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span><i class="bi bi-x-circle text-danger me-1"></i>Unmatched modems</span>
+                            <span>[[ unmatched ]] ([[ '%.1f'|format(unmatched_pct) ]]%)</span>
+                        </div>
+                        <div class="bar-track"><div class="bar-fill bg-danger" style="width: [[ unmatched_pct ]]%;"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-0">
+        <div class="col-12 joined-preview-wrap">
+            {% set joined_modems = topology.modems|selectattr('link_match')|list if topology.modems else [] %}
+            <div class="card joined-preview-card">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <strong><i class="bi bi-link-45deg me-1"></i>Joined Modem Preview</strong>
+                        <span class="badge bg-primary-subtle text-primary-emphasis">100 random matched</span>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 460px; overflow:auto;">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>MAC</th><th>FiberNode</th><th>TopologyLinkID</th><th>Address</th><th>HouseNr</th><th>Ext</th><th>PostalCode</th><th>LinkedNode</th><th>Match</th></tr></thead>
+                            <tbody>
+                            {% if joined_modems and joined_modems|length > 0 %}
+                            {% for m in joined_modems[:100] %}
+                                <tr>
+                                    <td class="font-monospace">[[ m.mac ]]</td>
+                                    <td>[[ m.fibernode ]]</td>
+                                    <td>[[ m.topology_link_id ]]</td>
+                                    <td>[[ m.address1 or '—' ]]</td>
+                                    <td>[[ m.house_number or '—' ]]</td>
+                                    <td>[[ m.house_number_extension or '—' ]]</td>
+                                    <td>[[ m.postalcode or '—' ]]</td>
+                                    <td>[[ m.linked_node_id or '—' ]]</td>
+                                    <td>yes</td>
+                                </tr>
+                            {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="9" class="text-center text-muted py-4">
+                                        No joined modem rows found for selected date.
+                                    </td>
+                                </tr>
+                            {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    const dateSelect = document.getElementById('topologyDateSelect');
+    const loadBtn = document.getElementById('topologyLoadBtn');
+    const importBtn = document.getElementById('topologyImportBtn');
+    const overwriteBtn = document.getElementById('topologyOverwriteBtn');
+    const toastWrap = document.getElementById('topologyToastWrap');
+    const basePath = "[[ base_path ]]";
+    const preselected = (dateSelect && dateSelect.value) ? dateSelect.value : "[[ topology.files.selected_date or topology.files.pair_date or '' ]]";
+
+    function showToast(message, type) {
+        if (!toastWrap) {
+            return;
+        }
+        const tone = type === 'success' ? 'success' : (type === 'info' ? 'secondary' : 'danger');
+        const icon = type === 'success' ? 'bi-check-circle-fill' : (type === 'info' ? 'bi-info-circle-fill' : 'bi-exclamation-triangle-fill');
+        const toastEl = document.createElement('div');
+        toastEl.className = `toast align-items-center text-bg-${tone} border-0 mb-2`;
+        toastEl.setAttribute('role', 'alert');
+        toastEl.setAttribute('aria-live', 'assertive');
+        toastEl.setAttribute('aria-atomic', 'true');
+        toastEl.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="bi ${icon} me-2"></i>${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        `;
+        toastWrap.appendChild(toastEl);
+
+        if (window.bootstrap && window.bootstrap.Toast) {
+            const inst = new window.bootstrap.Toast(toastEl, { delay: 4500, autohide: true });
+            toastEl.addEventListener('hidden.bs.toast', function () {
+                toastEl.remove();
+            });
+            inst.show();
+        } else {
+            toastEl.classList.add('show');
+            setTimeout(function () { toastEl.remove(); }, 4500);
+        }
+    }
+
+    async function hydrateDatasets() {
+        if (!dateSelect) {
+            return;
+        }
+        try {
+            const resp = await fetch(`${basePath}/api/topology/datasets`, { credentials: 'same-origin' });
+            const data = await resp.json();
+            if (!resp.ok || data.status === 'error' || !Array.isArray(data.datasets)) {
+                return;
+            }
+            const complete = data.datasets.filter((d) => !!d.complete);
+            if (!complete.length) {
+                return;
+            }
+            dateSelect.innerHTML = '';
+            complete.forEach((d) => {
+                const opt = document.createElement('option');
+                opt.value = d.file_date || '';
+                const topo = d.topology_file || 'NL_topology_*';
+                const modem = d.modemlocation_file || 'NL_modemlocation_*';
+                const hier = d.hierarchy_file || 'NL_hierarchy_*';
+                opt.textContent = `${d.file_date} | ${topo} + ${modem} + ${hier}`;
+                if (opt.value === preselected) {
+                    opt.selected = true;
+                }
+                dateSelect.appendChild(opt);
+            });
+            if (!dateSelect.value && dateSelect.options.length > 0) {
+                dateSelect.options[dateSelect.options.length - 1].selected = true;
+            }
+        } catch (err) {
+            // Keep server-rendered fallback options on failures.
+        }
+    }
+
+    hydrateDatasets();
+
+    if (loadBtn && dateSelect) {
+        loadBtn.addEventListener('click', function () {
+            const selected = (dateSelect.value || '').trim();
+            if (!selected) {
+                return;
+            }
+            window.location.href = `${basePath}/topology?date=${encodeURIComponent(selected)}`;
+        });
+    }
+
+    async function startImport(forceMode) {
+        const selected = (dateSelect && dateSelect.value ? dateSelect.value : '').trim();
+        if (!selected) {
+            showToast('Select a dataset date first.', 'error');
+            return;
+        }
+        if (forceMode) {
+            const ok = window.confirm(`Overwrite dataset ${selected}? This will replace existing snapshot rows for this date.`);
+            if (!ok) return;
+        }
+
+        if (importBtn) importBtn.disabled = true;
+        if (overwriteBtn) overwriteBtn.disabled = true;
+
+        const targetBtn = forceMode ? overwriteBtn : importBtn;
+        const oldText = targetBtn ? targetBtn.textContent : '';
+        if (targetBtn) targetBtn.textContent = forceMode ? 'Overwriting…' : 'Starting…';
+
+        showToast(`${forceMode ? 'Starting overwrite' : 'Starting background import'} for ${selected}…`, 'info');
+        try {
+            const resp = await fetch(`${basePath}/api/topology/import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ date: selected, force: !!forceMode }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.status === 'error') {
+                throw new Error(data.message || 'Failed to start import');
+            }
+            pollImportStatus(selected);
+        } catch (err) {
+            showToast(`Import start failed: ${err.message || err}`, 'error');
+            if (importBtn) importBtn.disabled = false;
+            if (overwriteBtn) overwriteBtn.disabled = false;
+            if (targetBtn) targetBtn.textContent = oldText;
+        }
+    }
+
+    if (importBtn && dateSelect) {
+        importBtn.addEventListener('click', function () {
+            startImport(false);
+        });
+    }
+
+    if (overwriteBtn && dateSelect) {
+        overwriteBtn.addEventListener('click', function () {
+            startImport(true);
+        });
+    }
+
+    const progressWrap  = document.getElementById('topoProgressWrap');
+    const progressBar   = document.getElementById('topoProgressBar');
+    const progressPct   = document.getElementById('topoProgressPct');
+    const progressStage = document.getElementById('topoProgressStage');
+    let _pollTimer = null;
+
+    function setProgress(pct, stage) {
+        if (!progressBar) return;
+        progressBar.style.width = pct + '%';
+        progressBar.setAttribute('aria-valuenow', pct);
+        if (progressPct)   progressPct.textContent = pct + '%';
+        if (progressStage) progressStage.textContent = stage || '';
+    }
+
+    async function pollImportStatus(date) {
+        if (progressWrap) progressWrap.classList.add('active');
+        setProgress(1, 'queued…');
+        if (_pollTimer) clearTimeout(_pollTimer);
+
+        async function _poll() {
+            try {
+                const r = await fetch(`${basePath}/api/topology/import/status?date=${encodeURIComponent(date)}`,
+                    { credentials: 'same-origin' });
+                if (r.status === 404) {
+                    // job not tracked yet — retry once more
+                    _pollTimer = setTimeout(_poll, 1500);
+                    return;
+                }
+                const d = await r.json();
+                const pct   = d.pct   || 0;
+                const stage = d.stage || '';
+                const state = d.state || '';
+                setProgress(pct, stage);
+
+                if (state === 'done') {
+                    setProgress(100, 'complete');
+                    showToast(`Import completed for ${date}.`, 'success');
+                    if (importBtn) { importBtn.disabled = false; importBtn.textContent = 'Import Selected'; }
+                    if (overwriteBtn) { overwriteBtn.disabled = false; overwriteBtn.textContent = 'Overwrite Selected'; }
+                    setTimeout(() => {
+                        if (progressWrap) progressWrap.classList.remove('active');
+                        window.location.href = `${basePath}/topology?date=${encodeURIComponent(date)}`;
+                    }, 1200);
+                } else if (state === 'error') {
+                    setProgress(pct, `error: ${d.error || 'unknown'}`);
+                    showToast(`Import failed: ${d.error || 'unknown error'}`, 'error');
+                    if (importBtn) { importBtn.disabled = false; importBtn.textContent = 'Import Selected'; }
+                    if (overwriteBtn) { overwriteBtn.disabled = false; overwriteBtn.textContent = 'Overwrite Selected'; }
+                    if (progressWrap) setTimeout(() => progressWrap.classList.remove('active'), 5000);
+                } else {
+                    // still running — keep polling every 1.5 s
+                    _pollTimer = setTimeout(_poll, 1500);
+                }
+            } catch (err) {
+                // network glitch — retry
+                _pollTimer = setTimeout(_poll, 3000);
+            }
+        }
+        _poll();
+    }
+
+    async function resumeImportIfRunning() {
+        if (!dateSelect) return;
+        const selected = (dateSelect.value || '').trim();
+        if (!selected) return;
+        try {
+            const r = await fetch(`${basePath}/api/topology/import/status?date=${encodeURIComponent(selected)}`, {
+                credentials: 'same-origin'
+            });
+            if (r.status === 404) return;
+            const d = await r.json();
+            if (!r.ok || d.status === 'error') return;
+            if (d.state === 'queued' || d.state === 'running') {
+                if (importBtn) importBtn.disabled = true;
+                if (overwriteBtn) overwriteBtn.disabled = true;
+                showToast(`Resuming import status for ${selected}…`, 'info');
+                pollImportStatus(selected);
+            }
+        } catch (err) {
+            // Ignore resume probe errors; user can still start manually.
+        }
+    }
+
+    resumeImportIfRunning();
+})();
+</script>
+{% endblock %}
