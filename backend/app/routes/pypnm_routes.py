@@ -2401,6 +2401,12 @@ def get_cmts_us_rxmer_fibernode_scan():
 
             modems = list(mac_info.values())
             if selected_macs:
+                all_macs_found = {_norm_mac(m.get('cm_mac_address') or m.get('mac_address') or '') for m in modems}
+                logger.info(f"FN scan: {len(all_macs_found)} modems from CMTS across ifindices {ofdma_ifindices}, "
+                            f"filtering for {len(selected_macs)} selected MACs")
+                missing = selected_macs - all_macs_found
+                if missing:
+                    logger.warning(f"FN scan: {len(missing)} selected MACs not found on channel(s): {list(missing)[:5]}")
                 modems = [
                     m for m in modems
                     if (_norm_mac(m.get('cm_mac_address') or m.get('mac_address') or '') in selected_macs)
