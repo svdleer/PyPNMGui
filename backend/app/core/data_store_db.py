@@ -959,6 +959,23 @@ class DataStoreDB:
             conn.commit()
         conn.close()
 
+    def is_job_cancelled(self, job_id: int) -> bool:
+        """Check if a job has been cancelled (e.g. by admin UI)."""
+        conn = self._connect()
+        cur = conn.cursor()
+        q = (
+            "SELECT status FROM poller_job WHERE id=%s"
+            if self.backend == "mysql"
+            else "SELECT status FROM poller_job WHERE id=?"
+        )
+        cur.execute(q, (int(job_id),))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return True  # job vanished — treat as cancelled
+        status = row["status"] if isinstance(row, dict) else (row[0] if isinstance(row, tuple) else row["status"])
+        return status == "cancelled"
+
     def cancel_poller_job(self, job_id, reason="Cancelled by admin"):
         now = self._now()
         conn = self._connect()

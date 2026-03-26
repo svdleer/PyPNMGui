@@ -200,7 +200,10 @@ def _run_poller_job(job):
     total_written = 0
     rf_snapshots = []
     timeout_hit = False
+    cancelled = False
     processed_targets = 0
+    # Check cancellation every N targets to avoid hammering the DB.
+    _cancel_check_interval = 3
     for t in targets:
         cmts_ip = t.get("ip")
         cmts_name = t.get("name") or cmts_ip
@@ -210,6 +213,12 @@ def _run_poller_job(job):
             logger.warning("Job %s exceeded max runtime (%ss) — stopping early", job.get("id"), max_runtime_sec)
             timeout_hit = True
             break
+        # Periodically check if the job was cancelled from the admin UI.
+        if processed_targets % _cancel_check_interval == 0 and processed_targets > 0:
+            if data_store_db.is_job_cancelled(job.get("id")):
+                logger.info("Job %s cancelled by admin — stopping after %d targets", job.get("id"), processed_targets)
+                cancelled = True
+                break
 
         cmts_breakdown[cmts_name] = {"rows": 0, "rf_snapshots": 0, "error": None}
         processed_targets += 1
@@ -323,15 +332,22 @@ def _run_poller_job(job):
     except Exception:
         logger.exception("Snapshot cleanup failed for poller id=%s", poller.get("id"))
 
+    # Always save progress so the next job resumes from where we stopped,
+    # whether we completed, timed out, or were cancelled.
     try:
         data_store_db.advance_poller_target_offset(poller.get("id"), total_targets, processed_targets)
     except Exception:
         logger.exception("Failed to advance target offset for poller id=%s", poller.get("id"))
 
+    # If already cancelled in DB, don't overwrite the status — just log.
+    if cancelled:
+        logger.info("Job %s: saved progress (%d targets, %d rows) before cancel exit", job.get("id"), processed_targets, total_written)
+        return
+
     timeout_error = None
     timeout_status = None
     if timeout_hit:
-        timeout_error = f"Timed out after {max_runtime_sec}s; partial results saved"
+        timeout_error = f"Timed out after {max_runtime_sec}s; processed {processed_targets}/{total_targets} targets; partial results saved"
         timeout_status = "timed_out"
 
     data_store_db.complete_job(
