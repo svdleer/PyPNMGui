@@ -177,7 +177,14 @@
                                             <option v-if="useTopologySearch" value="customer_id">Customer ID (topology)</option>
                                         </select>
                                     </div>
-                                    <div :class="(useTopologySearch && searchType === 'postal_house') ? 'col-md-5 position-relative' : 'col-md-7 position-relative'">
+                                    <div class="col-md-2" v-if="useTopologySearch && searchType === 'customer_id'">
+                                        <label class="form-label">Prefix</label>
+                                        <select v-model="customerIdPrefix" class="form-select">
+                                            <option value="RES-">RES-</option>
+                                            <option value="B2B-">B2B-</option>
+                                        </select>
+                                    </div>
+                                    <div :class="(useTopologySearch && (searchType === 'postal_house' || searchType === 'customer_id')) ? 'col-md-5 position-relative' : 'col-md-7 position-relative'">
                                         <label class="form-label">{{ t('search.search_value') }}</label>
                                         <input type="text" v-model="searchValue" class="form-control" 
                                                :placeholder="searchPlaceholder"
@@ -2508,7 +2515,19 @@
                             <div class="mb-2">
                                 <label class="form-label small fw-bold">OFDMA Upstream Channel
                                     <span class="text-muted">(required)</span>
-                                    <span v-if="fnScanModemCount !== null" class="badge bg-info ms-2">{{ fnScanModemCount }} modems</span>
+                                    <span v-if="fnScanModemCount !== null" class="badge ms-2" :class="fnScanModemSource === 'inventory' ? 'bg-success' : 'bg-info'">
+                                        {{ fnScanModemCount }} modems
+                                        <span v-if="fnScanModemSource" class="ms-1" style="font-size:0.6rem;opacity:0.85;">({{ fnScanModemSource }})</span>
+                                    </span>
+                                    <span v-if="fnScanModemLoadedAt" class="badge bg-secondary ms-1" style="font-size:0.6rem;" :title="'Loaded at ' + fnScanModemLoadedAt.toLocaleTimeString()">
+                                        {{ fnScanModemAge }}
+                                    </span>
+                                    <button v-if="fnScanModemCount !== null && !fnScanModemCountLoading"
+                                            class="btn btn-link btn-sm p-0 ms-1" style="font-size:0.7rem;"
+                                            @click="loadFnModemCount(true)"
+                                            title="Refresh from SNMP (live walk)">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                     <span v-if="fnScanModemCountLoading" class="spinner-border spinner-border-sm ms-1" style="width:0.7rem;height:0.7rem;"></span>
                                 </label>
                                 <div class="d-flex gap-1 align-items-start">

@@ -55,6 +55,7 @@ createApp({
             useTopologySearch: false,
             topologyEnabled: TOPOLOGY_ENABLED,
             searchHouseNumber: '',
+            customerIdPrefix: 'RES-',
             topologySuggestions: [],
             snmpCommunity: 'public',
             snmpCommunityRW: 'private',
@@ -178,6 +179,8 @@ createApp({
             fnScanTapPlotImage: null,     // matplotlib PNG from /fiberNode/tap-plot
             fnScanModemCount: null,         // Online modem count for selected channel
             fnScanModemCountLoading: false,
+            fnScanModemSource: '',          // 'inventory' or 'snmp'
+            fnScanModemLoadedAt: null,      // Date when modem list was loaded
             fnScanUseModemSelector: false,
             fnScanModemSearch: '',
             fnScanSelectedModemMacs: [],
@@ -261,7 +264,7 @@ createApp({
                 'fiber_node': 'e.g. FN55',
                 'fibernode': 'e.g. ASV-RC0004.ASV-0034-1A',
                 'postal_house': 'e.g. 1234AB',
-                'customer_id': 'e.g. RES-1234567'
+                'customer_id': 'e.g. 10038131'
             };
             return placeholders[this.searchType] || this.t('placeholder.search_value');
         },
@@ -510,6 +513,16 @@ createApp({
                 return this.selectedModem.upstream_interface;
             }
             return String(this.fnScanIfindex);
+        },
+
+        fnScanModemAge() {
+            if (!this.fnScanModemLoadedAt) return '';
+            const secs = Math.floor((Date.now() - this.fnScanModemLoadedAt.getTime()) / 1000);
+            if (secs < 5) return 'just now';
+            if (secs < 60) return `${secs}s ago`;
+            const mins = Math.floor(secs / 60);
+            if (mins < 60) return `${mins}m ago`;
+            return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
         },
 
         // Get modem count for currently selected channel
@@ -1333,7 +1346,10 @@ createApp({
                 this.searchType = 'fibernode';
             }
 
-            const q = (this.searchValue || '').trim();
+            let q = (this.searchValue || '').trim();
+            if (this.searchType === 'customer_id' && q && !q.match(/^(RES|B2B)-/i)) {
+                q = this.customerIdPrefix + q;
+            }
             if (q.length < 2) {
                 this.topologySuggestions = [];
                 return;
@@ -1369,6 +1385,14 @@ createApp({
                 const parts = v.trim().split(/\s+/);
                 this.searchValue = parts[0] || '';
                 this.searchHouseNumber = parts.slice(1).join(' ') || '';
+            } else if (this.useTopologySearch && this.searchType === 'customer_id') {
+                const match = v.match(/^(RES|B2B)-(.*)/i);
+                if (match) {
+                    this.customerIdPrefix = match[1].toUpperCase() + '-';
+                    this.searchValue = match[2];
+                } else {
+                    this.searchValue = v;
+                }
             } else {
                 this.searchValue = v;
             }
@@ -1780,9 +1804,13 @@ createApp({
                         return;
                     }
 
+                    let searchVal = (this.searchValue || '').trim();
+                    if (this.searchType === 'customer_id' && searchVal && !searchVal.match(/^(RES|B2B)-/i)) {
+                        searchVal = this.customerIdPrefix + searchVal;
+                    }
                     const params = new URLSearchParams({
                         type: this.searchType,
-                        value: this.searchValue || '',
+                        value: searchVal,
                         limit: '500',
                     });
                     if (this.searchType === 'postal_house') {
@@ -4180,7 +4208,7 @@ createApp({
             return false;
         },
 
-        async refreshFnSelectorModems(force = false) {
+        async refreshFnSelectorModems(force = false, liveSnmp = false) {
             if (!this.fnScanCmtsIp || this.fnScanSelectorRefreshInFlight) return;
             const now = Date.now();
             if (!force && (now - this.fnScanLastSelectorRefreshAt) < 30000) return;
@@ -4193,7 +4221,9 @@ createApp({
                 const cmtsRef = this.fnScanCmts?.hostname || this.fnScanCmts?.name || this.fnScanCmtsIp;
                 // FiberNode selector only needs modem inventory fields; deep modem enrichment
                 // (vendor/firmware/sysDescr per modem) is too slow on large CMTSes.
-                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=10000&enrich=false${force ? '&refresh=true' : ''}`;
+                // Only append refresh=true when explicitly requested (liveSnmp) to avoid
+                // triggering a full SNMP walk on every fiber node selection.
+                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=10000&enrich=false${liveSnmp ? '&refresh=true' : ''}`;
 
                 let resp = await fetch(`${API_BASE}/cmts/${encodeURIComponent(cmtsRef)}/modems?${q}`);
                 if (resp.status === 404) {
@@ -4305,23 +4335,27 @@ createApp({
             }
         },
 
-        async loadFnModemCount() {
+        async loadFnModemCount(forceSnmp = false) {
             if (!this.fnScanCmtsIp || !this.fnScanCommunity || !this.fnScanIfindex) return;
             this.fnScanModemCountLoading = true;
             try {
+                const payload = {
+                    cmts_ip:       this.fnScanCmtsIp,
+                    community:     this.fnScanCommunity,
+                    ofdma_ifindex: parseInt(this.fnScanIfindex),
+                    max_modems:    500,
+                };
+                if (forceSnmp) payload.force_snmp = true;
                 const r = await fetch(`${API_BASE}/pypnm/cmts/ofdma/channel/modems`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        cmts_ip:       this.fnScanCmtsIp,
-                        community:     this.fnScanCommunity,
-                        ofdma_ifindex: parseInt(this.fnScanIfindex),
-                        max_modems:    500,
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const d = await r.json();
                 if (d.success && Array.isArray(d.modems)) {
                     this.fnScanModemCount = d.modems.length;
+                    this.fnScanModemSource = d.source || 'snmp';
+                    this.fnScanModemLoadedAt = new Date();
 
                     // Merge channel modems into this.modems so selector always
                     // has them even if CMTS cache did not return them. Use stubs

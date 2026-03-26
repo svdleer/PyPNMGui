@@ -455,6 +455,7 @@ def get_modems():
 
     try:
         keys = [f"modems:{cmts_filter}"] if cmts_filter else redis_client.keys('modems:*')
+        seen_macs: set[str] = set()
         modems = []
 
         for key in keys:
@@ -464,6 +465,10 @@ def get_modems():
             payload = json.loads(cached)
             cmts_name = str(payload.get('cmts') or key.split(':', 1)[-1])
             for m in payload.get('modems', []):
+                mac_key = str(m.get('mac_address', '')).lower().replace(':', '').replace('-', '')
+                if mac_key in seen_macs:
+                    continue
+                seen_macs.add(mac_key)
                 row = dict(m)
                 row.setdefault('cmts', cmts_name)
                 modems.append(row)

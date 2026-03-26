@@ -2275,27 +2275,31 @@ def get_cmts_ofdma_channel_modems():
     community     = data.get('community', 'public')
     ofdma_ifindex = data.get('ofdma_ifindex')
     max_modems    = data.get('max_modems', 100)
+    force_snmp    = bool(data.get('force_snmp', False))
 
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
 
     try:
         base_url = get_pypnm_api_url()
+        params = {
+            "cmts_ip":       cmts_ip,
+            "community":     community,
+            "ofdma_ifindex": int(ofdma_ifindex),
+            "max_modems":    int(max_modems),
+        }
+        if force_snmp:
+            params["force_snmp"] = "true"
         r = req.get(
             f"{base_url}/pnm/us/ofdma/rxmer/channel/modems",
-            params={
-                "cmts_ip":       cmts_ip,
-                "community":     community,
-                "ofdma_ifindex": int(ofdma_ifindex),
-                "max_modems":    int(max_modems),
-            },
+            params=params,
             timeout=PYPNM_OFDMA_TIMEOUT
         )
         if r.status_code != 200:
             return jsonify({"success": False, "error": f"PyPNM channel modems failed: {r.status_code}"}), 500
 
         d = r.json()
-        return jsonify({"success": d.get('success', False), "modems": d.get('modems', [])})
+        return jsonify({"success": d.get('success', False), "modems": d.get('modems', []), "source": d.get('source', 'snmp')})
 
     except Exception as e:
         logger.error(f"OFDMA channel modems failed: {e}")
