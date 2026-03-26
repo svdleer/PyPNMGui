@@ -2161,7 +2161,17 @@ def get_cmts_us_rxmer_fibernode():
         import requests as req
         import time as _time
         if ftp_prefetch_enabled:
-            pending = [(_cap.get('filename') or '').strip() for _cap in captures if (_cap.get('filename') or '').strip()]
+            import glob as _glob
+            pending = []
+            for _cap in captures:
+                _fn = (_cap.get('filename') or '').strip()
+                if not _fn:
+                    continue
+                _bn = os.path.basename(_fn)
+                # Skip FTP if file already exists locally (Commscope TFTP)
+                if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
+                    continue
+                pending.append(_fn)
             max_fetch_rounds = 6
             for round_idx in range(max_fetch_rounds):
                 still_pending = []
@@ -2652,10 +2662,20 @@ def get_cmts_us_rxmer_fibernode_scan():
                 return
 
             _set_scan_progress(scan_id, action='Analysing…', pct=99, done='false')
-            # FTP mode: pull all capture files to local cache before passing to PyPNM
+            # FTP mode: pull capture files not already on the local TFTP mount
             _effective_tftp_path = tftp_path
             if ftp_prefetch_enabled:
-                pending = [(_cap.get('filename') or '').strip() for _cap in captures if (_cap.get('filename') or '').strip()]
+                import glob as _glob
+                pending = []
+                for _cap in captures:
+                    _fn = (_cap.get('filename') or '').strip()
+                    if not _fn:
+                        continue
+                    _bn = os.path.basename(_fn)
+                    # Skip FTP if file already exists locally (Commscope TFTP)
+                    if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
+                        continue
+                    pending.append(_fn)
                 max_fetch_rounds = 8
                 for round_idx in range(max_fetch_rounds):
                     still_pending = []
