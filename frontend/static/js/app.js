@@ -3317,6 +3317,21 @@ createApp({
                     if (data.fiber_node && this.selectedModem) {
                         this.selectedModem.fiber_node = data.fiber_node;
                     }
+                    
+                    // Pre-load PNM interface ifindices from channel-stats so
+                    // UTSC / RxMER don't need a separate discovery step.
+                    if (this.selectedModem) {
+                        const ofdmaCh = data.upstream?.ofdma?.channels?.[0];
+                        if (ofdmaCh?.index != null && !this.selectedModem.ofdma_ifindex) {
+                            this.selectedModem.ofdma_ifindex = ofdmaCh.index;
+                            console.log('Pre-loaded ofdma_ifindex from channel-stats:', ofdmaCh.index);
+                        }
+                        const atdmaCh = data.upstream?.atdma?.channels?.[0];
+                        if (atdmaCh?.index != null && !this.selectedModem.upstream_ifindex) {
+                            this.selectedModem.upstream_ifindex = atdmaCh.index;
+                            console.log('Pre-loaded upstream_ifindex from channel-stats:', atdmaCh.index);
+                        }
+                    }
                 }
                 
                 // Process DS OFDM channels if available

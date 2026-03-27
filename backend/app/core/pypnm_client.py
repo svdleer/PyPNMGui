@@ -808,13 +808,12 @@ class PyPNMClient:
             "community": community,
             "cm_mac_address": cm_mac_address
         }
-        # Keep this discovery bounded to avoid long blocking calls in
-        # /upstream/interfaces. If it times out, caller can still return RF/OFDMA
-        # lists and proceed without auto-selected modem RF port.
+        # CMTS discovery walks can take 50s+ on large/slow CMTS.
+        # Keep timeout generous so results are not discarded.
         return self._post(
             "/pnm/us/spectrumAnalyzer/discoverRfPort",
             payload,
-            request_timeout=30,
+            request_timeout=65,
         )
 
     def discover_modem_ofdma(
@@ -839,7 +838,7 @@ class PyPNMClient:
             },
             "cm_mac_address": cm_mac_address
         }
-        return self._post("/pnm/us/ofdma/rxmer/discover", payload, request_timeout=30)
+        return self._post("/pnm/us/ofdma/rxmer/discover", payload, request_timeout=65)
     
     def configure_bulk_destination(
         self,
