@@ -1374,8 +1374,10 @@ createApp({
             this.showSearchSuggestions = true;
             if (!this.useTopologySearch) return;
 
+            // Only fetch topology suggestions for topology-specific search types;
+            // never auto-switch the user's chosen type (mac, ip, name, fiber_node).
             if (!['fibernode', 'postal_house', 'customer_id'].includes(this.searchType)) {
-                this.searchType = 'fibernode';
+                return;
             }
 
             let q = (this.searchValue || '').trim();
@@ -1926,7 +1928,8 @@ createApp({
                 const vendorMissing = !m.vendor || m.vendor === 'Unknown';
                 const modelMissing = !m.model || m.model === 'N/A';
                 const docsisMissing = !m.docsis_version || m.docsis_version === 'Unknown';
-                return !m.ip_address || !m.cmts_ip || vendorMissing || modelMissing || docsisMissing;
+                const ofdmMissing = m.ofdm_enabled == null || m.ofdma_enabled == null;
+                return !m.ip_address || !m.cmts_ip || vendorMissing || modelMissing || docsisMissing || ofdmMissing;
             });
             if (!targets.length) return;
 
@@ -2006,6 +2009,10 @@ createApp({
                     model: patch.model || m.model,
                     software_version: patch.software_version || m.software_version || '',
                     docsis_version: this.resolveDocsisVersion({ ...m, ...patch }, m.docsis_version || 'Unknown'),
+                    ofdm_enabled: m.ofdm_enabled ?? patch.ofdm_enabled ?? null,
+                    ofdma_enabled: m.ofdma_enabled ?? patch.ofdma_enabled ?? null,
+                    ofdma_ifindex: m.ofdma_ifindex ?? patch.ofdma_ifindex ?? null,
+                    partial_service: patch.partial_service ?? m.partial_service ?? false,
                     upstream_interface: patch.upstream_interface || m.upstream_interface,
                     upstream_ifindex: m.upstream_ifindex ?? patch.upstream_ifindex ?? patch.md_if_index ?? null,
                     md_if_index: m.md_if_index ?? patch.md_if_index ?? null,
@@ -2896,7 +2903,8 @@ createApp({
             this.selectedModem = modem;
             const _needsEnrich = this.selectedModem && this.selectedModem.mac_address &&
                 (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip ||
-                 !this.selectedModem.vendor || !this.selectedModem.software_version);
+                 !this.selectedModem.vendor || !this.selectedModem.software_version ||
+                 this.selectedModem.ofdm_enabled == null || this.selectedModem.ofdma_enabled == null);
             if (_needsEnrich) {
                 this.modemDetailLoading = true;
                 try {
