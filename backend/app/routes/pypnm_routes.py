@@ -984,7 +984,10 @@ def channel_stats(mac_address):
     # Clients can explicitly set cmts_stats=false for lean mode.
     cmts_stats = bool(data.get('cmts_stats', True))
     # Experimental speed mode: compact SNMP roots with parser-compatible rebucketing.
-    experimental_compact_walk = bool(data.get('experimental_compact_walk', True))
+    # Default OFF — broad root walks (esp. docsIf31) return thousands of OIDs
+    # on D3.1 modems, causing agent timeouts.  Canonical tables are smaller and
+    # more reliable with the serialized parallel-walk agent.
+    experimental_compact_walk = bool(data.get('experimental_compact_walk', False))
     # Slow CMTS can require longer CMTS walk budget for cm-index/rxmer/profile tables.
     cmts_task_timeout_s = float(data.get('cmts_task_timeout_s', 60.0))
     cm_index = data.get('cm_index')
