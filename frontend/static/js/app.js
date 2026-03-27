@@ -3212,7 +3212,7 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: 'public',
+                        community: this.snmpCommunityModem || 'private',
                         cmts_ip: this.selectedModem.cmts_ip,
                         cmts_community: this.selectedModem.cmts_community || this.snmpCommunity,
                         // Full CMTS stats: button-driven so latency is acceptable.
