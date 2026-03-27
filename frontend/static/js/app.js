@@ -1184,7 +1184,11 @@ createApp({
             const dottedNode = String(this.fnScanFiberNode || '').trim();
             const bridgeNode = String(this.fnScanTopologyBridgeNodeId || '').trim();
             const fallbackNode = dottedNode.includes('.') ? dottedNode : (bridgeNode.includes('.') ? bridgeNode : '');
+            // Scope to selected CMTS — this.modems can contain cross-network
+            // search results; sending every area's nodes is wrong and expensive.
+            const cmtsScope = (this.fnScanCmtsIp || '').trim();
             const nodeIds = [...new Set((this.modems || [])
+                .filter(m => !cmtsScope || !m.cmts_ip || m.cmts_ip === cmtsScope)
                 .map(m => (m?.fiber_node || '').trim())
                 .filter(v => v && v.includes('.')))];
             if (!nodeIds.length && fallbackNode) {
@@ -2083,8 +2087,6 @@ createApp({
                     this.fnScanCmts = cmtsMatch || { name: fallbackCmtsName || fallbackCmtsIp, ip: fallbackCmtsIp };
                     this.fnScanCmtsIp = fallbackCmtsIp;
                     await this.loadFnScanChannels();
-                    this.fnScanPreparingMessage = 'Loading topology metadata…';
-                    await this._enrichFnSelectorTopologyMetadata();
                     this.fnScanPreparingMessage = 'Loading modem selector list…';
                     await this.refreshFnSelectorModems(true);
                     this.$toast?.warning('No RxMER-ready topology rows (missing IP/CMTS). Opened FiberNode scanner with fallback CMTS context; DS/Fullband tests can still run.');
@@ -2155,8 +2157,6 @@ createApp({
 
                 this.fnScanPreparingMessage = 'Loading FiberNode channels…';
                 await this.loadFnScanChannels();
-                this.fnScanPreparingMessage = 'Loading topology metadata…';
-                await this._enrichFnSelectorTopologyMetadata();
                 this.fnScanPreparingMessage = 'Loading modem selector list…';
                 await this.refreshFnSelectorModems(true);
 
