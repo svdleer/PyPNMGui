@@ -1228,15 +1228,17 @@ createApp({
                     String(this.fnScanCmts?.hostname || '').trim(),
                     String(this.fnScanCmts?.cmts || '').trim(),
                 ].filter(Boolean))];
-                const missingAmp = (this.modems || []).filter(m => !(m.topology_group_amplifier || m.topology_end_amplifier));
+                // Only look up the serving group for the selected FN, not
+                // every FN on the CMTS. Other FNs are irrelevant here.
+                const selFnForSg = String(this.fnScanFiberNode || '').trim().toUpperCase();
                 const sgSet = new Set();
-                for (const m of missingAmp) {
-                    const fn = String(m.fiber_node || '').trim().toUpperCase();
-                    const mFn = /^FN(\d{1,3})$/.exec(fn);
-                    if (!mFn || !cmtsCandidates.length) continue;
-                    const gnum = String(parseInt(mFn[1], 10)).padStart(3, '0');
-                    for (const cmtsName of cmtsCandidates) {
-                        sgSet.add(`${cmtsName}-G${gnum}`);
+                if (selFnForSg && cmtsCandidates.length) {
+                    const mFn = /^FN(\d{1,3})$/.exec(selFnForSg);
+                    if (mFn) {
+                        const gnum = String(parseInt(mFn[1], 10)).padStart(3, '0');
+                        for (const cmtsName of cmtsCandidates) {
+                            sgSet.add(`${cmtsName}-G${gnum}`);
+                        }
                     }
                 }
                 const groups = [...sgSet];
@@ -1270,13 +1272,16 @@ createApp({
                 }
 
                 // ── Serving-group mismatch detection ───────────────────────
-                // Collect unique topology_node_id values scoped to the selected
-                // CMTS only — this.modems can still contain cross-network search
-                // results at this point, and sending every node in the world to
-                // the node-meta API is both wrong and expensive.
-                const cmtsScope = (this.fnScanCmtsIp || '').trim();
+                // Only collect topology_node_id from modems matching the selected
+                // FN. Looking up every node on the CMTS is wasteful and pulls in
+                // unrelated areas (AK00, RT18, etc. that share the same CMTS).
+                const selFnMismatch = String(this.fnScanFiberNode || '').trim().toUpperCase();
                 const allNodeIds = [...new Set((this.modems || [])
-                    .filter(m => !cmtsScope || !m.cmts_ip || m.cmts_ip === cmtsScope)
+                    .filter(m => {
+                        if (!selFnMismatch) return true;
+                        const mFn = String(m.fiber_node || '').trim().toUpperCase();
+                        return mFn === selFnMismatch;
+                    })
                     .map(m => (m.topology_node_id || '').trim())
                     .filter(v => v && v.includes('.')))];
                 if (allNodeIds.length > 0) {
