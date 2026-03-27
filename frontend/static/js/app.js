@@ -542,6 +542,17 @@ createApp({
                 .map(m => this.normalizeMacForMatch(m))
                 .filter(Boolean));
 
+            // Expected serving group(s) for the selected FN — set by
+            // _enrichFnSelectorTopologyMetadata. Multiple connected_node_ids
+            // can share the same serving_group (e.g. GV-0030-1A and GV-0030-1B
+            // both on GV-WC0030-DAA001-G001). Match by SG so sister nodes are
+            // included.
+            const expectedSgs = new Set(
+                (this.fnScanExpectedServingGroup || '').split(',')
+                    .map(s => s.trim().toLowerCase())
+                    .filter(Boolean)
+            );
+
             const matchesSelectedFn = (m) => {
                 if (!fnNameLc) return true;
                 const modemFn = (m.fiber_node || '').trim().toLowerCase();
@@ -552,6 +563,13 @@ createApp({
                 if (fnMacDomainLc && modemFn === fnMacDomainLc) return true;
                 if (modemLinkedNode === fnNameLc) return true;
                 if (modemLinkedNode && modemLinkedNode.startsWith(`${fnNameLc}.`)) return true;
+
+                // Serving-group match: sister topology nodes on the same SG
+                // belong to the same fiber node from an RF perspective.
+                if (expectedSgs.size > 0) {
+                    const modemSg = (m.topology_serving_group || '').trim().toLowerCase();
+                    if (modemSg && expectedSgs.has(modemSg)) return true;
+                }
 
                 // Fallback: OFDMA ifindex match, but ONLY when modem has no
                 // fiber_node — avoids pulling in modems from adjacent FNs that
