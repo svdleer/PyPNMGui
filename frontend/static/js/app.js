@@ -2892,7 +2892,10 @@ createApp({
         async selectModem(modem) {
             const wasMeasurementsView = this.currentView === 'measurements';
             this.selectedModem = modem;
-            if (this.selectedModem && this.selectedModem.mac_address && (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip)) {
+            const _needsEnrich = this.selectedModem && this.selectedModem.mac_address &&
+                (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip ||
+                 !this.selectedModem.vendor || !this.selectedModem.software_version);
+            if (_needsEnrich) {
                 try {
                     const topologyFiberNode = this.selectedModem.fiber_node || this.selectedModem.fibernode || '';
                     const resp = await fetch(`${API_BASE}/modems/${encodeURIComponent(this.selectedModem.mac_address)}`);
