@@ -151,6 +151,8 @@ class PyPNMClient:
             
             result = response.json()
             logger.debug(f"PyPNM response from {endpoint}: status={result.get('status')}, keys={list(result.keys())[:10]}")
+            if result.get('status') == -1 or result.get('success') is False:
+                logger.warning(f"PyPNM {endpoint} error: success={result.get('success')}, error={result.get('error')}, timing={result.get('timing')}")
             if 'results' in result:
                 result_val = result['results']
                 if isinstance(result_val, dict):
