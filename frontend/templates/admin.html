@@ -1006,6 +1006,50 @@
         return null;
     };
 
+    const toAgeSec = (createdAt) => {
+        if (!createdAt) return null;
+        const raw = String(createdAt);
+        const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+        const withZone = /Z|[+-]\d{2}:?\d{2}$/.test(normalized) ? normalized : `${normalized}Z`;
+        const ts = Date.parse(withZone);
+        if (Number.isNaN(ts)) return null;
+        return Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    };
+
+    const summarizeQueueRows = (rows) => {
+        const all = Array.isArray(rows) ? rows : [];
+        const queued = all.filter((r) => String(r?.status || '').toLowerCase() === 'queued');
+        const running = all.filter((r) => String(r?.status || '').toLowerCase() === 'running');
+        const mapHead = (row) => {
+            if (!row) return null;
+            return {
+                id: row.id,
+                poller_id: row.poller_id,
+                mac: row.mac,
+                cmts: row.cmts,
+                age_sec: toAgeSec(row.created_at),
+            };
+        };
+        return {
+            queued_count: queued.length,
+            running_count: running.length,
+            queued_head: mapHead(queued[0]),
+            running_head: mapHead(running[0]),
+        };
+    };
+
+    const normalizeQueuePayload = (data) => {
+        // New/legacy backend shape: { status, queue: { poller_job, modem_refresh_request } }
+        if (data?.queue && (data.queue.poller_job || data.queue.modem_refresh_request)) {
+            return data.queue;
+        }
+        // Proxy/backend shape: { status, poller_jobs: [...], refresh_requests: [...] }
+        return {
+            poller_job: summarizeQueueRows(data?.poller_jobs),
+            modem_refresh_request: summarizeQueueRows(data?.refresh_requests),
+        };
+    };
+
     const renderQueueRow = (name, q) => {
         const queued = q?.queued_count ?? 0;
         const running = q?.running_count ?? 0;
@@ -1059,7 +1103,7 @@
             const resp = await fetch(queueHeadUrl, { credentials: 'same-origin' });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
-            const q = data?.queue || {};
+            const q = normalizeQueuePayload(data);
             queueHeadBody.innerHTML = [
                 renderQueueRow('poller_job', q.poller_job),
                 renderQueueRow('modem_refresh_request', q.modem_refresh_request),
