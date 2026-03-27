@@ -259,7 +259,7 @@ def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> d
     out: dict[str, dict] = {}
     try:
         client = PyPNMClient()
-        inv_resp = client.get_inventory_modems(cmts=cmts_name or None, limit=50000)
+        inv_resp = client.get_inventory_modems_bulk([v for v in mac_addresses if v])
         for m in (inv_resp.get('modems') or []):
             mac_norm = _bare(m.get('mac_address') or m.get('mac') or '')
             if mac_norm and mac_norm in wanted:
