@@ -3031,7 +3031,7 @@ createApp({
                 try {
                     const resp = await fetch(`${API_BASE}/modems/${encodeURIComponent(mac)}/refresh/status`);
                     const data = await resp.json();
-                    const req = data.request;
+                    const req = data.refresh || data.request;
                     if (!req) return;
                     this.modemRefreshStatus = req.status;
                     this.modemRefreshError = req.error_text || null;
