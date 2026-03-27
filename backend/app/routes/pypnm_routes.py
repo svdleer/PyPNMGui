@@ -1025,11 +1025,14 @@ def channel_stats(mac_address):
     
     result = client._post('/cm/channel-stats', payload)
     
-    if result.get('success'):
-        # Return the result directly - already in correct format
+    # PyPNM may return success=False with status=-1 when the modem SNMP
+    # times out, but still include valid CMTS-side data (downstream,
+    # upstream, ofdm_stats). Pass through any data that is present.
+    has_data = bool(result.get('downstream') or result.get('upstream') or result.get('ofdm_stats'))
+    if result.get('success') or has_data:
         return jsonify({
             "mac_address": mac_address,
-            "status": 0,
+            "status": 0 if result.get('success') else result.get('status', -1),
             "fiber_node": result.get('fiber_node'),
             "downstream": result.get('downstream', {}),
             "upstream": result.get('upstream', {}),
