@@ -29,6 +29,7 @@ createApp({
             
             // Loading state
             isLoading: false,
+            modemDetailLoading: false,
             loadingSystemInfo: false,
             runningTest: false,
             activeMeasurement: null,   // which measurement button is running (e.g. 'rxmer', 'us_pre_eq')
@@ -2897,6 +2898,7 @@ createApp({
                 (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip ||
                  !this.selectedModem.vendor || !this.selectedModem.software_version);
             if (_needsEnrich) {
+                this.modemDetailLoading = true;
                 try {
                     const topologyFiberNode = this.selectedModem.fiber_node || this.selectedModem.fibernode || '';
                     const resp = await fetch(`${API_BASE}/modems/${encodeURIComponent(this.selectedModem.mac_address)}`);
@@ -2909,6 +2911,8 @@ createApp({
                     }
                 } catch (_) {
                     // Best-effort enrichment only.
+                } finally {
+                    this.modemDetailLoading = false;
                 }
             }
             if (this.currentView === 'fibernode') {
