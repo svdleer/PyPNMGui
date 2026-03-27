@@ -2003,6 +2003,7 @@ createApp({
                     status: patch.status || m.status,
                     vendor: patch.vendor || m.vendor,
                     model: patch.model || m.model,
+                    software_version: patch.software_version || m.software_version || '',
                     docsis_version: this.resolveDocsisVersion({ ...m, ...patch }, m.docsis_version || 'Unknown'),
                     upstream_interface: patch.upstream_interface || m.upstream_interface,
                     upstream_ifindex: m.upstream_ifindex ?? patch.upstream_ifindex ?? patch.md_if_index ?? null,
