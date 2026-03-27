@@ -1039,15 +1039,11 @@ def channel_stats(mac_address):
             "ofdm_stats": result.get('ofdm_stats'),
             "timing": result.get('timing', {})
         })
-    else:
-        # Return 200 with error info — let frontend handle gracefully
-        return jsonify({
-            "mac_address": mac_address,
-            "status": result.get('status', -1),
-            "error": result.get('error', 'Failed to get channel stats'),
-            "downstream": {},
-            "upstream": {}
-        })
+
+    # Optimized agent walk failed entirely — fall back to legacy per-table
+    # API calls which are simpler and more resilient (no agent timeout).
+    logger.warning(f"Optimized channel-stats failed for {mac_address}: {result.get('error')}; falling back to legacy")
+    return _channel_stats_legacy(mac_address, modem_ip, community)
 
 
 def _channel_stats_legacy(mac_address: str, modem_ip: str, community: str):
