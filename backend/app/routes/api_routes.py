@@ -518,6 +518,21 @@ def get_modem(mac_address):
                     modems = data.get('modems', [])
                     for modem in modems:
                         if _bare(modem.get('mac_address', '')) == mac_bare:
+                            # Merge enrichment fields from inventory when Redis
+                            # cache lacks them (vendor/model/software come from
+                            # sysDescr refresh, stored in MySQL only).
+                            if not modem.get('vendor') or not modem.get('model'):
+                                try:
+                                    inv = PyPNMClient().get_inventory_modem_by_mac(mac_bare)
+                                    inv_m = inv.get('modem') if isinstance(inv, dict) else None
+                                    if inv_m:
+                                        for field in ('vendor', 'model', 'software_version',
+                                                      'docsis_version', 'ofdm_enabled', 'ofdma_enabled',
+                                                      'ofdma_ifindex', 'fiber_node', 'cable_mac'):
+                                            if inv_m.get(field) and not modem.get(field):
+                                                modem[field] = inv_m[field]
+                                except Exception:
+                                    pass
                             return jsonify({
                                 "status": "success",
                                 "modem": modem
