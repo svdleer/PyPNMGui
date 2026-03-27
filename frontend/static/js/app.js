@@ -1266,9 +1266,13 @@ createApp({
                 }
 
                 // ── Serving-group mismatch detection ───────────────────────
-                // Collect all unique topology_node_id values (from linked_node_id)
-                // and look up their serving_group via node-meta API.
+                // Collect unique topology_node_id values scoped to the selected
+                // CMTS only — this.modems can still contain cross-network search
+                // results at this point, and sending every node in the world to
+                // the node-meta API is both wrong and expensive.
+                const cmtsScope = (this.fnScanCmtsIp || '').trim();
                 const allNodeIds = [...new Set((this.modems || [])
+                    .filter(m => !cmtsScope || !m.cmts_ip || m.cmts_ip === cmtsScope)
                     .map(m => (m.topology_node_id || '').trim())
                     .filter(v => v && v.includes('.')))];
                 if (allNodeIds.length > 0) {
@@ -2676,13 +2680,22 @@ createApp({
             // fast and always returns the complete data.
             let m = modem;
             try {
+                // Preserve topology/previously-resolved fiber_node before enrichment
+                // (inventory/Redis may return empty fiber_node, wiping the topology value).
+                const preFiberNode = m.fiber_node || m.fibernode || '';
                 const enrichResp = await fetch(`${API_BASE}/modems/${encodeURIComponent(m.mac_address)}`);
                 const enrichData = await enrichResp.json();
                 if (enrichData?.status === 'success' && enrichData.modem) {
                     // Merge enriched data onto the modem object
                     Object.assign(m, enrichData.modem);
+                    if (!m.fiber_node && preFiberNode) {
+                        m.fiber_node = preFiberNode;
+                    }
                     if (this.selectedModem?.mac_address === m.mac_address) {
                         Object.assign(this.selectedModem, enrichData.modem);
+                        if (!this.selectedModem.fiber_node && preFiberNode) {
+                            this.selectedModem.fiber_node = preFiberNode;
+                        }
                     }
                     this._fnTrace('prime.enriched_modem', {
                         mac: m.mac_address,
