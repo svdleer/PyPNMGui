@@ -211,8 +211,9 @@
                                                @keyup.enter="searchModems">
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end gap-1">
-                                        <button @click="searchModems" class="btn btn-primary flex-grow-1">
-                                            <i class="bi bi-search me-1"></i>{{ t('search.search') }}
+                                        <button @click="searchModems" class="btn btn-primary flex-grow-1" :disabled="isLoading">
+                                            <span v-if="isLoading" class="spinner-border spinner-border-sm me-1"></span>
+                                            <i v-else class="bi bi-search me-1"></i>{{ t('search.search') }}
                                         </button>
                                         <button @click="clearSearchForm" class="btn btn-outline-secondary" title="Clear form">
                                             <i class="bi bi-x-lg"></i>
@@ -227,7 +228,7 @@
                                         </div>
                                     </div>
                                     <div class="col-md-12" v-if="useTopologySearch && modems.length > 0">
-                                        <button class="btn btn-sm btn-outline-primary" @click="prepareTopologyFiberNodeScanTargets" :disabled="fnScanPreparing">
+                                        <button class="btn btn-sm btn-outline-primary" @click="prepareTopologyFiberNodeScanTargets" :disabled="fnScanPreparing || isLoading || fnScanSelectorRefreshInFlight">
                                             <span v-if="fnScanPreparing" class="spinner-border spinner-border-sm me-1"></span>
                                             <i v-else class="bi bi-diagram-3 me-1"></i>{{ fnScanPreparing ? (fnScanPreparingMessage || 'Preparing FiberNode scan…') : 'Use Search Results For FiberNode Scans (RxMER / DS Suckout / Fullband)' }}
                                         </button>
@@ -2686,19 +2687,19 @@
                                 Selected channel has <strong>0 modems</strong>. Try a different channel or fiber node.
                             </div>
                             <div class="d-flex gap-2 mt-2">
-                                <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || dsScanRunning || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
                                         class="btn btn-primary flex-fill">
                                     <span v-if="fnScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                     <i v-else class="bi bi-play-fill me-1"></i>
                                     {{ fnScanRunning ? 'Scanning…' : (fnScanFN2Name ? 'US RxMER (FN1 vs FN2)' : fnScanExtraIfindices.length ? 'US RxMER (' + (fnScanExtraIfindices.length + 1) + ' ch)' : 'US RxMER Scan') }}
                                 </button>
-                                <button type="button" @click="runDsSuckoutScan" :disabled="dsScanRunning || fnScanRunning || fbScanRunning || !fnScanCmtsIp"
+                                <button type="button" @click="runDsSuckoutScan" :disabled="dsScanRunning || fnScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
                                         class="btn btn-danger flex-fill">
                                     <span v-if="dsScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                     <i v-else class="bi bi-reception-4 me-1"></i>
                                     {{ dsScanRunning ? 'DS Scanning…' : 'DS Suckout Scan' }}
                                 </button>
-                                <button type="button" @click="runFullbandScan" :disabled="fbScanRunning || fnScanRunning || dsScanRunning || !fnScanCmtsIp"
+                                <button type="button" @click="runFullbandScan" :disabled="fbScanRunning || fnScanRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
                                         class="btn btn-warning flex-fill">
                                     <span v-if="fbScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                     <i v-else class="bi bi-broadcast me-1"></i>
