@@ -21,8 +21,6 @@ sock = None
 import os
 
 from app.core.auth_db import auth_db
-from app.core.data_store_db import data_store_db
-from app.core.data_store_worker import start_data_store_worker
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, get_messages, normalize_locale, translate
 
 def create_app():
@@ -84,10 +82,6 @@ def create_app():
     # Initialize auth storage and bootstrap admin account.
     auth_db.init_db()
     auth_db.ensure_bootstrap_admin()
-    local_poller_enabled = os.environ.get("PYPNMGUI_LOCAL_POLLER_ENGINE", "false").lower() in {"1", "true", "yes", "on"}
-    if local_poller_enabled:
-        data_store_db.init_db()
-        start_data_store_worker()
     try:
         app.logger.info(
             "Auth DB ready (backend=%s, users=%s, admins=%s)",
@@ -95,10 +89,7 @@ def create_app():
             len(auth_db.list_users()),
             auth_db.admin_count(),
         )
-        if local_poller_enabled:
-            app.logger.info("Local poller engine enabled (backend=%s)", data_store_db.backend)
-        else:
-            app.logger.info("Local poller engine disabled; GUI expects remote PyPNM poller API")
+        app.logger.info("Poller engine runs in PyPNM API — GUI is proxy-only")
     except Exception as exc:
         app.logger.error("Auth DB startup check failed: %s", exc)
     

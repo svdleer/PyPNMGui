@@ -1815,19 +1815,21 @@ def get_upstream_interfaces(mac_address):
             except Exception as e:
                 logger.debug(f"Failed to cache cm_index: {e}")
 
-        # ---- Persist discovered channel ifindices to MySQL (durable, survives Redis TTL) ----
+        # ---- Persist discovered channel ifindices to PyPNM inventory (durable, survives Redis TTL) ----
         discovered_ofdma_ifindex  = ofdma_channels[0]["ifindex"] if ofdma_channels else None
         discovered_upstream_ifindex = modem_rf_port["ifindex"] if modem_rf_port else None
         try:
-            from app.core.data_store_db import data_store_db
-            data_store_db.update_modem_channel_ifindices(
-                mac_address, cmts_ip,
-                ofdma_ifindex=discovered_ofdma_ifindex,
-                upstream_ifindex=discovered_upstream_ifindex,
+            pypnm_base = (os.environ.get("PYPNM_API_URL") or os.environ.get("PYPNM_BASE_URL") or "http://172.17.0.1:8081").rstrip("/")
+            import requests as _req
+            _req.post(
+                f"{pypnm_base}/api/admin/modem-refresh",
+                json={"mac": mac_address, "cmts": cmts_ip, "requested_by": "channel-discover"},
+                timeout=5,
+                verify=False,
             )
-            logger.debug(f"Persisted ofdma_ifindex={discovered_ofdma_ifindex} upstream_ifindex={discovered_upstream_ifindex} for {mac_address}")
+            logger.debug(f"Queued refresh for ofdma_ifindex={discovered_ofdma_ifindex} upstream_ifindex={discovered_upstream_ifindex} for {mac_address}")
         except Exception as e:
-            logger.warning(f"Failed to persist channel ifindices for {mac_address}: {e}")
+            logger.warning(f"Failed to queue refresh for {mac_address}: {e}")
 
         result = {
             "success": True,

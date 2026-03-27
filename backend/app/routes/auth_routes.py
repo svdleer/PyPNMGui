@@ -9,8 +9,6 @@ import requests
 from . import auth_bp
 from app.core.auth_db import auth_db
 from app.core.cmts_provider import CMTSProvider
-from app.core.data_store_db import data_store_db
-from app.core.data_store_worker import get_scheduler_status
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale, translate
 
 
@@ -239,12 +237,8 @@ def admin_page():
     poller_scheduler_status = {"enabled": False, "running": False, "last_tick": None}
     data_store_error = None
     try:
-        local_enabled = os.environ.get("PYPNMGUI_LOCAL_POLLER_ENGINE", "false").lower() in {"1", "true", "yes", "on"}
-        if local_enabled:
-            poller_settings = data_store_db.list_poller_settings()
-        else:
-            settings_resp = _poller_api_request("GET", "/poller-settings")
-            poller_settings = settings_resp.get("pollers") or settings_resp.get("poller_settings") or []
+        settings_resp = _poller_api_request("GET", "/poller-settings")
+        poller_settings = settings_resp.get("pollers") or settings_resp.get("poller_settings") or []
         for p in poller_settings:
             p["enabled"] = _as_bool(p.get("enabled"))
             p["collect_identity"] = _as_bool(p.get("collect_identity"))
@@ -255,11 +249,8 @@ def admin_page():
             p["heavy_window_start"] = _normalize_time_24h(p.get("heavy_window_start"))
             p["heavy_window_end"] = _normalize_time_24h(p.get("heavy_window_end"))
 
-        if local_enabled:
-            poller_jobs = data_store_db.list_jobs(limit=30)
-        else:
-            jobs_resp = _poller_api_request("GET", "/poller-jobs", params={"limit": 30})
-            poller_jobs = jobs_resp.get("jobs") or []
+        jobs_resp = _poller_api_request("GET", "/poller-jobs", params={"limit": 30})
+        poller_jobs = jobs_resp.get("jobs") or []
         for j in poller_jobs:
             j["created_at"] = _normalize_datetime_24h(j.get("created_at"))
             j["started_at"] = _normalize_datetime_24h(j.get("started_at"))
@@ -273,11 +264,8 @@ def admin_page():
         snapshot_analytics_resp = _poller_api_request("GET", "/poller-snapshots/analytics", params={"lookback_days": 14})
         snapshot_analytics = snapshot_analytics_resp.get("analytics") or {}
 
-        if local_enabled:
-            poller_scheduler_status.update(get_scheduler_status() or {})
-        else:
-            scheduler_resp = _poller_api_request("GET", "/poller-scheduler/status")
-            poller_scheduler_status.update(scheduler_resp.get("scheduler") or scheduler_resp.get("status") or {})
+        scheduler_resp = _poller_api_request("GET", "/poller-scheduler/status")
+        poller_scheduler_status.update(scheduler_resp.get("scheduler") or scheduler_resp.get("status") or {})
         poller_scheduler_status["enabled"] = _as_bool(poller_scheduler_status.get("enabled"))
         poller_scheduler_status["running"] = _as_bool(poller_scheduler_status.get("running"))
         poller_scheduler_status["last_tick"] = _normalize_datetime_24h(poller_scheduler_status.get("last_tick"))
@@ -357,20 +345,6 @@ def admin_run_poller_setting(poller_id):
 @admin_required
 def admin_delete_poller_setting(poller_id):
     try:
-        local_enabled = os.environ.get("PYPNMGUI_LOCAL_POLLER_ENGINE", "false").lower() in {"1", "true", "yes", "on"}
-        if local_enabled:
-            res = data_store_db.delete_poller_setting(int(poller_id))
-            if res.get("deleted"):
-                active = int(res.get("active_jobs") or 0)
-                if active > 0:
-                    flash(f"Deleted poller setting {poller_id} (cancelled {active} active queued/running job(s))", "success")
-                else:
-                    flash(f"Deleted poller setting {poller_id}", "success")
-            else:
-                flash(f"Poller {poller_id} not found", "warning")
-            return redirect(_prefixed(url_for("auth.admin_page")))
-
-        # Remote poller API fallback.
         _poller_api_request("DELETE", f"/poller-settings/{int(poller_id)}")
         flash(f"Deleted poller setting {poller_id}", "success")
     except Exception as exc:
@@ -430,12 +404,8 @@ def admin_clear_poller_scheduler_decisions():
 @admin_required
 def admin_clear_poller_jobs():
     try:
-        local_enabled = os.environ.get("PYPNMGUI_LOCAL_POLLER_ENGINE", "false").lower() in {"1", "true", "yes", "on"}
-        if local_enabled:
-            deleted = data_store_db.clear_finished_jobs()
-        else:
-            clear_resp = _poller_api_request("POST", "/poller-jobs/clear", payload={})
-            deleted = clear_resp.get("deleted") or 0
+        clear_resp = _poller_api_request("POST", "/poller-jobs/clear", payload={})
+        deleted = clear_resp.get("deleted") or 0
         flash(f"Cleared {deleted} finished poller job(s)", "success")
     except Exception as exc:
         flash(f"Clear jobs failed: {exc}", "danger")
@@ -446,12 +416,8 @@ def admin_clear_poller_jobs():
 @admin_required
 def admin_clear_all_poller_jobs():
     try:
-        local_enabled = os.environ.get("PYPNMGUI_LOCAL_POLLER_ENGINE", "false").lower() in {"1", "true", "yes", "on"}
-        if local_enabled:
-            deleted = data_store_db.clear_inactive_jobs()
-        else:
-            clear_resp = _poller_api_request("POST", "/poller-jobs/clear-all", payload={})
-            deleted = clear_resp.get("deleted") or 0
+        clear_resp = _poller_api_request("POST", "/poller-jobs/clear-all", payload={})
+        deleted = clear_resp.get("deleted") or 0
         flash(f"Cleared all {deleted} poller job(s) (running/queued kept)", "success")
     except Exception as exc:
         flash(f"Clear all jobs failed: {exc}", "danger")
@@ -461,16 +427,7 @@ def admin_clear_all_poller_jobs():
 @auth_bp.route("/admin/poller-jobs/<int:job_id>/kill", methods=["POST"])
 @admin_required
 def admin_kill_poller_job(job_id):
-    # Prefer local cancel when GUI local poller engine is enabled.
-    # Keep remote API fallback for legacy/remote poller setups.
     try:
-        local_enabled = os.environ.get("PYPNMGUI_LOCAL_POLLER_ENGINE", "false").lower() in {"1", "true", "yes", "on"}
-        if local_enabled:
-            local_killed = data_store_db.cancel_poller_job(int(job_id), reason="Killed by admin UI")
-            if local_killed:
-                flash(f"Killed poller job {job_id}", "success")
-                return redirect(_prefixed(url_for("auth.admin_page")))
-
         kill_resp = _poller_api_request("POST", f"/poller-jobs/{int(job_id)}/kill", payload={})
         killed = int(kill_resp.get("killed") or 0)
         state = kill_resp.get("state") or "unknown"

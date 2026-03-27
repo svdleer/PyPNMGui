@@ -1,9 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Data / poller admin routes — pure proxy to PyPNM API.
+
+Every request is forwarded to PyPNM's ``/api/admin/*`` endpoints.
+No local database access. No business logic.
+"""
+
 import os
 
 from flask import jsonify, request, session
 import requests
 
-from app.core.data_store_db import data_store_db
 from . import api_bp
 
 
@@ -21,11 +27,14 @@ def _poller_api_base() -> str:
     return f"{pypnm_base}/api/admin"
 
 
-def _poller_proxy(method: str, path: str, *, payload=None, params=None):
-    timeout = int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "20"))
+def _proxy(method: str, path: str, *, payload=None, params=None):
+    timeout = int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "30"))
     url = f"{_poller_api_base()}{path}"
     resp = requests.request(method=method, url=url, json=payload, params=params, timeout=timeout, verify=False)
     return jsonify(resp.json() if resp.content else {"status": "success"}), resp.status_code
+
+
+# ── Data-store status ────────────────────────────────────────
 
 
 @api_bp.route('/admin/data-store/status', methods=['GET'])
@@ -33,10 +42,10 @@ def data_store_status():
     gate = _require_admin()
     if gate:
         return gate
-    return jsonify({
-        "status": "success",
-        "backend": "remote-pypnm",
-    })
+    return jsonify({"status": "success", "backend": "remote-pypnm"})
+
+
+# ── Poller settings ──────────────────────────────────────────
 
 
 @api_bp.route('/admin/poller-settings', methods=['GET'])
@@ -44,7 +53,7 @@ def list_poller_settings():
     gate = _require_admin()
     if gate:
         return gate
-    return _poller_proxy("GET", "/poller-settings")
+    return _proxy("GET", "/poller-settings")
 
 
 @api_bp.route('/admin/poller-settings', methods=['POST'])
@@ -52,8 +61,7 @@ def upsert_poller_setting():
     gate = _require_admin()
     if gate:
         return gate
-    payload = request.get_json(silent=True) or {}
-    return _poller_proxy("POST", "/poller-settings", payload=payload)
+    return _proxy("POST", "/poller-settings", payload=request.get_json(silent=True) or {})
 
 
 @api_bp.route('/admin/poller-settings/<int:poller_id>/run', methods=['POST'])
@@ -61,8 +69,10 @@ def run_poller_setting(poller_id):
     gate = _require_admin()
     if gate:
         return gate
-    payload = request.get_json(silent=True) or {}
-    return _poller_proxy("POST", f"/poller-settings/{int(poller_id)}/run", payload=payload)
+    return _proxy("POST", f"/poller-settings/{int(poller_id)}/run", payload=request.get_json(silent=True) or {})
+
+
+# ── Poller jobs ──────────────────────────────────────────────
 
 
 @api_bp.route('/admin/data-jobs', methods=['GET'])
@@ -70,10 +80,7 @@ def list_data_jobs():
     gate = _require_admin()
     if gate:
         return gate
-    status = request.args.get('status')
-    limit = request.args.get('limit', 100)
-    params = {"status": status, "limit": limit}
-    return _poller_proxy("GET", "/poller-jobs", params=params)
+    return _proxy("GET", "/poller-jobs", params={"limit": request.args.get("limit", 100)})
 
 
 @api_bp.route('/admin/queue-head', methods=['GET'])
@@ -81,8 +88,7 @@ def queue_head():
     gate = _require_admin()
     if gate:
         return gate
-    snapshot = data_store_db.get_queue_heads()
-    return jsonify({"status": "success", "queue": snapshot})
+    return _proxy("GET", "/queue-head")
 
 
 @api_bp.route('/admin/poller-jobs/<int:job_id>/cancel', methods=['POST'])
@@ -90,11 +96,10 @@ def cancel_poller_job(job_id):
     gate = _require_admin()
     if gate:
         return gate
-    reason = (request.get_json(silent=True) or {}).get('reason') or 'Cancelled by admin'
-    ok = data_store_db.cancel_poller_job(job_id, reason=reason)
-    if not ok:
-        return jsonify({"status": "error", "message": "Job not cancellable (not found or already finished)"}), 404
-    return jsonify({"status": "success", "job_id": int(job_id)})
+    return _proxy("POST", f"/poller-jobs/{int(job_id)}/kill", payload=request.get_json(silent=True) or {})
+
+
+# ── Modem refresh (on-demand single-modem enrichment) ────────
 
 
 @api_bp.route('/admin/modem-refresh/<int:request_id>/cancel', methods=['POST'])
@@ -102,11 +107,7 @@ def cancel_modem_refresh(request_id):
     gate = _require_admin()
     if gate:
         return gate
-    reason = (request.get_json(silent=True) or {}).get('reason') or 'Cancelled by admin'
-    ok = data_store_db.cancel_refresh_request(request_id, reason=reason)
-    if not ok:
-        return jsonify({"status": "error", "message": "Refresh request not cancellable (not found or already finished)"}), 404
-    return jsonify({"status": "success", "request_id": int(request_id)})
+    return _proxy("POST", f"/modem-refresh/{int(request_id)}/cancel")
 
 
 @api_bp.route('/modems/<mac>/refresh', methods=['POST'])
@@ -115,15 +116,46 @@ def request_modem_refresh(mac):
     cmts = payload.get('cmts')
     if not cmts:
         return jsonify({"status": "error", "message": "cmts is required"}), 400
-
     requested_by = session.get("username") or session.get("user") or "user"
-    req_id = data_store_db.enqueue_modem_refresh(mac=mac, cmts=cmts, requested_by=requested_by)
-    return jsonify({"status": "success", "request_id": req_id})
+    return _proxy("POST", "/modem-refresh", payload={"mac": mac, "cmts": cmts, "requested_by": requested_by})
 
 
 @api_bp.route('/modems/<mac>/refresh/status', methods=['GET'])
 def modem_refresh_status(mac):
-    req = data_store_db.get_latest_refresh_request(mac)
-    if not req:
-        return jsonify({"status": "success", "request": None})
-    return jsonify({"status": "success", "request": req})
+    return _proxy("GET", f"/modem-refresh/{mac}/status")
+
+
+# ── Enrichment progress ─────────────────────────────────────
+
+
+@api_bp.route('/admin/enrichment-progress', methods=['GET'])
+def enrichment_progress():
+    cmts = request.args.get("cmts")
+    return _proxy("GET", "/inventory/enrichment-progress", params={"cmts": cmts} if cmts else None)
+
+
+# ── Scheduler control ────────────────────────────────────────
+
+
+@api_bp.route('/admin/poller-scheduler/status', methods=['GET'])
+def poller_scheduler_status():
+    gate = _require_admin()
+    if gate:
+        return gate
+    return _proxy("GET", "/poller-scheduler/status")
+
+
+@api_bp.route('/admin/poller-scheduler/toggle', methods=['POST'])
+def toggle_poller_scheduler():
+    gate = _require_admin()
+    if gate:
+        return gate
+    return _proxy("POST", "/poller-scheduler/toggle", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/poller-scheduler/run-once', methods=['POST'])
+def run_poller_scheduler_once():
+    gate = _require_admin()
+    if gate:
+        return gate
+    return _proxy("POST", "/poller-scheduler/run-once")

@@ -12,7 +12,6 @@ from flask import jsonify, request, current_app
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
 from app.core.pypnm_client import PyPNMClient
-from app.core.data_store_db import data_store_db
 from app.core.topology_db import topology_db
 from app.core.modem_filters import filter_ignored_modems
 
@@ -39,7 +38,6 @@ def _run_modem_job(job_id: str, cmts_ip: str, cmts_name: str,
             for m in modems:
                 m['cmts_ip'] = cmts_ip
                 m['cmts_community'] = community
-            _persist_enriched_inventory_rows(modems, source_poller="api-job")
             with _modem_jobs_lock:
                 _modem_jobs[job_id].update({
                     'status': 'done',
@@ -191,26 +189,6 @@ def _modem_missing_enrichment(modem: dict) -> bool:
     return vendor_missing or fw_missing
 
 
-def _persist_enriched_inventory_rows(modems: list[dict], source_poller: str = "api-live") -> None:
-    """Best-effort persistence of enriched modem rows into modem_inventory_current."""
-    if not modems:
-        return
-    if not _modems_are_enriched(modems):
-        return
-    # DOCSIS 3.0 modems do not have OFDM/OFDMA — set explicitly to false.
-    for m in modems:
-        dv = str(m.get("docsis_version") or "").strip()
-        if "3.0" in dv and "3.1" not in dv:
-            if m.get("ofdm_enabled") is None:
-                m["ofdm_enabled"] = False
-            if m.get("ofdma_enabled") is None:
-                m["ofdma_enabled"] = False
-    try:
-        data_store_db.upsert_inventory_rows(modems, source_poller=source_poller)
-    except Exception as exc:
-        logger.warning(f"Failed to persist enriched inventory rows: {exc}")
-
-
 def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
     """Best-effort lookup of topology fields keyed by bare uppercase MAC."""
     if not mac_addresses:
@@ -263,7 +241,7 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
 
 
 def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> dict[str, dict]:
-    """Best-effort bulk lookup of fiber_node/cable_mac from modem_inventory_current."""
+    """Bulk lookup of fiber_node/cable_mac from PyPNM inventory API."""
     if not mac_addresses:
         return {}
 
@@ -275,66 +253,24 @@ def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> d
         return {}
 
     out: dict[str, dict] = {}
-    conn = None
     try:
-        conn = data_store_db._connect()
-        cur = conn.cursor()
-        marker = "%s" if data_store_db.backend == "mysql" else "?"
-        # When CMTS name is known, fetch all inventory rows for that CMTS in one query
-        # and filter in Python.  Much faster than IN-clause on thousands of MACs.
-        if cmts_name:
-            sql = (
-                "SELECT UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) AS mac_norm, "
-                "fiber_node, cable_mac, ofdm_enabled, ofdma_enabled, docsis_version, vendor "
-                "FROM modem_inventory_current "
-                f"WHERE LOWER(COALESCE(cmts,'')) = LOWER({marker}) "
-                "AND fiber_node IS NOT NULL AND fiber_node != ''"
-            )
-            cur.execute(sql, (cmts_name,))
-            for row in (cur.fetchall() or []):
-                r = dict(row) if hasattr(row, "keys") else row
-                mac_norm = str(r.get("mac_norm") or "").strip().upper()
-                if mac_norm and mac_norm in wanted:
+        client = PyPNMClient()
+        inv_resp = client.get_inventory_modems(cmts=cmts_name or None, limit=50000)
+        for m in (inv_resp.get('modems') or []):
+            mac_norm = _bare(m.get('mac_address') or m.get('mac') or '')
+            if mac_norm and mac_norm in wanted:
+                fn = m.get('fiber_node') or ''
+                if fn:
                     out[mac_norm] = {
-                        "fiber_node": r.get("fiber_node") or "",
-                        "cable_mac": r.get("cable_mac") or "",
-                        "ofdm_enabled": r.get("ofdm_enabled"),
-                        "ofdma_enabled": r.get("ofdma_enabled"),
-                        "docsis_version": r.get("docsis_version") or "",
-                        "vendor": r.get("vendor") or "",
+                        'fiber_node': fn,
+                        'cable_mac': m.get('cable_mac') or '',
+                        'ofdm_enabled': m.get('ofdm_enabled'),
+                        'ofdma_enabled': m.get('ofdma_enabled'),
+                        'docsis_version': m.get('docsis_version') or '',
+                        'vendor': m.get('vendor') or '',
                     }
-        else:
-            for i in range(0, len(wanted), 500):
-                chunk = sorted(wanted)[i:i + 500]
-                placeholders = ",".join([marker] * len(chunk))
-                sql = (
-                    "SELECT UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) AS mac_norm, "
-                    "fiber_node, cable_mac "
-                    "FROM modem_inventory_current "
-                    f"WHERE UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) IN ({placeholders}) "
-                    "AND fiber_node IS NOT NULL AND fiber_node != ''"
-                )
-                cur.execute(sql, tuple(chunk))
-                for row in (cur.fetchall() or []):
-                    r = dict(row) if hasattr(row, "keys") else row
-                    mac_norm = str(r.get("mac_norm") or "").strip().upper()
-                    if mac_norm:
-                        out[mac_norm] = {
-                            "fiber_node": r.get("fiber_node") or "",
-                            "cable_mac": r.get("cable_mac") or "",
-                            "ofdm_enabled": r.get("ofdm_enabled"),
-                            "ofdma_enabled": r.get("ofdma_enabled"),
-                            "docsis_version": r.get("docsis_version") or "",
-                            "vendor": r.get("vendor") or "",
-                        }
     except Exception as exc:
-        logger.warning(f"Inventory MAC lookup skipped: {exc}")
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+        logger.warning(f"Inventory MAC lookup via PyPNM API skipped: {exc}")
     return out
 
 
@@ -888,9 +824,6 @@ def get_cmts_modems(cmts_name):
 
             _augment_modems_with_topology_fields(modems, cmts_name=cmts_name)
 
-            # Persist enriched rows to DB so modem inventory survives Redis TTL.
-            _persist_enriched_inventory_rows(modems, source_poller="api-live")
-
             is_enriched = result.get('enriched', False)
             is_enriching = result.get('enriching', False)
 
@@ -1082,21 +1015,25 @@ def enqueue_delta_enrichment(cmts_name):
 
     missing = [m for m in modems if _modem_missing_enrichment(m)]
     enqueued = []
-    already_queued = 0
 
+    pypnm_base = (os.environ.get("PYPNM_API_URL") or os.environ.get("PYPNM_BASE_URL") or "http://172.17.0.1:8081").rstrip("/")
     for modem in missing:
         if len(enqueued) >= max_batch:
             break
         mac = str(modem.get('mac_address') or '').strip()
         if not mac:
             continue
-        latest = data_store_db.get_latest_refresh_request(mac)
-        latest_status = str((latest or {}).get('status') or '').strip().lower()
-        if latest_status in ('queued', 'running'):
-            already_queued += 1
-            continue
-        data_store_db.enqueue_modem_refresh(mac=mac, cmts=cmts_name, requested_by='delta-enrich')
-        enqueued.append(mac)
+        try:
+            import requests as _req
+            _req.post(
+                f"{pypnm_base}/api/admin/modem-refresh",
+                json={"mac": mac, "cmts": cmts_name, "requested_by": "delta-enrich"},
+                timeout=5,
+                verify=False,
+            )
+            enqueued.append(mac)
+        except Exception:
+            pass
 
     return jsonify({
         "status": "success",
@@ -1104,7 +1041,6 @@ def enqueue_delta_enrichment(cmts_name):
         "total_modems": len(modems),
         "missing_count": len(missing),
         "enqueued": len(enqueued),
-        "already_queued": already_queued,
         "max_batch": max_batch,
         "sample_enqueued_macs": enqueued[:20],
     })
