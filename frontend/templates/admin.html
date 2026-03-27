@@ -532,7 +532,7 @@
                                         <thead><tr><th>ID</th><th>Poller</th><th>Status</th><th>Rows</th><th>Att/Suc/Fail</th><th>CMTS</th><th>Duration</th><th>Trigger</th><th>Created</th><th>Log</th><th>Kill</th><th>Error</th></tr></thead>
                                         <tbody id="jobs-body">
                                             {% for j in poller_jobs %}
-                                            <tr class="job-row" data-job-id="[[ j.id ]]">
+                                            <tr class="job-row" data-job-id="[[ j.id ]]" data-job-poller-id="[[ j.poller_id ]]" data-job-status="[[ j.status or '' ]]" data-job-created="[[ j.created_at or '' ]]" data-job-log="[[ (j.error_text or '')|e ]]">
                                                 <td>[[ j.id ]]</td>
                                                 <td>[[ j.poller_id ]]</td>
                                                 <td>
@@ -1323,13 +1323,34 @@
     const jobLogText = byId('job-log-text');
     const jobLogModalEl = byId('jobLogModal');
     const jobLogModal = (window.bootstrap && jobLogModalEl) ? new bootstrap.Modal(jobLogModalEl) : null;
+
+    const collectRecentJobSnippets = (maxItems = 5) => {
+        return Array.from(document.querySelectorAll('#jobs-body .job-row'))
+            .map((row) => ({
+                id: row.dataset.jobId || '?',
+                pollerId: row.dataset.jobPollerId || '?',
+                status: (row.dataset.jobStatus || 'unknown').trim(),
+                createdAt: (row.dataset.jobCreated || '—').trim(),
+                log: (row.dataset.jobLog || '').trim(),
+            }))
+            .filter((item) => !!item.log)
+            .slice(0, maxItems);
+    };
+
+    const formatRecentJobSnippets = (items) => {
+        if (!items.length) return 'No log snippets available.';
+        return items.map((item) => {
+            return `[${item.createdAt}] Job ${item.id} (poller ${item.pollerId}) status=${item.status}\n${item.log}`;
+        }).join('\n\n');
+    };
+
     document.querySelectorAll('.job-show-log').forEach((btn) => {
         btn.addEventListener('click', () => {
             const jobId = btn.dataset.jobId || '?';
             const status = btn.dataset.jobStatus || 'unknown';
-            const text = (btn.dataset.jobLog || '').trim();
-            if (jobLogMeta) jobLogMeta.textContent = `Job ${jobId} • status: ${status}`;
-            if (jobLogText) jobLogText.textContent = text || 'No log snippet available.';
+            const snippets = collectRecentJobSnippets(5);
+            if (jobLogMeta) jobLogMeta.textContent = `Job ${jobId} • status: ${status} • showing last ${snippets.length || 0} snippets`;
+            if (jobLogText) jobLogText.textContent = formatRecentJobSnippets(snippets);
             if (jobLogModal) jobLogModal.show();
         });
     });
