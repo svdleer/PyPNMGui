@@ -212,7 +212,8 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
             placeholders = ",".join([marker] * len(chunk))
             sql = (
                 "SELECT UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) AS mac_norm, "
-                "MIN(linked_node_id) AS linked_node_id, MIN(lat) AS lat, MIN(lon) AS lon "
+                "MIN(linked_node_id) AS linked_node_id, MIN(lat) AS lat, MIN(lon) AS lon, "
+                "MIN(fibernode) AS fibernode, MIN(customer_id) AS customer_id, MIN(address) AS address "
                 "FROM topology_modems "
                 f"WHERE UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) IN ({placeholders}) "
                 "GROUP BY UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-',''))"
@@ -228,6 +229,9 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
                     "linked_node_id": r.get("linked_node_id") or "",
                     "lat": r.get("lat"),
                     "lon": r.get("lon"),
+                    "fibernode": r.get("fibernode") or "",
+                    "customer_id": r.get("customer_id") or "",
+                    "address": r.get("address") or "",
                 }
     except Exception as exc:
         logger.warning(f"Topology MAC lookup skipped: {exc}")
@@ -305,6 +309,12 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
                 m["lat"] = t.get("lat")
             if (m.get("lon") is None or m.get("lon") == "") and t.get("lon") is not None:
                 m["lon"] = t.get("lon")
+            if not m.get("fiber_node") and t.get("fibernode"):
+                m["fiber_node"] = t["fibernode"]
+            if not m.get("customer_id") and t.get("customer_id"):
+                m["customer_id"] = t["customer_id"]
+            if not m.get("address") and t.get("address"):
+                m["address"] = t["address"]
         iv = inv.get(bare)
         if iv:
             if not m.get("fiber_node") and iv.get("fiber_node"):
@@ -376,6 +386,7 @@ def get_modems():
                 limit=10000,
             )
             modems = filter_ignored_modems(modems_resp.get('modems') or [])
+            _augment_modems_with_topology_fields(modems)
             return jsonify({
                 "status": "success",
                 "modems": modems,
@@ -423,6 +434,7 @@ def get_modems():
             db_modems = filter_ignored_modems(db_resp.get('modems') or [])
             if db_modems:
                 _backfill_redis_from_inventory(db_modems, requested_limit=10000)
+                _augment_modems_with_topology_fields(db_modems)
                 return jsonify({
                     "status": "success",
                     "modems": db_modems,
@@ -470,6 +482,9 @@ def get_modems():
 
         # Stable ordering for UI
         modems.sort(key=lambda m: (str(m.get('cmts', '')), str(m.get('mac_address', ''))))
+
+        # Enrich inventory results with topology fields (fibernode, customer_id, lat/lon)
+        _augment_modems_with_topology_fields(modems)
 
         return jsonify({
             "status": "success",

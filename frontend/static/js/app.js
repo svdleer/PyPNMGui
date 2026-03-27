@@ -1795,10 +1795,11 @@ createApp({
             this.searchPerformed = true;
             
             try {
-                if (this.useTopologySearch) {
-                    if (!['fibernode', 'postal_house', 'customer_id'].includes(this.searchType)) {
-                        this.searchType = 'fibernode';
-                    }
+                // Topology-only search types always go through topology endpoint
+                const topologyOnlyTypes = ['fibernode', 'postal_house', 'customer_id'];
+                const isTopologyOnlySearch = this.useTopologySearch && topologyOnlyTypes.includes(this.searchType);
+
+                if (isTopologyOnlySearch) {
                     if (this.searchType === 'postal_house' && (!this.searchValue || !this.searchHouseNumber)) {
                         this.showError('Search failed', 'PostalCode and House Number are both required');
                         return;
@@ -1855,6 +1856,8 @@ createApp({
                     return;
                 }
 
+                // MAC / IP / name searches always hit inventory first (Redis/MySQL = freshest cached data)
+                // When topology toggle is on, we also enrich with topology fields afterwards
                 let url = `${API_BASE}/modems?`;
                 
                 if (this.searchValue) {
