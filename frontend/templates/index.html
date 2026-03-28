@@ -3096,24 +3096,26 @@
 
         </div>
 
-        <!-- US RxMER Fiber Node Scan progress (full-width, same level as DS scan cards) -->
-        <div v-if="fnScanRunning" class="row mt-3">
-            <div class="col-12">
-                <div class="card border-primary p-3">
+        <!-- US RxMER Fiber Node Scan progress — fixed overlay at top of viewport -->
+        <div v-if="fnScanRunning" class="position-fixed start-50 translate-middle-x shadow-lg"
+             style="top: 12px; z-index: 1080; width: 520px; max-width: 92vw;">
+            <div class="card border-primary">
+                <div class="card-body py-2 px-3">
                     <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="spinner-border spinner-border-sm text-primary"></div>
-                        <strong>US RxMER Fiber Node Scan…</strong>
-                        <span v-if="fnScanProgress?.modem_total" class="text-muted small ms-auto">
-                            Modem {{ fnScanProgress.modem_idx }} of {{ fnScanProgress.modem_total }}
+                        <div class="spinner-border spinner-border-sm text-primary" style="width: 1rem; height: 1rem;"></div>
+                        <strong class="text-truncate">US RxMER Fiber Node Scan</strong>
+                        <span v-if="fnScanProgress?.modem_total" class="text-muted small ms-auto text-nowrap">
+                            {{ fnScanProgress.modem_idx }}/{{ fnScanProgress.modem_total }}
                         </span>
                         <button type="button"
-                                class="btn btn-sm btn-outline-danger ms-2"
+                                class="btn btn-sm btn-outline-danger ms-2 py-0 px-2"
+                                style="font-size: 0.78rem;"
                                 :disabled="fnScanAbortRequested"
                                 @click="abortFnScan">
-                            <i class="bi bi-stop-circle me-1"></i>{{ fnScanAbortRequested ? 'Aborting...' : 'Abort Scan' }}
+                            <i class="bi bi-stop-circle me-1"></i>{{ fnScanAbortRequested ? 'Aborting…' : 'Abort' }}
                         </button>
                     </div>
-                    <div class="progress mb-2" style="height:18px;">
+                    <div class="progress mb-2" style="height: 14px;">
                         <div class="progress-bar progress-bar-striped progress-bar-animated"
                              role="progressbar"
                              :style="{ width: (fnScanProgress?.pct || 0) + '%' }"
@@ -3122,14 +3124,14 @@
                             {{ (fnScanProgress?.pct || 0).toFixed(0) }}%
                         </div>
                     </div>
-                    <div v-if="fnScanProgress" class="small text-muted d-flex flex-wrap gap-3">
+                    <div v-if="fnScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
                         <span v-if="fnScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fnScanProgress.modem }}</span>
                         <span v-if="fnScanProgress.channel"><i class="bi bi-arrow-up-circle me-1"></i>ch {{ fnScanProgress.channel }}</span>
                         <span v-if="fnScanProgress.action"><i class="bi bi-activity me-1"></i>{{ fnScanProgress.action }}</span>
-                        <span v-if="fnScanProgress.total"><i class="bi bi-check2-all me-1"></i>{{ fnScanProgress.step }}/{{ fnScanProgress.total }} captures</span>
+                        <span v-if="fnScanProgress.total"><i class="bi bi-check2-all me-1"></i>{{ fnScanProgress.step }}/{{ fnScanProgress.total }}</span>
                         <span v-if="fnScanEtaText"><i class="bi bi-hourglass-split me-1"></i>{{ fnScanEtaText }}</span>
                     </div>
-                    <div v-else class="small text-muted">Starting scan, please wait…</div>
+                    <div v-else style="font-size: 0.78rem; color: #6c757d;">Starting scan, please wait…</div>
                 </div>
             </div>
         </div>
