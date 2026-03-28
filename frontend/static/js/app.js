@@ -224,6 +224,12 @@ createApp({
             _enrichBatch1Refreshed: false,  // one-time full refresh after first ~200 enriched
             _metadataRefreshTriggeredByCmts: {},
             channelStatsLoading: false,
+            channelStatsProgress: {
+                pct: 0,
+                eta: '',
+                steps: [],
+            },
+            _csProgressTimer: null,
             loadProgress: 0,       // 0-100 fake progress for initial CMTS walk screen
             modemPage: 1,
             modemsPerPage: 200,
@@ -3220,6 +3226,7 @@ createApp({
                 this._enrichPollTimer = null;
             }
             this.channelStatsLoading = true;
+            this._startChannelStatsProgress();
             
             try {
                 // Use PyPNM API for channel stats - correct URL
@@ -3401,6 +3408,7 @@ createApp({
                 console.warn('Failed to load channel stats:', error);
                 // Don't show error to user, just skip channel stats
             } finally {
+                this._stopChannelStatsProgress();
                 this.channelStatsLoading = false;
                 if (resumeEnrichPolling && this.isEnriching && !this._enrichPollTimer) {
                     this._scheduleEnrichPoll();
@@ -3408,6 +3416,86 @@ createApp({
             }
         },
         
+        _startChannelStatsProgress() {
+            const hasCmIndex = !!(this.selectedModem?.cm_index);
+            const hasCmts = !!(this.selectedModem?.cmts_ip);
+            // Phase definitions: id, label, duration (seconds), cumulative start
+            const phases = [
+                { id: 'connect', label: 'Connecting to modem...', dur: 1 },
+                { id: 'walk',    label: 'Walking modem channels (13 OIDs)...', dur: hasCmIndex ? 16 : 16 },
+                { id: 'cmts',    label: 'CMTS enrichment (RxMER, profiles)...', dur: hasCmts ? (hasCmIndex ? 2 : 5) : 0 },
+                { id: 'fiber',   label: 'Resolving fiber node...', dur: hasCmts ? 1 : 0 },
+                { id: 'parse',   label: 'Parsing results...', dur: 1 },
+            ].filter(p => p.dur > 0);
+
+            const totalDur = phases.reduce((s, p) => s + p.dur, 0);
+            let cumulative = 0;
+            for (const p of phases) {
+                p.startPct = (cumulative / totalDur) * 100;
+                cumulative += p.dur;
+                p.endPct = (cumulative / totalDur) * 100;
+            }
+
+            this.channelStatsProgress = {
+                pct: 0,
+                eta: `~${totalDur}s remaining`,
+                steps: phases.map(p => ({ id: p.id, label: p.label, status: 'pending' })),
+            };
+
+            const startTime = Date.now();
+            this._csProgressTimer = setInterval(() => {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const remaining = Math.max(0, Math.round(totalDur - elapsed));
+
+                // Find current phase
+                let accum = 0;
+                let activeIdx = 0;
+                for (let i = 0; i < phases.length; i++) {
+                    accum += phases[i].dur;
+                    if (elapsed < accum) { activeIdx = i; break; }
+                    if (i === phases.length - 1) activeIdx = i;
+                }
+
+                // Update step statuses
+                const steps = phases.map((p, i) => ({
+                    id: p.id,
+                    label: i < activeIdx ? p.label.replace('...', '') : p.label,
+                    status: i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'pending',
+                }));
+
+                // Smooth progress within current phase
+                let phaseProg = 0;
+                const phaseStart = phases.slice(0, activeIdx).reduce((s, p) => s + p.dur, 0);
+                if (phases[activeIdx]) {
+                    phaseProg = Math.min(1, (elapsed - phaseStart) / phases[activeIdx].dur);
+                }
+                const pct = Math.min(95, phases[activeIdx]
+                    ? phases[activeIdx].startPct + phaseProg * (phases[activeIdx].endPct - phases[activeIdx].startPct)
+                    : 95);
+
+                this.channelStatsProgress = {
+                    pct: Math.round(pct),
+                    eta: remaining > 0 ? `~${remaining}s remaining` : 'Finishing up...',
+                    steps,
+                };
+            }, 300);
+        },
+
+        _stopChannelStatsProgress() {
+            if (this._csProgressTimer) {
+                clearInterval(this._csProgressTimer);
+                this._csProgressTimer = null;
+            }
+            // Flash 100% briefly
+            this.channelStatsProgress = {
+                pct: 100,
+                eta: 'Done',
+                steps: (this.channelStatsProgress.steps || []).map(s => ({
+                    ...s, status: 'done', label: s.label.replace('...', ''),
+                })),
+            };
+        },
+
         async runRxmerTest() {
             return this.runPnmMeasurement('rxmer');
         },

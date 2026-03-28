@@ -671,13 +671,34 @@
                     <div class="tab-pane fade show active" id="overview" role="tabpanel">
                         <!-- Loading Overlay -->
                         <div v-if="loadingSystemInfo" class="position-relative">
-                            <div class="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style="background: rgba(255,255,255,0.9); z-index: 1000; min-height: 300px;">
-                                <div class="text-center">
-                                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <div class="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style="background: rgba(255,255,255,0.95); z-index: 1000; min-height: 300px;">
+                                <div class="text-center" style="min-width: 320px; max-width: 400px;">
+                                    <div class="spinner-border text-primary mb-3" role="status" style="width: 2.5rem; height: 2.5rem;">
                                         <span class="visually-hidden">Loading...</span>
                                     </div>
-                                    <p class="mt-3 text-primary fw-bold">Loading channel information...</p>
-                                    <small class="text-muted">This may take 15-20 seconds</small>
+                                    <p class="text-primary fw-bold mb-3">Loading channel information</p>
+                                    <!-- Progress bar -->
+                                    <div class="progress mb-3" style="height: 6px;">
+                                        <div class="progress-bar bg-primary" role="progressbar"
+                                             :style="{ width: channelStatsProgress.pct + '%' }"
+                                             :aria-valuenow="channelStatsProgress.pct" aria-valuemin="0" aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                    <!-- Phase steps -->
+                                    <div class="text-start px-2">
+                                        <div v-for="step in channelStatsProgress.steps" :key="step.id"
+                                             class="d-flex align-items-center mb-1" style="font-size: 0.82rem;">
+                                            <i v-if="step.status === 'done'" class="bi bi-check-circle-fill text-success me-2"></i>
+                                            <span v-else-if="step.status === 'active'" class="spinner-border spinner-border-sm text-primary me-2" style="width: 0.85rem; height: 0.85rem;"></span>
+                                            <i v-else class="bi bi-circle text-muted me-2" style="opacity: 0.4;"></i>
+                                            <span :class="{ 'text-muted': step.status === 'pending', 'fw-semibold': step.status === 'active' }"
+                                                  v-text="step.label"></span>
+                                        </div>
+                                    </div>
+                                    <!-- ETA -->
+                                    <div class="mt-3">
+                                        <small class="text-muted" v-text="channelStatsProgress.eta"></small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
