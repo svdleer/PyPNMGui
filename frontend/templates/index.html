@@ -3136,24 +3136,22 @@
             </div>
         </div>
 
-        <!-- DS OFDM Suckout Scan Results (triggered from scanner config above) -->
-        <div v-if="dsScanRunning || dsScanResult" class="row mt-3">
-            <div class="col-12">
-                <!-- Progress bar while scan is running -->
-                <div v-if="dsScanRunning" class="card border-danger mb-3 p-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="text-danger fw-semibold">
-                            <span class="spinner-border spinner-border-sm me-2"></span>Running DS Suckout Scan…
-                        </span>
-                        <span v-if="dsScanProgress?.total" class="text-muted small">
+        <!-- DS Suckout Scan — fixed overlay progress at top of viewport -->
+        <div v-if="dsScanRunning" class="position-fixed start-50 translate-middle-x shadow-lg"
+             style="top: 12px; z-index: 1080; width: 520px; max-width: 92vw;">
+            <div class="card border-danger">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <div class="spinner-border spinner-border-sm text-danger" style="width: 1rem; height: 1rem;"></div>
+                        <strong class="text-truncate">DS Suckout Scan</strong>
+                        <span v-if="dsScanProgress?.total" class="text-muted small ms-auto text-nowrap">
                             <span v-if="dsScanProgress.completed < dsScanProgress.total">
-                                {{ dsScanProgress.started || 0 }} dispatched &middot;
-                                {{ dsScanProgress.completed || 0 }} done / {{ dsScanProgress.total }}
+                                {{ dsScanProgress.completed || 0 }}/{{ dsScanProgress.total }}
                             </span>
-                            <span v-else>{{ dsScanProgress.total }} / {{ dsScanProgress.total }} done</span>
+                            <span v-else>{{ dsScanProgress.total }}/{{ dsScanProgress.total }} done</span>
                         </span>
                     </div>
-                    <div class="progress" style="height:22px;">
+                    <div class="progress mb-2" style="height: 14px;">
                         <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
                              role="progressbar"
                              :style="{ width: (dsScanProgress?.pct || 0) + '%' }"
@@ -3162,12 +3160,17 @@
                             {{ (dsScanProgress?.pct || 0).toFixed(0) }}%
                         </div>
                     </div>
-                    <div v-if="dsScanProgress?.modem" class="small text-muted mt-1">
-                        <i class="bi bi-router me-1"></i>{{ dsScanProgress.modem }}
-                        <span v-if="dsScanProgress?.action" class="ms-2 text-secondary">· {{ dsScanProgress.action }}</span>
+                    <div v-if="dsScanProgress?.modem" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
+                        <span><i class="bi bi-router me-1"></i>{{ dsScanProgress.modem }}</span>
+                        <span v-if="dsScanProgress?.action">· {{ dsScanProgress.action }}</span>
                     </div>
                 </div>
+            </div>
+        </div>
 
+        <!-- DS OFDM Suckout Scan Results -->
+        <div v-if="dsScanResult" class="row mt-3">
+            <div class="col-12">
                 <!-- Results -->
                 <div v-if="dsScanResult" class="card shadow-sm">
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
@@ -3281,8 +3284,37 @@
             </div>
         </div>
 
+        <!-- DS Fullband Scan — fixed overlay progress at top of viewport -->
+        <div v-if="fbScanRunning" class="position-fixed start-50 translate-middle-x shadow-lg"
+             style="top: 12px; z-index: 1080; width: 520px; max-width: 92vw;">
+            <div class="card border-warning">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <div class="spinner-border spinner-border-sm text-warning" style="width: 1rem; height: 1rem;"></div>
+                        <strong class="text-truncate">DS Fullband Spectrum Scan</strong>
+                        <span v-if="fbScanProgress" class="text-muted small ms-auto text-nowrap">
+                            {{ fbScanProgress.completed || 0 }}/{{ fbScanProgress.total || '?' }}
+                        </span>
+                    </div>
+                    <div class="progress mb-2" style="height: 14px;">
+                        <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
+                             role="progressbar"
+                             :style="{ width: (fbScanProgress?.pct || 0) + '%' }"
+                             :aria-valuenow="fbScanProgress?.pct || 0"
+                             aria-valuemin="0" aria-valuemax="100">
+                            {{ (fbScanProgress?.pct || 0).toFixed(0) }}%
+                        </div>
+                    </div>
+                    <div v-if="fbScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
+                        <span v-if="fbScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fbScanProgress.modem }}</span>
+                        <span v-if="fbScanProgress.action">· {{ fbScanProgress.action }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- DS Fullband Spectrum Scan Results -->
-        <div v-if="fbScanRunning || fbScanResult" class="mt-3">
+        <div v-if="fbScanResult" class="mt-3">
             <div class="card shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center" role="button" @click="fbScanCollapsed = !fbScanCollapsed">
                     <h5 class="mb-0">
@@ -3292,19 +3324,6 @@
                     <i :class="fbScanCollapsed ? 'bi-chevron-down' : 'bi-chevron-up'" class="bi"></i>
                 </div>
                 <div v-show="!fbScanCollapsed" class="card-body">
-                    <!-- Progress bar while running -->
-                    <div v-if="fbScanRunning && fbScanProgress" class="mb-3">
-                        <div class="d-flex justify-content-between small text-muted mb-1">
-                            <span>{{ fbScanProgress.action }} · {{ fbScanProgress.modem }}</span>
-                            <span>{{ fbScanProgress.completed || 0 }} / {{ fbScanProgress.total || '?' }} modems</span>
-                        </div>
-                        <div class="progress" style="height:20px;">
-                            <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
-                                 :style="{width: (fbScanProgress.pct || 0) + '%'}">
-                                {{ fbScanProgress.pct || 0 }}%
-                            </div>
-                        </div>
-                    </div>
 
                     <div v-if="fbScanResult">
                         <!-- Detection summary badges -->
