@@ -2016,70 +2016,62 @@ def get_cmts_us_rxmer_status(mac_address):
 @pypnm_bp.route('/cmts/ofdma/rxmer/data/<mac_address>', methods=['POST'])
 def get_cmts_us_rxmer_data(mac_address):
     """
-    Fetch US OFDMA RxMER capture as base64 PNG from PyPNM API.
-    Returns: {"success": true, "image_data": "<base64 png>"}
+    Fetch US OFDMA RxMER capture as base64 PNG + parsed JSON from PyPNM API.
+
+    Uses the combined /getCaptureAndData endpoint so the file is fetched from
+    FTP only once (eliminates the ~14s double-fetch penalty).
+    Returns: {"success": true, "image_data": "<base64 png>", "rxmer_data": {...}}
     """
     from app.core.cmts_pnm import get_pypnm_api_url, PYPNM_AVAILABLE
-    import base64
-    
+
     if not PYPNM_AVAILABLE:
         return jsonify({"success": False, "error": "PyPNM not available"}), 503
-    
+
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     community = data.get('community', get_cmts_community())
     write_community = data.get('write_community', get_cmts_write_community())
-    
+
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
-    
+
     try:
         import requests as req
         base_url = get_pypnm_api_url()
-        url = f"{base_url}/pnm/us/ofdma/rxmer/getCapture"
-        
+
         _filename = data.get('filename', f'usrxmer_{mac_address.replace(":", "")}')
         payload = {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community
-            },
-            "ofdma_ifindex": data.get('ofdma_ifindex'),
             "filename": _filename,
-            "tftp_path": _ensure_pnm_local(_filename)  # fetches from FTP if PNM_FILE_SOURCE=ftp
+            "tftp_path": data.get('tftp_path', '/var/lib/tftpboot'),
         }
-        
-        response = req.post(url, json=payload, timeout=60)
-        
-        if response.status_code == 200 and 'image/png' in response.headers.get('Content-Type', ''):
-            image_b64 = base64.b64encode(response.content).decode('utf-8')
-            
-            # Also fetch raw JSON data from getData endpoint
-            rxmer_data = None
-            try:
-                data_url = f"{base_url}/pnm/us/ofdma/rxmer/getData"
-                data_resp = req.post(data_url, json=payload, timeout=30)
-                if data_resp.status_code == 200:
-                    rxmer_data = data_resp.json()
-            except Exception as e:
-                logger.warning(f"Could not fetch RxMER JSON data: {e}")
-            
-            # Housekeeping owned by PyPNM API (it deletes after parsing)
+
+        # Single call — file fetched once, returns PNG (base64) + JSON data
+        resp = req.post(
+            f"{base_url}/pnm/us/ofdma/rxmer/getCaptureAndData",
+            json=payload,
+            timeout=60,
+        )
+
+        if resp.status_code == 200:
+            result = resp.json()
+            if result.get('success') and result.get('image_base64'):
+                return jsonify({
+                    "success": True,
+                    "mac_address": mac_address,
+                    "image_data": result['image_base64'],
+                    "rxmer_data": result,
+                })
             return jsonify({
-                "success": True,
-                "mac_address": mac_address,
-                "image_data": image_b64,
-                "rxmer_data": rxmer_data
-            })
-        else:
-            # Try JSON error response
-            try:
-                err = response.json()
-                return jsonify({"success": False, "error": err.get('error', f'API error {response.status_code}')}), 500
-            except Exception:
-                return jsonify({"success": False, "error": f"API error {response.status_code}"}), 500
-        
+                "success": False,
+                "error": result.get('error', 'No image data returned'),
+            }), 500
+
+        try:
+            err = resp.json()
+            return jsonify({"success": False, "error": err.get('error', f'API error {resp.status_code}')}), 500
+        except Exception:
+            return jsonify({"success": False, "error": f"API error {resp.status_code}"}), 500
+
     except Exception as e:
         logger.error(f"Get US RxMER data failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
