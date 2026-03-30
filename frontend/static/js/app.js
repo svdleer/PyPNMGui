@@ -372,6 +372,11 @@ createApp({
             return Math.max(1, Math.ceil(this.filteredModems.length / this.modemsPerPage));
         },
 
+        modemTableShowCmts() {
+            // Show CMTS column when any modem has a cmts name (multi-CMTS / topology search)
+            return (this.modems || []).some(m => m.cmts && m.cmts !== 'unknown');
+        },
+
         visiblePages() {
             const total = this.totalPages;
             const cur = this.modemPage;
@@ -1033,6 +1038,20 @@ createApp({
             const normalized = this.normalizeCmtsName(cmtsName);
             if (/(ABR|DBR|CBR)\d+$/i.test(normalized)) return '';
             return String(cmtsName || '').trim();
+        },
+
+        _mergeModemPreservingCmts(target, source) {
+            // Merge source into target but never clobber good CMTS/enrichment
+            // fields with empty or 'unknown' values from inventory fallback.
+            const preserve = ['cmts', 'cmts_ip', 'cmts_hostname', 'cmts_community'];
+            const saved = {};
+            for (const k of preserve) {
+                if (target[k] && (!source[k] || source[k] === 'unknown' || source[k] === 'N/A')) {
+                    saved[k] = target[k];
+                }
+            }
+            Object.assign(target, source);
+            Object.assign(target, saved);
         },
 
         _normalizeFnSelectedMacsToCurrentRows() {
@@ -2918,7 +2937,7 @@ createApp({
                     const resp = await fetch(`${API_BASE}/modems/${encodeURIComponent(this.selectedModem.mac_address)}`);
                     const data = await resp.json();
                     if (data?.status === 'success' && data.modem) {
-                        Object.assign(this.selectedModem, data.modem);
+                        this._mergeModemPreservingCmts(this.selectedModem, data.modem);
                         if (!this.selectedModem.fiber_node && topologyFiberNode) {
                             this.selectedModem.fiber_node = topologyFiberNode;
                         }
@@ -3063,7 +3082,7 @@ createApp({
                             const mr = await fetch(`${API_BASE}/modems/${encodeURIComponent(mac)}`);
                             const md = await mr.json();
                             if (md.status === 'success' && md.modem) {
-                                Object.assign(this.selectedModem, md.modem);
+                                this._mergeModemPreservingCmts(this.selectedModem, md.modem);
                             }
                         } catch(_) {}
                         return;

@@ -437,6 +437,7 @@
                                                 <th @click="setModemSort('docsis_version')" style="cursor:pointer;white-space:nowrap;user-select:none">DOCSIS <i class="bi" :class="modemSortKey==='docsis_version' ? (modemSortDir==='asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-arrow-down-up text-muted opacity-50'" style="font-size:0.75rem"></i></th>
                                                 <th @click="setModemSort('cable_mac')" style="cursor:pointer;white-space:nowrap;user-select:none">CableMac <i class="bi" :class="modemSortKey==='cable_mac' ? (modemSortDir==='asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-arrow-down-up text-muted opacity-50'" style="font-size:0.75rem"></i></th>
                                                 <th @click="setModemSort('upstream_interface')" style="cursor:pointer;white-space:nowrap;user-select:none">Upstream <i class="bi" :class="modemSortKey==='upstream_interface' ? (modemSortDir==='asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-arrow-down-up text-muted opacity-50'" style="font-size:0.75rem"></i></th>
+                                                <th v-if="modemTableShowCmts" @click="setModemSort('cmts')" style="cursor:pointer;white-space:nowrap;user-select:none">CMTS <i class="bi" :class="modemSortKey==='cmts' ? (modemSortDir==='asc' ? 'bi-sort-up' : 'bi-sort-down') : 'bi-arrow-down-up text-muted opacity-50'" style="font-size:0.75rem"></i></th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -507,6 +508,9 @@
                                                         {{ modem.upstream_interface.replace('cable-upstream ', 'US ').replace('cable-us-ofdma ', 'OFDMA ').replace('cable-mac ', '') }}
                                                     </small>
                                                     <small v-else class="text-muted">-</small>
+                                                </td>
+                                                <td v-if="modemTableShowCmts">
+                                                    <small class="text-muted" :title="modem.cmts_ip">{{ modem.cmts || modem.cmts_hostname || '-' }}</small>
                                                 </td>
                                                 <td>
                                                     <button @click="selectModem(modem)" class="btn btn-sm btn-primary me-1" title="View Details">
