@@ -246,17 +246,17 @@ class PyPNMClient:
             params["interface"] = interface
         return self._get("/api/admin/inventory/modems", params=params)
 
-    def get_inventory_modem_by_mac(self, mac_address: str) -> Dict[str, Any]:
-        return self._get(f"/api/admin/inventory/modems/{mac_address}")
+    def get_inventory_modem_by_mac(self, mac_address: str, request_timeout: int | None = None) -> Dict[str, Any]:
+        return self._get(f"/api/admin/inventory/modems/{mac_address}", request_timeout=request_timeout)
 
     def get_inventory_modems_bulk(self, mac_addresses: list[str]) -> Dict[str, Any]:
         return self._post("/api/admin/inventory/modems/bulk", {"mac_addresses": mac_addresses})
 
-    def get_topology_modem_by_mac(self, mac_address: str, date: Optional[str] = None) -> Dict[str, Any]:
+    def get_topology_modem_by_mac(self, mac_address: str, date: Optional[str] = None, request_timeout: int | None = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {"mac": mac_address}
         if date:
             params["date"] = date
-        return self._get("/api/topology/modem/by-mac", params=params)
+        return self._get("/api/topology/modem/by-mac", params=params, request_timeout=request_timeout)
 
     # ============== Agent Management ==============
     

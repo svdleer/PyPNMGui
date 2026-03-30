@@ -526,7 +526,7 @@ def get_modem(mac_address):
                                     or modem.get('ofdm_enabled') is None
                                     or modem.get('ofdma_enabled') is None):
                                 try:
-                                    inv = PyPNMClient().get_inventory_modem_by_mac(mac_bare)
+                                    inv = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
                                     inv_m = inv.get('modem') if isinstance(inv, dict) else None
                                     if inv_m:
                                         for field in ('vendor', 'model', 'software_version',
@@ -545,7 +545,7 @@ def get_modem(mac_address):
 
     # Fallback to PyPNM inventory snapshot (pass bare hex so DB REPLACE works)
     try:
-        modem_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare)
+        modem_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
         modem = modem_resp.get('modem')
         if modem:
             return jsonify({
@@ -559,7 +559,7 @@ def get_modem(mac_address):
     # Final fallback: topology MySQL snapshot (for topology-origin modems that
     # are not present in live CMTS Redis cache/inventory).
     try:
-        topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare)
+        topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare, request_timeout=10)
         topo_modem = topo_resp.get('modem') if isinstance(topo_resp, dict) else None
         if topo_modem:
             mac_norm = topo_modem.get('mac') or mac_address
