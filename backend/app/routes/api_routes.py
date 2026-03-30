@@ -842,7 +842,8 @@ def get_cmts_modems(cmts_name):
             community=community,
             limit=limit,
             enrich=enrich,
-            modem_community=modem_community
+            modem_community=modem_community,
+            cmts_hostname=cmts_name,
         )
         
         if result.get('success'):

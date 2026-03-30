@@ -1162,7 +1162,8 @@ class PyPNMClient:
         community: str = "public",
         limit: int = 10000,
         enrich: bool = False,
-        modem_community: str = os.environ.get('MODEM_COMMUNITY', 'private')
+        modem_community: str = os.environ.get('MODEM_COMMUNITY', 'private'),
+        cmts_hostname: str = "",
     ) -> Dict[str, Any]:
         """
         Get cable modems from CMTS via PyPNM API (which uses agent for SNMP).
@@ -1173,6 +1174,7 @@ class PyPNMClient:
             limit: Maximum number of modems to return
             enrich: Whether to enrich modem data with additional info
             modem_community: SNMP community for individual modems
+            cmts_hostname: ISW hostname (stored in MySQL inventory)
         
         Returns:
             Dictionary with 'success', 'modems', and optional 'error'
@@ -1184,6 +1186,8 @@ class PyPNMClient:
             "enrich": str(enrich).lower(),
             "modem_community": modem_community
         }
+        if cmts_hostname:
+            params["cmts_hostname"] = cmts_hostname
 
         try:
             response = self._get("/cmts/modems", params)
