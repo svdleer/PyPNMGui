@@ -1027,15 +1027,16 @@ def channel_stats(mac_address):
         payload['cmts_community'] = cmts_community
     
     result = client._post('/cm/channel-stats', payload)
-    
-    # PyPNM may return success=False with status=-1 when the modem SNMP
-    # times out, but still include valid CMTS-side data (downstream,
-    # upstream, ofdm_stats). Pass through any data that is present.
+
+    # Pass CMTS-side data through even on modem-side failure so downstream/
+    # upstream tables can still show partial results when available.
     has_data = bool(result.get('downstream') or result.get('upstream') or result.get('ofdm_stats'))
     if result.get('success') or has_data:
         return jsonify({
+            "success": result.get('success', False),
             "mac_address": mac_address,
             "status": 0 if result.get('success') else result.get('status', -1),
+            "error": result.get('error'),
             "fiber_node": result.get('fiber_node'),
             "downstream": result.get('downstream', {}),
             "upstream": result.get('upstream', {}),
@@ -1043,10 +1044,17 @@ def channel_stats(mac_address):
             "timing": result.get('timing', {})
         })
 
-    # Optimized agent walk failed entirely — fall back to legacy per-table
-    # API calls which are simpler and more resilient (no agent timeout).
-    logger.warning(f"Optimized channel-stats failed for {mac_address}: {result.get('error')}; falling back to legacy")
-    return _channel_stats_legacy(mac_address, modem_ip, community)
+    # All SNMP walks failed entirely — return the error so the GUI can
+    # display it. Do not fall back to legacy calls: they hit the same
+    # unreachable modem and produce the same 10s-per-table timeout, making
+    # things worse and masking the real problem.
+    logger.warning(f"channel-stats failed for {mac_address}: {result.get('error')}")
+    return jsonify({
+        "success": False,
+        "mac_address": mac_address,
+        "status": result.get('status', -1),
+        "error": result.get('error') or "SNMP walk failed — modem unreachable or SNMP not responding",
+    }), 200
 
 
 def _channel_stats_legacy(mac_address: str, modem_ip: str, community: str):

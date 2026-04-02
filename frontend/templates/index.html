@@ -706,6 +706,14 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Channel stats error banner -->
+                        <div v-if="channelStatsError && !channelStatsLoading" class="alert alert-danger d-flex align-items-start gap-2 mb-3" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
+                            <div>
+                                <strong>SNMP failed</strong> — modem did not respond.<br>
+                                <small class="text-muted">[[ channelStatsError ]]</small>
+                            </div>
+                        </div>
                         <div class="row">
                             <!-- Quick Stats -->
                             <div class="col-md-3 mb-4">

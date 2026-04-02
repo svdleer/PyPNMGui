@@ -224,6 +224,7 @@ createApp({
             _enrichBatch1Refreshed: false,  // one-time full refresh after first ~200 enriched
             _metadataRefreshTriggeredByCmts: {},
             channelStatsLoading: false,
+            channelStatsError: null,
             channelStatsProgress: {
                 pct: 0,
                 eta: '',
@@ -2973,6 +2974,7 @@ createApp({
             this.dsChannels = [];
             this.usChannels = [];
             this.channelStats = null;
+            this.channelStatsError = null;
             this.rxmerData = null;
             this.eventLog = [];
             this.selectedMeasurementData = null;
@@ -3271,7 +3273,14 @@ createApp({
                 }
                 
                 const data = await response.json();
-                
+
+                // Explicit failure with no usable data — show error and stop.
+                if (data.success === false && !data.downstream && !data.upstream && !data.ofdm_stats) {
+                    this.channelStatsError = data.error || 'SNMP failed — modem unreachable or not responding';
+                    return;
+                }
+                this.channelStatsError = null;
+
                 // Store full channel stats for computed properties
                 // Check for successful response (status === 0 or has downstream/upstream data)
                 if (data.status === 0 || data.downstream || data.upstream) {
@@ -3425,7 +3434,7 @@ createApp({
                 
             } catch (error) {
                 console.warn('Failed to load channel stats:', error);
-                // Don't show error to user, just skip channel stats
+                this.channelStatsError = 'Request failed: ' + (error.message || error);
             } finally {
                 this._stopChannelStatsProgress();
                 this.channelStatsLoading = false;
