@@ -953,7 +953,7 @@
                                                 <small class="text-muted d-block">OFDM Channels</small>
                                                 <div v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id" class="d-inline-block me-3 mb-2">
                                                     <span class="badge bg-info">Ch {{ ch.channel_id }}: {{ ch.frequency_mhz.toFixed(0) }} MHz</span>
-                                                    <span class="badge bg-secondary" v-if="ch.current_profile !== null && ch.current_profile !== undefined">P{{ ch.current_profile }}</span>
+                                                    <span class="badge bg-secondary" v-if="ch.current_profile !== null && ch.current_profile !== undefined" :title="'Profile ID ' + ch.current_profile">{{ profileLabel(ch.current_profile) }}</span>
                                                     <small class="text-muted ms-1">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) + ' MHz' : '' }}</small>
                                                 </div>
                                             </div>
@@ -1200,13 +1200,13 @@
                                                         </td>
                                                         <td>
                                                             <span v-if="ch.profiles && ch.profiles.length > 0">
-                                                                <span v-for="p in ch.profiles" :key="'profile-'+p" class="badge bg-primary me-1">{{ p }}</span>
+                                                                <span v-for="p in ch.profiles" :key="'profile-'+p" class="badge bg-primary me-1" :title="'Profile ID ' + p">{{ profileLabel(p) }}</span>
                                                             </span>
                                                             <span v-else-if="ch.active_profiles" class="badge bg-secondary">{{ ch.active_profiles }} active</span>
                                                             <span v-else class="text-muted">-</span>
                                                         </td>
                                                         <td>
-                                                            <span v-if="ch.current_profile !== null && ch.current_profile !== undefined" class="badge bg-success">{{ ch.current_profile }}</span>
+                                                            <span v-if="ch.current_profile !== null && ch.current_profile !== undefined" class="badge bg-success" :title="'Profile ID ' + ch.current_profile">{{ profileLabel(ch.current_profile) }}</span>
                                                             <span v-else class="text-muted">-</span>
                                                         </td>
                                                         <td>
@@ -1470,7 +1470,7 @@
                                                             <tr v-for="p in ch.profiles" :key="p.profile_id"
                                                                 :class="{ 'table-warning': p.partial_reason_code > 0, 'table-danger': p.uncorrectable_pct > 0.01 }">
                                                                 <td>
-                                                                    <span :class="profileBadgeClass(p, ch)">P{{ p.profile_id }}</span>
+                                                                    <span :class="profileBadgeClass(p, ch)" :title="'Profile ID ' + p.profile_id">{{ profileLabel(p.profile_id) }}</span>
                                                                     <span v-if="isActiveProfile(p, ch)" class="badge bg-primary ms-1">active</span>
                                                                 </td>
                                                                 <td class="text-end font-monospace">{{ fmtN(p.total_codewords) }}</td>

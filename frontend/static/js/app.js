@@ -1618,6 +1618,13 @@ createApp({
             return Number(n).toLocaleString('en-US');
         },
 
+        profileLabel(profileId) {
+            const id = Number(profileId);
+            if (!Number.isFinite(id)) return String(profileId ?? '\u2014');
+            if (id >= 0 && id < 26) return String.fromCharCode(65 + id);
+            return String(id);
+        },
+
         countPartialProfiles(dsProfiles) {
             if (!Array.isArray(dsProfiles)) return 0;
             let count = 0;
