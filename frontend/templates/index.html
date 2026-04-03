@@ -692,10 +692,17 @@
                                     <div class="text-start px-2">
                                         <div v-for="step in channelStatsProgress.steps" :key="step.id"
                                              class="d-flex align-items-center mb-1" style="font-size: 0.82rem;">
-                                            <i v-if="step.status === 'done'" class="bi bi-check-circle-fill text-success me-2"></i>
+                                            <i v-if="step.status === 'done'"  class="bi bi-check-circle-fill text-success me-2"></i>
+                                            <i v-else-if="step.status === 'warn'"  class="bi bi-exclamation-circle-fill text-warning me-2"></i>
+                                            <i v-else-if="step.status === 'error'" class="bi bi-x-circle-fill text-danger me-2"></i>
                                             <span v-else-if="step.status === 'active'" class="spinner-border spinner-border-sm text-primary me-2" style="width: 0.85rem; height: 0.85rem;"></span>
                                             <i v-else class="bi bi-circle text-muted me-2" style="opacity: 0.4;"></i>
-                                            <span :class="{ 'text-muted': step.status === 'pending', 'fw-semibold': step.status === 'active' }"
+                                            <span :class="{
+                                                    'text-muted':   step.status === 'pending',
+                                                    'fw-semibold':  step.status === 'active',
+                                                    'text-warning': step.status === 'warn',
+                                                    'text-danger':  step.status === 'error'
+                                                  }"
                                                   v-text="step.label"></span>
                                         </div>
                                     </div>
@@ -1463,8 +1470,8 @@
                                                             <tr v-for="p in ch.profiles" :key="p.profile_id"
                                                                 :class="{ 'table-warning': p.partial_reason_code > 0, 'table-danger': p.uncorrectable_pct > 0.01 }">
                                                                 <td>
-                                                                    <span :class="profileBadgeClass(p)">P{{ p.profile_id }}</span>
-                                                                    <span v-if="isActiveProfile(p)" class="badge bg-primary ms-1">active</span>
+                                                                    <span :class="profileBadgeClass(p, ch)">P{{ p.profile_id }}</span>
+                                                                    <span v-if="isActiveProfile(p, ch)" class="badge bg-primary ms-1">active</span>
                                                                 </td>
                                                                 <td class="text-end font-monospace">{{ fmtN(p.total_codewords) }}</td>
                                                                 <td class="text-end font-monospace">{{ fmtN(p.corrected) }}</td>

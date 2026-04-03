@@ -1640,28 +1640,74 @@ createApp({
             return count;
         },
 
-        isActiveIuc(iucRow, channelRow) {
+        _resolveCurrentIuc(channelRow) {
             const explicitCurrentIuc = Number(channelRow?.current_iuc);
             if (Number.isFinite(explicitCurrentIuc)) {
-                return Number(iucRow?.iuc || 0) === explicitCurrentIuc;
+                return explicitCurrentIuc;
             }
+
+            // Fallback: align OFDM stats US rows (CMTS ifIndex namespace) with
+            // modem US OFDMA rows (CM ifIndex namespace) by stable sorted order.
+            try {
+                const statsRows = (this.channelStats?.ofdm_stats?.us_iuc_stats || []).slice()
+                    .sort((a, b) => Number(a?.ifindex || 0) - Number(b?.ifindex || 0));
+                const modemRows = (this.channelStats?.upstream?.ofdma?.channels || []).slice()
+                    .sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0));
+                const pos = statsRows.findIndex(r => Number(r?.ifindex || -1) === Number(channelRow?.ifindex || -2));
+                if (pos >= 0 && pos < modemRows.length) {
+                    const mappedCurrentIuc = Number(modemRows[pos]?.current_iuc);
+                    if (Number.isFinite(mappedCurrentIuc)) return mappedCurrentIuc;
+                }
+            } catch (_) {
+                // Fall through to heuristic below.
+            }
+
             const rows = channelRow?.iuc_stats || [];
-            if (!rows.length) return false;
+            if (!rows.length) return null;
             const maxTotal = Math.max(...rows.map(r => Number(r?.total || 0)));
-            if (maxTotal <= 0) return false;
+            if (maxTotal <= 0) return null;
             const contenders = rows.filter(r => Number(r?.total || 0) === maxTotal);
-            const winnerIuc = Math.max(...contenders.map(r => Number(r?.iuc || 0)));
-            return Number(iucRow?.iuc || 0) === winnerIuc;
+            return Math.max(...contenders.map(r => Number(r?.iuc || 0)));
         },
 
-        isActiveProfile(profileRow) {
+        isActiveIuc(iucRow, channelRow) {
+            const activeIuc = this._resolveCurrentIuc(channelRow);
+            if (!Number.isFinite(activeIuc)) return false;
+            return Number(iucRow?.iuc || 0) === activeIuc;
+        },
+
+        _resolveCurrentProfile(channelRow) {
+            const explicitCurrentProfile = Number(channelRow?.current_profile);
+            if (Number.isFinite(explicitCurrentProfile)) {
+                return explicitCurrentProfile;
+            }
+
+            // DS profile stats rows can omit current_profile; map by channel_id
+            // from downstream OFDM channels where current_profile is populated.
+            try {
+                const dsRows = this.channelStats?.downstream?.ofdm?.channels || [];
+                const match = dsRows.find(r => Number(r?.channel_id) === Number(channelRow?.channel_id));
+                const mappedCurrentProfile = Number(match?.current_profile);
+                if (Number.isFinite(mappedCurrentProfile)) return mappedCurrentProfile;
+            } catch (_) {
+                // Keep heuristic fallback below.
+            }
+
+            return null;
+        },
+
+        isActiveProfile(profileRow, channelRow = null) {
+            const currentProfile = this._resolveCurrentProfile(channelRow);
+            if (Number.isFinite(currentProfile)) {
+                return Number(profileRow?.profile_id) === currentProfile;
+            }
             const total = Number(profileRow?.total_codewords || 0);
             const speed = Number(profileRow?.full_channel_speed_bps || 0);
             return total > 0 || speed > 0;
         },
 
-        profileBadgeClass(profileRow) {
-            return this.isActiveProfile(profileRow) ? 'badge bg-success' : 'badge bg-secondary';
+        profileBadgeClass(profileRow, channelRow = null) {
+            return this.isActiveProfile(profileRow, channelRow) ? 'badge bg-success' : 'badge bg-secondary';
         },
 
         iucBadgeClass(iucRow, channelRow) {
@@ -3281,6 +3327,7 @@ createApp({
                 // Explicit failure with no usable data — show error and stop.
                 if (data.success === false && !data.downstream && !data.upstream && !data.ofdm_stats) {
                     this.channelStatsError = data.error || 'SNMP failed — modem unreachable or not responding';
+                    this._stopChannelStatsProgress(null, true);
                     return;
                 }
                 this.channelStatsError = null;
@@ -3439,8 +3486,9 @@ createApp({
             } catch (error) {
                 console.warn('Failed to load channel stats:', error);
                 this.channelStatsError = 'Request failed: ' + (error.message || error);
+                this._stopChannelStatsProgress(null, true);
             } finally {
-                this._stopChannelStatsProgress();
+                if (!this.channelStatsError) this._stopChannelStatsProgress(this.channelStats);
                 this.channelStatsLoading = false;
                 if (resumeEnrichPolling && this.isEnriching && !this._enrichPollTimer) {
                     this._scheduleEnrichPoll();
@@ -3513,18 +3561,66 @@ createApp({
             }, 300);
         },
 
-        _stopChannelStatsProgress() {
+        _stopChannelStatsProgress(data, failed = false) {
             if (this._csProgressTimer) {
                 clearInterval(this._csProgressTimer);
                 this._csProgressTimer = null;
             }
-            // Flash 100% briefly
+
+            // Derive real per-step outcomes from the response data
+            const steps = (this.channelStatsProgress.steps || []).map(s => {
+                const label = s.label.replace('...', '');
+                if (failed) return { ...s, label, status: 'error' };
+                if (!data)  return { ...s, label, status: 'done' };
+
+                let status = 'done';
+                let note = '';
+                switch (s.id) {
+                    case 'connect': {
+                        // Modem responded if we have ANY channel data
+                        const hasAny = (data.downstream?.scqam?.count > 0 ||
+                                        data.downstream?.ofdm?.count > 0 ||
+                                        data.upstream?.atdma?.count > 0 ||
+                                        data.upstream?.ofdma?.count > 0);
+                        status = hasAny ? 'done' : 'warn';
+                        if (!hasAny) note = ' (no channels)';
+                        break;
+                    }
+                    case 'walk': {
+                        const dsOk  = (data.downstream?.scqam?.count > 0 || data.downstream?.ofdm?.count > 0);
+                        const usOk  = (data.upstream?.atdma?.count > 0  || data.upstream?.ofdma?.count > 0);
+                        if (!dsOk && !usOk) { status = 'error'; note = ' (no channels)'; }
+                        else if (!dsOk || !usOk) { status = 'warn'; note = !dsOk ? ' (DS missing)' : ' (US missing)'; }
+                        break;
+                    }
+                    case 'cmts': {
+                        // CMTS enrichment: check if IUC or RxMER were injected
+                        const ofdmaChs = data.upstream?.ofdma?.channels || [];
+                        const dsProfs  = (data.ofdm_stats?.ds_profiles || []);
+                        const hasIuc   = ofdmaChs.some(c => c.current_iuc != null);
+                        const hasRxMer = ofdmaChs.some(c => c.rx_mer != null && c.rx_mer > 0);
+                        const hasDs    = dsProfs.some(p => p.profiles?.some(pr => pr.full_channel_speed_bps != null));
+                        if (!hasIuc && !hasRxMer && !hasDs) { status = 'warn'; note = ' (no CMTS data)'; }
+                        break;
+                    }
+                    case 'fiber': {
+                        if (!data.fiber_node) { status = 'warn'; note = ' (not resolved)'; }
+                        break;
+                    }
+                    case 'parse':
+                    default:
+                        status = 'done';
+                        break;
+                }
+                return { ...s, label: label + note, status };
+            });
+
+            const anyError = steps.some(s => s.status === 'error');
+            const anyWarn  = steps.some(s => s.status === 'warn');
             this.channelStatsProgress = {
                 pct: 100,
-                eta: 'Done',
-                steps: (this.channelStatsProgress.steps || []).map(s => ({
-                    ...s, status: 'done', label: s.label.replace('...', ''),
-                })),
+                eta: anyError ? 'Completed with errors' : anyWarn ? 'Completed with warnings' : 'Done',
+                steps,
             };
         },
 
