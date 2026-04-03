@@ -1693,7 +1693,9 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
 
     # ---- Redis cache check (instant return) ----
-    cache_key = f"pypnm:upstream_if:{cmts_ip}:{mac_address}"
+    # Versioned cache key to avoid stale payload shape after upstream interface
+    # enrichment changes (e.g., active/secondary OFDMA channel metadata).
+    cache_key = f"pypnm:upstream_if:v2:{cmts_ip}:{mac_address}"
     if REDIS_AVAILABLE:
         try:
             cached = redis_client.get(cache_key)
