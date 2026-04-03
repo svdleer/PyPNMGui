@@ -1780,7 +1780,9 @@ def get_upstream_interfaces(mac_address):
                             "ofdma_ifindex": ifindex,
                             "index": i + 1,
                             "description": ch.get('description') or f'OFDMA {ifindex}',
-                            "cm_index": cm_index
+                            "cm_index": cm_index,
+                            "active": True,
+                            "secondary": False,
                         })
                 logger.info(f"Found {len(ofdma_channels)} OFDMA channel(s) for modem {mac_address}")
             else:
@@ -1815,9 +1817,83 @@ def get_upstream_interfaces(mac_address):
                         "index": 1,
                         "description": f"OFDMA {logical_if}",
                         "cm_index": cm_index,
+                        "active": True,
+                        "secondary": False,
                     }]
             except Exception:
                 pass
+
+        # ---- Enrich with secondary OFDMA channels from the CMTS channel list ----
+        # Per-modem discovery only returns OFDMA blocks with timing_offset > 0.
+        # On some CMTSes the same modem is associated with a secondary OFDMA block
+        # that is visible in the CMTS channel inventory but not currently active.
+        # Surface those sibling blocks in the GUI so operators can inspect them.
+        if ofdma_channels:
+            try:
+                channel_list = client._get(
+                    "/pnm/us/ofdma/rxmer/channel/list",
+                    params={"cmts_ip": cmts_ip, "community": community},
+                    request_timeout=65,
+                )
+                all_channels = channel_list.get("channels") or []
+                by_ifindex = {}
+                for row in all_channels:
+                    try:
+                        by_ifindex[int(row.get("ifindex"))] = row
+                    except Exception:
+                        continue
+
+                active_ifindexes = {int(ch["ifindex"]) for ch in ofdma_channels if ch.get("ifindex") is not None}
+                sibling_domains = set()
+                sibling_fns = set()
+                for ifindex in active_ifindexes:
+                    row = by_ifindex.get(ifindex) or {}
+                    mac_domain = str(row.get("mac_domain") or "").strip()
+                    suggested_fn = str(row.get("suggested_fn") or "").strip()
+                    if mac_domain:
+                        sibling_domains.add(mac_domain)
+                    if suggested_fn:
+                        sibling_fns.add(suggested_fn)
+
+                secondary_rows = []
+                for row in all_channels:
+                    try:
+                        ifindex = int(row.get("ifindex"))
+                    except Exception:
+                        continue
+                    if ifindex in active_ifindexes:
+                        continue
+                    mac_domain = str(row.get("mac_domain") or "").strip()
+                    suggested_fn = str(row.get("suggested_fn") or "").strip()
+                    if ((mac_domain and mac_domain in sibling_domains)
+                            or (suggested_fn and suggested_fn in sibling_fns)):
+                        secondary_rows.append(row)
+
+                for row in sorted(secondary_rows, key=lambda item: int(item.get("ifindex") or 0)):
+                    try:
+                        ifindex = int(row.get("ifindex"))
+                    except Exception:
+                        continue
+                    ofdma_channels.append({
+                        "ifindex": ifindex,
+                        "ofdma_ifindex": ifindex,
+                        "index": len(ofdma_channels) + 1,
+                        "description": row.get("description") or f"OFDMA {ifindex}",
+                        "cm_index": cm_index,
+                        "active": False,
+                        "secondary": True,
+                        "mac_domain": row.get("mac_domain"),
+                        "suggested_fn": row.get("suggested_fn"),
+                        "modem_count": row.get("modem_count"),
+                    })
+
+                if secondary_rows:
+                    logger.info(
+                        f"Added {len(secondary_rows)} secondary OFDMA channel(s) for modem {mac_address} "
+                        f"from channel-list sibling matching"
+                    )
+            except Exception as e:
+                logger.debug(f"Failed to enrich secondary OFDMA channels for {mac_address}: {e}")
 
         if cm_index is not None and cmts_ip and REDIS_AVAILABLE:
             try:

@@ -1857,10 +1857,13 @@
                                                             <select v-model.number="usRxmerConfig.ofdmaIfindex" class="form-select form-select-sm" :disabled="upstreamInterfaces.loading">
                                                                 <option :value="null" disabled>{{ upstreamInterfaces.loading ? 'Loading...' : (upstreamInterfaces.ofdmaChannels.length ? 'Select channel' : 'No OFDMA channels') }}</option>
                                                                 <option v-for="ch in upstreamInterfaces.ofdmaChannels" :key="ch.ifindex" :value="ch.ifindex">
-                                                                    {{ ch.description || ('OFDMA ' + ch.index + ' (ifIndex ' + ch.ifindex + ')') }}
+                                                                    {{ ch.description || ('OFDMA ' + ch.index + ' (ifIndex ' + ch.ifindex + ')') }}{{ ch.active ? ' [active]' : (ch.secondary ? ' [secondary]' : '') }}
                                                                 </option>
                                                             </select>
                                                         </div>
+                                                        <small v-if="upstreamInterfaces.ofdmaChannels.some(ch => ch.secondary)" class="text-muted d-block mb-2">
+                                                            Active upstream OFDMA blocks are discovered from modem timing offsets; secondary blocks are inferred from the same CMTS mac domain/fiber-node group.
+                                                        </small>
                                                         <div class="mb-2">
                                                             <div class="form-check">
                                                                 <input type="checkbox" v-model="usRxmerConfig.preEq" class="form-check-input" id="usRxmerPreEq">
