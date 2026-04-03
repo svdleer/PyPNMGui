@@ -1641,6 +1641,10 @@ createApp({
         },
 
         isActiveIuc(iucRow, channelRow) {
+            const explicitCurrentIuc = Number(channelRow?.current_iuc);
+            if (Number.isFinite(explicitCurrentIuc)) {
+                return Number(iucRow?.iuc || 0) === explicitCurrentIuc;
+            }
             const rows = channelRow?.iuc_stats || [];
             if (!rows.length) return false;
             const maxTotal = Math.max(...rows.map(r => Number(r?.total || 0)));
