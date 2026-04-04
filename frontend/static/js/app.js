@@ -1621,8 +1621,8 @@ createApp({
         profileLabel(profileId) {
             const id = Number(profileId);
             if (!Number.isFinite(id)) return String(profileId ?? '\u2014');
-            // Profile 3 = A (highest modulation), 0 = D (lowest)
-            const labels = { 0: 'D', 1: 'C', 2: 'B', 3: 'A' };
+            // Profile 0 = A (lowest: QAM-256), 3 = D (highest: QAM-4096+)
+            const labels = { 0: 'A', 1: 'B', 2: 'C', 3: 'D' };
             return labels[id] ?? String(id);
         },
 
