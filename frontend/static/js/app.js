@@ -1686,6 +1686,16 @@ createApp({
         },
 
         _resolveCurrentProfile(channelRow) {
+            const profiles = channelRow?.profiles || [];
+            if (profiles.length) {
+                const maxTotal = Math.max(...profiles.map(p => Number(p?.total_codewords || 0)));
+                if (maxTotal > 0) {
+                    const contenders = profiles.filter(p => Number(p?.total_codewords || 0) === maxTotal);
+                    // Tie-break to highest profile id (more robust profile).
+                    return Math.max(...contenders.map(p => Number(p?.profile_id || 0)));
+                }
+            }
+
             const explicitCurrentProfile = Number(channelRow?.current_profile);
             if (Number.isFinite(explicitCurrentProfile)) {
                 return explicitCurrentProfile;
