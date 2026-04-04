@@ -5394,13 +5394,20 @@ createApp({
                 const result = await response.json();
                 
                 if (result.success && result.data) {
-                    // Skip if same file as last poll (no new data)
+                    // Casa/vCCAP often reuses a constant filename for successive
+                    // captures. Deduplicate on file signature (name+mtime+size),
+                    // not filename alone.
                     const currentFile = result.data.filename || null;
+                    const currentSig = [
+                        currentFile || '',
+                        String(result.data.file_mtime ?? ''),
+                        String(result.data.file_size ?? ''),
+                    ].join('|');
                     this.utscLastFilename = currentFile || this.utscLastFilename;
-                    if (currentFile && currentFile === this.liveSpectrumLastFile) {
+                    if (currentSig && currentSig === this.liveSpectrumLastFile) {
                         return;  // No new capture yet
                     }
-                    this.liveSpectrumLastFile = currentFile;
+                    this.liveSpectrumLastFile = currentSig || currentFile;
                     
                     const elapsed = Date.now() - startTime;
                     

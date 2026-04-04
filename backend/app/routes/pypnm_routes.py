@@ -3716,6 +3716,7 @@ def configure_utsc(mac_address):
     
     try:
         client = PyPNMClient()
+        logical_ch_ifindex = data.get('logical_ch_ifindex')
 
         # Normalize client-provided RF port first.
         try:
@@ -3744,6 +3745,19 @@ def configure_utsc(mac_address):
                 )
             rf_port_ifindex = discovered_ifindex
             logger.info(f"UTSC configure selected modem RF port {rf_port_ifindex} for {mac_address}")
+            # Keep UTSC target on physical RF port, but provide logical OFDMA
+            # channel ifIndex for vendors that require LogicalChIfIndex.
+            if logical_ch_ifindex is None:
+                try:
+                    discovered_logical = discovered.get('logical_channel')
+                    logical_ch_ifindex = int(discovered_logical) if discovered_logical is not None else None
+                except Exception:
+                    logical_ch_ifindex = None
+            if logical_ch_ifindex is not None:
+                logger.info(
+                    f"UTSC configure using logical_ch_ifindex={logical_ch_ifindex} "
+                    f"for rf_port_ifindex={rf_port_ifindex}"
+                )
         elif not rf_port_ifindex:
             return jsonify({
                 "success": False,
@@ -3778,7 +3792,7 @@ def configure_utsc(mac_address):
                 trigger_count=data.get('trigger_count', 1),
                 filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
                 cm_mac_address=cm_mac,
-                logical_ch_ifindex=data.get('logical_ch_ifindex'),
+                logical_ch_ifindex=logical_ch_ifindex,
                 tftp_server=get_tftp_for_cmts(cmts_ip),
                 dest_path=get_tftp_dest_path_for_cmts(cmts_ip),
             )
@@ -4155,6 +4169,8 @@ def get_utsc_data(mac_address):
         
         spectrum_data = {
             'filename': os.path.basename(latest_file),
+            'file_mtime': os.path.getmtime(latest_file),
+            'file_size': os.path.getsize(latest_file),
             'num_samples': len(amplitudes),
             'frequencies': frequencies[:800],  # Limit to first 800 points
             'amplitudes': amplitudes[:800],
