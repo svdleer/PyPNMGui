@@ -953,7 +953,7 @@
                                                 <small class="text-muted d-block">OFDM Channels</small>
                                                 <div v-for="ch in systemInfo.downstream.filter(c => c.type === 'OFDM')" :key="'ofdm-'+ch.channel_id" class="d-inline-block me-3 mb-2">
                                                     <span class="badge bg-info">Ch {{ ch.channel_id }}: {{ ch.frequency_mhz.toFixed(0) }} MHz</span>
-                                                    <span class="badge bg-secondary" v-if="ch.current_profile !== null && ch.current_profile !== undefined" :title="'Profile ID ' + ch.current_profile">{{ profileLabel(ch.current_profile) }}</span>
+                                                    <span class="badge bg-secondary" v-if="displayedDownstreamProfile(ch) !== null" :title="'Profile ID ' + displayedDownstreamProfile(ch)">{{ profileLabel(displayedDownstreamProfile(ch)) }}</span>
                                                     <small class="text-muted ms-1">{{ ch.bandwidth_mhz ? ch.bandwidth_mhz.toFixed(0) + ' MHz' : '' }}</small>
                                                 </div>
                                             </div>
