@@ -1627,6 +1627,26 @@ createApp({
             return labels[id] ?? String(id);
         },
 
+        displayedDownstreamProfile(channelRow) {
+            try {
+                const channelId = Number(channelRow?.channel_id);
+                const dsStats = this.channelStats?.ofdm_stats?.ds_profiles || [];
+                const statsRow = dsStats.find(r => Number(r?.channel_id) === channelId);
+                const profiles = statsRow?.profiles || [];
+                if (profiles.length) {
+                    const maxTotal = Math.max(...profiles.map(p => Number(p?.total_codewords || 0)));
+                    if (maxTotal > 0) {
+                        const contenders = profiles.filter(p => Number(p?.total_codewords || 0) === maxTotal);
+                        return Math.max(...contenders.map(p => Number(p?.profile_id || 0)));
+                    }
+                }
+            } catch (_) {
+                // Fall back to channel current_profile.
+            }
+            const currentProfile = Number(channelRow?.current_profile);
+            return Number.isFinite(currentProfile) ? currentProfile : null;
+        },
+
         countPartialProfiles(dsProfiles) {
             if (!Array.isArray(dsProfiles)) return 0;
             let count = 0;

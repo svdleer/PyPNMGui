@@ -1206,7 +1206,7 @@
                                                             <span v-else class="text-muted">-</span>
                                                         </td>
                                                         <td>
-                                                            <span v-if="ch.current_profile !== null && ch.current_profile !== undefined" class="badge bg-success" :title="'Profile ID ' + ch.current_profile">{{ profileLabel(ch.current_profile) }}</span>
+                                                            <span v-if="displayedDownstreamProfile(ch) !== null" class="badge bg-success" :title="'Profile ID ' + displayedDownstreamProfile(ch)">{{ profileLabel(displayedDownstreamProfile(ch)) }}</span>
                                                             <span v-else class="text-muted">-</span>
                                                         </td>
                                                         <td>
