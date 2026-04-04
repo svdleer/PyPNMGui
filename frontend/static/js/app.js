@@ -1621,8 +1621,9 @@ createApp({
         profileLabel(profileId) {
             const id = Number(profileId);
             if (!Number.isFinite(id)) return String(profileId ?? '\u2014');
-            if (id >= 0 && id < 26) return String.fromCharCode(65 + id);
-            return String(id);
+            // Profile 3 = A (highest modulation), 0 = D (lowest)
+            const labels = { 0: 'D', 1: 'C', 2: 'B', 3: 'A' };
+            return labels[id] ?? String(id);
         },
 
         countPartialProfiles(dsProfiles) {
