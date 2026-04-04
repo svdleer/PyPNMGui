@@ -756,8 +756,19 @@ def get_cmts_modems(cmts_name):
                     if not cache_is_enriched and enrich:
                         cache_needs_enrich = True
                         logger.info(
-                            f"Returning non-enriched Redis cache for {cmts_name} immediately; live enrichment may continue in background."
+                            f"Redis cache for {cmts_name} is not enriched; live enrichment state must be fetched from PyPNM."
                         )
+
+                    # For enrich requests, don't keep serving partial/non-enriched
+                    # Redis snapshots during polling. PyPNM maintains the live
+                    # in-memory enrichment state and progress; bypass Redis so the
+                    # frontend sees current progress and updated modem fields.
+                    if enrich and (cache_limit_mismatch or cache_needs_enrich):
+                        logger.info(
+                            f"Bypassing Redis cache for {cmts_name} "
+                            f"(partial={cache_limit_mismatch}, needs_enrich={cache_needs_enrich})"
+                        )
+                        raise RuntimeError("bypass-redis-enrichment-cache")
 
                     # Guard against stale/partial empty cache loops.
                     # If Redis has 0 rows while marked partial/non-enriched, returning it causes
