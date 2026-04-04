@@ -223,6 +223,7 @@ createApp({
             isEnriching: false,    // reactive flag — drives progress bar in card header
             _enrichBatch1Refreshed: false,  // one-time full refresh after first ~200 enriched
             _metadataRefreshTriggeredByCmts: {},
+            _forceNextLiveRefreshByCmts: {},
             channelStatsLoading: false,
             channelStatsError: null,
             channelStatsProgress: {
@@ -2406,9 +2407,13 @@ createApp({
                     ofdm_enabled: m.ofdm_enabled ?? null,
                 });
 
+                const cmtsKey = String(this.selectedCmts || '').trim();
+                const forcePreviewRefresh = !!this._forceNextLiveRefreshByCmts[cmtsKey];
+                if (forcePreviewRefresh && cmtsKey) delete this._forceNextLiveRefreshByCmts[cmtsKey];
+
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const previewResp = await fetch(buildUrl(PRELOAD_COUNT, false));
+                const previewResp = await fetch(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh));
                 const preview = await previewResp.json();
 
                 if (preview.status !== 'success') {
@@ -2426,7 +2431,6 @@ createApp({
                 this.liveCachePartial = Boolean(preview?.partial);
 
                 const metadataCheck = this._shouldRefreshCacheForMetadata(previewRaw);
-                const cmtsKey = String(this.selectedCmts || '').trim();
                 const alreadyTriggered = !!this._metadataRefreshTriggeredByCmts[cmtsKey];
                 const backendEnriching = preview?.enriching === true;
                 const backendEnriched = preview?.enriched === true;
@@ -2709,6 +2713,8 @@ createApp({
                 const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/clear`, { method: 'POST' });
                 const data = await response.json();
                 if (data.status === 'success') {
+                    const cmtsKey = String(this.selectedCmts || '').trim();
+                    if (cmtsKey) this._forceNextLiveRefreshByCmts[cmtsKey] = true;
                     this.modems = [];
                     this.liveModemSource = '';
                     this.showSuccess('Cache Cleared', data.message || `Cache cleared for ${this.selectedCmts}`);
