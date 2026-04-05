@@ -5185,7 +5185,7 @@ createApp({
             // Set iframe src with all config params (spectrum-analyzer.html reads them)
             // Pass live=1 if UTSC is already running to skip WebSocket re-configuration
             const liveParam = this.runningUtsc ? '&live=1' : '';
-            const cfgParams = `&center_freq_hz=${this.utscConfig.centerFreqMhz * 1000000}&span_hz=${this.utscConfig.spanMhz * 1000000}&num_bins=${this.utscConfig.numBins}&output_format=${this.utscConfig.outputFormat}&window=${this.utscConfig.window}&runtime=${this.utscConfig.runtime}`;
+            const cfgParams = `&center_freq_hz=${this.utscConfig.centerFreqMhz * 1000000}&span_hz=${this.utscConfig.spanMhz * 1000000}&num_bins=${this.utscConfig.numBins}&output_format=${this.utscConfig.outputFormat}&window=${this.utscConfig.window}&runtime=${this.utscConfig.runtime}&cfg_index=${this.utscConfig.cfgIndex || 0}`;
             const communityParam = this.snmpCommunityRW ? `&community=${encodeURIComponent(this.snmpCommunityRW)}` : '';
             iframe.src = `${BASE_PATH}/spectrum-analyzer?mac=${encodeURIComponent(mac)}&rfport=${this.utscConfig.rfPortIfindex || ''}&cmts=${encodeURIComponent(this.selectedModem.cmts_ip || '')}${liveParam}${cfgParams}${communityParam}`;
             

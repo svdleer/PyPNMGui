@@ -153,6 +153,7 @@ const paramNumBins = parseInt(urlParams.get('num_bins')) || 800;
 const paramOutputFormat = parseInt(urlParams.get('output_format')) || 5;
 const paramWindow = parseInt(urlParams.get('window')) || 4;
 const paramRuntime = parseInt(urlParams.get('runtime')) || 60;
+const paramCfgIndex = parseInt(urlParams.get('cfg_index')) || 1;
 const paramLive = urlParams.get('live') || '';
 const paramCommunity = urlParams.get('community') || '';
 
@@ -165,6 +166,7 @@ function updateWsUrl() {
     const mac = document.getElementById('targetMac').value.trim().replace(/:/g, '').toLowerCase();
     const qs = new URLSearchParams({
         rf_port: paramRfPort || '',
+      cfg_index: String(paramCfgIndex || 1),
         cmts_ip: paramCmts || '',
         community: paramCommunity || 'private',
         refresh: '500',

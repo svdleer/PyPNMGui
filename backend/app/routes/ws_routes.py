@@ -141,7 +141,7 @@ def delete_rxmer_files_by_mac_via_ftp(ftp_server, ftp_user, ftp_pass, mac_list, 
     return deleted
 
 
-def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
+def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
     """Trigger UTSC test via agent's snmp_set capability."""
     from app.core.simple_ws import get_simple_agent_manager
     
@@ -156,7 +156,7 @@ def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
             logger.error("No agent with snmp_set capability")
             return False
         
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='snmp_set',
@@ -182,7 +182,7 @@ def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
         return False
 
 
-def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
+def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
     """Stop UTSC test via agent's snmp_set capability."""
     from app.core.simple_ws import get_simple_agent_manager
     
@@ -197,7 +197,7 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community):
             logger.error("No agent with snmp_set capability")
             return False
         
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.1"
+        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
         task_id = agent_manager.send_task_sync(
             agent_id=agent.agent_id,
             command='snmp_set',
@@ -278,11 +278,15 @@ def init_websocket(app):
             refresh_ms = int(request.args.get('refresh', 500))  # Refresh rate in ms
             duration_s = int(request.args.get('duration', 60))  # Duration in seconds
             rf_port = request.args.get('rf_port')
+            cfg_index = int(request.args.get('cfg_index', 1))
             cmts_ip = request.args.get('cmts_ip')
             community = request.args.get('community', 'public')
             write_community = request.args.get('write_community', community)
             
-            logger.info(f"UTSC WebSocket opened for {mac_address}: refresh={refresh_ms}ms, duration={duration_s}s, rf_port={rf_port}, cmts_ip={cmts_ip}")
+            logger.info(
+                f"UTSC WebSocket opened for {mac_address}: refresh={refresh_ms}ms, "
+                f"duration={duration_s}s, rf_port={rf_port}, cfg_index={cfg_index}, cmts_ip={cmts_ip}"
+            )
         except Exception as e:
             logger.error(f"UTSC WebSocket parameter parsing failed: {e}")
             raise
@@ -354,7 +358,7 @@ def init_websocket(app):
                 logger.info(f"UTSC WebSocket: Starting continuous streaming mode (re-trigger every {trigger_interval}s)")
                 logger.info(f"UTSC WebSocket: Triggering initial UTSC run #{run_counter}")
                 try:
-                    trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
+                    trigger_utsc_via_agent(cmts_ip, int(rf_port), community, cfg_index=cfg_index)
                     last_trigger_time = stream_start_time
                     run_counter += 1
                 except Exception as e:
@@ -377,7 +381,7 @@ def init_websocket(app):
                 if rf_port and cmts_ip and (current_time - last_trigger_time) >= trigger_interval:
                     try:
                         logger.info(f"UTSC WebSocket: Re-triggering UTSC run #{run_counter} (every {trigger_interval}s)")
-                        trigger_utsc_via_agent(cmts_ip, int(rf_port), community)
+                        trigger_utsc_via_agent(cmts_ip, int(rf_port), community, cfg_index=cfg_index)
                         last_trigger_time = current_time
                         run_counter += 1
                     except Exception as e:
@@ -550,7 +554,7 @@ def init_websocket(app):
             if rf_port and cmts_ip:
                 logger.info(f"UTSC WebSocket: Stopping continuous UTSC on {cmts_ip} port {rf_port} (completed {run_counter} runs)")
                 try:
-                    stop_utsc_via_agent(cmts_ip, int(rf_port), community)
+                    stop_utsc_via_agent(cmts_ip, int(rf_port), community, cfg_index=cfg_index)
                 except Exception as e:
                     logger.warning(f"UTSC stop failed on cleanup: {e}")
             
