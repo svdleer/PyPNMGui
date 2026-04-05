@@ -1762,9 +1762,9 @@
                                                                 <label class="form-label form-label-sm">Span (MHz)</label>
                                                                 <select v-model.number="utscConfig.spanMhz" class="form-select form-select-sm">
                                                                     <option :value="40">40 MHz</option>
-                                                                    <option :value="60">60 MHz</option>
                                                                     <option :value="80">80 MHz</option>
                                                                     <option :value="160">160 MHz</option>
+                                                                    <option :value="320">320 MHz</option>
                                                                 </select>
                                                             </div>
                                                         </div>
@@ -1784,15 +1784,10 @@
                                                                 <label class="form-label form-label-sm">Bins</label>
                                                                 <select v-model.number="utscConfig.numBins" class="form-select form-select-sm">
                                                                     <option :value="200">200</option>
-                                                                    <option :value="256">256</option>
                                                                     <option :value="400">400</option>
-                                                                    <option :value="512">512</option>
                                                                     <option :value="800">800</option>
-                                                                    <option :value="1024">1024</option>
                                                                     <option :value="1600">1600</option>
-                                                                    <option :value="2048">2048</option>
                                                                     <option :value="3200">3200</option>
-                                                                    <option :value="4096">4096</option>
                                                                 </select>
                                                             </div>
                                                         </div>

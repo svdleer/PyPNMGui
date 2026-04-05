@@ -5313,11 +5313,11 @@ createApp({
             this.liveSpectrumLastFile = null;  // Track last file to skip duplicates
             this.liveSpectrumStats = { captures: 0, lastUpdate: null, avgRefreshMs: 0 };
             
-            // Configure UTSC for FreeRunning mode with device-safe timing.
-            this.utscConfig.triggerMode = 2; // FreeRunning
+            // Configure UTSC - use user-selected triggerMode and params.
+            // Only enforce device-safe timing minimums; cfgIndex auto-probed by backend.
             this.utscConfig.cfgIndex = 0;
-            this.utscConfig.repeatPeriodMs = Math.max(this.liveSpectrumIntervalMs, 400);
-            this.utscConfig.freerunDurationMs = 120000;
+            this.utscConfig.repeatPeriodMs = Math.max(this.utscConfig.repeatPeriodMs || 400, 400);
+            this.utscConfig.freerunDurationMs = Math.max(this.utscConfig.freerunDurationMs || 120000, 120000);
             
             try {
                 // Configure and start UTSC (vendor-aware defaults applied in PyPNM)
