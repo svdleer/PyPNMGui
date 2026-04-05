@@ -1,12 +1,27 @@
 """
-UTSC Parameter Validation for CommScope E6000 CMTS
+UTSC Parameter Validation for CommScope CMTS (Casa 100G, EVO vCCAP)
 
-Based on E6000 CER User Guide Release 13.0 - Proactive Network Maintenance
-and observed behavior from testing.
+Based on:
+- Casa E6000 CER User Guide Release 13.0 - Proactive Network Maintenance
+- CommScope EVO vCCAP firmware 10.10.0 (validated 2026-04-05)
+- Tested on MND-GT0002-CCAPV001 172.16.6.160
 
 References:
 - DOCS-PNM-MIB (docsPnmCmtsUtscCfg table)
-- E6000 CER I-CCAP User Guide
+- Casa E6000 CER I-CCAP User Guide
+
+**CRITICAL CASA/EVO CONSTRAINT (Validated)**:
+  FreeRunning mode: FreeRunDuration / RepeatPeriod <= 300 files
+  - 120s duration requires RepeatPeriod >= 400ms (120,000 / 300 = 400ms minimum)
+  - Firmware error: "utsc_freerun_param_check() freerun capture file number error"
+  - Fix: Increase RepeatPeriod or reduce FreeRunDuration
+
+**EVO-SPECIFIC NOTES** (validated 2026-04-05):
+  - Config index: Valid indices 2, 3 (sometimes 1) per RF port — not sequential
+  - RF port index: Use 120001280+ (RPHY Upstream Physical Interface)
+  - LogicalChIfIndex: 0 = any OFDMA channel, or pin to 160001280+ (specific channel)
+  - TriggerMode: freeRunning(2) works only if file count valid; idleSid(5) always works
+  - DestinationIndex: May reject with commitFailed even in notInService state
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -35,7 +50,7 @@ class UtscLimits:
     SUPPORTED_BIN_COUNTS: List[int] = None   # Populated in __post_init__
     
     # Timing Parameters (milliseconds)
-    # Casa E6000 constraints (most restrictive):
+    # Casa C100G constraints:
     #   RepeatPeriod >= 100ms, FreeRunDuration >= 120s, files = FreeRun/Repeat <= 300
     MIN_REPEAT_PERIOD_MS: int = 100          # Casa minimum: 100ms
     MAX_REPEAT_PERIOD_MS: int = 60_000       # 60 seconds max
@@ -47,6 +62,10 @@ class UtscLimits:
 
     # Casa file count: FreeRunDuration / RepeatPeriod <= 300
     MAX_CAPTURE_FILE_COUNT: int = 300
+    
+    # Device-specific defaults
+    EVO_MIN_REPEAT_PERIOD_MS: int = 400      # EVO empirically requires 400ms min with 120s duration
+    CASA_MIN_REPEAT_PERIOD_MS: int = 100     # Casa can go down to 100ms
 
     # Trigger Parameters
     MIN_TRIGGER_COUNT: int = 1
@@ -239,7 +258,8 @@ def validate_all_parameters(
     trigger_mode: int = 2,
     repeat_period_ms: int = 1000,
     freerun_duration_ms: int = 60000,
-    trigger_count: int = 10
+    trigger_count: int = 10,
+    device_type: str = "casa"  # "casa" or "evo"
 ) -> Dict[str, any]:
     """
     Validate all UTSC parameters together.
@@ -287,6 +307,28 @@ def validate_all_parameters(
     elif msg:  # Info/Warning
         warnings.append(msg)
     
+    # **NEW**: Validate file count for freeRunning mode (critical for Casa/EVO)
+    # CASA/EVO firmware constraint: FreeRunDuration / RepeatPeriod <= 300 files
+    # EVO empirically enforces stricter RepeatPeriod >= 400ms with 120s duration
+    if trigger_mode == 2 and repeat_period_ms > 0:  # freeRunning mode
+        file_count = freerun_duration_ms / repeat_period_ms
+        if file_count > LIMITS.MAX_CAPTURE_FILE_COUNT:
+            min_repeat_ms = (freerun_duration_ms + 299) // 300  # ceil(freerun / 300)
+            errors.append(
+                f"FreeRunning file count {file_count:.0f} exceeds maximum {LIMITS.MAX_CAPTURE_FILE_COUNT}. "
+                f"Adjust: FreeRunDuration ({freerun_duration_ms}ms) / RepeatPeriod ({repeat_period_ms}ms) must be <= 300. "
+                f"Recommended: increase RepeatPeriod to {min_repeat_ms}ms or more."
+            )
+        
+        # EVO-specific: validate minimum RepeatPeriod of 400ms for freeRunning mode
+        if device_type.lower() == "evo" and trigger_mode == 2:
+            if repeat_period_ms < LIMITS.EVO_MIN_REPEAT_PERIOD_MS:
+                errors.append(
+                    f"EVO freeRunning mode: RepeatPeriod {repeat_period_ms}ms is below EVO minimum {LIMITS.EVO_MIN_REPEAT_PERIOD_MS}ms. "
+                    f"EVO firmware enforces RepeatPeriod >= 400ms; Casa can accept 100ms. "
+                    f"Firmware will reject with: utsc_freerun_param_check() freerun capture file number error"
+                )
+    
     # Check frequency resolution
     if span_hz > 0 and num_bins > 0:
         freq_resolution_hz = span_hz / num_bins
@@ -315,7 +357,8 @@ def validate_all_parameters(
             'trigger_mode': trigger_mode,
             'repeat_period_ms': repeat_period_ms,
             'freerun_duration_ms': freerun_duration_ms,
-            'trigger_count': trigger_count
+            'trigger_count': trigger_count,
+            'file_count': freerun_duration_ms / repeat_period_ms if repeat_period_ms > 0 else 0,
         }
     }
 
@@ -349,6 +392,8 @@ def get_limits_summary() -> Dict[str, any]:
             'min_repeat_period_ms': LIMITS.MIN_REPEAT_PERIOD_MS,
             'max_repeat_period_ms': LIMITS.MAX_REPEAT_PERIOD_MS,
             'default_repeat_period_ms': LIMITS.DEFAULT_REPEAT_PERIOD_MS,
+            'evo_min_repeat_period_ms': LIMITS.EVO_MIN_REPEAT_PERIOD_MS,
+            'casa_min_repeat_period_ms': LIMITS.CASA_MIN_REPEAT_PERIOD_MS,
             'min_freerun_duration_ms': LIMITS.MIN_FREERUN_DURATION_MS,
             'max_freerun_duration_ms': LIMITS.MAX_FREERUN_DURATION_MS,
             'default_freerun_duration_ms': LIMITS.DEFAULT_FREERUN_DURATION_MS,
@@ -360,10 +405,58 @@ def get_limits_summary() -> Dict[str, any]:
         },
         'notes': {
             'e6000_limitations': [
-                "Repeat period maximum: 1000ms (1 second) - E6000 hardware limit",
+                "Repeat period maximum: 60 seconds - Casa/EVO hardware limit",
                 "Trigger count maximum: 10 captures - E6000 hardware limit",
                 "FreeRunning mode uses freerun_duration, not trigger_count",
-                "Frequency range: 5-200 MHz (DOCSIS 3.0: 5-85 MHz typical)"
+                "Frequency range: 5-200 MHz (DOCSIS 3.0: 5-85 MHz typical)",
+                "**CRITICAL**: FreeRunning file count: FreeRunDuration / RepeatPeriod <= 300 files",
+                "  Example: 120s FreeRun requires RepeatPeriod >= 400ms (120000/300=400ms)",
+                "  Failure: Casa/EVO will reject with 'freerun capture file number error'",
+            ],
+            'evo_specific': [
+                "Config index: Try indices 2, 3, then 1 (not all may exist on port)",
+                "TriggerMode freeRunning(2): Works ONLY if RepeatPeriod >= 400ms with 120s FreeRun",
+                "TriggerMode idleSid(5): Always works, but captures run indefinitely (no sampleReady signal)",
+                "RF port: Use 120001280+ (RPHY Upstream Physical Interface, not RF Port index)",
+                "DestinationIndex: May reject even in notInService; use BDT autoUpload instead",
+                "LogicalChIfIndex: Set to 0 for any OFDMA channel, or pin to 160001280+ (OFDMA Upstream)",
+                "RepeatPeriod default: 400ms (NOT 100ms) — empirically required for FreeRunning mode",
+            ],
+            'casa_specific': [
+                "Config index: Check standard indices 1, 2, 3 (pre-provisioned by vendor)",
+                "TriggerMode freeRunning(2): May work with RepeatPeriod >= 100ms if file count valid",
+                "RepeatPeriod minimum: 100ms (Casa can go lower than EVO)",
             ]
         }
     }
+
+
+def get_device_defaults(device_type: str = "casa") -> Dict[str, any]:
+    """
+    Get device-type-specific default parameters.
+    
+    Args:
+        device_type: "casa" or "evo"
+        
+    Returns:
+        Dict with device defaults
+    """
+    if device_type.lower() == "evo":
+        return {
+            'repeat_period_ms': LIMITS.EVO_MIN_REPEAT_PERIOD_MS,  # 400ms
+            'freerun_duration_ms': LIMITS.DEFAULT_FREERUN_DURATION_MS,  # 120s
+            'trigger_mode': 5,  # idleSid (safer default than freeRunning)
+            'config_index_candidates': [2, 3, 1],  # Try these in order
+            'note': 'EVO defaults: RepeatPeriod=400ms (required for FreeRunning), TriggerMode=idleSid(5) for safety'
+        }
+    else:  # casa
+        return {
+            'repeat_period_ms': LIMITS.CASA_MIN_REPEAT_PERIOD_MS,  # 100ms
+            'freerun_duration_ms': LIMITS.DEFAULT_FREERUN_DURATION_MS,  # 120s
+            'trigger_mode': 2,  # freeRunning (Casa default)
+            'config_index_candidates': [1, 2, 3],  # Try standard first
+            'note': 'Casa defaults: RepeatPeriod=100ms (Casa minimum), TriggerMode=freeRunning(2)'
+        }
+
+
+
