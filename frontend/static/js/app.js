@@ -901,6 +901,17 @@ createApp({
         };
         window.addEventListener('pagehide', this._pageLeaveHandler);
         window.addEventListener('beforeunload', this._pageLeaveHandler);
+
+        // Auto-stop UTSC whenever the spectrum analyzer modal is fully closed
+        // (covers X button, Escape key, and backdrop click)
+        const saModal = document.getElementById('spectrumAnalyzerModal');
+        if (saModal) {
+            saModal.addEventListener('hidden.bs.modal', () => {
+                if (this.spectrumAnalyzerModalOpen) {
+                    this.closeSpectrumAnalyzerModal();
+                }
+            });
+        }
     },
 
     beforeUnmount() {
