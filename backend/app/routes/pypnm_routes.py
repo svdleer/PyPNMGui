@@ -582,7 +582,7 @@ def pnm_measurement(measurement_type, mac_address):
             
             if result.get('success'):
                 # Start the capture — use cfg_index returned by configure (probed index)
-                resolved_cfg_index = result.get('cfg_index', 1)
+                resolved_cfg_index = result.get('cfg_index', 0)
                 start_result = client.start_utsc(
                     cmts_ip, rf_port_ifindex, cmts_write,
                     cfg_index=resolved_cfg_index
@@ -3835,18 +3835,15 @@ def start_utsc(mac_address):
     
     # Optional overrides (use correct defaults if not provided)
     trigger_mode = data.get('trigger_mode', 2)  # FreeRunning
-    freerun_duration_ms = data.get('freerun_duration_ms', 60000)  # Default 1 minute (can be overridden by GUI)
-    repeat_period_ms = data.get('repeat_period_ms', 50)  # 50ms (E6000 minimum)
+    freerun_duration_ms = data.get('freerun_duration_ms', 120000)
+    repeat_period_ms = data.get('repeat_period_ms', 400)
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
     
     try:
         client = PyPNMClient()
-        cfg_index = int(data.get('cfg_index', 1) or 1)
-        if cfg_index <= 0:
-            logger.warning(f"UTSC start received cfg_index={cfg_index}; normalizing to 1")
-            cfg_index = 1
+        cfg_index = int(data.get('cfg_index', 0) or 0)
         trigger_mode = data.get('trigger_mode', 2)
 
         # Just start — configure was already done by the caller

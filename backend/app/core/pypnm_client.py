@@ -960,7 +960,7 @@ class PyPNMClient:
         destination_index: int = 1,
         cm_mac_address: Optional[str] = None,
         logical_ch_ifindex: Optional[int] = None,
-        cfg_index: int = 1,
+        cfg_index: int = 0,
         tftp_server: Optional[str] = None,
         dest_path: Optional[str] = None,
     ) -> Dict[str, Any]:

@@ -106,8 +106,9 @@ createApp({
                 spanMhz: 80,
                 numBins: 800,
                 rfPortIfindex: null,
-                repeatPeriodMs: 50,       // 50ms between captures (20 fps)
-                freerunDurationMs: 600000, // 10 min max (E6000 ignores this for file count)
+                cfgIndex: 0,              // 0=auto-probe on backend; EVO may use 2/3 instead of 1
+                repeatPeriodMs: 400,      // 400ms default - valid for EVO freeRunning (<=300 files)
+                freerunDurationMs: 120000, // 120s default - valid Casa/EVO minimum
                 outputFormat: 0,          // 0=auto-detect (tries 5 then 2), 5=fftAmplitude (best for visualisation)
                 window: 2,                // 2=rectangular (E6000 RRPS HF only supports rectangular; safe default for all vendors)
                 runtime: 60               // seconds - streaming runtime¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡€ for spectrum analyzer
@@ -3854,8 +3855,8 @@ createApp({
                     return;
                 }
                 
-                const cfgIndexForStart = this.utscConfig.cfgIndex;
-                // cfg_index=0 sent to server — auto-probe by TriggerMode, no client-side block needed
+                const cfgIndexForStart = this.utscConfig.cfgIndex || 0;
+                // cfg_index=0 sent to server — auto-probe by TriggerMode, required for EVO rows 2/3.
 
                 const response = await fetch(`${API_BASE}/pypnm/upstream/utsc/start/${this.selectedModem.mac_address}`, {
                     method: 'POST',
@@ -3863,7 +3864,7 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        cfg_index: this.utscConfig.cfgIndex || 1,
+                        cfg_index: cfgIndexForStart,
                         trigger_mode: this.utscConfig.triggerMode || 2,
                         community: this.snmpCommunity,
                         write_community: this.snmpCommunityRW
@@ -5312,10 +5313,11 @@ createApp({
             this.liveSpectrumLastFile = null;  // Track last file to skip duplicates
             this.liveSpectrumStats = { captures: 0, lastUpdate: null, avgRefreshMs: 0 };
             
-            // Configure UTSC for FreeRunning mode with fast repeat
+            // Configure UTSC for FreeRunning mode with device-safe timing.
             this.utscConfig.triggerMode = 2; // FreeRunning
-            this.utscConfig.repeatPeriodMs = this.liveSpectrumIntervalMs;
-            this.utscConfig.freerunDurationMs = 600000; // 10 min max
+            this.utscConfig.cfgIndex = 0;
+            this.utscConfig.repeatPeriodMs = Math.max(this.liveSpectrumIntervalMs, 400);
+            this.utscConfig.freerunDurationMs = 120000;
             
             try {
                 // Configure and start UTSC (vendor-aware defaults applied in PyPNM)
@@ -5331,7 +5333,7 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        cfg_index: this.utscConfig.cfgIndex || 1,
+                        cfg_index: this.utscConfig.cfgIndex || 0,
                         trigger_mode: this.utscConfig.triggerMode || 2,
                         community: this.snmpCommunity,
                         write_community: this.snmpCommunityRW
