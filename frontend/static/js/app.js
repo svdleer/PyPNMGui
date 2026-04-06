@@ -1639,19 +1639,25 @@ createApp({
             return labels[id] ?? String(id);
         },
 
+        _resolvePreferredProfileFromRows(profileRows) {
+            const rows = Array.isArray(profileRows) ? profileRows : [];
+            if (!rows.length) return null;
+            const withTraffic = rows.filter(p => Number(p?.total_codewords || 0) > 0);
+            if (!withTraffic.length) return null;
+            const nonZero = withTraffic.filter(p => Number(p?.profile_id || 0) > 0);
+            const target = nonZero.length ? nonZero : withTraffic;
+            return Math.max(...target.map(p => Number(p?.profile_id || 0)));
+        },
+
         displayedDownstreamProfile(channelRow) {
+            const explicit = Number(channelRow?.current_profile);
+            if (Number.isFinite(explicit) && explicit > 0) return explicit;
             try {
                 const channelId = Number(channelRow?.channel_id);
                 const dsStats = this.channelStats?.ofdm_stats?.ds_profiles || [];
                 const statsRow = dsStats.find(r => Number(r?.channel_id) === channelId);
-                const profiles = statsRow?.profiles || [];
-                if (profiles.length) {
-                    const maxTotal = Math.max(...profiles.map(p => Number(p?.total_codewords || 0)));
-                    if (maxTotal > 0) {
-                        const contenders = profiles.filter(p => Number(p?.total_codewords || 0) === maxTotal);
-                        return Math.max(...contenders.map(p => Number(p?.profile_id || 0)));
-                    }
-                }
+                const preferred = this._resolvePreferredProfileFromRows(statsRow?.profiles || []);
+                if (Number.isFinite(preferred)) return preferred;
             } catch (_) {
                 // Fall back to channel current_profile.
             }
@@ -1718,19 +1724,14 @@ createApp({
         },
 
         _resolveCurrentProfile(channelRow) {
-            const profiles = channelRow?.profiles || [];
-            if (profiles.length) {
-                const maxTotal = Math.max(...profiles.map(p => Number(p?.total_codewords || 0)));
-                if (maxTotal > 0) {
-                    const contenders = profiles.filter(p => Number(p?.total_codewords || 0) === maxTotal);
-                    // Tie-break to highest profile id (more robust profile).
-                    return Math.max(...contenders.map(p => Number(p?.profile_id || 0)));
-                }
+            const explicitCurrentProfile = Number(channelRow?.current_profile);
+            if (Number.isFinite(explicitCurrentProfile) && explicitCurrentProfile > 0) {
+                return explicitCurrentProfile;
             }
 
-            const explicitCurrentProfile = Number(channelRow?.current_profile);
-            if (Number.isFinite(explicitCurrentProfile)) {
-                return explicitCurrentProfile;
+            const preferred = this._resolvePreferredProfileFromRows(channelRow?.profiles || []);
+            if (Number.isFinite(preferred)) {
+                return preferred;
             }
 
             // DS profile stats rows can omit current_profile; map by channel_id
@@ -1739,9 +1740,13 @@ createApp({
                 const dsRows = this.channelStats?.downstream?.ofdm?.channels || [];
                 const match = dsRows.find(r => Number(r?.channel_id) === Number(channelRow?.channel_id));
                 const mappedCurrentProfile = Number(match?.current_profile);
-                if (Number.isFinite(mappedCurrentProfile)) return mappedCurrentProfile;
+                if (Number.isFinite(mappedCurrentProfile) && mappedCurrentProfile > 0) return mappedCurrentProfile;
             } catch (_) {
                 // Keep heuristic fallback below.
+            }
+
+            if (Number.isFinite(explicitCurrentProfile)) {
+                return explicitCurrentProfile;
             }
 
             return null;
