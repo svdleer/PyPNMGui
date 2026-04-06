@@ -1639,28 +1639,7 @@ createApp({
             return labels[id] ?? String(id);
         },
 
-        _resolvePreferredProfileFromRows(profileRows) {
-            const rows = Array.isArray(profileRows) ? profileRows : [];
-            if (!rows.length) return null;
-            const withTraffic = rows.filter(p => Number(p?.total_codewords || 0) > 0);
-            if (!withTraffic.length) return null;
-            const nonZero = withTraffic.filter(p => Number(p?.profile_id || 0) > 0);
-            const target = nonZero.length ? nonZero : withTraffic;
-            return Math.max(...target.map(p => Number(p?.profile_id || 0)));
-        },
-
         displayedDownstreamProfile(channelRow) {
-            const explicit = Number(channelRow?.current_profile);
-            if (Number.isFinite(explicit) && explicit > 0) return explicit;
-            try {
-                const channelId = Number(channelRow?.channel_id);
-                const dsStats = this.channelStats?.ofdm_stats?.ds_profiles || [];
-                const statsRow = dsStats.find(r => Number(r?.channel_id) === channelId);
-                const preferred = this._resolvePreferredProfileFromRows(statsRow?.profiles || []);
-                if (Number.isFinite(preferred)) return preferred;
-            } catch (_) {
-                // Fall back to channel current_profile.
-            }
             const currentProfile = Number(channelRow?.current_profile);
             return Number.isFinite(currentProfile) ? currentProfile : null;
         },
@@ -1692,29 +1671,7 @@ createApp({
             if (Number.isFinite(explicitCurrentIuc)) {
                 return explicitCurrentIuc;
             }
-
-            // Fallback: align OFDM stats US rows (CMTS ifIndex namespace) with
-            // modem US OFDMA rows (CM ifIndex namespace) by stable sorted order.
-            try {
-                const statsRows = (this.channelStats?.ofdm_stats?.us_iuc_stats || []).slice()
-                    .sort((a, b) => Number(a?.ifindex || 0) - Number(b?.ifindex || 0));
-                const modemRows = (this.channelStats?.upstream?.ofdma?.channels || []).slice()
-                    .sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0));
-                const pos = statsRows.findIndex(r => Number(r?.ifindex || -1) === Number(channelRow?.ifindex || -2));
-                if (pos >= 0 && pos < modemRows.length) {
-                    const mappedCurrentIuc = Number(modemRows[pos]?.current_iuc);
-                    if (Number.isFinite(mappedCurrentIuc)) return mappedCurrentIuc;
-                }
-            } catch (_) {
-                // Fall through to heuristic below.
-            }
-
-            const rows = channelRow?.iuc_stats || [];
-            if (!rows.length) return null;
-            const maxTotal = Math.max(...rows.map(r => Number(r?.total || 0)));
-            if (maxTotal <= 0) return null;
-            const contenders = rows.filter(r => Number(r?.total || 0) === maxTotal);
-            return Math.max(...contenders.map(r => Number(r?.iuc || 0)));
+            return null;
         },
 
         isActiveIuc(iucRow, channelRow) {
@@ -1725,30 +1682,9 @@ createApp({
 
         _resolveCurrentProfile(channelRow) {
             const explicitCurrentProfile = Number(channelRow?.current_profile);
-            if (Number.isFinite(explicitCurrentProfile) && explicitCurrentProfile > 0) {
-                return explicitCurrentProfile;
-            }
-
-            const preferred = this._resolvePreferredProfileFromRows(channelRow?.profiles || []);
-            if (Number.isFinite(preferred)) {
-                return preferred;
-            }
-
-            // DS profile stats rows can omit current_profile; map by channel_id
-            // from downstream OFDM channels where current_profile is populated.
-            try {
-                const dsRows = this.channelStats?.downstream?.ofdm?.channels || [];
-                const match = dsRows.find(r => Number(r?.channel_id) === Number(channelRow?.channel_id));
-                const mappedCurrentProfile = Number(match?.current_profile);
-                if (Number.isFinite(mappedCurrentProfile) && mappedCurrentProfile > 0) return mappedCurrentProfile;
-            } catch (_) {
-                // Keep heuristic fallback below.
-            }
-
             if (Number.isFinite(explicitCurrentProfile)) {
                 return explicitCurrentProfile;
             }
-
             return null;
         },
 
@@ -1757,9 +1693,7 @@ createApp({
             if (Number.isFinite(currentProfile)) {
                 return Number(profileRow?.profile_id) === currentProfile;
             }
-            const total = Number(profileRow?.total_codewords || 0);
-            const speed = Number(profileRow?.full_channel_speed_bps || 0);
-            return total > 0 || speed > 0;
+            return false;
         },
 
         profileBadgeClass(profileRow, channelRow = null) {
