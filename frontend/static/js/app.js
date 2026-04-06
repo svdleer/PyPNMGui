@@ -3484,6 +3484,18 @@ createApp({
                 this._stopChannelStatsProgress(null, true);
             } finally {
                 if (!this.channelStatsError) this._stopChannelStatsProgress(this.channelStats);
+
+                // Keep the progress modal visible briefly after completion so users
+                // can read step outcomes instead of it disappearing immediately.
+                const startedAt = this._csProgressStartedAt || 0;
+                const elapsedMs = startedAt ? (Date.now() - startedAt) : 0;
+                const minTotalVisibleMs = 2600;
+                const postCompleteHoldMs = 1200;
+                const extraWaitMs = Math.max(postCompleteHoldMs, minTotalVisibleMs - elapsedMs, 0);
+                if (extraWaitMs > 0) {
+                    await new Promise(resolve => setTimeout(resolve, extraWaitMs));
+                }
+
                 this.channelStatsLoading = false;
                 if (resumeEnrichPolling && this.isEnriching && !this._enrichPollTimer) {
                     this._scheduleEnrichPoll();
@@ -3492,6 +3504,7 @@ createApp({
         },
         
         _startChannelStatsProgress() {
+            this._csProgressStartedAt = Date.now();
             const hasCmIndex = !!(this.selectedModem?.cm_index);
             const hasCmts = !!(this.selectedModem?.cmts_ip);
             // Phase definitions: id, label, duration (seconds), cumulative start
