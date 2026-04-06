@@ -3562,6 +3562,23 @@ createApp({
                 this._csProgressTimer = null;
             }
 
+            const apiPartial = !!(data && (data.success === false || Number(data.status) !== 0));
+            const errorText = String(data?.error || '').toLowerCase();
+            const hasTimeoutHint = errorText.includes('timeout') || errorText.includes('timed out');
+
+            const dsOfdmChannels = data?.downstream?.ofdm?.channels || [];
+            const usOfdmaChannels = data?.upstream?.ofdma?.channels || [];
+            const hasDsAuthoritativeGap = dsOfdmChannels.some(ch => {
+                const hasProfiles = Array.isArray(ch?.profiles) && ch.profiles.length > 0;
+                return hasProfiles && ch?.current_profile == null;
+            });
+            const hasUsAuthoritativeGap = usOfdmaChannels.some(ch => {
+                const hasAnyIucData = (Array.isArray(ch?.active_iucs) && ch.active_iucs.length > 0) ||
+                                      (Array.isArray(ch?.iuc_stats) && ch.iuc_stats.length > 0);
+                return hasAnyIucData && ch?.current_iuc == null;
+            });
+            const hasAuthoritativeGap = hasDsAuthoritativeGap || hasUsAuthoritativeGap;
+
             // Derive real per-step outcomes from the response data
             const steps = (this.channelStatsProgress.steps || []).map(s => {
                 const label = s.label.replace('...', '');
@@ -3577,7 +3594,7 @@ createApp({
                                         data.downstream?.ofdm?.count > 0 ||
                                         data.upstream?.atdma?.count > 0 ||
                                         data.upstream?.ofdma?.count > 0);
-                        status = hasAny ? 'done' : 'warn';
+                        status = hasAny ? 'done' : (hasTimeoutHint ? 'error' : 'warn');
                         if (!hasAny) note = ' (no channels)';
                         break;
                     }
@@ -3586,6 +3603,7 @@ createApp({
                         const usOk  = (data.upstream?.atdma?.count > 0  || data.upstream?.ofdma?.count > 0);
                         if (!dsOk && !usOk) { status = 'error'; note = ' (no channels)'; }
                         else if (!dsOk || !usOk) { status = 'warn'; note = !dsOk ? ' (DS missing)' : ' (US missing)'; }
+                        else if (apiPartial) { status = 'warn'; note = hasTimeoutHint ? ' (partial: timeout)' : ' (partial)'; }
                         break;
                     }
                     case 'cmts': {
@@ -3596,6 +3614,8 @@ createApp({
                         const hasRxMer = ofdmaChs.some(c => c.rx_mer != null && c.rx_mer > 0);
                         const hasDs    = dsProfs.some(p => p.profiles?.some(pr => pr.full_channel_speed_bps != null));
                         if (!hasIuc && !hasRxMer && !hasDs) { status = 'warn'; note = ' (no CMTS data)'; }
+                        else if (hasAuthoritativeGap) { status = 'warn'; note = ' (assigned/current mismatch)'; }
+                        else if (apiPartial) { status = 'warn'; note = hasTimeoutHint ? ' (partial: timeout)' : ' (partial)'; }
                         break;
                     }
                     case 'fiber': {
@@ -3604,7 +3624,8 @@ createApp({
                     }
                     case 'parse':
                     default:
-                        status = 'done';
+                        status = apiPartial ? 'warn' : 'done';
+                        if (apiPartial) note = hasTimeoutHint ? ' (partial: timeout)' : ' (partial)';
                         break;
                 }
                 return { ...s, label: label + note, status };
