@@ -239,7 +239,11 @@ def get_default_write_community():
 
 def get_cmts_community():
     """Get default SNMP read community for CMTS operations."""
-    return os.environ.get('CMTS_COMMUNITY', 'public')
+    return (
+        os.environ.get('CMTS_COMMUNITY')
+        or os.environ.get('CMTS_SNMP_COMMUNITY')
+        or 'public'
+    )
 
 
 def get_cmts_write_community():
