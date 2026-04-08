@@ -239,11 +239,7 @@ def get_default_write_community():
 
 def get_cmts_community():
     """Get default SNMP read community for CMTS operations."""
-    return (
-        os.environ.get('CMTS_COMMUNITY')
-        or os.environ.get('CMTS_SNMP_COMMUNITY')
-        or 'public'
-    )
+    return os.environ.get('CMTS_COMMUNITY', 'public')
 
 
 def get_cmts_write_community():
@@ -2605,7 +2601,6 @@ def get_cmts_us_rxmer_fibernode_scan():
                 deadline = time.time() + 90
                 # Keep our filename; the CMTS may report an older internal path.
                 import os as _os
-                resource_unavail_count = 0
                 while time.time() < deadline:
                     if _aborted():
                         return None
@@ -2625,19 +2620,10 @@ def get_cmts_us_rxmer_fibernode_scan():
                         status_fn = _os.path.basename(s.get('filename') or '')
                         if status_fn.startswith(f"rxmer_{mac_safe}_{preeq_suffix}"):
                             break  # confirmed our capture is ready
-                    if s.get('meas_status') == 6:
-                        resource_unavail_count += 1
-                        if resource_unavail_count > 5:
-                            logger.warning(f"Scan: {mac} RESOURCE_UNAVAILABLE persisted after {resource_unavail_count} polls, skipping")
-                            return None
-                        # RESOURCE_UNAVAILABLE — PNM engine busy, wait and retry
-                        logger.debug(f"Scan: {mac} RESOURCE_UNAVAILABLE, waiting… ({resource_unavail_count}/5)")
-                        time.sleep(3)
-                        continue
-                    if s.get('is_error') or s.get('meas_status') == 5:
+                    if s.get('is_error') or s.get('meas_status') in (5, 6):
                         logger.warning(f"Scan: {mac} status error: {s.get('meas_status_name')}")
                         return None
-                    time.sleep(1)
+                    time.sleep(1)  # 1s poll — was 3s, halves scan time
 
                 if unique_filename:
                     return {
@@ -2776,26 +2762,18 @@ def get_cmts_us_rxmer_fibernode_scan():
                     if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
                         continue
                     pending.append(_fn)
-                # Use the CMTS-specific FTP config to avoid trying unreachable servers
-                _scan_ftp_cfg = {
-                    'host': _ftp_server_ip,
-                    'port': 21,
-                    'user': _ftp_user,
-                    'password': _ftp_pass,
-                    'ftp_dir': os.environ.get('FTP_TFTPBOOT_DIR', '/var/lib/tftpboot'),
-                }
                 max_fetch_rounds = 8
                 for round_idx in range(max_fetch_rounds):
                     still_pending = []
                     for _prefix in pending:
-                        files = _fetch_pnm_files(_prefix, ftp_cfg=_scan_ftp_cfg, allow_when_local=True)
+                        files = _fetch_pnm_files(_prefix, allow_when_local=True)
                         if not files:
                             still_pending.append(_prefix)
                     pending = still_pending
                     if not still_pending:
                         break
                     if round_idx < max_fetch_rounds - 1:
-                        time.sleep(3.0)
+                        time.sleep(1.0)
                 if pending:
                     logger.warning(f"fiberNode scan: FTP prefetch missing {len(pending)} capture(s) after retries; sample={pending[:3]}")
                 _effective_tftp_path = os.environ.get('PNM_CACHE_DIR', '/app/data/pnm_cache')

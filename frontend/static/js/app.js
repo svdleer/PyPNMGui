@@ -1858,20 +1858,6 @@ createApp({
                 );
             }
         },
-
-        formatCmtsVendorType(vendor, type, hostname = '') {
-            const v = String(vendor || '').trim();
-            const t = String(type || '').trim();
-            const h = String(hostname || '').trim().toLowerCase();
-            const key = `${v.toLowerCase()} ${t.toLowerCase()}`.trim();
-
-            if (h.includes('ccapv')) return 'Commscope EVO vCCAP';
-
-            if (key === 'arris ccap') return 'Commscope E6000';
-            if (key === 'commscope vccap') return 'Commscope EVO vCCAP';
-
-            return `${v} ${t}`.trim();
-        },
         
         async loadCmtsInterfaces() {
             this.cmtsInterfaces = [];

@@ -242,7 +242,7 @@
                                         <select v-model="selectedCmts" class="form-select" @change="loadCmtsInterfaces">
                                             <option value="">{{ t('search.all_cmts') }} ({{ cmtsList.length }})</option>
                                             <option v-for="cmts in cmtsList" :key="cmts.name" :value="cmts.name">
-                                                {{ cmts.name }} - {{ formatCmtsVendorType(cmts.vendor, cmts.type, cmts.name) }}
+                                                {{ cmts.name }} - {{ cmts.vendor }} {{ cmts.type }}
                                             </option>
                                         </select>
                                     </div>

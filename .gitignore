@@ -44,9 +44,6 @@ docker/.env.pypnm
 *.swo
 *~
 
-# GitHub metadata
-.github/
-
 # OS
 .DS_Store
 Thumbs.db
