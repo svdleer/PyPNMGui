@@ -2605,6 +2605,7 @@ def get_cmts_us_rxmer_fibernode_scan():
                 deadline = time.time() + 90
                 # Keep our filename; the CMTS may report an older internal path.
                 import os as _os
+                resource_unavail_count = 0
                 while time.time() < deadline:
                     if _aborted():
                         return None
@@ -2625,8 +2626,12 @@ def get_cmts_us_rxmer_fibernode_scan():
                         if status_fn.startswith(f"rxmer_{mac_safe}_{preeq_suffix}"):
                             break  # confirmed our capture is ready
                     if s.get('meas_status') == 6:
+                        resource_unavail_count += 1
+                        if resource_unavail_count > 5:
+                            logger.warning(f"Scan: {mac} RESOURCE_UNAVAILABLE persisted after {resource_unavail_count} polls, skipping")
+                            return None
                         # RESOURCE_UNAVAILABLE — PNM engine busy, wait and retry
-                        logger.debug(f"Scan: {mac} RESOURCE_UNAVAILABLE, waiting…")
+                        logger.debug(f"Scan: {mac} RESOURCE_UNAVAILABLE, waiting… ({resource_unavail_count}/5)")
                         time.sleep(3)
                         continue
                     if s.get('is_error') or s.get('meas_status') == 5:
