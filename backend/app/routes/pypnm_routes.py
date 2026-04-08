@@ -2624,10 +2624,15 @@ def get_cmts_us_rxmer_fibernode_scan():
                         status_fn = _os.path.basename(s.get('filename') or '')
                         if status_fn.startswith(f"rxmer_{mac_safe}_{preeq_suffix}"):
                             break  # confirmed our capture is ready
-                    if s.get('is_error') or s.get('meas_status') in (5, 6):
+                    if s.get('meas_status') == 6:
+                        # RESOURCE_UNAVAILABLE — PNM engine busy, wait and retry
+                        logger.debug(f"Scan: {mac} RESOURCE_UNAVAILABLE, waiting…")
+                        time.sleep(3)
+                        continue
+                    if s.get('is_error') or s.get('meas_status') == 5:
                         logger.warning(f"Scan: {mac} status error: {s.get('meas_status_name')}")
                         return None
-                    time.sleep(1)  # 1s poll — was 3s, halves scan time
+                    time.sleep(1)
 
                 if unique_filename:
                     return {
