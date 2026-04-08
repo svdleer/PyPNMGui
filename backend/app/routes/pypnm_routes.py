@@ -2624,6 +2624,16 @@ def get_cmts_us_rxmer_fibernode_scan():
                         # Verify that SAMPLE_READY belongs to this capture.
                         status_fn = _os.path.basename(s.get('filename') or '')
                         if status_fn.startswith(f"rxmer_{mac_safe}_{preeq_suffix}"):
+                            # Release PNM resource so next modem can start immediately
+                            try:
+                                req.post(
+                                    f"{base_url}/pnm/us/ofdma/rxmer/stop",
+                                    params={"cmts_ip": cmts_ip, "ofdma_ifindex": modem_ifindex,
+                                            "community": community, "write_community": write_community},
+                                    timeout=5
+                                )
+                            except Exception:
+                                pass
                             break  # confirmed our capture is ready
                     if s.get('meas_status') == 6:
                         resource_unavail_count += 1
