@@ -2771,18 +2771,26 @@ def get_cmts_us_rxmer_fibernode_scan():
                     if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
                         continue
                     pending.append(_fn)
+                # Use the CMTS-specific FTP config to avoid trying unreachable servers
+                _scan_ftp_cfg = {
+                    'host': _ftp_server_ip,
+                    'port': 21,
+                    'user': _ftp_user,
+                    'password': _ftp_pass,
+                    'ftp_dir': os.environ.get('FTP_TFTPBOOT_DIR', '/var/lib/tftpboot'),
+                }
                 max_fetch_rounds = 8
                 for round_idx in range(max_fetch_rounds):
                     still_pending = []
                     for _prefix in pending:
-                        files = _fetch_pnm_files(_prefix, allow_when_local=True)
+                        files = _fetch_pnm_files(_prefix, ftp_cfg=_scan_ftp_cfg, allow_when_local=True)
                         if not files:
                             still_pending.append(_prefix)
                     pending = still_pending
                     if not still_pending:
                         break
                     if round_idx < max_fetch_rounds - 1:
-                        time.sleep(1.0)
+                        time.sleep(3.0)
                 if pending:
                     logger.warning(f"fiberNode scan: FTP prefetch missing {len(pending)} capture(s) after retries; sample={pending[:3]}")
                 _effective_tftp_path = os.environ.get('PNM_CACHE_DIR', '/app/data/pnm_cache')
