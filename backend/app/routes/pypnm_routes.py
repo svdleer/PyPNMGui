@@ -3982,6 +3982,26 @@ def start_us_rxmer(mac_address):
     
     try:
         client = PyPNMClient()
+        tftp_server = data.get('tftp_server', get_tftp_for_cmts(cmts_ip))
+        dest_path = data.get('dest_path', get_tftp_dest_path_for_cmts(cmts_ip))
+
+        # Preflight: explicitly provision/verify bulk destination before start.
+        bulk_resp = client._post("/pnm/us/bulk-destination", {
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community,
+                "write_community": write_community,
+            },
+            "dest_ip": tftp_server,
+            "index": int(data.get('destination_index') or 1),
+            "pnm_types": ["rxmer"],
+            "dest_path": dest_path,
+        })
+        if not bulk_resp or not bulk_resp.get("success"):
+            bulk_err = (bulk_resp or {}).get("error") or "bulk destination provisioning failed"
+            return jsonify({"status": "error", "message": f"Bulk destination error: {bulk_err}"}), 500
+        dest_index = int(bulk_resp.get("standard_dest_index") or data.get('destination_index') or 1)
+
         # Use vendor-aware OFDMA endpoint so bulk-destination is provisioned
         # consistently (same path as FiberNode scanner flow).
         result = client._post("/pnm/us/ofdma/rxmer/start", {
@@ -3995,10 +4015,9 @@ def start_us_rxmer(mac_address):
             "pre_eq": data.get('pre_eq', True),
             "num_averages": data.get('num_averages', 1),
             "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
-            # Force auto-provision/re-provision of bulk destination for single-modem runs
-            "destination_index": 0,
-            "tftp_server": data.get('tftp_server', get_tftp_for_cmts(cmts_ip)),
-            "dest_path": data.get('dest_path', get_tftp_dest_path_for_cmts(cmts_ip)),
+            "destination_index": dest_index,
+            "tftp_server": tftp_server,
+            "dest_path": dest_path,
         })
         
         if not result or result.get('status') == 'error':
