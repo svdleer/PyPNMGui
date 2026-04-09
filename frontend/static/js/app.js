@@ -193,6 +193,7 @@ createApp({
             fnScanSelectorFilterGroupAmp: '',
             fnScanSelectorFilterEndAmp: '',
             fnScanSelectorFilterTap: '',
+            fnScanSelectorFilterImpairment: '',
             fnScanTopologyBridgeNodeId: '',
             fnScanExpectedServingGroup: '',
 
@@ -755,6 +756,10 @@ createApp({
             const filterTap = this.fnScanUniqueSelectorTaps.includes(this.fnScanSelectorFilterTap)
                 ? this.fnScanSelectorFilterTap
                 : '';
+            const validImpairmentFilters = new Set(['impaired_ofdma', 'impaired_ofdm', 'impaired_any']);
+            const filterImpairment = validImpairmentFilters.has(this.fnScanSelectorFilterImpairment)
+                ? this.fnScanSelectorFilterImpairment
+                : '';
 
             const filtered = this.fnScanBaseModems
                 .filter(m => {
@@ -770,6 +775,13 @@ createApp({
                     if (filterGa && this.formatTopologyGroupAmplifier(m.topology_group_amplifier) !== filterGa) return false;
                     if (filterEa && this.formatTopologyEndAmplifier(m.topology_end_amplifier) !== filterEa) return false;
                     if (filterTap && this.formatTopologyTap(m.topology_tap) !== filterTap) return false;
+                    if (filterImpairment) {
+                        const ofdmImpaired = m.ofdm_enabled === false;
+                        const ofdmaImpaired = m.ofdma_enabled === false;
+                        if (filterImpairment === 'impaired_ofdma' && !ofdmaImpaired) return false;
+                        if (filterImpairment === 'impaired_ofdm' && !ofdmImpaired) return false;
+                        if (filterImpairment === 'impaired_any' && !(ofdmImpaired || ofdmaImpaired)) return false;
+                    }
                     if (!q) return true;
                     return (
                         (m.mac_address || '').toLowerCase().includes(q) ||
@@ -4310,6 +4322,7 @@ createApp({
             this.fnScanSelectedModemMacs = [];
             this.fnScanSelectorFilterFn = '';
             this.fnScanSelectorFilterCableMac = '';
+            this.fnScanSelectorFilterImpairment = '';
             this.fnScanExpectedServingGroup = '';
             this.modems              = [];
             await this.loadFnScanChannels();

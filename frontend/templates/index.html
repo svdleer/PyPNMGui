@@ -2790,10 +2790,16 @@
                                     <option value="">All Taps</option>
                                     <option v-for="tap in fnScanUniqueSelectorTaps" :key="tap" :value="tap">{{ tap }}</option>
                                 </select>
+                                <select v-model="fnScanSelectorFilterImpairment" class="form-select form-select-sm" style="min-width:140px;max-width:190px;">
+                                    <option value="">All OFDM/OFDMA</option>
+                                    <option value="impaired_ofdma">Impaired OFDMA</option>
+                                    <option value="impaired_ofdm">Impaired OFDM</option>
+                                    <option value="impaired_any">Impaired OFDM + OFDMA</option>
+                                </select>
                                 <input v-model="fnScanModemSearch" class="form-control form-control-sm" placeholder="MAC / IP…" style="min-width:120px;max-width:180px;" />
-                                <button v-if="fnScanSelectorFilterFn || fnScanSelectorFilterCableMac || fnScanSelectorFilterGroupAmp || fnScanSelectorFilterEndAmp || fnScanSelectorFilterTap || fnScanModemSearch"
+                                <button v-if="fnScanSelectorFilterFn || fnScanSelectorFilterCableMac || fnScanSelectorFilterGroupAmp || fnScanSelectorFilterEndAmp || fnScanSelectorFilterTap || fnScanSelectorFilterImpairment || fnScanModemSearch"
                                         class="btn btn-sm btn-outline-secondary" title="Clear filters"
-                                        @click="fnScanSelectorFilterFn=''; fnScanSelectorFilterCableMac=''; fnScanSelectorFilterGroupAmp=''; fnScanSelectorFilterEndAmp=''; fnScanSelectorFilterTap=''; fnScanModemSearch=''">
+                                        @click="fnScanSelectorFilterFn=''; fnScanSelectorFilterCableMac=''; fnScanSelectorFilterGroupAmp=''; fnScanSelectorFilterEndAmp=''; fnScanSelectorFilterTap=''; fnScanSelectorFilterImpairment=''; fnScanModemSearch=''">
                                     <i class="bi bi-x-lg"></i>
                                 </button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @click="fnScanSelectAllVisibleModems" :disabled="!fnScanCandidateModems.length">Select visible</button>
