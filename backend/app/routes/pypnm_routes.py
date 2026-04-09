@@ -3975,19 +3975,30 @@ def start_us_rxmer(mac_address):
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
     community = data.get('community', get_cmts_community())
+    write_community = data.get('write_community', get_cmts_write_community())
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
         client = PyPNMClient()
-        result = client._post("/pnm/us/rxmer/start", {
-            "cmts_ip": cmts_ip,
+        # Use vendor-aware OFDMA endpoint so bulk-destination is provisioned
+        # consistently (same path as FiberNode scanner flow).
+        result = client._post("/pnm/us/ofdma/rxmer/start", {
+            "cmts": {
+                "cmts_ip": cmts_ip,
+                "community": community,
+                "write_community": write_community,
+            },
             "ofdma_ifindex": ofdma_ifindex,
             "cm_mac_address": mac_address,
             "pre_eq": data.get('pre_eq', True),
+            "num_averages": data.get('num_averages', 1),
             "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
-            "community": community
+            # Force auto-provision/re-provision of bulk destination for single-modem runs
+            "destination_index": 0,
+            "tftp_server": data.get('tftp_server', get_tftp_for_cmts(cmts_ip)),
+            "dest_path": data.get('dest_path', get_tftp_dest_path_for_cmts(cmts_ip)),
         })
         
         if not result or result.get('status') == 'error':
