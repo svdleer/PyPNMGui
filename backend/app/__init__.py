@@ -21,6 +21,7 @@ sock = None
 import os
 
 from app.core.auth_db import auth_db
+from app.core.auth_providers import auth_template_context, get_auth_registry, local_user_id, session_matches_active_provider
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, get_messages, normalize_locale, translate
 
 def create_app():
@@ -79,9 +80,17 @@ def create_app():
     # Load configuration
     app.config.from_object('app.core.config.Config')
 
+    auth_registry = get_auth_registry()
+    active_auth_provider = auth_registry.active_provider
+    app.config['ACTIVE_AUTH_PROVIDER'] = active_auth_provider.name
+    app.config['ACTIVE_AUTH_PROVIDER_LABEL'] = active_auth_provider.label
+    for provider in auth_registry.providers:
+        provider.configure_app(app)
+
     # Initialize auth storage and bootstrap admin account.
     auth_db.init_db()
-    auth_db.ensure_bootstrap_admin()
+    if active_auth_provider.is_internal:
+        auth_db.ensure_bootstrap_admin()
     try:
         app.logger.info(
             "Auth DB ready (backend=%s, users=%s, admins=%s)",
@@ -90,6 +99,8 @@ def create_app():
             auth_db.admin_count(),
         )
         app.logger.info("Poller engine runs in PyPNM API — GUI is proxy-only")
+        if not active_auth_provider.is_internal:
+            app.logger.info("External auth provider active (%s); internal user login is disabled", active_auth_provider.label)
     except Exception as exc:
         app.logger.error("Auth DB startup check failed: %s", exc)
     
@@ -106,6 +117,8 @@ def create_app():
     # Register blueprints
     from app.routes import main_bp, api_bp, auth_bp, topology_bp
     from app.routes.pypnm_routes import pypnm_bp
+    for blueprint in auth_registry.blueprints:
+        app.register_blueprint(blueprint)
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
@@ -127,7 +140,14 @@ def create_app():
             'supported_locales': SUPPORTED_LOCALES,
             't': lambda key, default=None: translate(locale, key, default),
             'locale_messages': get_messages(locale),
+            **auth_template_context(),
         }
+
+    @app.before_request
+    def enforce_active_auth_provider():
+        if not session_matches_active_provider(session):
+            session.clear()
+        return None
 
     @app.before_request
     def hydrate_user_locale():
@@ -138,7 +158,11 @@ def create_app():
         if user_locale:
             session['locale'] = normalize_locale(user_locale)
             return None
-        user = auth_db.get_user_by_id(session.get('user_id'))
+        user_id = local_user_id(session)
+        if user_id is None:
+            session['locale'] = normalize_locale(session.get('locale') or DEFAULT_LOCALE)
+            return None
+        user = auth_db.get_user_by_id(user_id)
         session['locale'] = normalize_locale((user or {}).get('language_preference'))
         return None
 
@@ -167,7 +191,7 @@ def create_app():
             path = '/'
         elif base_path and raw_path.startswith(base_path + '/'):
             path = raw_path[len(base_path):]
-        bypass_prefixes = ('/static/', '/login', '/logout', '/api/', '/health', '/ws/')
+        bypass_prefixes = ('/static/', '/api/', '/health', '/ws/') + auth_registry.all_public_prefixes
         if any(path.startswith(p) for p in bypass_prefixes):
             return None
         if session.get('role') == 'admin':
@@ -192,13 +216,11 @@ def create_app():
         # Keep health checks, static assets and login available without auth.
         public_prefixes = (
             '/static/',
-            '/login',
-            '/logout',
             '/api/health',
             '/health',
             '/ws/agent',
             '/ws/utsc/',
-        )
+        ) + auth_registry.all_public_prefixes
         if any(path.startswith(p) for p in public_prefixes):
             return None
 
@@ -209,7 +231,7 @@ def create_app():
             return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
 
         base = base_path
-        login_path = url_for('auth.login', next=path)
+        login_path = url_for(active_auth_provider.login_endpoint, next=path)
         if base and not login_path.startswith(base + '/'):
             login_path = f"{base}{login_path}"
         return redirect(login_path)

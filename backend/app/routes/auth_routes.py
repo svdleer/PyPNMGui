@@ -8,6 +8,7 @@ import requests
 
 from . import auth_bp
 from app.core.auth_db import auth_db
+from app.core.auth_providers import auth_template_context, get_active_auth_provider, is_authenticated_session, local_user_id, sanitize_next_path
 from app.core.cmts_provider import CMTSProvider
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale, translate
 
@@ -94,8 +95,9 @@ def _normalize_datetime_24h(value) -> str:
 def login_required(view_func):
     @wraps(view_func)
     def _wrapped(*args, **kwargs):
-        if not session.get("user_id"):
-            return redirect(_prefixed(url_for("auth.login", next=request.path)))
+        if not is_authenticated_session(session):
+            provider = get_active_auth_provider()
+            return redirect(_prefixed(url_for(provider.login_endpoint, next=request.path)))
         return view_func(*args, **kwargs)
 
     return _wrapped
@@ -104,8 +106,9 @@ def login_required(view_func):
 def admin_required(view_func):
     @wraps(view_func)
     def _wrapped(*args, **kwargs):
-        if not session.get("user_id"):
-            return redirect(_prefixed(url_for("auth.login", next=request.path)))
+        if not is_authenticated_session(session):
+            provider = get_active_auth_provider()
+            return redirect(_prefixed(url_for(provider.login_endpoint, next=request.path)))
         if session.get("role") != "admin":
             flash("Admin role required", "danger")
             return redirect(_prefixed(url_for("main.index")))
@@ -116,11 +119,21 @@ def admin_required(view_func):
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
+    provider = get_active_auth_provider()
     if request.method == "GET":
-        if session.get("user_id"):
+        if is_authenticated_session(session):
             return redirect(_prefixed(url_for("main.index")))
         base_path = current_app.config.get("APP_ROOT", "")
-        return render_template("login.html", base_path=base_path)
+        return render_template(
+            "login.html",
+            base_path=base_path,
+            oidc_login_path=_prefixed(url_for(provider.login_endpoint, next=sanitize_next_path(request.args.get("next"), default=url_for("main.index")))) if not provider.supports_username_password else None,
+            **auth_template_context(),
+        )
+
+    if not provider.supports_username_password:
+        flash(f"{provider.label} is enabled. Internal username/password login is disabled.", "danger")
+        return redirect(_prefixed(url_for(provider.login_endpoint, next=sanitize_next_path(request.args.get("next"), default=url_for("main.index")))))
 
     username = (request.form.get("username") or "").strip()
     password = request.form.get("password") or ""
@@ -130,16 +143,21 @@ def login():
         return redirect(_prefixed(url_for("auth.login")))
 
     session["user_id"] = user["id"]
+    session["auth_source"] = "internal"
     session["username"] = user["username"]
     session["role"] = user["role"]
     session["locale"] = normalize_locale(user.get("language_preference") or DEFAULT_LOCALE)
 
-    next_url = request.args.get("next") or url_for("main.index")
+    next_url = sanitize_next_path(request.args.get("next"), default=url_for("main.index"))
     return redirect(_prefixed(next_url))
 
 
 @auth_bp.route("/logout", methods=["GET", "POST"])
 def logout():
+    provider = get_active_auth_provider()
+    auth_source = session.get("auth_source") or "internal"
+    if auth_source == provider.name and provider.logout_endpoint != "auth.logout":
+        return redirect(_prefixed(url_for(provider.logout_endpoint)))
     session.clear()
     return redirect(_prefixed(url_for("auth.login")))
 
@@ -148,13 +166,18 @@ def logout():
 @login_required
 def account():
     base_path = current_app.config.get("APP_ROOT", "")
-    user = auth_db.get_user_by_id(session.get("user_id")) or {}
+    user_id = local_user_id(session)
+    user = auth_db.get_user_by_id(user_id) if user_id is not None else {}
+    provider = get_active_auth_provider()
     return render_template(
         "account.html",
         base_path=base_path,
         auth_username=session.get("username", ""),
+        auth_email=session.get("email", ""),
         auth_role=session.get("role", "user"),
-        current_locale=normalize_locale(user.get("language_preference") or session.get("locale") or DEFAULT_LOCALE),
+        auth_provider_label=provider.label,
+        auth_password_management_enabled=provider.password_management_enabled,
+        current_locale=normalize_locale((user or {}).get("language_preference") or session.get("locale") or DEFAULT_LOCALE),
         supported_locales=SUPPORTED_LOCALES,
     )
 
@@ -162,6 +185,11 @@ def account():
 @auth_bp.route("/account/password", methods=["POST"])
 @login_required
 def account_change_password():
+    provider = get_active_auth_provider()
+    if not provider.password_management_enabled:
+        flash(f"Password changes are managed by {provider.label}", "danger")
+        return redirect(_prefixed(url_for("auth.account")))
+
     current_password = request.form.get("current_password") or ""
     new_password = request.form.get("new_password") or ""
     confirm_password = request.form.get("confirm_password") or ""
@@ -173,7 +201,12 @@ def account_change_password():
         flash("Password confirmation does not match", "danger")
         return redirect(_prefixed(url_for("auth.account")))
 
-    ok, msg = auth_db.change_password(session["user_id"], current_password, new_password)
+    user_id = local_user_id(session)
+    if user_id is None:
+        flash("Password changes are not available for this account", "danger")
+        return redirect(_prefixed(url_for("auth.account")))
+
+    ok, msg = auth_db.change_password(user_id, current_password, new_password)
     flash(msg, "success" if ok else "danger")
     return redirect(_prefixed(url_for("auth.account")))
 
@@ -185,7 +218,9 @@ def account_change_language():
     if locale not in SUPPORTED_LOCALES:
         flash(translate(session.get("locale") or DEFAULT_LOCALE, "language.invalid"), "danger")
         return redirect(_prefixed(url_for("auth.account")))
-    auth_db.set_language_preference(session["user_id"], locale)
+    user_id = local_user_id(session)
+    if user_id is not None:
+        auth_db.set_language_preference(user_id, locale)
     session["locale"] = locale
     flash(translate(locale, "language.saved"), "success")
     return redirect(_prefixed(url_for("auth.account")))
@@ -196,6 +231,7 @@ def account_change_language():
 def admin_page():
     import os
     base_path = current_app.config.get("APP_ROOT", "")
+    provider = get_active_auth_provider()
     users = auth_db.list_users()
     api_keys = auth_db.list_api_keys()
     data_flag = '/app/data/MAINTENANCE'
@@ -279,6 +315,8 @@ def admin_page():
     return render_template(
         "admin.html",
         base_path=base_path,
+        auth_provider_label=provider.label,
+        auth_user_management_enabled=provider.user_management_enabled,
         users=users,
         api_keys=api_keys,
         auth_username=session.get("username", ""),
@@ -466,6 +504,11 @@ def admin_maintenance_toggle():
 @auth_bp.route("/admin/users/create", methods=["POST"])
 @admin_required
 def admin_create_user():
+    provider = get_active_auth_provider()
+    if not provider.user_management_enabled:
+        flash(f"Local user management is disabled while {provider.label} is active", "danger")
+        return redirect(_prefixed(url_for("auth.admin_page")))
+
     username = (request.form.get("username") or "").strip()
     role = (request.form.get("role") or "user").strip()
     password = request.form.get("password") or ""
@@ -491,6 +534,11 @@ def admin_create_user():
 @auth_bp.route("/admin/users/<int:user_id>/update", methods=["POST"])
 @admin_required
 def admin_update_user(user_id):
+    provider = get_active_auth_provider()
+    if not provider.user_management_enabled:
+        flash(f"Local user management is disabled while {provider.label} is active", "danger")
+        return redirect(_prefixed(url_for("auth.admin_page")))
+
     user = auth_db.get_user_by_id(user_id)
     if not user:
         flash("User not found", "danger")
@@ -515,6 +563,11 @@ def admin_update_user(user_id):
 @auth_bp.route("/admin/users/<int:user_id>/password", methods=["POST"])
 @admin_required
 def admin_set_password(user_id):
+    provider = get_active_auth_provider()
+    if not provider.user_management_enabled:
+        flash(f"Local user management is disabled while {provider.label} is active", "danger")
+        return redirect(_prefixed(url_for("auth.admin_page")))
+
     user = auth_db.get_user_by_id(user_id)
     if not user:
         flash("User not found", "danger")
@@ -533,6 +586,11 @@ def admin_set_password(user_id):
 @auth_bp.route("/admin/users/<int:user_id>/delete", methods=["POST"])
 @admin_required
 def admin_delete_user(user_id):
+    provider = get_active_auth_provider()
+    if not provider.user_management_enabled:
+        flash(f"Local user management is disabled while {provider.label} is active", "danger")
+        return redirect(_prefixed(url_for("auth.admin_page")))
+
     user = auth_db.get_user_by_id(user_id)
     if not user:
         flash("User not found", "danger")
@@ -560,7 +618,7 @@ def admin_create_api_key():
         flash("Invalid role", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
 
-    _, plain = auth_db.create_api_key(name=name, role=role, description=description, created_by=session["user_id"])
+    _, plain = auth_db.create_api_key(name=name, role=role, description=description, created_by=local_user_id(session))
     flash(f"API key created. Copy now: {plain}", "success")
     return redirect(_prefixed(url_for("auth.admin_page")))
 
@@ -662,7 +720,7 @@ def admin_export_sql():
 
 @auth_bp.route("/api/auth/me", methods=["GET"])
 def auth_me():
-    if not session.get("user_id"):
+    if not is_authenticated_session(session):
         return jsonify({"authenticated": False}), 401
     return jsonify(
         {
@@ -671,6 +729,7 @@ def auth_me():
                 "id": session.get("user_id"),
                 "username": session.get("username"),
                 "role": session.get("role"),
+                "auth_source": session.get("auth_source") or "internal",
                 "locale": normalize_locale(session.get("locale") or DEFAULT_LOCALE),
             },
         }

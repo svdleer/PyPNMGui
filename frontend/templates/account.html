@@ -46,7 +46,10 @@
 
     <div class="card shadow-sm">
         <div class="card-body">
-            <div class="identity-pill"><i class="bi bi-person-check me-1"></i>[[ t('account.identity') ]] • [[ auth_username ]] • [[ auth_role ]]</div>
+                        <div class="identity-pill"><i class="bi bi-person-check me-1"></i>[[ t('account.identity') ]] • [[ auth_username ]] • [[ auth_role ]] • [[ auth_provider_label ]]</div>
+                        {% if auth_email %}
+                        <div class="small text-muted mb-3">[[ auth_email ]]</div>
+                        {% endif %}
             <h5 class="mb-3">[[ t('account.preferences') ]]</h5>
             <form method="post" action="[[ base_path ]]/account/language" class="row g-3 mb-4">
                 <div class="col-12 col-md-4">
@@ -61,6 +64,7 @@
                     <button class="btn btn-outline-primary" type="submit"><i class="bi bi-translate me-1"></i>[[ t('account.save_preferences') ]]</button>
                 </div>
             </form>
+            {% if auth_password_management_enabled %}
             <h5 class="mb-3">[[ t('account.change_password') ]]</h5>
             <form method="post" action="[[ base_path ]]/account/password" class="row g-3">
                 <div class="col-12 col-md-4">
@@ -79,6 +83,11 @@
                     <button class="btn btn-primary" type="submit"><i class="bi bi-check2-circle me-1"></i>[[ t('account.update_password') ]]</button>
                 </div>
             </form>
+            {% else %}
+            <div class="alert alert-info py-2 mb-0">
+                Password changes are managed by [[ auth_provider_label ]].
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>

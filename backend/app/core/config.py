@@ -7,6 +7,20 @@ class Config:
     """Application configuration."""
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+
+    # Authentication provider.
+    # - internal: local username/password accounts from auth_db
+    # - oidc: generic OpenID Connect login (Keycloak, Microsoft 365 / Entra ID, etc.)
+    AUTH_PROVIDER = os.environ.get('AUTH_PROVIDER', 'internal').strip().lower()
+
+    # Generic OIDC settings used when AUTH_PROVIDER=oidc.
+    OIDC_PROVIDER_LABEL = os.environ.get('OIDC_PROVIDER_LABEL', 'Single Sign-On')
+    OIDC_DISCOVERY_URL = os.environ.get('OIDC_DISCOVERY_URL', '')
+    OIDC_CLIENT_ID = os.environ.get('OIDC_CLIENT_ID', '')
+    OIDC_CLIENT_SECRET = os.environ.get('OIDC_CLIENT_SECRET', '')
+    OIDC_SCOPES = os.environ.get('OIDC_SCOPES', 'openid profile email')
+    OIDC_ADMIN_ROLES = os.environ.get('OIDC_ADMIN_ROLES', 'admin')
+    OIDC_ADMIN_EMAILS = os.environ.get('OIDC_ADMIN_EMAILS', '')
     
     # PyPNM API Configuration (for direct API mode)
     PYPNM_API_URL = os.environ.get('PYPNM_API_URL', 'http://127.0.0.1:8000')

@@ -8,6 +8,7 @@ from io import BytesIO
 import requests
 from flask import Response, current_app, jsonify, render_template, request, session
 
+from app.core.auth_providers import is_authenticated_session
 from . import topology_bp
 
 
@@ -86,7 +87,7 @@ def _load_topology_summary(selected_date: str | None = None) -> dict:
 
 
 def _is_admin() -> bool:
-    return bool(session.get('user_id')) and session.get('role') == 'admin'
+    return is_authenticated_session(session) and session.get('role') == 'admin'
 
 
 @topology_bp.route('/topology')

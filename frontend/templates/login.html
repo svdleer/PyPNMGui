@@ -37,7 +37,8 @@
               {% endif %}
             {% endwith %}
 
-            <form method="post" action="[[ base_path ]]/login">
+                        {% if auth_supports_username_password %}
+                        <form method="post" action="[[ base_path ]]/login">
                 <div class="mb-3">
                     <label class="form-label">Username</label>
                     <input name="username" class="form-control" autocomplete="username" required>
@@ -48,6 +49,12 @@
                 </div>
                 <button type="submit" class="btn btn-primary w-100 py-2">Login</button>
             </form>
+            {% else %}
+            <div class="alert alert-primary py-2">
+                External authentication is active through [[ auth_provider_label ]]. Internal username/password accounts are disabled.
+            </div>
+            <a class="btn btn-primary w-100 py-2" href="[[ oidc_login_path ]]">Continue with [[ auth_provider_label ]]</a>
+            {% endif %}
         </div>
     </div>
 </body>

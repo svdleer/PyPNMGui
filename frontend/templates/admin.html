@@ -152,11 +152,13 @@
                 <i class="bi bi-hdd-network"></i> Poller
             </button>
         </li>
+        {% if auth_user_management_enabled %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users-pane" type="button" role="tab" aria-controls="users-pane" aria-selected="false">
                 <i class="bi bi-person-badge"></i> Users
             </button>
         </li>
+        {% endif %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="apikeys-tab" data-bs-toggle="tab" data-bs-target="#apikeys-pane" type="button" role="tab" aria-controls="apikeys-pane" aria-selected="false">
                 <i class="bi bi-key"></i> API Keys
@@ -657,6 +659,7 @@
         </div> <!-- End Poller Tab -->
 
         <!-- USERS TAB -->
+        {% if auth_user_management_enabled %}
         <div class="tab-pane fade" id="users-pane" role="tabpanel" aria-labelledby="users-tab">
     <div class="row g-3">
         <!-- Left Column: Auth DB -->
@@ -784,6 +787,7 @@
         </div>
     </div>
         </div> <!-- End Users Tab -->
+        {% endif %}
 
         <!-- API KEYS TAB -->
         <div class="tab-pane fade" id="apikeys-pane" role="tabpanel" aria-labelledby="apikeys-tab">

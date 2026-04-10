@@ -1,74 +1,58 @@
-# Quick Start
+# QUICKSTART
 
-Get PyPNM Web GUI running in under 10 minutes.
+## Requirements
 
-## Prerequisites
+- Python 3.10+
+- Running PyPNM API
+- Optional: Docker and Docker Compose
 
-- Python 3.10+ or Docker
-- PyPNM API server ([install guide](https://github.com/svdleer/PyPNM))
-
-## Option A: Docker
+## Option 1: Run With Docker
 
 ```bash
 cd PyPNMGui/docker
 cp .env.example .env
-# Edit .env — set PYPNM_API_URL, SNMP communities, TFTP IP
+# Edit .env and set at least PYPNM_API_URL
+
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-Open `http://your-server:5050` (or the configured `APPLICATION_ROOT` path).
+Access:
+- `http://localhost:5050`
+- or `http://<host>:5050`
 
-## Option B: Manual
+## Option 2: Run Without Docker
 
 ```bash
 cd PyPNMGui
-python3 -m venv venv && source venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r backend/requirements.txt
 
-# Optional: set PyPNM API URL if not localhost
 export PYPNM_API_URL=http://127.0.0.1:8000
-
-cd backend && python run.py
+python backend/run.py
 ```
 
-Open `http://localhost:5050`.
+Access:
+- `http://localhost:5050`
 
-## Verify
+## Health Check
 
 ```bash
-curl http://localhost:5050/api/health
+curl -s http://127.0.0.1:5050/api/health
 ```
 
-Expected:
-```json
-{"status": "ok", "pypnm_connected": true}
+Expected key fields:
+- `status: ok`
+- `pypnm_connected: true`
+
+## If It Does Not Start
+
+- Port 5050 in use:
+```bash
+lsof -i :5050
 ```
+- PyPNM not reachable:
+  - verify `PYPNM_API_URL`
+  - verify PyPNM API is up (`http://127.0.0.1:8000/health`)
 
-If `pypnm_connected` is `false`, ensure the PyPNM API is running on the configured URL.
-
-## Next Steps
-
-1. **Add a CMTS** — Go to Admin > CMTS and register your CMTS IP + SNMP community
-2. **Search modems** — Select a CMTS, then search by IP, MAC, or fiber node
-3. **Run PNM scans** — Select a modem and use the RxMER, Spectrum, or Constellation tabs
-4. **FiberNode analysis** — Switch to the FiberNode tab for per-node RF assessment
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `pypnm_connected: false` | PyPNM API not running | Start PyPNM: `cd PyPNM && pypnm` |
-| `Address already in use: 5050` | Port conflict | `lsof -i :5050` then kill, or set `FLASK_PORT=5051` |
-| `tftp_ipv4 required` | TFTP not configured | Set TFTP IP in PyPNM `system.json` |
-| No modems returned | CMTS not added or SNMP timeout | Check Admin > CMTS, verify SNMP community |
-- **This Project's Docs:** [README.md](README.md)
-
-## Getting Help
-
-1. **Web GUI Issues:** Create issue in this repository
-2. **PyPNM Issues:** https://github.com/svdleer/PyPNM/issues
-3. **Integration Questions:** Read [docs/PYPNM_INTEGRATION.md](docs/PYPNM_INTEGRATION.md)
-
----
-
-**Remember:** PyPNM is the actual PNM engine. This Web GUI is just a user-friendly interface to it. Both must be running for full functionality.
+For full install/run operations, see `MANUAL.md`.
