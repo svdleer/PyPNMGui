@@ -8,12 +8,18 @@ import time
 import threading
 import uuid
 from datetime import datetime, timezone
-from flask import jsonify, request, current_app
+from flask import jsonify, request, current_app, session
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
 from app.core.pypnm_client import PyPNMClient
 from app.core.topology_db import topology_db
 from app.core.modem_filters import filter_ignored_modems
+
+# ── Viewer role guard — block mutating requests ─────────────────────────────
+@api_bp.before_request
+def _viewer_readonly():
+    if session.get('role') == 'viewer' and request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
+        return jsonify({'status': 'error', 'message': 'Viewer role is read-only'}), 403
 
 # ── Background modem-load job store ─────────────────────────────────────────
 # job_id -> {status, modems, count, enriched, enriching, enrichment_progress,
@@ -375,6 +381,47 @@ def get_modems():
     cmts_filter = (request.args.get('cmts') or '').strip()
     iface_filter = (request.args.get('interface') or '').strip().lower()
 
+    def _topology_fallback_for_mac(query_mac: str):
+        mac_bare = re.sub(r'[^a-f0-9]', '', (query_mac or '').lower())
+        if len(mac_bare) != 12:
+            return None
+        try:
+            topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare, request_timeout=10)
+            topo_modem = topo_resp.get('modem') if isinstance(topo_resp, dict) else None
+            if not topo_modem:
+                return None
+            modem = {
+                "mac_address": topo_modem.get('mac') or query_mac,
+                "name": topo_modem.get('mac') or query_mac,
+                "ip_address": "",
+                "status": "topology-only",
+                "vendor": "Unknown",
+                "model": "N/A",
+                "docsis_version": "Unknown",
+                "cmts": topo_modem.get('cmts') or "",
+                "cmts_ip": topo_modem.get('cmts_ip') or "",
+                "fiber_node": topo_modem.get('fibernode') or "",
+                "customer_id": topo_modem.get('customer_id') or "",
+                "postalcode": topo_modem.get('postalcode') or "",
+                "house_number": topo_modem.get('house_number') or "",
+                "house_number_extension": topo_modem.get('house_number_extension') or "",
+                "topology_path": topo_modem.get('hierarchy_path') or "",
+                "topology_link_id": topo_modem.get('topology_link_id') or "",
+                "linked_node_id": topo_modem.get('linked_node_id') or "",
+                "linked_node_type": topo_modem.get('linked_node_type') or "",
+                "link_match": bool(topo_modem.get('link_match')),
+                "source": "topology-mysql",
+            }
+            return jsonify({
+                "status": "success",
+                "modems": [modem],
+                "count": 1,
+                "cached": False,
+                "source": "topology-mysql",
+            })
+        except Exception:
+            return None
+
     # MySQL inventory fallback path when Redis is unavailable.
     if not REDIS_AVAILABLE or not redis_client:
         try:
@@ -386,6 +433,10 @@ def get_modems():
                 limit=10000,
             )
             modems = filter_ignored_modems(modems_resp.get('modems') or [])
+            if not modems and search_type == 'mac' and search_value:
+                topo_fallback = _topology_fallback_for_mac(search_value)
+                if topo_fallback is not None:
+                    return topo_fallback
             _augment_modems_with_topology_fields(modems)
             return jsonify({
                 "status": "success",
@@ -442,6 +493,10 @@ def get_modems():
                     "cached": False,
                     "source": db_resp.get('source') or "pypnm-inventory",
                 })
+            if search_type == 'mac' and search_value:
+                topo_fallback = _topology_fallback_for_mac(search_value)
+                if topo_fallback is not None:
+                    return topo_fallback
             msg = f"No cached modems for CMTS '{cmts_filter}'. Load modems first." if cmts_filter else "No cached modems found. Load modems from a CMTS first."
             return jsonify({"status": "success", "modems": [], "count": 0, "message": msg})
 
@@ -479,6 +534,11 @@ def get_modems():
                 )
                 return any(iface_filter in f for f in fields)
             modems = [m for m in modems if _iface_match(m)]
+
+        if not modems and search_type == 'mac' and search_value:
+            topo_fallback = _topology_fallback_for_mac(search_value)
+            if topo_fallback is not None:
+                return topo_fallback
 
         # Stable ordering for UI
         modems.sort(key=lambda m: (str(m.get('cmts', '')), str(m.get('mac_address', ''))))
