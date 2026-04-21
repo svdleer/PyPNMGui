@@ -381,10 +381,23 @@ def get_modems():
     cmts_filter = (request.args.get('cmts') or '').strip()
     iface_filter = (request.args.get('interface') or '').strip().lower()
 
-    def _topology_fallback_for_mac(query_mac: str):
+    def _fallback_for_mac(query_mac: str):
         mac_bare = re.sub(r'[^a-f0-9]', '', (query_mac or '').lower())
         if len(mac_bare) != 12:
             return None
+        try:
+            inv_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
+            inv_modem = inv_resp.get('modem') if isinstance(inv_resp, dict) else None
+            if inv_modem:
+                return jsonify({
+                    'status': 'success',
+                    'modems': [inv_modem],
+                    'count': 1,
+                    'cached': False,
+                    'source': inv_resp.get('source') or 'pypnm-inventory',
+                })
+        except Exception:
+            pass
         try:
             topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare, request_timeout=10)
             topo_modem = topo_resp.get('modem') if isinstance(topo_resp, dict) else None
@@ -434,9 +447,9 @@ def get_modems():
             )
             modems = filter_ignored_modems(modems_resp.get('modems') or [])
             if not modems and search_type == 'mac' and search_value:
-                topo_fallback = _topology_fallback_for_mac(search_value)
-                if topo_fallback is not None:
-                    return topo_fallback
+                mac_fallback = _fallback_for_mac(search_value)
+                if mac_fallback is not None:
+                    return mac_fallback
             _augment_modems_with_topology_fields(modems)
             return jsonify({
                 "status": "success",
@@ -494,9 +507,9 @@ def get_modems():
                     "source": db_resp.get('source') or "pypnm-inventory",
                 })
             if search_type == 'mac' and search_value:
-                topo_fallback = _topology_fallback_for_mac(search_value)
-                if topo_fallback is not None:
-                    return topo_fallback
+                mac_fallback = _fallback_for_mac(search_value)
+                if mac_fallback is not None:
+                    return mac_fallback
             msg = f"No cached modems for CMTS '{cmts_filter}'. Load modems first." if cmts_filter else "No cached modems found. Load modems from a CMTS first."
             return jsonify({"status": "success", "modems": [], "count": 0, "message": msg})
 
@@ -536,9 +549,9 @@ def get_modems():
             modems = [m for m in modems if _iface_match(m)]
 
         if not modems and search_type == 'mac' and search_value:
-            topo_fallback = _topology_fallback_for_mac(search_value)
-            if topo_fallback is not None:
-                return topo_fallback
+            mac_fallback = _fallback_for_mac(search_value)
+            if mac_fallback is not None:
+                return mac_fallback
 
         # Stable ordering for UI
         modems.sort(key=lambda m: (str(m.get('cmts', '')), str(m.get('mac_address', ''))))
