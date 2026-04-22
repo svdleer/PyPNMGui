@@ -203,44 +203,32 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
     def _bare(mac: str) -> str:
         return re.sub(r'[^A-F0-9]', '', str(mac or '').upper())
 
-    wanted = sorted({m for m in (_bare(v) for v in mac_addresses) if len(m) == 12})
+    wanted = sorted({m for m in (_bare(v) for v in mac_addresses) if m})
     if not wanted:
         return {}
-
-    # Imported topology modems are normalized to colon-lower format (xx:xx:xx:xx:xx:xx).
-    wanted_colon = [
-        ":".join([m[i:i + 2] for i in range(0, 12, 2)]).lower()
-        for m in wanted
-    ]
 
     out: dict[str, dict] = {}
     conn = None
     try:
         conn = topology_db._connect()
         cur = conn.cursor()
-        cur.execute("SELECT id FROM topology_snapshots ORDER BY snapshot_date DESC LIMIT 1")
-        snap_row = cur.fetchone() or {}
-        snapshot_id = int(snap_row.get("id") or 0)
-        if snapshot_id <= 0:
-            return {}
-
         marker = "%s"
-        for i in range(0, len(wanted_colon), 500):
-            chunk = wanted_colon[i:i + 500]
+        for i in range(0, len(wanted), 500):
+            chunk = wanted[i:i + 500]
             placeholders = ",".join([marker] * len(chunk))
             sql = (
-                "SELECT mac AS mac_norm, "
+                "SELECT UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) AS mac_norm, "
                 "MIN(linked_node_id) AS linked_node_id, MIN(lat) AS lat, MIN(lon) AS lon, "
                 "MIN(fibernode) AS fibernode, MIN(customer_id) AS customer_id, MIN(address) AS address "
                 "FROM topology_modems "
-                f"WHERE snapshot_id=%s AND mac IN ({placeholders}) "
-                "GROUP BY mac"
+                f"WHERE UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) IN ({placeholders}) "
+                "GROUP BY UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-',''))"
             )
-            cur.execute(sql, (snapshot_id, *chunk))
+            cur.execute(sql, tuple(chunk))
             rows = cur.fetchall() or []
             for row in rows:
                 r = dict(row) if hasattr(row, "keys") else row
-                mac_norm = _bare(r.get("mac_norm") or "")
+                mac_norm = str(r.get("mac_norm") or "").strip().upper()
                 if not mac_norm:
                     continue
                 out[mac_norm] = {
