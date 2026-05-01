@@ -8,6 +8,7 @@ const API_BASE = BASE_PATH + '/api';
 const GUI_LOCALE = window.GUI_LOCALE || 'en-US';
 const GUI_I18N = window.GUI_I18N || {};
 const TOPOLOGY_ENABLED = window.ENABLE_TOPOLOGY || false;
+const CM_MODEM_LIMIT = Number.parseInt(window.CM_MODEM_LIMIT, 10) > 0 ? Number.parseInt(window.CM_MODEM_LIMIT, 10) : 10000;
 
 createApp({
     data() {
@@ -2057,7 +2058,7 @@ createApp({
                 try {
                     const params = new URLSearchParams({
                         community: this.snmpCommunity,
-                        limit: '10000',
+                        limit: String(CM_MODEM_LIMIT),
                     });
                     const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(canonicalName)}/modems?${params.toString()}`);
                     const data = await response.json();
@@ -2438,7 +2439,7 @@ createApp({
                 if (metadataCheck.refresh && !backendEnriching && !backendEnriched && !alreadyTriggered) {
                     this.$toast?.info(`Metadata quality low (${Math.round(metadataCheck.ratio * 100)}% missing vendor+firmware). Forcing fresh inventory reload...`);
                     if (cmtsKey) this._metadataRefreshTriggeredByCmts[cmtsKey] = true;
-                    this._loadAllModemsInBackground(buildUrl(10000, true, true), mapModem, loadToken);
+                    this._loadAllModemsInBackground(buildUrl(CM_MODEM_LIMIT, true, true), mapModem, loadToken);
                     return;
                 }
 
@@ -2449,12 +2450,12 @@ createApp({
                     this.liveCacheRefreshing = true;
                     // Delta-friendly: first refresh inventory footprint to full limit,
                     // then only enrich when metadata check explicitly requests it.
-                    backgroundUrl = buildUrl(10000, false, true);
+                    backgroundUrl = buildUrl(CM_MODEM_LIMIT, false, true);
                     this._requestDeltaEnrichmentForSelectedCmts();
                 } else {
                     const shouldRequestEnrich = this.enrichModems && !preview?.cached;
                     this.liveCacheRefreshing = shouldRequestEnrich;
-                    backgroundUrl = buildUrl(10000, shouldRequestEnrich);
+                    backgroundUrl = buildUrl(CM_MODEM_LIMIT, shouldRequestEnrich);
                 }
                 this._loadAllModemsInBackground(backgroundUrl, mapModem, loadToken);
                 return;
@@ -2616,7 +2617,7 @@ createApp({
 
             try {
                 // Poll cached state here; avoid forcing a fresh walk each time.
-                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=10000`;
+                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=${CM_MODEM_LIMIT}`;
                 if (this.enrichModems) {
                     url += `&enrich=true&modem_community=${this.snmpCommunityModem || 'private'}`;
                 }
@@ -4551,7 +4552,7 @@ createApp({
                 // (vendor/firmware/sysDescr per modem) is too slow on large CMTSes.
                 // Only append refresh=true when explicitly requested (liveSnmp) to avoid
                 // triggering a full SNMP walk on every fiber node selection.
-                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=10000&enrich=false${liveSnmp ? '&refresh=true' : ''}`;
+                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=${CM_MODEM_LIMIT}&enrich=false${liveSnmp ? '&refresh=true' : ''}`;
 
                 let resp = await fetch(`${API_BASE}/cmts/${encodeURIComponent(cmtsRef)}/modems?${q}`);
                 if (resp.status === 404) {

@@ -12,6 +12,15 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _cm_modem_limit_default() -> int:
+    raw = os.environ.get('CM_MODEM_LIMIT', '10000')
+    try:
+        value = int(raw)
+        return value if value > 0 else 10000
+    except (TypeError, ValueError):
+        return 10000
+
+
 @dataclass
 class PyPNMConfig:
     """PyPNM server configuration."""
@@ -233,8 +242,10 @@ class PyPNMClient:
         search_type: Optional[str] = None,
         search_value: Optional[str] = None,
         interface: Optional[str] = None,
-        limit: int = 10000,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
+        if limit is None:
+            limit = _cm_modem_limit_default()
         params: Dict[str, Any] = {"limit": limit}
         if cmts:
             params["cmts"] = cmts
@@ -1160,7 +1171,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         community: str = "public",
-        limit: int = 10000,
+        limit: Optional[int] = None,
         enrich: bool = False,
         modem_community: str = os.environ.get('MODEM_COMMUNITY', 'private'),
         cmts_hostname: str = "",
@@ -1179,6 +1190,9 @@ class PyPNMClient:
         Returns:
             Dictionary with 'success', 'modems', and optional 'error'
         """
+        if limit is None:
+            limit = _cm_modem_limit_default()
+
         params = {
             "cmts_ip": cmts_ip,
             "community": community,

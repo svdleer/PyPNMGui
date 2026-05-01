@@ -67,6 +67,15 @@ def _run_modem_job(job_id: str, cmts_ip: str, cmts_name: str,
 
 logger = logging.getLogger(__name__)
 
+
+def _cm_modem_limit_default() -> int:
+    value = current_app.config.get('CM_MODEM_LIMIT', os.environ.get('CM_MODEM_LIMIT', 10000))
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else 10000
+    except (TypeError, ValueError):
+        return 10000
+
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '127.0.0.1')
 
@@ -98,9 +107,11 @@ except Exception as e:
     print(f"[WARNING] Redis not available: {e}", flush=True)
 
 
-def _redis_cache_modems_for_key(cache_key: str, cmts_name: str, modems: list[dict], requested_limit: int = 10000) -> None:
+def _redis_cache_modems_for_key(cache_key: str, cmts_name: str, modems: list[dict], requested_limit: int | None = None) -> None:
     if not REDIS_AVAILABLE or not redis_client or not cache_key:
         return
+    if requested_limit is None:
+        requested_limit = _cm_modem_limit_default()
     try:
         modems = filter_ignored_modems(modems)
         payload = json.dumps({
@@ -115,9 +126,11 @@ def _redis_cache_modems_for_key(cache_key: str, cmts_name: str, modems: list[dic
         logger.warning(f"Redis modem cache write error for {cache_key}: {exc}")
 
 
-def _backfill_redis_from_inventory(modems: list[dict], requested_limit: int = 10000) -> None:
+def _backfill_redis_from_inventory(modems: list[dict], requested_limit: int | None = None) -> None:
     if not REDIS_AVAILABLE or not redis_client or not modems:
         return
+    if requested_limit is None:
+        requested_limit = _cm_modem_limit_default()
 
     modems = filter_ignored_modems(modems)
 
@@ -438,12 +451,13 @@ def get_modems():
     # MySQL inventory fallback path when Redis is unavailable.
     if not REDIS_AVAILABLE or not redis_client:
         try:
+            default_limit = _cm_modem_limit_default()
             modems_resp = PyPNMClient().get_inventory_modems(
                 cmts=cmts_filter or None,
                 search_type=search_type or None,
                 search_value=search_value or None,
                 interface=iface_filter or None,
-                limit=10000,
+                limit=default_limit,
             )
             modems = filter_ignored_modems(modems_resp.get('modems') or [])
             if not modems and search_type == 'mac' and search_value:
@@ -488,16 +502,17 @@ def get_modems():
 
         if not modems:
             # If Redis has no records yet, fallback to PyPNM inventory snapshot.
+            default_limit = _cm_modem_limit_default()
             db_resp = PyPNMClient().get_inventory_modems(
                 cmts=cmts_filter or None,
                 search_type=search_type or None,
                 search_value=search_value or None,
                 interface=iface_filter or None,
-                limit=10000,
+                limit=default_limit,
             )
             db_modems = filter_ignored_modems(db_resp.get('modems') or [])
             if db_modems:
-                _backfill_redis_from_inventory(db_modems, requested_limit=10000)
+                _backfill_redis_from_inventory(db_modems, requested_limit=default_limit)
                 _augment_modems_with_topology_fields(db_modems)
                 return jsonify({
                     "status": "success",
@@ -774,7 +789,7 @@ def get_cmts_modems(cmts_name):
     
     # Get query parameters
     community = request.args.get('community', get_cmts_community())
-    limit = int(request.args.get('limit', 10000))
+    limit = int(request.args.get('limit', _cm_modem_limit_default()))
     enrich = request.args.get('enrich', 'true').lower() == 'true'  # Enable enrichment by default
     modem_community = request.args.get('modem_community') or get_default_community()
     if not request.args.get('modem_community'):

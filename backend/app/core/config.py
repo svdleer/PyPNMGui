@@ -3,6 +3,17 @@
 import os
 
 
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 class Config:
     """Application configuration."""
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -21,6 +32,8 @@ class Config:
     OIDC_SCOPES = os.environ.get('OIDC_SCOPES', 'openid profile email')
     OIDC_ADMIN_ROLES = os.environ.get('OIDC_ADMIN_ROLES', 'admin')
     OIDC_ADMIN_EMAILS = os.environ.get('OIDC_ADMIN_EMAILS', '')
+    OIDC_VIEWER_ROLES = os.environ.get('OIDC_VIEWER_ROLES', 'viewer')
+    OIDC_VIEWER_EMAILS = os.environ.get('OIDC_VIEWER_EMAILS', '')
     
     # PyPNM API Configuration (for direct API mode)
     PYPNM_API_URL = os.environ.get('PYPNM_API_URL', 'http://127.0.0.1:8000')
@@ -31,6 +44,7 @@ class Config:
     DEFAULT_SNMP_VERSION = 'v2c'
     DEFAULT_SNMP_TIMEOUT = 5
     DEFAULT_SNMP_RETRIES = 3
+    CM_MODEM_LIMIT = _int_env('CM_MODEM_LIMIT', 10000)
     
     # TFTP Configuration — generic fallback
     TFTP_IPV4 = os.environ.get('TFTP_IPV4', '192.168.1.100')
