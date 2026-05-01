@@ -2407,7 +2407,7 @@ createApp({
 
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 90000);
+                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 180000);
 
                 if (preview.status !== 'success') {
                     this.showError('Failed to get modems', preview.message || 'Unknown error');
@@ -2459,8 +2459,13 @@ createApp({
                 this._loadAllModemsInBackground(backgroundUrl, mapModem, loadToken);
                 return;
             } catch (error) {
-                console.error('Failed to get live modems:', error);
-                this.showError('Failed to get modems', error.message);
+                if (error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('timed out')) {
+                    console.warn('Live modem request timed out:', error);
+                    this.showError('Failed to get modems', 'Request timed out while loading live modems. Please retry.');
+                } else {
+                    console.error('Failed to get live modems:', error);
+                    this.showError('Failed to get modems', error.message);
+                }
             } finally {
                 if (this._progressTimer) { clearInterval(this._progressTimer); this._progressTimer = null; }
                 this.loadProgress = 100;
@@ -2490,7 +2495,15 @@ createApp({
             const timer = setTimeout(() => controller.abort(), timeoutMs);
             try {
                 const response = await fetch(url, { signal: controller.signal });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
                 return await response.json();
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s`);
+                }
+                throw error;
             } finally {
                 clearTimeout(timer);
             }
