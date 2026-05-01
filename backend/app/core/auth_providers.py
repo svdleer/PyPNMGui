@@ -70,6 +70,8 @@ class AuthProviderRegistry:
     @property
     def requested_provider_name(self) -> str:
         value = (os.environ.get("AUTH_PROVIDER") or "internal").strip().lower()
+        if value in {"o365", "office365", "azure", "microsoft", "entra"}:
+            return "oidc"
         return value or "internal"
 
     @property

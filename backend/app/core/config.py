@@ -22,13 +22,15 @@ class Config:
     # Authentication provider.
     # - internal: local username/password accounts from auth_db
     # - oidc: generic OpenID Connect login (Keycloak, Microsoft 365 / Entra ID, etc.)
-    AUTH_PROVIDER = os.environ.get('AUTH_PROVIDER', 'internal').strip().lower()
+    _auth_provider_raw = os.environ.get('AUTH_PROVIDER', 'internal').strip().lower()
+    AUTH_PROVIDER = 'oidc' if _auth_provider_raw in {'o365', 'office365', 'azure', 'microsoft', 'entra'} else _auth_provider_raw
 
     # Generic OIDC settings used when AUTH_PROVIDER=oidc.
     OIDC_PROVIDER_LABEL = os.environ.get('OIDC_PROVIDER_LABEL', 'Single Sign-On')
-    OIDC_DISCOVERY_URL = os.environ.get('OIDC_DISCOVERY_URL', '')
-    OIDC_CLIENT_ID = os.environ.get('OIDC_CLIENT_ID', '')
-    OIDC_CLIENT_SECRET = os.environ.get('OIDC_CLIENT_SECRET', '')
+    _azure_authority = os.environ.get('AZURE_AUTHORITY', '').rstrip('/')
+    OIDC_DISCOVERY_URL = os.environ.get('OIDC_DISCOVERY_URL', '') or (_azure_authority + '/v2.0/.well-known/openid-configuration' if _azure_authority else '')
+    OIDC_CLIENT_ID = os.environ.get('OIDC_CLIENT_ID', '') or os.environ.get('AZURE_CLIENT_ID', '')
+    OIDC_CLIENT_SECRET = os.environ.get('OIDC_CLIENT_SECRET', '') or os.environ.get('AZURE_CLIENT_SECRET', '')
     OIDC_SCOPES = os.environ.get('OIDC_SCOPES', 'openid profile email')
     OIDC_ADMIN_ROLES = os.environ.get('OIDC_ADMIN_ROLES', 'admin')
     OIDC_ADMIN_EMAILS = os.environ.get('OIDC_ADMIN_EMAILS', '')

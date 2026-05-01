@@ -25,7 +25,26 @@ def _provider_label() -> str:
 
 
 def _oidc_enabled() -> bool:
-    return (os.environ.get("AUTH_PROVIDER") or "internal").strip().lower() == "oidc"
+    provider = (os.environ.get("AUTH_PROVIDER") or "internal").strip().lower()
+    return provider in {"oidc", "o365", "office365", "azure", "microsoft", "entra"}
+
+
+def _oidc_discovery_url() -> str:
+    direct = (os.environ.get("OIDC_DISCOVERY_URL") or "").strip()
+    if direct:
+        return direct
+    authority = (os.environ.get("AZURE_AUTHORITY") or "").strip().rstrip("/")
+    if authority:
+        return f"{authority}/v2.0/.well-known/openid-configuration"
+    return ""
+
+
+def _oidc_client_id() -> str:
+    return (os.environ.get("OIDC_CLIENT_ID") or os.environ.get("AZURE_CLIENT_ID") or "").strip()
+
+
+def _oidc_client_secret() -> str:
+    return (os.environ.get("OIDC_CLIENT_SECRET") or os.environ.get("AZURE_CLIENT_SECRET") or "").strip()
 
 
 def _oidc_client():
@@ -56,7 +75,7 @@ def _extract_roles(claims: dict[str, Any]) -> set[str]:
         roles.update(_claims_list(realm_access.get("roles")))
 
     resource_access = claims.get("resource_access")
-    client_id = os.environ.get("OIDC_CLIENT_ID")
+    client_id = _oidc_client_id()
     if isinstance(resource_access, dict) and client_id and isinstance(resource_access.get(client_id), dict):
         roles.update(_claims_list(resource_access[client_id].get("roles")))
 
@@ -74,10 +93,22 @@ def _claims_role(claims: dict[str, Any]) -> str:
         for value in (os.environ.get("OIDC_ADMIN_EMAILS") or "").split(",")
         if value.strip()
     }
+    viewer_roles = {
+        role.strip().lower()
+        for role in (os.environ.get("OIDC_VIEWER_ROLES") or "viewer").split(",")
+        if role.strip()
+    }
+    viewer_emails = {
+        value.strip().lower()
+        for value in (os.environ.get("OIDC_VIEWER_EMAILS") or "").split(",")
+        if value.strip()
+    }
     roles = _extract_roles(claims)
     email = str(claims.get("email") or "").strip().lower()
     if admin_roles.intersection(roles) or (email and email in admin_emails):
         return "admin"
+    if viewer_roles.intersection(roles) or (email and email in viewer_emails):
+        return "viewer"
     return "user"
 
 
@@ -100,9 +131,9 @@ def configure_app(app) -> None:
     if not _oidc_enabled():
         return
 
-    discovery_url = (os.environ.get("OIDC_DISCOVERY_URL") or "").strip()
-    client_id = (os.environ.get("OIDC_CLIENT_ID") or "").strip()
-    client_secret = (os.environ.get("OIDC_CLIENT_SECRET") or "").strip()
+    discovery_url = _oidc_discovery_url()
+    client_id = _oidc_client_id()
+    client_secret = _oidc_client_secret()
     if not discovery_url or not client_id or not client_secret:
         app.logger.warning("OIDC auth selected but OIDC_DISCOVERY_URL / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET are incomplete")
         return
