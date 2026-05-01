@@ -2407,8 +2407,7 @@ createApp({
 
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const previewResp = await fetch(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh));
-                const preview = await previewResp.json();
+                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 90000);
 
                 if (preview.status !== 'success') {
                     this.showError('Failed to get modems', preview.message || 'Unknown error');
@@ -2486,10 +2485,20 @@ createApp({
             this._loadAllModemsInBackground(url, mapper, token);
         },
 
+        async _fetchJsonWithTimeout(url, timeoutMs = 90000) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(url, { signal: controller.signal });
+                return await response.json();
+            } finally {
+                clearTimeout(timer);
+            }
+        },
+
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
-                const response = await fetch(url);
-                const data = await response.json();
+                const data = await this._fetchJsonWithTimeout(url, 180000);
                 if (data.status !== 'success') return;
                 if (this._liveLoadToken !== loadToken) return;
 
@@ -2622,8 +2631,7 @@ createApp({
                     url += `&enrich=true&modem_community=${this.snmpCommunityModem || 'private'}`;
                 }
 
-                const response = await fetch(url);
-                const data = await response.json();
+                const data = await this._fetchJsonWithTimeout(url, 120000);
 
                 if (data.status === 'success' && data.modems) {
                     // Always update progress bar from the latest poll response
