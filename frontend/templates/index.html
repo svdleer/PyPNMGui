@@ -294,7 +294,8 @@
                                                 <i class="bi me-1" :class="enrichmentProgress && enrichmentProgress.total > 0 ? 'bi-cpu-fill' : 'bi-cpu'"></i>
                                                 Enriching (model / firmware / interfaces)
                                             </span>
-                                            <span class="small text-primary" v-if="enrichmentProgress && enrichmentProgress.total > 0">{{ enrichmentProgress.current }}/{{ enrichmentProgress.total }}</span>
+                                            <span class="small text-primary" v-if="enrichmentProgress && enrichmentProgress.total > 0">{{ enrichmentProgress.current }}/{{ enrichmentProgress.total }} modems</span>
+                                            <span class="small text-muted" v-else>{{ modems.length }} modems loaded</span>
                                         </div>
                                         <div class="progress rounded-pill" style="height:8px;">
                                             <div class="progress-bar progress-bar-striped progress-bar-animated rounded-pill bg-info"
@@ -412,8 +413,8 @@
                                 <div class="d-flex justify-content-between align-items-center mb-1">
                                     <small class="text-primary fw-medium"><i class="bi bi-cpu-fill me-1"></i>Enriching modems &mdash; model / firmware / interfaces</small>
                                     <div class="d-flex align-items-center gap-2">
-                                        <small v-if="enrichmentProgress.total > 0" class="fw-semibold text-primary">{{ enrichmentProgress.current }}/{{ enrichmentProgress.total }}&nbsp;<span class="badge rounded-pill bg-primary bg-opacity-75">{{ Math.round((enrichmentProgress.current / enrichmentProgress.total) * 100) }}%</span></small>
-                                        <small v-else class="text-muted">starting&hellip;</small>
+                                        <small v-if="enrichmentProgress.total > 0" class="fw-semibold text-primary">{{ enrichmentProgress.current }}/{{ enrichmentProgress.total }} modems&nbsp;<span class="badge rounded-pill bg-primary bg-opacity-75">{{ Math.round((enrichmentProgress.current / enrichmentProgress.total) * 100) }}%</span></small>
+                                        <small v-else class="text-muted">starting&hellip; {{ modems.length }} modems loaded</small>
                                         <button @click="stopEnrichment" class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size:0.7rem;" title="Stop enrichment">
                                             <i class="bi bi-stop-fill me-1"></i>Stop
                                         </button>
