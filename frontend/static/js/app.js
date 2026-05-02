@@ -1871,6 +1871,14 @@ createApp({
                 );
             }
         },
+
+        async selectSearchCmts(cmts) {
+            this.selectedCmts = cmts ? cmts.name : '';
+            this.cmtsSearch = '';
+            this.cmtsList = this.cmtsListFull;
+            this.selectedInterface = '';
+            await this.loadCmtsInterfaces();
+        },
         
         async loadCmtsInterfaces() {
             this.cmtsInterfaces = [];

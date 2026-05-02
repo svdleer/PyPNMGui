@@ -238,16 +238,36 @@
                                 
                                 <!-- Advanced Filters -->
                                 <div class="row g-3 mt-2">
-                                    <div class="col-md-4">
+                                    <div class="col-md-5">
                                         <label class="form-label">{{ t('search.cmts_filter') }}</label>
-                                        <select v-model="selectedCmts" class="form-select" @change="loadCmtsInterfaces">
-                                            <option value="">{{ t('search.all_cmts') }} ({{ cmtsList.length }})</option>
-                                            <option v-for="cmts in cmtsList" :key="cmts.name" :value="cmts.name">
-                                                {{ cmts.name }} - {{ cmts.vendor }} {{ cmts.type }}
-                                            </option>
-                                        </select>
+                                        <div class="dropdown w-100">
+                                            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
+                                                    type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                <i class="bi bi-server me-1"></i>
+                                                {{ selectedCmts || (t('search.all_cmts') + ' (' + cmtsList.length + ')') }}
+                                            </button>
+                                            <ul class="dropdown-menu w-100" style="max-height:260px;overflow-y:auto;">
+                                                <li class="px-2 py-1">
+                                                    <input class="form-control form-control-sm" :placeholder="t('search.search_hostname')" v-model="cmtsSearch" @input="filterCmtsList" @click.stop />
+                                                </li>
+                                                <li><hr class="dropdown-divider my-1"></li>
+                                                <li>
+                                                    <a class="dropdown-item small py-1" href="#" @click.prevent="selectSearchCmts(null)">
+                                                        {{ t('search.all_cmts') }} ({{ cmtsListFull.length }})
+                                                    </a>
+                                                </li>
+                                                <li v-for="cmts in cmtsList" :key="cmts.ip">
+                                                    <a class="dropdown-item small py-1" href="#" @click.prevent="selectSearchCmts(cmts)">
+                                                        <span class="fw-bold">{{ cmts.name }}</span>
+                                                        <span class="text-muted ms-1">{{ cmts.ip }}</span>
+                                                        <span v-if="cmts.vendor" class="badge bg-secondary ms-1" style="font-size:0.65rem;">{{ cmts.vendor }}</span>
+                                                    </a>
+                                                </li>
+                                                <li v-if="!cmtsList.length" class="px-3 py-1 text-muted small">No CMTS found</li>
+                                            </ul>
+                                        </div>
                                     </div>
-                                    <div class="col-md-3">
+                                    <div class="col-md-5">
                                         <label class="form-label">{{ t('search.interface_filter') }}</label>
                                         <select v-model="selectedInterface" class="form-select" :disabled="!selectedCmts">
                                             <option value="">{{ t('search.all_interfaces') }}</option>
@@ -255,11 +275,6 @@
                                                 {{ iface }}
                                             </option>
                                         </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">{{ t('search.cmts_search') }}</label>
-                                        <input type="text" v-model="cmtsSearch" class="form-control" 
-                                               :placeholder="t('search.search_hostname')" @input="filterCmtsList">
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">
                                         <button @click="getLiveModems" class="btn btn-success w-100"
