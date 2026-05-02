@@ -2425,10 +2425,11 @@ createApp({
                 if (this._liveLoadToken !== loadToken) return;
 
                 const previewRaw = Array.isArray(preview.modems) ? preview.modems : [];
-                this.modems = previewRaw.map(m => mapModem(m, preview));
+                const previewVisible = this._filterBySelectedInterface(previewRaw);
+                this.modems = previewVisible.map(m => mapModem(m, preview));
                 this._mergeSearchSeed(this.modems);
                 this.searchPerformed = true;
-                this.liveModemSource = `Live preview from ${preview.cmts_hostname} (${preview.cmts_ip}) - ${preview.count} modems (first page loaded)`;
+                this.liveModemSource = `Live preview from ${preview.cmts_hostname} (${preview.cmts_ip}) - ${this.modems.length}/${preview.count} modems (first page loaded)`;
                 this.liveCachePartial = Boolean(preview?.partial);
 
                 const metadataCheck = this._shouldRefreshCacheForMetadata(previewRaw);
@@ -2517,6 +2518,16 @@ createApp({
             }
         },
 
+        _filterBySelectedInterface(rows) {
+            const iface = String(this.selectedInterface || '').trim().toLowerCase();
+            if (!iface) return rows || [];
+            return (rows || []).filter(m => {
+                const upstream = String(m?.upstream_interface || '').toLowerCase();
+                const cableMac = String(m?.cable_mac || '').toLowerCase();
+                return upstream.includes(iface) || cableMac.includes(iface);
+            });
+        },
+
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
                 const data = await this._fetchJsonWithTimeout(url, 180000);
@@ -2555,17 +2566,18 @@ createApp({
                     }
                     return row;
                 });
-                this._mergeSearchSeed(mapped);
+                const visibleMapped = this._filterBySelectedInterface(mapped);
+                this._mergeSearchSeed(visibleMapped);
 
                 // Append in chunks to avoid freezing the UI.
                 this.modems = [];
                 let nextIdx = 0;
                 const appendChunk = () => {
                     if (this._liveLoadToken !== loadToken) return;
-                    if (nextIdx >= mapped.length) return;
-                    this.modems.push(...mapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
+                    if (nextIdx >= visibleMapped.length) return;
+                    this.modems.push(...visibleMapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
                     nextIdx += CHUNK_SIZE;
-                    if (nextIdx < mapped.length) setTimeout(appendChunk, 0);
+                    if (nextIdx < visibleMapped.length) setTimeout(appendChunk, 0);
                 };
                 appendChunk();
 
