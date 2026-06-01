@@ -64,7 +64,7 @@ APPDB_API_USER=isw
 APPDB_API_PASS=your-password-here
 
 # TFTP Servers - Update for your network
-TFTP_IPV4=172.16.6.101
+TFTP_IPV4=212.178.218.234
 TFTP_IPV4_ALT=127.0.0.1
 
 # SNMP Communities - Update for your network

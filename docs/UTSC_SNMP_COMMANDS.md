@@ -228,9 +228,9 @@ snmpset -v2c -c Z1gg0Sp3c1@l 172.16.6.160 1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{
 
 **Set destination IP (Casa)**
 ```bash
-snmpset -v2c -c Z1gg0Sp3c1@l 172.16.6.160 1.3.6.1.4.1.4491.2.1.27.1.1.1.5.1.3.1 x "AC 10 06 65"
+snmpset -v2c -c Z1gg0Sp3c1@l 172.16.6.160 1.3.6.1.4.1.4491.2.1.27.1.1.1.5.1.3.1 x "D4 B2 DA EA"
 ```
-*(172.16.6.101 in hex)*
+*(212.178.218.234 in hex)*
 
 **Set upload path**
 ```bash
@@ -278,7 +278,7 @@ snmpset -v2c -c Z1gg0Sp3c1@l 172.16.6.160 1.3.6.1.4.1.4491.2.1.27.1.3.10.2.1.21.
 | `{COMMUNITY_RO}` | Read community | `Z1gg0@LL` |
 | `{COMMUNITY_RW}` | Write community | `Z1gg0Sp3c1@l` |
 | `{CMTS_IP}` | CMTS management IP | `172.16.6.160` |
-| `{TFTP_IP}` | TFTP server IP (hex) | `AC 10 06 65` = 172.16.6.101 |
+| `{TFTP_IP}` | TFTP server IP (hex) | `D4 B2 DA EA` = 212.178.218.234 |
 
 ---
 

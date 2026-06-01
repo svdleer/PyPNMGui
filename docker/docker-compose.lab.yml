@@ -21,7 +21,7 @@ services:
       # Enable agent-based SNMP routing
       - PYPNM_USE_AGENT_SNMP=true
       # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
-      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4=${TFTP_IPV4:-212.178.218.234}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -60,7 +60,7 @@ services:
       - DATA_MODE=agent
       - MODEM_COMMUNITY=${MODEM_COMMUNITY:-z1gg0m0n1t0r1ng}
       # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
-      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4=${TFTP_IPV4:-212.178.218.234}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
     volumes:
       - pypnm-data-lab:/app/data
@@ -103,7 +103,7 @@ services:
       - AGENT_ID=lab-agent-local
       - PYPNM_SERVER_URL=ws://pypnm-api:8000/api/agents/ws
       - PYPNM_CM_COMMUNITY=${MODEM_COMMUNITY:-z1gg0m0n1t0r1ng}
-      - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+      - TFTP_IPV4=${TFTP_IPV4:-212.178.218.234}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
       # Per-vendor SNMP communities
       - SNMP_COMMUNITY_ARRIS=${SNMP_COMMUNITY_ARRIS:-public}

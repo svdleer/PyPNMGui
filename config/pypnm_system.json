@@ -27,7 +27,7 @@
     "PnmBulkDataTransfer": {
         "method": "tftp",
         "tftp": {
-            "ip_v4": "172.16.6.101",
+            "ip_v4": "212.178.218.234",
             "ip_v6": "",
             "remote_dir": ""
         },
@@ -61,7 +61,7 @@
                     "src_dir": "/var/lib/tftpboot"
                 },
                 "tftp": {
-                    "host": "172.16.6.101",
+                    "host": "212.178.218.234",
                     "port": 69,
                     "timeout": 5,
                     "remote_dir": ""

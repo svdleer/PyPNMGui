@@ -164,7 +164,7 @@ services:
   #     - PYPNM_SERVER_URL=ws://localhost:8000/api/ws/agent
   #     - PYPNM_AGENT_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
   #     - PYPNM_CM_COMMUNITY=${MODEM_COMMUNITY:-private}
-  #     - TFTP_IPV4=${TFTP_IPV4:-172.16.6.101}
+  #     - TFTP_IPV4=${TFTP_IPV4:-212.178.218.234}
   #     - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
   #     # Per-vendor SNMP communities
   #     - SNMP_COMMUNITY_ARRIS=${SNMP_COMMUNITY_ARRIS:-public}

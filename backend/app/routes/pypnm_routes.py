@@ -254,7 +254,7 @@ def _tftp_ip_for_vendor(vendor: str) -> str:
       TFTP_COMMSCOPE / TFTP_CISCO / TFTP_CASA / TFTP_ALT
       Cisco also falls back to TFTP_IPV4_ALT (per .env.pypnm convention:
       "Alternate TFTP for Cisco CMTS and CM operations").
-      Final fallback: TFTP_IPV4 → '172.16.6.101'.
+    Final fallback: TFTP_IPV4 → '212.178.218.234'.
     """
     vendor = (vendor or '').lower()
     # Accept exact values and composite strings (e.g. "Cisco cBR-8", "CommScope E6000").
@@ -270,13 +270,13 @@ def _tftp_ip_for_vendor(vendor: str) -> str:
         os.environ.get(key, '')
         or (os.environ.get('TFTP_ARRIS', '') if key == 'TFTP_COMMSCOPE' else '')
         or (os.environ.get('TFTP_IPV4_ALT', '') if key in ('TFTP_CISCO', 'TFTP_ALT') else '')
-        or os.environ.get('TFTP_IPV4', '172.16.6.101')
+        or os.environ.get('TFTP_IPV4', '212.178.218.234')
     )
 
 
 def get_default_tftp():
     """CommScope E6000 TFTP IP (TFTP_COMMSCOPE → TFTP_IPV4)."""
-    return os.environ.get('TFTP_COMMSCOPE') or os.environ.get('TFTP_IPV4', '172.16.6.101')
+    return os.environ.get('TFTP_COMMSCOPE') or os.environ.get('TFTP_IPV4', '212.178.218.234')
 
 
 def get_alternate_tftp():

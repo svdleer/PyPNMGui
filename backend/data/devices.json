@@ -6,7 +6,7 @@
     "model": "Arris TG4482",
     "cmts_ip": "172.16.6.212",
     "cmts_community": "USE_ENV",
-    "tftp_ip": "172.16.6.101",
+    "tftp_ip": "212.178.218.234",
     "location": "Lab",
     "notes": "Main test modem - SNMP community from environment"
   }
