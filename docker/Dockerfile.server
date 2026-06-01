@@ -76,4 +76,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5050/api/health || exit 1
 
 ENTRYPOINT ["/app/gui-entrypoint.sh"]
-CMD ["gunicorn", "--worker-class", "eventlet", "-w", "4", "--bind", "0.0.0.0:5050", "--timeout", "300", "--keep-alive", "120", "run:app"]
+CMD ["gunicorn", "--worker-class", "gthread", "--threads", "8", "-w", "4", "--bind", "0.0.0.0:5050", "--timeout", "300", "--keep-alive", "120", "run:app"]
