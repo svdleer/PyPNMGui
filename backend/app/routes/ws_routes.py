@@ -142,82 +142,67 @@ def delete_rxmer_files_by_mac_via_ftp(ftp_server, ftp_user, ftp_pass, mac_list, 
 
 
 def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
-    """Trigger UTSC test via agent's snmp_set capability."""
-    from app.core.simple_ws import get_simple_agent_manager
-    
+    """Trigger UTSC test via PyPNM API (agent-backed in PyPNM)."""
     try:
-        agent_manager = get_simple_agent_manager()
-        if not agent_manager:
-            logger.error("Agent manager not available")
-            return False
-        
-        agent = agent_manager.get_agent_for_capability('snmp_set')
-        if not agent:
-            logger.error("No agent with snmp_set capability")
-            return False
-        
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='snmp_set',
-            params={
-                'target_ip': cmts_ip,
-                'oid': oid,
-                'value': 1,  # 1 = start
-                'type': 'i',
-                'community': community
+        base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
+        response = requests.post(
+            f"{base_url}/pnm/us/utsc/start",
+            json={
+                "cmts": {
+                    "cmts_ip": cmts_ip,
+                    "community": community,
+                    "write_community": community,
+                },
+                "rf_port_ifindex": int(rf_port_ifindex),
+                "cfg_index": int(cfg_index or 1),
+                "trigger_mode": 2,
             },
-            timeout=5
+            timeout=12,
         )
-        result = agent_manager.wait_for_task(task_id, timeout=5)
-        # Agent returns: {'type': 'response', 'result': {'success': True, ...}}
-        if result and result.get('result', {}).get('success'):
-            logger.debug(f"UTSC triggered via agent on port {rf_port_ifindex}")
-            return True
-        else:
-            logger.warning(f"UTSC trigger failed: {result}")
+        if response.status_code >= 400:
+            logger.warning(f"UTSC trigger HTTP {response.status_code}: {response.text[:300]}")
             return False
+
+        result = response.json()
+        if result.get('success', False):
+            logger.debug(f"UTSC triggered via PyPNM on port {rf_port_ifindex}")
+            return True
+
+        logger.warning(f"UTSC trigger failed: {result}")
+        return False
     except Exception as e:
         logger.error(f"UTSC trigger error: {e}")
         return False
 
 
 def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
-    """Stop UTSC test via agent's snmp_set capability."""
-    from app.core.simple_ws import get_simple_agent_manager
-    
+    """Stop UTSC test via PyPNM API (agent-backed in PyPNM)."""
     try:
-        agent_manager = get_simple_agent_manager()
-        if not agent_manager:
-            logger.error("Agent manager not available")
-            return False
-        
-        agent = agent_manager.get_agent_for_capability('snmp_set')
-        if not agent:
-            logger.error("No agent with snmp_set capability")
-            return False
-        
-        oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
-        task_id = agent_manager.send_task_sync(
-            agent_id=agent.agent_id,
-            command='snmp_set',
-            params={
-                'target_ip': cmts_ip,
-                'oid': oid,
-                'value': 2,  # 2 = abort
-                'type': 'i',
-                'community': community
+        base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
+        response = requests.post(
+            f"{base_url}/pnm/us/utsc/stop",
+            json={
+                "cmts": {
+                    "cmts_ip": cmts_ip,
+                    "community": community,
+                    "write_community": community,
+                },
+                "rf_port_ifindex": int(rf_port_ifindex),
+                "cfg_index": int(cfg_index or 1),
             },
-            timeout=5
+            timeout=12,
         )
-        result = agent_manager.wait_for_task(task_id, timeout=5)
-        # Agent returns: {'type': 'response', 'result': {'success': True, ...}}
-        if result and result.get('result', {}).get('success'):
-            logger.debug(f"UTSC stopped via agent on port {rf_port_ifindex}")
-            return True
-        else:
-            logger.warning(f"UTSC stop failed: {result}")
+        if response.status_code >= 400:
+            logger.warning(f"UTSC stop HTTP {response.status_code}: {response.text[:300]}")
             return False
+
+        result = response.json()
+        if result.get('success', False):
+            logger.debug(f"UTSC stopped via PyPNM on port {rf_port_ifindex}")
+            return True
+
+        logger.warning(f"UTSC stop failed: {result}")
+        return False
     except Exception as e:
         logger.error(f"UTSC stop error: {e}")
         return False

@@ -3742,6 +3742,7 @@ def configure_utsc(mac_address):
     try:
         client = PyPNMClient()
         logical_ch_ifindex = data.get('logical_ch_ifindex')
+        vendor_hint = None
 
         # Normalize client-provided RF port first.
         try:
@@ -3783,12 +3784,38 @@ def configure_utsc(mac_address):
                     f"UTSC configure using logical_ch_ifindex={logical_ch_ifindex} "
                     f"for rf_port_ifindex={rf_port_ifindex}"
                 )
+
+            # Infer vendor from discovered RF-port description so destination
+            # resolution does not depend solely on CMTSProvider/appdb lookup.
+            discovered_desc = str(discovered.get('rf_port_description') or '').strip().lower()
+            if discovered_desc:
+                if discovered_desc.startswith('cable') or discovered_desc.startswith('integrated-cable') or '-upstream' in discovered_desc:
+                    vendor_hint = 'cisco'
+                elif 'us-conn' in discovered_desc or 'cable-upstreamrfport' in discovered_desc:
+                    vendor_hint = 'commscope'
+                elif discovered_desc.startswith('upstream physical interface') or discovered_desc.startswith('ofdma upstream'):
+                    vendor_hint = 'casa'
         elif not rf_port_ifindex:
             return jsonify({
                 "success": False,
                 "error": "No valid rf_port_ifindex and modem RF port discovery failed",
                 "rf_port_ifindex": None,
             }), 400
+
+        if vendor_hint:
+            tftp_server = _tftp_ip_for_vendor(vendor_hint)
+            tftp_dest_path = _get_tftp_dest_path_for_vendor(vendor_hint)
+            logger.info(
+                f"UTSC configure destination via vendor_hint={vendor_hint}: "
+                f"tftp_server={tftp_server} dest_path={tftp_dest_path}"
+            )
+        else:
+            tftp_server = get_tftp_for_cmts(cmts_ip)
+            tftp_dest_path = get_tftp_dest_path_for_cmts(cmts_ip)
+            logger.info(
+                f"UTSC configure destination via CMTS lookup: "
+                f"tftp_server={tftp_server} dest_path={tftp_dest_path}"
+            )
 
         trigger_mode = data.get('trigger_mode', 2)
         cm_mac = mac_address if trigger_mode == 6 else None
@@ -3818,8 +3845,8 @@ def configure_utsc(mac_address):
                 filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
                 cm_mac_address=cm_mac,
                 logical_ch_ifindex=logical_ch_ifindex,
-                tftp_server=get_tftp_for_cmts(cmts_ip),
-                dest_path=get_tftp_dest_path_for_cmts(cmts_ip),
+                tftp_server=tftp_server,
+                dest_path=tftp_dest_path,
             )
 
         # Row management (probe / clear / createAndWait for Arris) is handled
