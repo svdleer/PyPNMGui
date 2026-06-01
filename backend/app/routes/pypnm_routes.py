@@ -1698,7 +1698,7 @@ def get_upstream_interfaces(mac_address):
     # ---- Redis cache check (instant return) ----
     # Versioned cache key to avoid stale payload shape after upstream interface
     # enrichment changes (e.g., active/secondary OFDMA channel metadata).
-    cache_key = f"pypnm:upstream_if:v2:{cmts_ip}:{mac_address}"
+    cache_key = f"pypnm:upstream_if:v3:{cmts_ip}:{mac_address}"
     if REDIS_AVAILABLE:
         try:
             cached = redis_client.get(cache_key)
@@ -1810,6 +1810,28 @@ def get_upstream_interfaces(mac_address):
                     })
         except Exception as e:
             logger.warning(f"OFDMA discovery error (non-fatal): {e}")
+
+        # Cisco fallback: when modem RF discovery is unavailable but OFDMA discovery
+        # succeeded with Cisco-style upstream descriptor, use that ifIndex for UTSC.
+        if modem_rf_port is None and ofdma_result and ofdma_result.get('success'):
+            fallback_if = ofdma_result.get('ofdma_ifindex')
+            fallback_desc = str(ofdma_result.get('ofdma_description') or '')
+            try:
+                fallback_if = int(fallback_if) if fallback_if is not None else None
+            except Exception:
+                fallback_if = None
+            if fallback_if and fallback_desc.startswith('Cable') and '-upstream' in fallback_desc.lower():
+                modem_rf_port = {
+                    "ifindex": fallback_if,
+                    "rf_port_ifindex": fallback_if,
+                    "description": fallback_desc,
+                    "cfg_index": 1,
+                    "is_modem_port": True,
+                }
+                logger.info(
+                    f"Using Cisco OFDMA fallback as modem RF port for {mac_address}: "
+                    f"ifindex={fallback_if} desc='{fallback_desc}'"
+                )
 
         # Second OFDMA fallback from modem_logical_channel
         if not ofdma_channels and modem_logical_channel:
