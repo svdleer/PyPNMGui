@@ -142,8 +142,37 @@ def delete_rxmer_files_by_mac_via_ftp(ftp_server, ftp_user, ftp_pass, mac_list, 
 
 
 def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
-    """Trigger UTSC test via PyPNM API (agent-backed in PyPNM)."""
+    """Trigger UTSC test via agent's snmp_set capability.
+
+    Fallback to PyPNM REST path only when the legacy capability path is unavailable.
+    """
     try:
+        from app.core.simple_ws import get_simple_agent_manager
+
+        agent_manager = get_simple_agent_manager()
+        if agent_manager:
+            agent = agent_manager.get_agent_for_capability('snmp_set')
+            if agent:
+                oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
+                task_id = agent_manager.send_task_sync(
+                    agent_id=agent.agent_id,
+                    command='snmp_set',
+                    params={
+                        'target_ip': cmts_ip,
+                        'oid': oid,
+                        'value': 1,  # 1 = start
+                        'type': 'i',
+                        'community': community
+                    },
+                    timeout=5
+                )
+                result = agent_manager.wait_for_task(task_id, timeout=5)
+                if result and result.get('result', {}).get('success'):
+                    logger.debug(f"UTSC triggered via agent on port {rf_port_ifindex}")
+                    return True
+                logger.warning(f"UTSC trigger failed via capability path: {result}")
+
+        logger.warning("No snmp_set-capable legacy agent, using PyPNM /pnm/us/utsc/start fallback")
         base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
         response = requests.post(
             f"{base_url}/pnm/us/utsc/start",
@@ -176,8 +205,37 @@ def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
 
 
 def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
-    """Stop UTSC test via PyPNM API (agent-backed in PyPNM)."""
+    """Stop UTSC test via agent's snmp_set capability.
+
+    Fallback to PyPNM REST path only when the legacy capability path is unavailable.
+    """
     try:
+        from app.core.simple_ws import get_simple_agent_manager
+
+        agent_manager = get_simple_agent_manager()
+        if agent_manager:
+            agent = agent_manager.get_agent_for_capability('snmp_set')
+            if agent:
+                oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
+                task_id = agent_manager.send_task_sync(
+                    agent_id=agent.agent_id,
+                    command='snmp_set',
+                    params={
+                        'target_ip': cmts_ip,
+                        'oid': oid,
+                        'value': 2,  # 2 = abort
+                        'type': 'i',
+                        'community': community
+                    },
+                    timeout=5
+                )
+                result = agent_manager.wait_for_task(task_id, timeout=5)
+                if result and result.get('result', {}).get('success'):
+                    logger.debug(f"UTSC stopped via agent on port {rf_port_ifindex}")
+                    return True
+                logger.warning(f"UTSC stop failed via capability path: {result}")
+
+        logger.warning("No snmp_set-capable legacy agent, using PyPNM /pnm/us/utsc/stop fallback")
         base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
         response = requests.post(
             f"{base_url}/pnm/us/utsc/stop",

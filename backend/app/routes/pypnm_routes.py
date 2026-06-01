@@ -3802,19 +3802,33 @@ def configure_utsc(mac_address):
                 "rf_port_ifindex": None,
             }), 400
 
-        if vendor_hint:
-            tftp_server = _tftp_ip_for_vendor(vendor_hint)
-            tftp_dest_path = _get_tftp_dest_path_for_vendor(vendor_hint)
-            logger.info(
-                f"UTSC configure destination via vendor_hint={vendor_hint}: "
-                f"tftp_server={tftp_server} dest_path={tftp_dest_path}"
-            )
-        else:
+        cmts_lookup_ok = False
+        try:
+            from app.core.cmts_provider import CMTSProvider
+            cmts_lookup_ok = CMTSProvider.get_cmts_by_ip(cmts_ip) is not None
+        except Exception:
+            cmts_lookup_ok = False
+
+        if cmts_lookup_ok:
             tftp_server = get_tftp_for_cmts(cmts_ip)
             tftp_dest_path = get_tftp_dest_path_for_cmts(cmts_ip)
             logger.info(
                 f"UTSC configure destination via CMTS lookup: "
                 f"tftp_server={tftp_server} dest_path={tftp_dest_path}"
+            )
+        elif vendor_hint:
+            tftp_server = _tftp_ip_for_vendor(vendor_hint)
+            tftp_dest_path = _get_tftp_dest_path_for_vendor(vendor_hint)
+            logger.info(
+                f"UTSC configure destination via vendor_hint={vendor_hint} "
+                f"(CMTS lookup unavailable): tftp_server={tftp_server} dest_path={tftp_dest_path}"
+            )
+        else:
+            tftp_server = get_tftp_for_cmts(cmts_ip)
+            tftp_dest_path = get_tftp_dest_path_for_cmts(cmts_ip)
+            logger.warning(
+                "UTSC configure destination fallback: CMTS lookup unavailable and no vendor_hint; "
+                f"using defaults tftp_server={tftp_server} dest_path={tftp_dest_path}"
             )
 
         trigger_mode = data.get('trigger_mode', 2)
