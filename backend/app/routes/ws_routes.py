@@ -147,6 +147,17 @@ def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
     Fallback to PyPNM REST path only when the legacy capability path is unavailable.
     """
     try:
+        vendor_is_cisco = False
+        try:
+            from app.core.cmts_provider import CMTSProvider
+
+            cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
+            if cmts:
+                vendor_text = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".strip().lower()
+                vendor_is_cisco = 'cisco' in vendor_text or 'cbr' in vendor_text
+        except Exception:
+            vendor_is_cisco = False
+
         from app.core.simple_ws import get_simple_agent_manager
 
         agent_manager = get_simple_agent_manager()
@@ -172,7 +183,11 @@ def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
                     return True
                 logger.warning(f"UTSC trigger failed via capability path: {result}")
 
-        logger.warning("No snmp_set-capable legacy agent, using PyPNM /pnm/us/utsc/start fallback")
+        if not vendor_is_cisco:
+            logger.warning("No snmp_set-capable legacy agent; non-Cisco UTSC will not use PyPNM fallback")
+            return False
+
+        logger.warning("Cisco UTSC using PyPNM /pnm/us/utsc/start fallback because legacy agent path was unavailable")
         base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
         response = requests.post(
             f"{base_url}/pnm/us/utsc/start",
@@ -210,6 +225,17 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
     Fallback to PyPNM REST path only when the legacy capability path is unavailable.
     """
     try:
+        vendor_is_cisco = False
+        try:
+            from app.core.cmts_provider import CMTSProvider
+
+            cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
+            if cmts:
+                vendor_text = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".strip().lower()
+                vendor_is_cisco = 'cisco' in vendor_text or 'cbr' in vendor_text
+        except Exception:
+            vendor_is_cisco = False
+
         from app.core.simple_ws import get_simple_agent_manager
 
         agent_manager = get_simple_agent_manager()
@@ -235,7 +261,11 @@ def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
                     return True
                 logger.warning(f"UTSC stop failed via capability path: {result}")
 
-        logger.warning("No snmp_set-capable legacy agent, using PyPNM /pnm/us/utsc/stop fallback")
+        if not vendor_is_cisco:
+            logger.warning("No snmp_set-capable legacy agent; non-Cisco UTSC will not use PyPNM fallback")
+            return False
+
+        logger.warning("Cisco UTSC using PyPNM /pnm/us/utsc/stop fallback because legacy agent path was unavailable")
         base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
         response = requests.post(
             f"{base_url}/pnm/us/utsc/stop",
