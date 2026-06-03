@@ -4195,7 +4195,7 @@ def get_utsc_data(mac_address):
         for prefix in candidate_prefixes:
             retrieve_resp = client._post(
                 "/pnm/us/utsc/files/retrieve",
-                {"filename": prefix, "glob": True},
+                {"filename": prefix, "glob": True, "vendor": vendor},
                 request_timeout=90,
             )
             if isinstance(retrieve_resp, dict) and retrieve_resp.get('success'):
