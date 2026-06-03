@@ -5427,6 +5427,7 @@ createApp({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         filename: this.utscLastFilename,
+                        vendor: this.selectedModem.vendor || '',
                         community: this.snmpCommunity,
                         write_community: this.snmpCommunityRW
                     })

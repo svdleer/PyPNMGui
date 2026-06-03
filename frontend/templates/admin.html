@@ -44,8 +44,9 @@
             font-size: 0.72rem;
             font-weight: 600;
         }
-        .chip-admin { background: #ffe8cc; color: #8a4b07; }
-        .chip-user  { background: #dbeafe; color: #1e40af; }
+        .chip-admin  { background: #ffe8cc; color: #8a4b07; }
+        .chip-user   { background: #dbeafe; color: #1e40af; }
+        .chip-viewer { background: #e0e7ff; color: #3730a3; }
         .admin-hero {
             background: linear-gradient(135deg, var(--admin-blue-1) 0%, var(--admin-blue-2) 60%, #0ea5e9 100%);
             color: #fff;
@@ -719,6 +720,7 @@
                         <div class="col-md-3">
                             <select class="form-select" name="role">
                                 <option value="user">user</option>
+                                <option value="viewer">viewer</option>
                                 <option value="admin">admin</option>
                             </select>
                         </div>
@@ -740,13 +742,14 @@
                                     <td>
                                         <div class="user-cell">
                                             <strong class="user-name">[[ u.username ]]</strong>
-                                            <span class="chip user-role-badge [[ 'chip-admin' if u.role == 'admin' else 'chip-user' ]]">[[ u.role ]]</span>
+                                            <span class="chip user-role-badge [[ 'chip-admin' if u.role == 'admin' else ('chip-viewer' if u.role == 'viewer' else 'chip-user') ]]">[[ u.role ]]</span>
                                         </div>
                                     </td>
                                     <td>
                                         <form method="post" action="[[ base_path ]]/admin/users/[[ u.id ]]/update" class="user-role-form">
                                             <select class="form-select form-select-sm" name="role" style="max-width:120px;" {% if u.role == 'admin' %}disabled{% endif %}>
                                                 <option value="user" {% if u.role == 'user' %}selected{% endif %}>user</option>
+                                                <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>viewer</option>
                                                 <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
                                             </select>
                                             <label class="form-check small">
@@ -801,6 +804,7 @@
                         <div class="col-md-3">
                             <select class="form-select" name="role">
                                 <option value="user">user</option>
+                                <option value="viewer">viewer</option>
                                 <option value="admin">admin</option>
                             </select>
                         </div>

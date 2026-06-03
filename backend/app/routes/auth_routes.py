@@ -516,7 +516,7 @@ def admin_create_user():
     if not username:
         flash("Username is required", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
-    if role not in {"admin", "user"}:
+    if role not in {"admin", "user", "viewer"}:
         flash("Invalid role", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
     if len(password) < 8:
@@ -546,7 +546,7 @@ def admin_update_user(user_id):
 
     role = (request.form.get("role") or user["role"]).strip()
     is_active = request.form.get("is_active") == "on"
-    if role not in {"admin", "user"}:
+    if role not in {"admin", "user", "viewer"}:
         flash("Invalid role", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
 
@@ -614,7 +614,7 @@ def admin_create_api_key():
     if not name:
         flash("API key name is required", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
-    if role not in {"admin", "user"}:
+    if role not in {"admin", "user", "viewer"}:
         flash("Invalid role", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
 
@@ -634,7 +634,7 @@ def admin_update_api_key(key_id):
     if not name:
         flash("Name is required", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
-    if role not in {"admin", "user"}:
+    if role not in {"admin", "user", "viewer"}:
         flash("Invalid role", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
 

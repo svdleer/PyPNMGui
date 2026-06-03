@@ -4155,62 +4155,65 @@ def get_utsc_data(mac_address):
     
     Returns spectrum data with frequencies and amplitudes for graphing.
     """
-    import glob
+    import base64
     import os
     import struct
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
+    vendor = str(data.get('vendor') or '').strip().lower()
     raw_filename = data.get('filename')
     if raw_filename:
         filename_base = os.path.basename(str(raw_filename))
     else:
         filename_base = f'utsc_{mac_address.replace(":", "")}'
-    
-    # For FTP prefix matching, use only the MAC-based stem (utsc_{mac})
-    # so we find all captures for this modem, not just one exact file.
-    # E6000 appends timestamp: utsc_{mac}_YYYY-MM-DD_HH.MM.SS.mmm
     mac_clean = mac_address.replace(":", "")
-    ftp_prefix = f'utsc_{mac_clean}'
+    rf_port_ifindex = data.get('rf_port_ifindex')
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        # Fetch from FTP if configured, then resolve local path
-        _fetch_pnm_files(ftp_prefix)
-        tftp_base = _local_tftp_path()
+        from app.core.pypnm_client import PyPNMClient
 
-        # Find the most recent UTSC file matching the MAC-based prefix.
-        # E6000 naming: utsc_{mac}_YYYY-MM-DD_HH.MM.SS.mmm
-        patterns = [
-            f"{tftp_base}/{ftp_prefix}",
-            f"{tftp_base}/{ftp_prefix}_*",
-            f"{tftp_base}/{ftp_prefix}*",
-        ]
-        files = []
-        for p in patterns:
-            files.extend(glob.glob(p))
-        # Keep only regular files (glob can include directories such as tftp root).
-        files = [p for p in set(files) if os.path.isfile(p)]
-        files = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
-        
-        if not files:
-            # No files yet - return empty result (not an error)
-            logger.info(f"No UTSC files found for {ftp_prefix}")
+        client = PyPNMClient()
+
+        candidate_prefixes: list[str] = []
+        if 'cisco' in vendor or 'cbr' in vendor:
+            if rf_port_ifindex:
+                candidate_prefixes.append(f'PNMCcapUsSpecAn_*_{rf_port_ifindex}')
+            candidate_prefixes.append('PNMCcapUsSpecAn_*')
+        elif vendor in ('commscope', 'casa', 'arris', 'e6000'):
+            candidate_prefixes.append(f'utsc_{mac_clean}_*')
+        else:
+            if rf_port_ifindex:
+                candidate_prefixes.append(f'PNMCcapUsSpecAn_*_{rf_port_ifindex}')
+            candidate_prefixes.append(f'utsc_{mac_clean}_*')
+
+        binary_data = None
+        latest_file = None
+        for prefix in candidate_prefixes:
+            retrieve_resp = client._post(
+                "/pnm/us/utsc/files/retrieve",
+                {"filename": prefix, "glob": True},
+                request_timeout=90,
+            )
+            if isinstance(retrieve_resp, dict) and retrieve_resp.get('success'):
+                content_b64 = retrieve_resp.get('content_base64')
+                if content_b64:
+                    binary_data = base64.b64decode(content_b64)
+                    latest_file = retrieve_resp.get('filename') or prefix
+                    break
+
+        if binary_data is None:
+            logger.info(f"No UTSC files found for {mac_address} (vendor={vendor or 'unknown'})")
             return jsonify({
                 "success": True,
                 "message": "No UTSC data available yet. Start a measurement to begin.",
                 "data": None
             }), 200
-        
-        # Get the most recent file
-        latest_file = files[0]
-        logger.info(f"Reading UTSC file: {latest_file}")
-        
-        # Read the binary file
-        with open(latest_file, 'rb') as f:
-            binary_data = f.read()
+
+        logger.info(f"Reading UTSC file via PyPNM API: {latest_file}")
 
         if len(binary_data) < 328:
             return jsonify({
