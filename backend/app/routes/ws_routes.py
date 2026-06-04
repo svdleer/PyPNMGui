@@ -8,7 +8,6 @@ import os
 import struct
 import threading
 import requests
-import base64
 from collections import deque
 from flask import Blueprint, current_app
 
@@ -408,63 +407,6 @@ def init_websocket(app):
             # Keep only regular files
             return [p for p in set(candidates) if os.path.isfile(p)]
 
-        def _list_files_via_api() -> list[str]:
-            """Ask PyPNM API for matching UTSC filenames (vendor-aware mode)."""
-            base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
-            files: list[str] = []
-            for pfx in filename_prefixes:
-                try:
-                    r = requests.post(
-                        f"{base_url}/pnm/us/utsc/files/list",
-                        json={
-                            'prefix': pfx,
-                            'rf_port_ifindex': int(rf_port) if rf_port else None,
-                            'mac_address': mac_address,
-                            'vendor': vendor_hint or None,
-                        },
-                        timeout=10,
-                    )
-                    if r.status_code >= 400:
-                        continue
-                    payload = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
-                    if not payload.get('success'):
-                        continue
-                    files.extend(payload.get('files', []) or [])
-                except Exception:
-                    continue
-            # Deduplicate while preserving order.
-            seen = set()
-            ordered = []
-            for f in files:
-                if f and f not in seen:
-                    seen.add(f)
-                    ordered.append(f)
-            return ordered
-
-        def _retrieve_file_via_api(filename: str) -> tuple[str | None, bytes | None]:
-            """Retrieve one specific UTSC file from PyPNM API."""
-            if not filename:
-                return None, None
-            base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
-            try:
-                r = requests.post(
-                    f"{base_url}/pnm/us/utsc/files/retrieve",
-                    json={'filename': filename, 'glob': False, 'vendor': vendor_hint or None},
-                    timeout=10,
-                )
-                if r.status_code >= 400:
-                    return None, None
-                payload = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
-                if not payload.get('success'):
-                    return None, None
-                out_name = payload.get('filename') or filename
-                content_b64 = payload.get('content_base64')
-                if not content_b64:
-                    return None, None
-                return out_name, base64.b64decode(content_b64)
-            except Exception:
-                return None, None
-
         session_id = f"{mac_clean}_{id(ws)}"
         _utsc_sessions[session_id] = True
         
@@ -566,52 +508,6 @@ def init_websocket(app):
                         fetch_pnm_files(pfx.split('*')[0])
                     last_ftp_fetch_time = current_time
 
-                # API-backed retrieval path (vendor-aware; supports agent/ftp/local).
-                # Pull all new files discovered this cycle (not only the newest one).
-                api_files = _list_files_via_api()
-                api_new_files = [
-                    fn for fn in api_files
-                    if fn not in processed_files and os.path.basename(fn) not in processed_files
-                ]
-                for api_filename in api_new_files[:20]:
-                    out_name, out_bytes = _retrieve_file_via_api(api_filename)
-                    if not out_name or not out_bytes:
-                        continue
-                    processed_files.add(out_name)
-                    processed_files.add(os.path.basename(out_name))
-                    last_new_file_time = current_time
-                    try:
-                        if len(out_bytes) >= 328:
-                            amp_data = out_bytes[328:]
-                            num_samples = len(amp_data) // 2
-                            if num_samples > 0:
-                                amplitudes = struct.unpack(f'>{num_samples}h', amp_data[:num_samples * 2])
-                                all_amplitudes = [a / 10.0 for a in amplitudes]
-                                try:
-                                    from app import redis_client
-                                    config_json = redis_client.get(f'utsc_config:{mac_address}')
-                                    if config_json:
-                                        config = json.loads(config_json)
-                                        span_hz = config.get('span_hz', 80000000)
-                                        center_freq_hz = config.get('center_freq_hz', 50000000)
-                                    else:
-                                        span_hz = 80000000
-                                        center_freq_hz = 50000000
-                                except Exception:
-                                    span_hz = 80000000
-                                    center_freq_hz = 50000000
-
-                                file_buffer.append({
-                                    'filepath': out_name,
-                                    'amplitudes': all_amplitudes,
-                                    'span_hz': span_hz,
-                                    'center_freq_hz': center_freq_hz,
-                                    'collected_at': current_time,
-                                })
-                                logger.info(f"UTSC WebSocket: Buffered API file {out_name} with {len(all_amplitudes)} samples")
-                    except Exception as e:
-                        logger.error(f"UTSC WebSocket API parse error for {out_name}: {e}")
-                
                 # Timeout: close if no new files arrive for NO_FILE_TIMEOUT seconds
                 if not streaming_started and (current_time - last_new_file_time) > NO_FILE_TIMEOUT:
                     logger.warning(f"UTSC WebSocket: No files received for {NO_FILE_TIMEOUT}s, closing")
