@@ -8,6 +8,7 @@ import os
 import struct
 import threading
 import requests
+import base64
 from collections import deque
 from flask import Blueprint, current_app
 
@@ -366,6 +367,70 @@ def init_websocket(app):
         
         # Clean MAC address format
         mac_clean = mac_address.replace(':', '').replace('-', '').lower()
+
+        # Determine CMTS vendor for file pattern and retrieval mode hints.
+        vendor_hint = ''
+        try:
+            from app.core.cmts_provider import CMTSProvider
+
+            if cmts_ip:
+                cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
+                if cmts:
+                    vendor_text = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".strip().lower()
+                    if 'cisco' in vendor_text or 'cbr' in vendor_text:
+                        vendor_hint = 'cisco'
+                    elif 'casa' in vendor_text or 'evo' in vendor_text or 'vccap' in vendor_text:
+                        vendor_hint = 'casa'
+                    elif 'arris' in vendor_text or 'commscope' in vendor_text or 'e6000' in vendor_text:
+                        vendor_hint = 'commscope'
+        except Exception:
+            vendor_hint = ''
+
+        # Build filename prefixes by vendor; keep both patterns as fallback for unknowns.
+        filename_prefixes = []
+        if vendor_hint == 'cisco':
+            if rf_port:
+                filename_prefixes.append(f'PNMCcapUsSpecAn_*_{rf_port}')
+            filename_prefixes.append('PNMCcapUsSpecAn_*')
+            filename_prefixes.append(f'utsc_{mac_clean}_*')
+        else:
+            filename_prefixes.append(f'utsc_{mac_clean}_*')
+            if rf_port:
+                filename_prefixes.append(f'PNMCcapUsSpecAn_*_{rf_port}')
+            filename_prefixes.append('PNMCcapUsSpecAn_*')
+
+        def _all_candidate_files(base_dir: str) -> list[str]:
+            candidates: list[str] = []
+            if not base_dir:
+                return candidates
+            for pfx in filename_prefixes:
+                candidates.extend(glob.glob(f"{base_dir}/{pfx}"))
+            # Keep only regular files
+            return [p for p in set(candidates) if os.path.isfile(p)]
+
+        def _fetch_latest_via_api() -> tuple[str | None, bytes | None]:
+            """Ask PyPNM API for newest UTSC file content (vendor-aware mode)."""
+            base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
+            for pfx in filename_prefixes:
+                try:
+                    r = requests.post(
+                        f"{base_url}/pnm/us/utsc/files/retrieve",
+                        json={'filename': pfx, 'glob': True, 'vendor': vendor_hint or None},
+                        timeout=10,
+                    )
+                    if r.status_code >= 400:
+                        continue
+                    payload = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
+                    if not payload.get('success'):
+                        continue
+                    filename = payload.get('filename')
+                    content_b64 = payload.get('content_base64')
+                    if filename and content_b64:
+                        return filename, base64.b64decode(content_b64)
+                except Exception:
+                    continue
+            return None, None
+
         session_id = f"{mac_clean}_{id(ws)}"
         _utsc_sessions[session_id] = True
         
@@ -403,9 +468,8 @@ def init_websocket(app):
             ftp_user = current_app.config.get('FTP_USER', 'ftpaccess')
             ftp_pass = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
             
-            # Look for recent files from this MAC (last 60 seconds)
-            pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-            all_files = glob.glob(pattern)
+            # Look for recent files from this stream (last 60 seconds)
+            all_files = _all_candidate_files(tftp_base)
             current_time = time.time()
             recent_files = [f for f in all_files if (current_time - os.path.getmtime(f)) < 60]
             old_files = [f for f in all_files if f not in recent_files]
@@ -463,8 +527,49 @@ def init_websocket(app):
                 # Fetch new files from FTP — throttled to every FTP_FETCH_INTERVAL seconds
                 if (current_time - last_ftp_fetch_time) >= FTP_FETCH_INTERVAL:
                     from app.core.pnm_file_source import fetch_pnm_files
-                    fetch_pnm_files(f'utsc_{mac_clean}')
+                    for pfx in filename_prefixes:
+                        # Remove wildcard for prefix-based FTP listing helper.
+                        fetch_pnm_files(pfx.split('*')[0])
                     last_ftp_fetch_time = current_time
+
+                # API-backed retrieval path (vendor-aware; supports agent/ftp/local).
+                # This keeps websocket livestream behavior while using the same retrieval
+                # logic as REST data path.
+                latest_name, latest_bytes = _fetch_latest_via_api()
+                if latest_name and latest_bytes and latest_name not in processed_files:
+                    processed_files.add(latest_name)
+                    last_new_file_time = current_time
+                    try:
+                        if len(latest_bytes) >= 328:
+                            amp_data = latest_bytes[328:]
+                            num_samples = len(amp_data) // 2
+                            if num_samples > 0:
+                                amplitudes = struct.unpack(f'>{num_samples}h', amp_data[:num_samples * 2])
+                                all_amplitudes = [a / 10.0 for a in amplitudes]
+                                try:
+                                    from app import redis_client
+                                    config_json = redis_client.get(f'utsc_config:{mac_address}')
+                                    if config_json:
+                                        config = json.loads(config_json)
+                                        span_hz = config.get('span_hz', 80000000)
+                                        center_freq_hz = config.get('center_freq_hz', 50000000)
+                                    else:
+                                        span_hz = 80000000
+                                        center_freq_hz = 50000000
+                                except Exception:
+                                    span_hz = 80000000
+                                    center_freq_hz = 50000000
+
+                                file_buffer.append({
+                                    'filepath': latest_name,
+                                    'amplitudes': all_amplitudes,
+                                    'span_hz': span_hz,
+                                    'center_freq_hz': center_freq_hz,
+                                    'collected_at': current_time,
+                                })
+                                logger.info(f"UTSC WebSocket: Buffered API file {latest_name} with {len(all_amplitudes)} samples")
+                    except Exception as e:
+                        logger.error(f"UTSC WebSocket API parse error for {latest_name}: {e}")
                 
                 # Timeout: close if no new files arrive for NO_FILE_TIMEOUT seconds
                 if not streaming_started and (current_time - last_new_file_time) > NO_FILE_TIMEOUT:
@@ -476,11 +581,12 @@ def init_websocket(app):
                     break
                 
                 # Collect new files continuously
-                pattern = f"{tftp_base}/utsc_{mac_clean}_*"
-                files = glob.glob(pattern)
+                files = _all_candidate_files(tftp_base)
                 # Filter: not yet processed
-                new_files = [f for f in files 
-                            if f not in processed_files]
+                new_files = [
+                    f for f in files
+                    if f not in processed_files and os.path.basename(f) not in processed_files
+                ]
                 
                 if len(new_files) > 0:
                     last_new_file_time = current_time
@@ -488,6 +594,7 @@ def init_websocket(app):
                 
                 for filepath in sorted(new_files, key=os.path.getmtime):
                     processed_files.add(filepath)
+                    processed_files.add(os.path.basename(filepath))
                     
                     try:
                         with open(filepath, 'rb') as f:
