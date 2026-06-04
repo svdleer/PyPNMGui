@@ -8,6 +8,7 @@ import os
 import struct
 import threading
 import requests
+import base64
 from collections import deque
 from flask import Blueprint, current_app
 
@@ -407,6 +408,80 @@ def init_websocket(app):
             # Keep only regular files
             return [p for p in set(candidates) if os.path.isfile(p)]
 
+        def _prefetch_via_api_to_local(max_files: int = 20) -> int:
+            """Prefetch matching UTSC files via PyPNM API into local stream folder.
+
+            Keeps websocket flow unchanged: files are still parsed from local filesystem.
+            This only adds a vendor-aware source (agent/ftp/local decided by PyPNM API).
+            """
+            base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
+            listed: list[str] = []
+
+            # 1) List candidate files using the same UTSC API route for all vendors.
+            for pfx in filename_prefixes:
+                try:
+                    r = requests.post(
+                        f"{base_url}/pnm/us/utsc/files/list",
+                        json={
+                            'prefix': pfx,
+                            'rf_port_ifindex': int(rf_port) if rf_port else None,
+                            'mac_address': mac_address,
+                            'vendor': vendor_hint or None,
+                        },
+                        timeout=8,
+                    )
+                    if r.status_code >= 400:
+                        continue
+                    payload = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
+                    if payload.get('success'):
+                        listed.extend(payload.get('files', []) or [])
+                except Exception:
+                    continue
+
+            # De-duplicate while preserving order.
+            seen = set()
+            ordered = []
+            for fname in listed:
+                bname = os.path.basename(str(fname))
+                if bname and bname not in seen:
+                    seen.add(bname)
+                    ordered.append(bname)
+
+            # 2) Retrieve new files and write them into local stream folder.
+            fetched = 0
+            for bname in ordered:
+                if fetched >= max_files:
+                    break
+                if bname in processed_files:
+                    continue
+                local_path = os.path.join(tftp_base, bname)
+                if os.path.exists(local_path):
+                    continue
+
+                try:
+                    r = requests.post(
+                        f"{base_url}/pnm/us/utsc/files/retrieve",
+                        json={'filename': bname, 'glob': False, 'vendor': vendor_hint or None},
+                        timeout=12,
+                    )
+                    if r.status_code >= 400:
+                        continue
+                    payload = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
+                    if not payload.get('success'):
+                        continue
+                    content_b64 = payload.get('content_base64')
+                    if not content_b64:
+                        continue
+                    with open(local_path, 'wb') as fh:
+                        fh.write(base64.b64decode(content_b64))
+                    fetched += 1
+                except Exception:
+                    continue
+
+            if fetched:
+                logger.info(f"UTSC WebSocket: API prefetched {fetched} file(s) for vendor={vendor_hint or 'unknown'}")
+            return fetched
+
         session_id = f"{mac_clean}_{id(ws)}"
         _utsc_sessions[session_id] = True
         
@@ -506,6 +581,9 @@ def init_websocket(app):
                     for pfx in filename_prefixes:
                         # Remove wildcard for prefix-based FTP listing helper.
                         fetch_pnm_files(pfx.split('*')[0])
+                    # Also prefetch via vendor-aware UTSC API route (agent/ftp/local)
+                    # so websocket can stream files regardless of CMTS vendor/source.
+                    _prefetch_via_api_to_local(max_files=25)
                     last_ftp_fetch_time = current_time
 
                 # Timeout: close if no new files arrive for NO_FILE_TIMEOUT seconds
