@@ -484,7 +484,8 @@ def init_websocket(app):
 
         session_id = f"{mac_clean}_{id(ws)}"
         _utsc_sessions[session_id] = True
-        
+        _prefetch_running = [False]  # Guard: only one prefetch thread at a time
+
         processed_files = set()  # Track files we've already processed
         file_buffer = deque(maxlen=500)  # Buffer for smooth streaming (max 500 samples)
         from app.core.pnm_file_source import local_tftp_path
@@ -603,14 +604,16 @@ def init_websocket(app):
                             fetch_pnm_files(pfx.split('*')[0])
 
                     # API prefetch (vendor-aware agent/ftp/local via PyPNM).
-                    # Run in a daemon thread so it never blocks the WS stream loop.
-                    import threading as _threading
-                    _t = _threading.Thread(
-                        target=_prefetch_via_api_to_local,
-                        kwargs={'max_files': 25},
-                        daemon=True,
-                    )
-                    _t.start()
+                    # Guard: skip if a previous prefetch thread is still running.
+                    if not _prefetch_running[0]:
+                        def _run_prefetch():
+                            _prefetch_running[0] = True
+                            try:
+                                _prefetch_via_api_to_local(max_files=25)
+                            finally:
+                                _prefetch_running[0] = False
+                        import threading as _threading
+                        _threading.Thread(target=_run_prefetch, daemon=True).start()
 
                     last_ftp_fetch_time = current_time
 
