@@ -427,6 +427,7 @@ def init_websocket(app):
                             'rf_port_ifindex': int(rf_port) if rf_port else None,
                             'mac_address': mac_address,
                             'vendor': vendor_hint or None,
+                            'exclude': list(processed_files),
                         },
                         timeout=8,
                     )
