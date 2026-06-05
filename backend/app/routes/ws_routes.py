@@ -575,15 +575,43 @@ def init_websocket(app):
                     except Exception as e:
                         logger.warning(f"UTSC re-trigger failed: {e}")
                 
-                # Fetch new files from FTP — throttled to every FTP_FETCH_INTERVAL seconds
+                # Fetch new files — throttled to every FTP_FETCH_INTERVAL seconds.
+                # Agent mode: API prefetch handles retrieval; skip FTP entirely.
+                # FTP/local mode: use fetch_pnm_files as before.
                 if (current_time - last_ftp_fetch_time) >= FTP_FETCH_INTERVAL:
-                    from app.core.pnm_file_source import fetch_pnm_files
-                    for pfx in filename_prefixes:
-                        # Remove wildcard for prefix-based FTP listing helper.
-                        fetch_pnm_files(pfx.split('*')[0])
-                    # Also prefetch via vendor-aware UTSC API route (agent/ftp/local)
-                    # so websocket can stream files regardless of CMTS vendor/source.
-                    _prefetch_via_api_to_local(max_files=25)
+                    # Resolve effective file source mode for this vendor.
+                    def _resolve_mode(vh: str) -> str:
+                        vendor_keys: list[str] = []
+                        if 'cisco' in vh or 'cbr' in vh:
+                            vendor_keys = ['CISCO_TFTP', 'CMTS_TFTP_CISCO']
+                        elif 'commscope' in vh or 'arris' in vh or 'e6000' in vh:
+                            vendor_keys = ['COMMSCOPE_TFTP', 'CMTS_TFTP_COMMSCOPE']
+                        elif 'casa' in vh or 'evo' in vh:
+                            vendor_keys = ['CASA_TFTP', 'CMTS_TFTP_CASA']
+                        for k in vendor_keys:
+                            v = (os.environ.get(k) or '').strip().lower()
+                            if v in ('ftp', 'agent', 'local'):
+                                return v
+                        return (os.environ.get('CMTS_TFTP') or os.environ.get('PNM_FILE_SOURCE', 'local')).strip().lower()
+
+                    effective_mode = _resolve_mode(vendor_hint)
+
+                    if effective_mode != 'agent':
+                        # FTP or local: use existing fetch helper.
+                        from app.core.pnm_file_source import fetch_pnm_files
+                        for pfx in filename_prefixes:
+                            fetch_pnm_files(pfx.split('*')[0])
+
+                    # API prefetch (vendor-aware agent/ftp/local via PyPNM).
+                    # Run in a daemon thread so it never blocks the WS stream loop.
+                    import threading as _threading
+                    _t = _threading.Thread(
+                        target=_prefetch_via_api_to_local,
+                        kwargs={'max_files': 25},
+                        daemon=True,
+                    )
+                    _t.start()
+
                     last_ftp_fetch_time = current_time
 
                 # Timeout: close if no new files arrive for NO_FILE_TIMEOUT seconds

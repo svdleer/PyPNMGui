@@ -254,7 +254,7 @@ def _tftp_ip_for_vendor(vendor: str) -> str:
       TFTP_COMMSCOPE / TFTP_CISCO / TFTP_CASA / TFTP_ALT
       Cisco also falls back to TFTP_IPV4_ALT (per .env.pypnm convention:
       "Alternate TFTP for Cisco CMTS and CM operations").
-    Final fallback: TFTP_IPV4 → '212.178.218.234'.
+      Final fallback: TFTP_IPV4 → '172.16.6.101'.
     """
     vendor = (vendor or '').lower()
     # Accept exact values and composite strings (e.g. "Cisco cBR-8", "CommScope E6000").
@@ -270,13 +270,13 @@ def _tftp_ip_for_vendor(vendor: str) -> str:
         os.environ.get(key, '')
         or (os.environ.get('TFTP_ARRIS', '') if key == 'TFTP_COMMSCOPE' else '')
         or (os.environ.get('TFTP_IPV4_ALT', '') if key in ('TFTP_CISCO', 'TFTP_ALT') else '')
-        or os.environ.get('TFTP_IPV4', '212.178.218.234')
+        or os.environ.get('TFTP_IPV4', '172.16.6.101')
     )
 
 
 def get_default_tftp():
     """CommScope E6000 TFTP IP (TFTP_COMMSCOPE → TFTP_IPV4)."""
-    return os.environ.get('TFTP_COMMSCOPE') or os.environ.get('TFTP_IPV4', '212.178.218.234')
+    return os.environ.get('TFTP_COMMSCOPE') or os.environ.get('TFTP_IPV4', '172.16.6.101')
 
 
 def get_alternate_tftp():
@@ -1698,7 +1698,7 @@ def get_upstream_interfaces(mac_address):
     # ---- Redis cache check (instant return) ----
     # Versioned cache key to avoid stale payload shape after upstream interface
     # enrichment changes (e.g., active/secondary OFDMA channel metadata).
-    cache_key = f"pypnm:upstream_if:v3:{cmts_ip}:{mac_address}"
+    cache_key = f"pypnm:upstream_if:v2:{cmts_ip}:{mac_address}"
     if REDIS_AVAILABLE:
         try:
             cached = redis_client.get(cache_key)
@@ -1810,28 +1810,6 @@ def get_upstream_interfaces(mac_address):
                     })
         except Exception as e:
             logger.warning(f"OFDMA discovery error (non-fatal): {e}")
-
-        # Cisco fallback: when modem RF discovery is unavailable but OFDMA discovery
-        # succeeded with Cisco-style upstream descriptor, use that ifIndex for UTSC.
-        if modem_rf_port is None and ofdma_result and ofdma_result.get('success'):
-            fallback_if = ofdma_result.get('ofdma_ifindex')
-            fallback_desc = str(ofdma_result.get('ofdma_description') or '')
-            try:
-                fallback_if = int(fallback_if) if fallback_if is not None else None
-            except Exception:
-                fallback_if = None
-            if fallback_if and fallback_desc.startswith('Cable') and '-upstream' in fallback_desc.lower():
-                modem_rf_port = {
-                    "ifindex": fallback_if,
-                    "rf_port_ifindex": fallback_if,
-                    "description": fallback_desc,
-                    "cfg_index": 1,
-                    "is_modem_port": True,
-                }
-                logger.info(
-                    f"Using Cisco OFDMA fallback as modem RF port for {mac_address}: "
-                    f"ifindex={fallback_if} desc='{fallback_desc}'"
-                )
 
         # Second OFDMA fallback from modem_logical_channel
         if not ofdma_channels and modem_logical_channel:
@@ -3742,94 +3720,22 @@ def configure_utsc(mac_address):
     try:
         client = PyPNMClient()
         logical_ch_ifindex = data.get('logical_ch_ifindex')
-        vendor_hint = None
 
-        # Normalize client-provided RF port first.
+        # RF port is already known at this point (selected by user in UI).
+        # No discovery needed — just normalise the type.
         try:
             rf_port_ifindex = int(rf_port_ifindex) if rf_port_ifindex is not None else None
         except Exception:
             rf_port_ifindex = None
 
-        # Authoritative source: modem-specific RF port discovery.
-        discovered = client.discover_modem_rf_port(
-            cmts_ip=cmts_ip,
-            cm_mac_address=mac_address,
-            community=community,
-        )
-        discovered_ifindex = None
-        if discovered and discovered.get('success') and discovered.get('rf_port_ifindex'):
-            try:
-                discovered_ifindex = int(discovered.get('rf_port_ifindex'))
-            except Exception:
-                discovered_ifindex = None
-
-        if discovered_ifindex:
-            if rf_port_ifindex and rf_port_ifindex != discovered_ifindex:
-                logger.warning(
-                    f"UTSC configure overriding client rf_port_ifindex={rf_port_ifindex} "
-                    f"with authoritative modem_rf_port={discovered_ifindex}"
-                )
-            rf_port_ifindex = discovered_ifindex
-            logger.info(f"UTSC configure selected modem RF port {rf_port_ifindex} for {mac_address}")
-            # Keep UTSC target on physical RF port, but provide logical OFDMA
-            # channel ifIndex for vendors that require LogicalChIfIndex.
-            if logical_ch_ifindex is None:
-                try:
-                    discovered_logical = discovered.get('logical_channel')
-                    logical_ch_ifindex = int(discovered_logical) if discovered_logical is not None else None
-                except Exception:
-                    logical_ch_ifindex = None
-            if logical_ch_ifindex is not None:
-                logger.info(
-                    f"UTSC configure using logical_ch_ifindex={logical_ch_ifindex} "
-                    f"for rf_port_ifindex={rf_port_ifindex}"
-                )
-
-            # Infer vendor from discovered RF-port description so destination
-            # resolution does not depend solely on CMTSProvider/appdb lookup.
-            discovered_desc = str(discovered.get('rf_port_description') or '').strip().lower()
-            if discovered_desc:
-                if discovered_desc.startswith('cable') or discovered_desc.startswith('integrated-cable') or '-upstream' in discovered_desc:
-                    vendor_hint = 'cisco'
-                elif 'us-conn' in discovered_desc or 'cable-upstreamrfport' in discovered_desc:
-                    vendor_hint = 'commscope'
-                elif discovered_desc.startswith('upstream physical interface') or discovered_desc.startswith('ofdma upstream'):
-                    vendor_hint = 'casa'
-        elif not rf_port_ifindex:
+        if not rf_port_ifindex:
             return jsonify({
                 "success": False,
-                "error": "No valid rf_port_ifindex and modem RF port discovery failed",
+                "error": "rf_port_ifindex required",
                 "rf_port_ifindex": None,
             }), 400
 
-        cmts_lookup_ok = False
-        try:
-            from app.core.cmts_provider import CMTSProvider
-            cmts_lookup_ok = CMTSProvider.get_cmts_by_ip(cmts_ip) is not None
-        except Exception:
-            cmts_lookup_ok = False
-
-        if cmts_lookup_ok:
-            tftp_server = get_tftp_for_cmts(cmts_ip)
-            tftp_dest_path = get_tftp_dest_path_for_cmts(cmts_ip)
-            logger.info(
-                f"UTSC configure destination via CMTS lookup: "
-                f"tftp_server={tftp_server} dest_path={tftp_dest_path}"
-            )
-        elif vendor_hint:
-            tftp_server = _tftp_ip_for_vendor(vendor_hint)
-            tftp_dest_path = _get_tftp_dest_path_for_vendor(vendor_hint)
-            logger.info(
-                f"UTSC configure destination via vendor_hint={vendor_hint} "
-                f"(CMTS lookup unavailable): tftp_server={tftp_server} dest_path={tftp_dest_path}"
-            )
-        else:
-            tftp_server = get_tftp_for_cmts(cmts_ip)
-            tftp_dest_path = get_tftp_dest_path_for_cmts(cmts_ip)
-            logger.warning(
-                "UTSC configure destination fallback: CMTS lookup unavailable and no vendor_hint; "
-                f"using defaults tftp_server={tftp_server} dest_path={tftp_dest_path}"
-            )
+        logger.info(f"UTSC configure using rf_port_ifindex={rf_port_ifindex} for {mac_address}")
 
         trigger_mode = data.get('trigger_mode', 2)
         cm_mac = mac_address if trigger_mode == 6 else None
@@ -3859,8 +3765,8 @@ def configure_utsc(mac_address):
                 filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
                 cm_mac_address=cm_mac,
                 logical_ch_ifindex=logical_ch_ifindex,
-                tftp_server=tftp_server,
-                dest_path=tftp_dest_path,
+                tftp_server=get_tftp_for_cmts(cmts_ip),
+                dest_path=get_tftp_dest_path_for_cmts(cmts_ip),
             )
 
         # Row management (probe / clear / createAndWait for Arris) is handled
@@ -4155,65 +4061,62 @@ def get_utsc_data(mac_address):
     
     Returns spectrum data with frequencies and amplitudes for graphing.
     """
-    import base64
+    import glob
     import os
     import struct
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    vendor = str(data.get('vendor') or '').strip().lower()
     raw_filename = data.get('filename')
     if raw_filename:
         filename_base = os.path.basename(str(raw_filename))
     else:
         filename_base = f'utsc_{mac_address.replace(":", "")}'
+    
+    # For FTP prefix matching, use only the MAC-based stem (utsc_{mac})
+    # so we find all captures for this modem, not just one exact file.
+    # E6000 appends timestamp: utsc_{mac}_YYYY-MM-DD_HH.MM.SS.mmm
     mac_clean = mac_address.replace(":", "")
-    rf_port_ifindex = data.get('rf_port_ifindex')
+    ftp_prefix = f'utsc_{mac_clean}'
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
-        from app.core.pypnm_client import PyPNMClient
+        # Fetch from FTP if configured, then resolve local path
+        _fetch_pnm_files(ftp_prefix)
+        tftp_base = _local_tftp_path()
 
-        client = PyPNMClient()
-
-        candidate_prefixes: list[str] = []
-        if 'cisco' in vendor or 'cbr' in vendor:
-            if rf_port_ifindex:
-                candidate_prefixes.append(f'PNMCcapUsSpecAn_*_{rf_port_ifindex}')
-            candidate_prefixes.append('PNMCcapUsSpecAn_*')
-        elif vendor in ('commscope', 'casa', 'arris', 'e6000'):
-            candidate_prefixes.append(f'utsc_{mac_clean}_*')
-        else:
-            if rf_port_ifindex:
-                candidate_prefixes.append(f'PNMCcapUsSpecAn_*_{rf_port_ifindex}')
-            candidate_prefixes.append(f'utsc_{mac_clean}_*')
-
-        binary_data = None
-        latest_file = None
-        for prefix in candidate_prefixes:
-            retrieve_resp = client._post(
-                "/pnm/us/utsc/files/retrieve",
-                {"filename": prefix, "glob": True, "vendor": vendor},
-                request_timeout=90,
-            )
-            if isinstance(retrieve_resp, dict) and retrieve_resp.get('success'):
-                content_b64 = retrieve_resp.get('content_base64')
-                if content_b64:
-                    binary_data = base64.b64decode(content_b64)
-                    latest_file = retrieve_resp.get('filename') or prefix
-                    break
-
-        if binary_data is None:
-            logger.info(f"No UTSC files found for {mac_address} (vendor={vendor or 'unknown'})")
+        # Find the most recent UTSC file matching the MAC-based prefix.
+        # E6000 naming: utsc_{mac}_YYYY-MM-DD_HH.MM.SS.mmm
+        patterns = [
+            f"{tftp_base}/{ftp_prefix}",
+            f"{tftp_base}/{ftp_prefix}_*",
+            f"{tftp_base}/{ftp_prefix}*",
+        ]
+        files = []
+        for p in patterns:
+            files.extend(glob.glob(p))
+        # Keep only regular files (glob can include directories such as tftp root).
+        files = [p for p in set(files) if os.path.isfile(p)]
+        files = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
+        
+        if not files:
+            # No files yet - return empty result (not an error)
+            logger.info(f"No UTSC files found for {ftp_prefix}")
             return jsonify({
                 "success": True,
                 "message": "No UTSC data available yet. Start a measurement to begin.",
                 "data": None
             }), 200
-
-        logger.info(f"Reading UTSC file via PyPNM API: {latest_file}")
+        
+        # Get the most recent file
+        latest_file = files[0]
+        logger.info(f"Reading UTSC file: {latest_file}")
+        
+        # Read the binary file
+        with open(latest_file, 'rb') as f:
+            binary_data = f.read()
 
         if len(binary_data) < 328:
             return jsonify({
