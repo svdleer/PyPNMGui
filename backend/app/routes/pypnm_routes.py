@@ -1909,18 +1909,10 @@ def get_upstream_interfaces(mac_address):
         # ---- Persist discovered channel ifindices to PyPNM inventory (durable, survives Redis TTL) ----
         discovered_ofdma_ifindex  = ofdma_channels[0]["ifindex"] if ofdma_channels else None
         discovered_upstream_ifindex = modem_rf_port["ifindex"] if modem_rf_port else None
-        try:
-            pypnm_base = (os.environ.get("PYPNM_API_URL") or os.environ.get("PYPNM_BASE_URL") or "http://172.17.0.1:8081").rstrip("/")
-            import requests as _req
-            _req.post(
-                f"{pypnm_base}/api/admin/modem-refresh",
-                json={"mac": mac_address, "cmts": cmts_ip, "requested_by": "channel-discover"},
-                timeout=5,
-                verify=False,
-            )
-            logger.debug(f"Queued refresh for ofdma_ifindex={discovered_ofdma_ifindex} upstream_ifindex={discovered_upstream_ifindex} for {mac_address}")
-        except Exception as e:
-            logger.warning(f"Failed to queue refresh for {mac_address}: {e}")
+        # Note: modem-refresh (sysDescr enrichment) is intentionally NOT queued here.
+        # It is a slow per-modem SNMP call that the user triggers explicitly from the
+        # modem detail panel. Auto-queuing it on every channel discovery caused the
+        # detail panel to show a permanent "refreshing" spinner.
 
         result = {
             "success": True,
@@ -3721,21 +3713,52 @@ def configure_utsc(mac_address):
         client = PyPNMClient()
         logical_ch_ifindex = data.get('logical_ch_ifindex')
 
-        # RF port is already known at this point (selected by user in UI).
-        # No discovery needed — just normalise the type.
+        # Normalize client-provided RF port first.
         try:
             rf_port_ifindex = int(rf_port_ifindex) if rf_port_ifindex is not None else None
         except Exception:
             rf_port_ifindex = None
 
-        if not rf_port_ifindex:
+        # Authoritative source: modem-specific RF port discovery.
+        discovered = client.discover_modem_rf_port(
+            cmts_ip=cmts_ip,
+            cm_mac_address=mac_address,
+            community=community,
+        )
+        discovered_ifindex = None
+        if discovered and discovered.get('success') and discovered.get('rf_port_ifindex'):
+            try:
+                discovered_ifindex = int(discovered.get('rf_port_ifindex'))
+            except Exception:
+                discovered_ifindex = None
+
+        if discovered_ifindex:
+            if rf_port_ifindex and rf_port_ifindex != discovered_ifindex:
+                logger.warning(
+                    f"UTSC configure overriding client rf_port_ifindex={rf_port_ifindex} "
+                    f"with authoritative modem_rf_port={discovered_ifindex}"
+                )
+            rf_port_ifindex = discovered_ifindex
+            logger.info(f"UTSC configure selected modem RF port {rf_port_ifindex} for {mac_address}")
+            # Keep UTSC target on physical RF port, but provide logical OFDMA
+            # channel ifIndex for vendors that require LogicalChIfIndex.
+            if logical_ch_ifindex is None:
+                try:
+                    discovered_logical = discovered.get('logical_channel')
+                    logical_ch_ifindex = int(discovered_logical) if discovered_logical is not None else None
+                except Exception:
+                    logical_ch_ifindex = None
+            if logical_ch_ifindex is not None:
+                logger.info(
+                    f"UTSC configure using logical_ch_ifindex={logical_ch_ifindex} "
+                    f"for rf_port_ifindex={rf_port_ifindex}"
+                )
+        elif not rf_port_ifindex:
             return jsonify({
                 "success": False,
-                "error": "rf_port_ifindex required",
+                "error": "No valid rf_port_ifindex and modem RF port discovery failed",
                 "rf_port_ifindex": None,
             }), 400
-
-        logger.info(f"UTSC configure using rf_port_ifindex={rf_port_ifindex} for {mac_address}")
 
         trigger_mode = data.get('trigger_mode', 2)
         cm_mac = mac_address if trigger_mode == 6 else None

@@ -1135,6 +1135,33 @@ def clear_cmts_modem_cache(cmts_name):
     return jsonify({"status": "success", "message": msg})
 
 
+@api_bp.route('/cmts/<cmts_name>/cache/refresh', methods=['POST'])
+def refresh_cmts_modem_cache(cmts_name):
+    """Re-pull enriched modem data from PyPNM inventory and rewrite Redis.
+
+    Called fire-and-forget by the frontend when enrichment completes, so that
+    cable_mac / fiber_node fields are present in the Redis cache for subsequent
+    modem searches without waiting for the next full CMTS modem load.
+    """
+    _log = logging.getLogger(__name__)
+    if not REDIS_AVAILABLE or not redis_client:
+        return jsonify({"status": "skipped", "reason": "Redis not available"})
+    try:
+        default_limit = _cm_modem_limit_default()
+        inv_resp = PyPNMClient().get_inventory_modems(cmts=cmts_name, limit=default_limit)
+        inv_modems = filter_ignored_modems(inv_resp.get('modems') or [])
+        if not inv_modems:
+            return jsonify({"status": "skipped", "reason": "no inventory modems yet"})
+        for m in inv_modems:
+            m.setdefault('cmts', cmts_name)
+        _backfill_redis_from_inventory(inv_modems, requested_limit=default_limit)
+        _log.info(f"cache/refresh: wrote {len(inv_modems)} enriched modems to Redis for {cmts_name}")
+        return jsonify({"status": "success", "count": len(inv_modems)})
+    except Exception as exc:
+        _log.warning(f"cache/refresh failed for {cmts_name}: {exc}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
 @api_bp.route('/cmts/<cmts_name>/enrich/delta', methods=['POST'])
 def enqueue_delta_enrichment(cmts_name):
     """Queue refresh only for modems missing enrichment fields in current CMTS cache."""

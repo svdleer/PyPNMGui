@@ -2724,6 +2724,13 @@ createApp({
                         this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
                         console.log('Modem list fully enriched');
                         this._stopEnrichmentPolling('backend reports completed');
+                        // Refresh Redis cache with the now-enriched data (cable_mac,
+                        // fiber_node etc. were missing in the earlier partial write).
+                        // Fire-and-forget — don't await so UI is not delayed.
+                        if (this.selectedCmts) {
+                            fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/refresh`, { method: 'POST' })
+                                .catch(() => {});
+                        }
                         return true;
                     }
                 }
@@ -5599,7 +5606,28 @@ createApp({
                     community: this.snmpCommunityModem,
                     output_type: this.pnmOutputType
                 };
-                
+
+                // For DS spectrum: pass the modem's actual max DS frequency so
+                // ESD/D4.0 modems (>993 MHz) are captured up to their real upper band.
+                // Infer from OFDM channel data already loaded in channel-stats.
+                if (measurementType === 'spectrum') {
+                    let maxFreqHz = 993_000_000; // DOCSIS 3.1 default
+                    try {
+                        const ofdmChs = this.channelStats?.downstream?.ofdm?.channels || [];
+                        for (const ch of ofdmChs) {
+                            // plc_freq_mhz is the OFDM PLC centre; end = plc + ~96 MHz for 192 MHz ch
+                            const plcHz = (ch.plc_freq_mhz || 0) * 1e6;
+                            const bwHz  = (ch.bandwidth_mhz  || 192) * 1e6;
+                            const endHz = plcHz + bwHz / 2;
+                            if (endHz > maxFreqHz) maxFreqHz = endHz;
+                        }
+                        // Round down to nearest MHz and keep inside supported range.
+                        maxFreqHz = Math.floor(maxFreqHz / 1e6) * 1e6;
+                        if (maxFreqHz < 993_000_000) maxFreqHz = 993_000_000;
+                    } catch (e) { /* ignore; fallback stays */ }
+                    payload.last_segment_center_freq_hz = maxFreqHz;
+                }
+
                 // Add measurement-specific parameters
                 if (measurementType === 'fec_summary') {
                     payload.fec_summary_type = 2;  // 10-minute interval
