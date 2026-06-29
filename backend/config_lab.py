@@ -1,6 +1,6 @@
 """
 LAB Configuration - Direct access to access-engineering.nl
-4 CMTS systems for testing via direct SSH port 65001
+14 CMTS systems for testing via direct SSH port 65001
 """
 
 import os
@@ -26,66 +26,157 @@ CM_SNMP_COMMUNITY = os.environ.get('CM_SNMP_COMMUNITY', 'z1gg0m0n1t0r1ng')
 
 LAB_CMTS_SYSTEMS = [
     {
-        'name': 'mnd-gt0002-ccap001',
-        'ip': '172.16.6.200',
+        'name': 'asd-gt0003-ccap001',
+        'ip': '172.16.2.110',
+        'public_ip': '213.51.253.251',
         'snmp_community': SNMP_COMMUNITY_ARRIS,
         'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
-        'type': 'CCAP',
+        'type': 'E6000',
         'vendor': 'Arris',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0003'
+    },
+    {
+        'name': 'asd-gt0003-ccap101',
+        'ip': '172.16.2.120',
+        'public_ip': '213.51.251.251',
+        'snmp_community': SNMP_COMMUNITY_CASA,
+        'write_community': SNMP_WRITE_COMMUNITY_CASA,
+        'type': 'C100G',
+        'vendor': 'Casa',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0003'
+    },
+    {
+        'name': 'asd-gt0003-ccap201',
+        'ip': '172.16.2.114',
+        'public_ip': '213.51.255.251',
+        'snmp_community': SNMP_COMMUNITY_CISCO,
+        'write_community': SNMP_WRITE_COMMUNITY_CISCO,
+        'type': 'cBR8',
+        'vendor': 'Cisco',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0003'
+    },
+    {
+        'name': 'asd-gt0004-ccap002',
+        'ip': '172.16.2.150',
+        'public_ip': '213.51.253.252',
+        'snmp_community': SNMP_COMMUNITY_ARRIS,
+        'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
+        'type': 'E6000',
+        'vendor': 'Arris',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0004'
+    },
+    {
+        'name': 'asd-gt0004-ccap003',
+        'ip': '172.16.2.151',
+        'public_ip': '213.51.253.253',
+        'snmp_community': SNMP_COMMUNITY_ARRIS,
+        'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
+        'type': 'E6000',
+        'vendor': 'Arris',
+        'ccap_role': 'cCCAP',
+        'location': 'LAB-ASD-GT0004'
+    },
+    {
+        'name': 'asd-gt0004-ccap102',
+        'ip': '172.16.2.154',
+        'public_ip': '213.51.251.252',
+        'snmp_community': SNMP_COMMUNITY_CASA,
+        'write_community': SNMP_WRITE_COMMUNITY_CASA,
+        'type': 'C100G',
+        'vendor': 'Casa',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0004'
+    },
+    {
+        'name': 'asd-gt0004-ccap202',
+        'ip': '172.16.2.156',
+        'public_ip': '213.51.255.252',
+        'snmp_community': SNMP_COMMUNITY_CISCO,
+        'write_community': SNMP_WRITE_COMMUNITY_CISCO,
+        'type': 'cBR8',
+        'vendor': 'Cisco',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0004'
+    },
+    {
+        'name': 'asd-gt0004-ccap203',
+        'ip': '172.16.2.157',
+        'public_ip': '213.51.255.253',
+        'snmp_community': SNMP_COMMUNITY_CISCO,
+        'write_community': SNMP_WRITE_COMMUNITY_CISCO,
+        'type': 'cBR8',
+        'vendor': 'Cisco',
+        'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0004'
+    },
+    {
+        'name': 'mnd-gt0002-ccap001',
+        'ip': '172.16.6.200',
+        'public_ip': '213.51.253.250',
+        'snmp_community': SNMP_COMMUNITY_ARRIS,
+        'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
+        'type': 'E6000',
+        'vendor': 'Arris',
+        'ccap_role': 'iCCAP',
         'location': 'LAB-MND-GT0002'
     },
     {
-        'name': 'mnd-gt0002-ccap002', 
+        'name': 'mnd-gt0002-ccap002',
         'ip': '172.16.6.212',
+        'public_ip': '213.51.253.254',
         'snmp_community': SNMP_COMMUNITY_ARRIS,
         'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
-        'type': 'CCAP',
+        'type': 'E6000',
         'vendor': 'Arris',
+        'ccap_role': 'cCCAP',
         'location': 'LAB-MND-GT0002'
     },
     {
         'name': 'mnd-gt0002-ccap101',
-        'ip': '172.16.6.201', 
+        'ip': '172.16.6.201',
+        'public_ip': '213.51.251.254',
         'snmp_community': SNMP_COMMUNITY_CASA,
         'write_community': SNMP_WRITE_COMMUNITY_CASA,
-        'type': 'CCAP',
+        'type': 'C100G',
         'vendor': 'Casa',
+        'ccap_role': 'iCCAP',
         'location': 'LAB-MND-GT0002'
     },
     {
         'name': 'mnd-gt0002-ccap201',
         'ip': '172.16.6.202',
+        'public_ip': '213.51.255.254',
         'snmp_community': SNMP_COMMUNITY_CISCO,
         'write_community': SNMP_WRITE_COMMUNITY_CISCO,
-        'type': 'CCAP',
+        'type': 'cBR8',
         'vendor': 'Cisco',
-        'location': 'LAB-MND-GT0002'
-    },
-    {
-        'name': 'mnd-gt0002-ccapv001',
-        'ip': '172.16.6.160',
-        'snmp_community': SNMP_COMMUNITY_COMMSCOPE,
-        'write_community': SNMP_WRITE_COMMUNITY_COMMSCOPE,
-        'type': 'CCAP',
-        'vendor': 'Commscope',
+        'ccap_role': 'iCCAP',
         'location': 'LAB-MND-GT0002'
     },
     {
         'name': 'mnd-gt0002-ccapv002',
         'ip': '172.16.6.130',
+        'public_ip': '213.51.254.233',
         'snmp_community': SNMP_COMMUNITY_COMMSCOPE,
         'write_community': SNMP_WRITE_COMMUNITY_COMMSCOPE,
-        'type': 'CCAP',
+        'type': 'EVO',
         'vendor': 'Commscope',
+        'ccap_role': 'vCCAP',
         'location': 'LAB-MND-GT0002'
     },
     {
-        'name': 'asd-gt0003-ccap001',
-        'ip': '172.16.2.110',
-        'snmp_community': SNMP_COMMUNITY_ARRIS,
-        'write_community': SNMP_WRITE_COMMUNITY_ARRIS,
-        'type': 'CCAP',
-        'vendor': 'Arris',
+        'name': 'mnd-gt0002-ccapv003',
+        'ip': '172.16.6.160',
+        'public_ip': '213.51.251.253',
+        'snmp_community': SNMP_COMMUNITY_COMMSCOPE,
+        'write_community': SNMP_WRITE_COMMUNITY_COMMSCOPE,
+        'type': 'EVO',
+        'vendor': 'Commscope',
+        'ccap_role': 'vCCAP',
         'location': 'LAB-ASD-GT0003'
     }
 ]
