@@ -1,6 +1,6 @@
 """
 LAB Configuration - Direct access to access-engineering.nl
-14 CMTS systems for testing via direct SSH port 65001
+15 CMTS systems for testing via direct SSH port 65001
 """
 
 import os
@@ -56,6 +56,16 @@ LAB_CMTS_SYSTEMS = [
         'type': 'cBR8',
         'vendor': 'Cisco',
         'ccap_role': 'iCCAP',
+        'location': 'LAB-ASD-GT0003'
+    },
+    {
+        'name': 'asd-gt0003-ccapv001',
+        'ip': '172.16.2.159',
+        'snmp_community': SNMP_COMMUNITY_COMMSCOPE,
+        'write_community': SNMP_WRITE_COMMUNITY_COMMSCOPE,
+        'type': 'EVO',
+        'vendor': 'Commscope',
+        'ccap_role': 'vCCAP',
         'location': 'LAB-ASD-GT0003'
     },
     {
