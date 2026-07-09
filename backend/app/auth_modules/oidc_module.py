@@ -124,6 +124,14 @@ def _claims_locale(claims: dict[str, Any]) -> str:
     return normalize_locale(claims.get("locale") or claims.get("lang") or DEFAULT_LOCALE)
 
 
+def _local_auth_allowed() -> bool:
+    """Allow local username/password login alongside OIDC.
+    Set DISABLE_LOCAL_AUTH=true to hide local login and force OIDC only.
+    """
+    disable = (os.environ.get("DISABLE_LOCAL_AUTH") or "").strip().lower()
+    return disable not in {"1", "true", "yes", "on"}
+
+
 def configure_app(app) -> None:
     if oauth is None:
         app.logger.warning("OIDC auth module found but Authlib is not installed")
@@ -224,6 +232,9 @@ def oidc_logout():
 
 
 def register_auth_provider(registry) -> None:
+    # When local auth is allowed alongside OIDC, the login form shows both options.
+    # Otherwise, only OIDC is available.
+    local_allowed = _local_auth_allowed()
     registry.register(
         AuthProvider(
             name="oidc",
@@ -232,7 +243,7 @@ def register_auth_provider(registry) -> None:
             logout_endpoint="oidc_auth.oidc_logout",
             public_prefixes=("/auth/oidc/login", "/auth/oidc/callback", "/auth/oidc/logout"),
             is_internal=False,
-            supports_username_password=False,
+            supports_username_password=local_allowed,  # Show local form if allowed
             user_management_enabled=False,
             password_management_enabled=False,
             blueprints=[oidc_auth_bp],

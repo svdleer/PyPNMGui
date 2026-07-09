@@ -643,6 +643,50 @@ def admin_update_api_key(key_id):
     return redirect(_prefixed(url_for("auth.admin_page")))
 
 
+@auth_bp.route("/admin/o365-debug", methods=["GET"])
+@admin_required
+def admin_o365_debug():
+    """Debug page for O365/OIDC authentication troubleshooting."""
+    provider = get_active_auth_provider()
+    base_path = current_app.config.get("APP_ROOT", "")
+    
+    oidc_enabled = provider.name == "oidc"
+    oidc_config = {}
+    current_user_claims = {}
+    
+    if oidc_enabled:
+        from app.auth_modules.oidc_module import _oidc_discovery_url, _oidc_client_id, _local_auth_allowed
+        oidc_config = {
+            "provider_name": provider.name,
+            "provider_label": provider.label,
+            "discovery_url": _oidc_discovery_url(),
+            "client_id": _oidc_client_id() or "(not configured)",
+            "local_auth_allowed": _local_auth_allowed(),
+            "disable_local_auth_env": (os.environ.get("DISABLE_LOCAL_AUTH") or "").strip(),
+            "supports_username_password": provider.supports_username_password,
+        }
+        
+        # Current user's claims from session
+        if session.get("auth_source") == "oidc":
+            current_user_claims = {
+                "user_id": session.get("user_id", ""),
+                "username": session.get("username", ""),
+                "email": session.get("email", ""),
+                "role": session.get("role", ""),
+                "locale": session.get("locale", ""),
+            }
+    
+    return render_template(
+        "admin-o365-debug.html",
+        base_path=base_path,
+        auth_username=session.get("username", ""),
+        auth_role=session.get("role", "user"),
+        oidc_enabled=oidc_enabled,
+        oidc_config=oidc_config,
+        current_user_claims=current_user_claims,
+    )
+
+
 @auth_bp.route("/admin/export-sql", methods=["GET"])
 @admin_required
 def admin_export_sql():

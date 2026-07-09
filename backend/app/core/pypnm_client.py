@@ -458,13 +458,19 @@ class PyPNMClient:
         tftp_ipv4: str,
         community: str = "private",
         tftp_ipv6: Optional[str] = None,
-        output_type: str = "json"
+        output_type: str = "json",
+        last_segment_center_freq_hz: int = 0,
     ) -> Dict[str, Any]:
         """
         Trigger spectrum analyzer capture.
         
         Endpoint: POST /docs/pnm/ds/spectrumAnalyzer/getCapture
         """
+        # Default to 993 MHz (std DOCSIS 3.1). Caller may pass a higher value
+        # for ESD/D4.0 modems (e.g. 1218 MHz, 1794 MHz) — modem rejects values
+        # it doesn't support so this must come from diplexer discovery.
+        if last_segment_center_freq_hz <= 0:
+            last_segment_center_freq_hz = 993_000_000
         payload = {
             "cable_modem": {
                 "mac_address": mac_address,
@@ -487,13 +493,11 @@ class PyPNMClient:
             },
             "capture_parameters": {
                 "inactivity_timeout":         60,
-                "first_segment_center_freq": 108_000_000,   # 108 MHz — start of DS band
-                "last_segment_center_freq":  993_000_000,   # 993 MHz — safe max (std DOCSIS 3.1)
-                # Extended-spectrum modems (ESD) support up to 1218 MHz but
-                # sending 1218 to a standard modem causes SNMP inconsistentValue → 400.
-                "segment_freq_span":         1_000_000,       # 1 MHz per segment
+                "first_segment_center_freq": 108_000_000,
+                "last_segment_center_freq":  last_segment_center_freq_hz,
+                "segment_freq_span":         1_000_000,
                 "num_bins_per_segment":      256,
-                "spectrum_retrieval_type":   1,               # 1=FILE (agent fetch)
+                "spectrum_retrieval_type":   1,
             }
         }
         
