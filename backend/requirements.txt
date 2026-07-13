@@ -23,6 +23,8 @@ pysnmp>=6.0.0
 # PyPNM library for CMTS PNM operations (US OFDMA RxMER)
 pypnm
 
+# Swagger/OpenAPI documentation
+
 # Optional dependencies
 # Uncomment if you need caching support:
 redis>=5.0.0

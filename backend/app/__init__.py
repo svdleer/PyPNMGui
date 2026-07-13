@@ -115,13 +115,14 @@ def create_app():
             app.logger.warning(f"Agent WebSocket not available: {e}")
     
     # Register blueprints
-    from app.routes import main_bp, api_bp, auth_bp, topology_bp
+    from app.routes import main_bp, api_bp, auth_bp, topology_bp, apidoc_bp
     from app.routes.pypnm_routes import pypnm_bp
     for blueprint in auth_registry.blueprints:
         app.register_blueprint(blueprint)
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(apidoc_bp)  # Register Swagger UI blueprint
     app.register_blueprint(pypnm_bp)  # pypnm_bp already has url_prefix='/api/pypnm'
     enable_topology = os.environ.get('ENABLE_TOPOLOGY', 'false').lower() in {'1', 'true', 'yes', 'on'}
     if enable_topology:
