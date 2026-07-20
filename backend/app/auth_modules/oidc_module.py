@@ -294,6 +294,9 @@ def oidc_callback():
     session["oidc_id_token"] = result.get("id_token")
 
     next_path = sanitize_next_path(session.pop("post_login_next", None), default=url_for("main.index"))
+    app_root = (current_app.config.get("APP_ROOT", "") or "").rstrip("/")
+    if app_root and next_path != app_root and not next_path.startswith(f"{app_root}/"):
+        next_path = f"{app_root}{next_path}"
     return redirect(next_path)
 
 
