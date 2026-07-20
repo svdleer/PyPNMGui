@@ -262,6 +262,7 @@ def oidc_login():
 
 @oidc_auth_bp.route("/auth/oidc/callback", methods=["GET"])
 def oidc_callback():
+    current_app.logger.info("O365 callback received")
     if not _oidc_enabled():
         return redirect(url_for("auth.login"))
     if request.args.get("state") != session.get("state"):
@@ -277,6 +278,7 @@ def oidc_callback():
         return redirect(url_for("auth.login"))
 
     try:
+        current_app.logger.info("O365 callback state validated; beginning Entra token exchange")
         cache = _load_cache()
         result = _build_msal_app(cache=cache).acquire_token_by_authorization_code(
             request.args["code"],
@@ -293,6 +295,7 @@ def oidc_callback():
         flash(f"Login failed: {result.get('error')}", "danger")
         return redirect(url_for("auth.login"))
 
+    current_app.logger.info("O365 token exchange completed")
     claims = dict(result.get("id_token_claims") or {})
     access_token = result.get("access_token")
     if access_token:
