@@ -1,27 +1,33 @@
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any
 from urllib.parse import urlencode
 
-from flask import Blueprint, abort, current_app, flash, redirect, request, session, url_for
+import requests
+from flask import Blueprint, current_app, flash, redirect, request, session, url_for
 
 from app.core.auth_providers import AuthProvider, sanitize_next_path
 from app.core.i18n import DEFAULT_LOCALE, normalize_locale
 
 try:
-    from authlib.integrations.flask_client import OAuth
+    import msal
 except Exception:  # pragma: no cover - optional dependency
-    OAuth = None
+    msal = None
+
+try:
+    from flask_session import Session
+except Exception:  # pragma: no cover - optional dependency
+    Session = None
 
 
 oidc_auth_bp = Blueprint("oidc_auth", __name__)
-oauth = OAuth() if OAuth is not None else None
-_CLIENT_NAME = "pypnm_oidc"
+_MSAL_SCOPES = ["User.Read"]
 
 
 def _provider_label() -> str:
-    return (os.environ.get("OIDC_PROVIDER_LABEL") or "Single Sign-On").strip() or "Single Sign-On"
+    return (os.environ.get("OIDC_PROVIDER_LABEL") or "Microsoft 365").strip() or "Microsoft 365"
 
 
 def _oidc_enabled() -> bool:
@@ -29,31 +35,21 @@ def _oidc_enabled() -> bool:
     return provider in {"oidc", "o365", "office365", "azure", "microsoft", "entra"}
 
 
+def _azure_authority() -> str:
+    return (os.environ.get("AZURE_AUTHORITY") or "https://login.microsoftonline.com/common").strip().rstrip("/")
+
+
 def _oidc_discovery_url() -> str:
-    direct = (os.environ.get("OIDC_DISCOVERY_URL") or "").strip()
-    if direct:
-        return direct
-    authority = (os.environ.get("AZURE_AUTHORITY") or "").strip().rstrip("/")
-    if authority:
-        return f"{authority}/v2.0/.well-known/openid-configuration"
-    return ""
+    """Expose the derived URL for diagnostics; MSAL uses the authority directly."""
+    return f"{_azure_authority()}/v2.0/.well-known/openid-configuration"
 
 
 def _oidc_client_id() -> str:
-    return (os.environ.get("OIDC_CLIENT_ID") or os.environ.get("AZURE_CLIENT_ID") or "").strip()
+    return (os.environ.get("AZURE_CLIENT_ID") or "").strip()
 
 
 def _oidc_client_secret() -> str:
-    return (os.environ.get("OIDC_CLIENT_SECRET") or os.environ.get("AZURE_CLIENT_SECRET") or "").strip()
-
-
-def _oidc_client():
-    if oauth is None:
-        abort(503)
-    client = oauth.create_client(_CLIENT_NAME)
-    if client is None:
-        abort(503)
-    return client
+    return (os.environ.get("AZURE_CLIENT_SECRET") or "").strip()
 
 
 def _claims_list(value: Any) -> list[str]:
@@ -63,6 +59,11 @@ def _claims_list(value: Any) -> list[str]:
         return [str(item).strip() for item in value if str(item).strip()]
     text = str(value).strip()
     return [text] if text else []
+
+
+def _env_values(*names: str, default: str = "") -> set[str]:
+    value = next((os.environ.get(name) for name in names if os.environ.get(name)), default)
+    return {item.strip().lower() for item in (value or "").split(",") if item.strip()}
 
 
 def _extract_roles(claims: dict[str, Any]) -> set[str]:
@@ -83,31 +84,21 @@ def _extract_roles(claims: dict[str, Any]) -> set[str]:
 
 
 def _claims_role(claims: dict[str, Any]) -> str:
-    admin_roles = {
-        role.strip().lower()
-        for role in (os.environ.get("OIDC_ADMIN_ROLES") or "admin").split(",")
-        if role.strip()
-    }
-    admin_emails = {
-        value.strip().lower()
-        for value in (os.environ.get("OIDC_ADMIN_EMAILS") or "").split(",")
-        if value.strip()
-    }
-    viewer_roles = {
-        role.strip().lower()
-        for role in (os.environ.get("OIDC_VIEWER_ROLES") or "viewer").split(",")
-        if role.strip()
-    }
-    viewer_emails = {
-        value.strip().lower()
-        for value in (os.environ.get("OIDC_VIEWER_EMAILS") or "").split(",")
-        if value.strip()
-    }
+    """Map LI-compatible Entra role, group, and email settings to PyPNM roles."""
     roles = _extract_roles(claims)
-    email = str(claims.get("email") or "").strip().lower()
-    if admin_roles.intersection(roles) or (email and email in admin_emails):
+    groups = {value.lower() for value in _claims_list(claims.get("groups"))}
+    email = str(claims.get("email") or claims.get("preferred_username") or "").strip().lower()
+
+    admin_roles = _env_values("OIDC_ADMIN_ROLES", "O365_ADMIN_ROLES", default="admin") | {"li-admin", "li_xml_admin"}
+    viewer_roles = _env_values("OIDC_VIEWER_ROLES", "O365_VIEWER_ROLES", default="viewer") | {"li-viewer", "li_xml_viewer"}
+    admin_emails = _env_values("OIDC_ADMIN_EMAILS", "O365_ADMIN_EMAILS")
+    viewer_emails = _env_values("OIDC_VIEWER_EMAILS", "O365_VIEWER_EMAILS")
+    admin_groups = _env_values("O365_ADMIN_GROUPS")
+    viewer_groups = _env_values("O365_VIEWER_GROUPS")
+
+    if roles.intersection(admin_roles) or (email and email in admin_emails) or groups.intersection(admin_groups):
         return "admin"
-    if viewer_roles.intersection(roles) or (email and email in viewer_emails):
+    if roles.intersection(viewer_roles) or (email and email in viewer_emails) or groups.intersection(viewer_groups):
         return "viewer"
     return "user"
 
@@ -125,83 +116,182 @@ def _claims_locale(claims: dict[str, Any]) -> str:
 
 
 def _local_auth_allowed() -> bool:
-    """Allow local username/password login alongside OIDC.
-    Set DISABLE_LOCAL_AUTH=true to hide local login and force OIDC only.
-    """
-    disable = (os.environ.get("DISABLE_LOCAL_AUTH") or "").strip().lower()
-    return disable not in {"1", "true", "yes", "on"}
+    """Match LI: O365 disables local login unless explicitly enabled for emergencies."""
+    emergency = (os.environ.get("EMERGENCY_LOCAL_AUTH") or "false").strip().lower()
+    return not _oidc_enabled() or emergency in {"1", "true", "yes", "on"}
+
+
+def _configure_server_side_sessions(app) -> bool:
+    """Use LI-style filesystem sessions so the MSAL token cache is never put in a cookie."""
+    if Session is None:
+        app.logger.warning("MSAL auth requires Flask-Session for server-side token caching")
+        return False
+    if app.config.get("MSAL_SESSION_CONFIGURED"):
+        return True
+
+    data_dir = os.environ.get("PYPNM_DATA_DIR")
+    if not data_dir:
+        data_dir = "/app/data" if os.path.isdir("/app/data") else app.instance_path
+    session_dir = os.environ.get("MSAL_SESSION_DIR", os.path.join(data_dir, "flask_session"))
+    try:
+        os.makedirs(session_dir, exist_ok=True)
+    except OSError as exc:
+        app.logger.error("Cannot create MSAL session directory %s: %s", session_dir, exc)
+        return False
+
+    app.config.update(
+        SESSION_TYPE="filesystem",
+        SESSION_PERMANENT=False,
+        SESSION_FILE_DIR=session_dir,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_HTTPONLY=True,
+        MSAL_SESSION_CONFIGURED=True,
+    )
+    Session(app)
+    return True
+
+
+def _build_msal_app(cache=None, authority: str | None = None):
+    if msal is None:
+        raise RuntimeError("MSAL is not installed")
+    return msal.ConfidentialClientApplication(
+        _oidc_client_id(),
+        authority=authority or _azure_authority(),
+        client_credential=_oidc_client_secret(),
+        token_cache=cache,
+    )
+
+
+def _build_auth_url(authority: str | None = None, scopes: list[str] | None = None, state: str | None = None) -> str:
+    """Build the Entra authorize redirect exactly as the LI O365 implementation does."""
+    return _build_msal_app(authority=authority).get_authorization_request_url(
+        scopes or _MSAL_SCOPES,
+        state=state or str(uuid.uuid4()),
+        redirect_uri=url_for("oidc_auth.oidc_callback", _external=True),
+    )
+
+
+def _load_cache():
+    cache = msal.SerializableTokenCache()
+    serialized = session.get("token_cache")
+    if serialized:
+        cache.deserialize(serialized)
+    return cache
+
+
+def _save_cache(cache) -> None:
+    if cache.has_state_changed:
+        session["token_cache"] = cache.serialize()
+
+
+def _fetch_graph_groups(access_token: str) -> list[str] | None:
+    """Match LI's optional Microsoft Graph group enrichment for group-based RBAC."""
+    url = "https://graph.microsoft.com/v1.0/me/memberOf?$select=id&$top=100"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    group_ids: list[str] = []
+    try:
+        while url:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                current_app.logger.warning("Graph API memberOf returned %s: %s", response.status_code, response.text[:200])
+                return None
+            payload = response.json()
+            group_ids.extend(str(item["id"]) for item in payload.get("value", []) if item.get("id"))
+            url = payload.get("@odata.nextLink")
+        current_app.logger.info("Graph API returned %d group memberships", len(group_ids))
+        return group_ids
+    except Exception as exc:
+        current_app.logger.warning("Failed to fetch Graph groups: %s", exc)
+        return None
 
 
 def configure_app(app) -> None:
-    if oauth is None:
-        app.logger.warning("OIDC auth module found but Authlib is not installed")
-        return
     if not _oidc_enabled():
         return
-
-    discovery_url = _oidc_discovery_url()
-    client_id = _oidc_client_id()
-    client_secret = _oidc_client_secret()
-    if not discovery_url or not client_id or not client_secret:
-        app.logger.warning("OIDC auth selected but OIDC_DISCOVERY_URL / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET are incomplete")
+    if msal is None:
+        app.logger.warning("O365 auth selected but msal is not installed")
         return
-
-    oauth.init_app(app)
-    oauth.register(
-        name=_CLIENT_NAME,
-        server_metadata_url=discovery_url,
-        client_id=client_id,
-        client_secret=client_secret,
-        client_kwargs={
-            "scope": (os.environ.get("OIDC_SCOPES") or "openid profile email").strip(),
-        },
-    )
-    app.logger.info("OIDC auth provider configured (%s)", _provider_label())
+    if not _oidc_client_id() or not _oidc_client_secret():
+        app.logger.warning("O365 auth selected but AZURE_CLIENT_ID / AZURE_CLIENT_SECRET are incomplete")
+        return
+    if not _configure_server_side_sessions(app):
+        return
+    app.logger.info("O365 auth provider configured with MSAL (%s)", _provider_label())
 
 
 @oidc_auth_bp.route("/auth/oidc/login", methods=["GET"])
 def oidc_login():
     if not _oidc_enabled():
         return redirect(url_for("auth.login"))
-    client = _oidc_client()
-    next_path = sanitize_next_path(request.args.get("next"), default=url_for("main.index"))
-    session["post_login_next"] = next_path
-    redirect_uri = url_for("oidc_auth.oidc_callback", _external=True)
-    return client.authorize_redirect(redirect_uri)
+    if msal is None or not _oidc_client_id() or not _oidc_client_secret():
+        flash("Microsoft 365 authentication is not configured", "danger")
+        return redirect(url_for("auth.login"))
+    if not current_app.config.get("MSAL_SESSION_CONFIGURED"):
+        current_app.logger.error("Microsoft 365 login blocked: server-side session storage is unavailable")
+        flash("Microsoft 365 session storage is unavailable", "danger")
+        return redirect(url_for("auth.login"))
+
+    session["state"] = str(uuid.uuid4())
+    session["post_login_next"] = sanitize_next_path(request.args.get("next"), default=url_for("main.index"))
+    try:
+        return redirect(_build_auth_url(scopes=_MSAL_SCOPES, state=session["state"]))
+    except Exception as exc:
+        current_app.logger.error("O365 authorization redirect failed: %s", exc)
+        flash("Unable to start Microsoft 365 sign-in", "danger")
+        return redirect(url_for("auth.login"))
 
 
 @oidc_auth_bp.route("/auth/oidc/callback", methods=["GET"])
 def oidc_callback():
     if not _oidc_enabled():
         return redirect(url_for("auth.login"))
-    client = _oidc_client()
-    try:
-        token = client.authorize_access_token()
-        claims = token.get("userinfo")
-        if not claims:
-            claims = client.parse_id_token(token)
-        if not claims:
-            claims = client.userinfo()
-    except Exception as exc:
-        current_app.logger.error("OIDC callback failed: %s", exc)
-        flash("Single sign-on failed", "danger")
+    if request.args.get("state") != session.get("state"):
+        current_app.logger.warning("O365 callback state validation failed")
+        flash("Single sign-on state validation failed", "danger")
+        return redirect(url_for("auth.login"))
+    if "error" in request.args:
+        current_app.logger.error("O365 callback error: %s", request.args.get("error"))
+        flash(f"Authentication failed: {request.args.get('error')}", "danger")
+        return redirect(url_for("auth.login"))
+    if not request.args.get("code"):
+        flash("Authentication response did not include an authorization code", "danger")
         return redirect(url_for("auth.login"))
 
-    claims = dict(claims or {})
-    subject = str(claims.get("sub") or _claims_username(claims)).strip()
-    username = _claims_username(claims)
-    locale = _claims_locale(claims)
-    role = _claims_role(claims)
+    try:
+        cache = _load_cache()
+        result = _build_msal_app(cache=cache).acquire_token_by_authorization_code(
+            request.args["code"],
+            scopes=_MSAL_SCOPES,
+            redirect_uri=url_for("oidc_auth.oidc_callback", _external=True),
+        )
+    except Exception as exc:
+        current_app.logger.error("O365 token acquisition failed: %s", exc)
+        flash("Microsoft 365 sign-in failed", "danger")
+        return redirect(url_for("auth.login"))
 
-    session.clear()
+    if "error" in result:
+        current_app.logger.error("O365 token acquisition error: %s", result.get("error"))
+        flash(f"Login failed: {result.get('error')}", "danger")
+        return redirect(url_for("auth.login"))
+
+    claims = dict(result.get("id_token_claims") or {})
+    access_token = result.get("access_token")
+    if access_token:
+        graph_groups = _fetch_graph_groups(access_token)
+        if graph_groups is not None:
+            claims["groups"] = graph_groups
+    _save_cache(cache)
+
+    subject = str(claims.get("sub") or claims.get("oid") or _claims_username(claims)).strip()
+    session["user"] = claims
     session["user_id"] = f"oidc:{subject}"
     session["auth_source"] = "oidc"
-    session["username"] = username
-    session["role"] = role
-    session["email"] = str(claims.get("email") or "").strip()
-    session["locale"] = locale
+    session["username"] = _claims_username(claims)
+    session["role"] = _claims_role(claims)
+    session["email"] = str(claims.get("email") or claims.get("preferred_username") or "").strip()
+    session["locale"] = _claims_locale(claims)
     session["auth_display_name"] = _provider_label()
-    session["oidc_id_token"] = token.get("id_token")
+    session["oidc_id_token"] = result.get("id_token")
 
     next_path = sanitize_next_path(session.pop("post_login_next", None), default=url_for("main.index"))
     return redirect(next_path)
@@ -209,32 +299,25 @@ def oidc_callback():
 
 @oidc_auth_bp.route("/auth/oidc/logout", methods=["GET", "POST"])
 def oidc_logout():
-    id_token = session.get("oidc_id_token")
     post_logout_redirect = url_for("auth.login", _external=True)
+    global_logout = (os.environ.get("O365_GLOBAL_LOGOUT") or "false").strip().lower() in {"1", "true", "yes", "on"}
     session.clear()
 
-    if not _oidc_enabled():
-        return redirect(post_logout_redirect)
+    if _oidc_enabled() and global_logout:
+        logout_url = f"{_azure_authority()}/oauth2/v2.0/logout?{urlencode({'post_logout_redirect_uri': post_logout_redirect})}"
+        response = redirect(logout_url)
+    else:
+        response = redirect(post_logout_redirect)
 
-    try:
-        client = _oidc_client()
-        metadata = getattr(client, "server_metadata", {}) or {}
-        end_session_endpoint = metadata.get("end_session_endpoint")
-        if end_session_endpoint:
-            params = {"post_logout_redirect_uri": post_logout_redirect}
-            if id_token:
-                params["id_token_hint"] = id_token
-            return redirect(f"{end_session_endpoint}?{urlencode(params)}")
-    except Exception as exc:
-        current_app.logger.warning("OIDC logout fallback used: %s", exc)
-
-    return redirect(post_logout_redirect)
+    response.delete_cookie(
+        key=current_app.config.get("SESSION_COOKIE_NAME", "session"),
+        path=current_app.config.get("SESSION_COOKIE_PATH", "/"),
+        domain=current_app.config.get("SESSION_COOKIE_DOMAIN"),
+    )
+    return response
 
 
 def register_auth_provider(registry) -> None:
-    # When local auth is allowed alongside OIDC, the login form shows both options.
-    # Otherwise, only OIDC is available.
-    local_allowed = _local_auth_allowed()
     registry.register(
         AuthProvider(
             name="oidc",
@@ -243,7 +326,7 @@ def register_auth_provider(registry) -> None:
             logout_endpoint="oidc_auth.oidc_logout",
             public_prefixes=("/auth/oidc/login", "/auth/oidc/callback", "/auth/oidc/logout"),
             is_internal=False,
-            supports_username_password=local_allowed,  # Show local form if allowed
+            supports_username_password=_local_auth_allowed(),
             user_management_enabled=False,
             password_management_enabled=False,
             blueprints=[oidc_auth_bp],

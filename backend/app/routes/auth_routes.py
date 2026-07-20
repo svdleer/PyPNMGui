@@ -655,14 +655,14 @@ def admin_o365_debug():
     current_user_claims = {}
     
     if oidc_enabled:
-        from app.auth_modules.oidc_module import _oidc_discovery_url, _oidc_client_id, _local_auth_allowed
+        from app.auth_modules.oidc_module import _azure_authority, _oidc_client_id, _local_auth_allowed
         oidc_config = {
             "provider_name": provider.name,
             "provider_label": provider.label,
-            "discovery_url": _oidc_discovery_url(),
+            "authority": _azure_authority(),
             "client_id": _oidc_client_id() or "(not configured)",
             "local_auth_allowed": _local_auth_allowed(),
-            "disable_local_auth_env": (os.environ.get("DISABLE_LOCAL_AUTH") or "").strip(),
+            "emergency_local_auth_env": (os.environ.get("EMERGENCY_LOCAL_AUTH") or "").strip(),
             "supports_username_password": provider.supports_username_password,
         }
         
