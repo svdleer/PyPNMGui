@@ -162,13 +162,32 @@ def _build_msal_app(cache=None, authority: str | None = None):
     )
 
 
+def _external_callback_url() -> str:
+    """Build the public callback URL even when Apache strips /cmtool upstream."""
+    callback_path = url_for("oidc_auth.oidc_callback")
+    app_root = (current_app.config.get("APP_ROOT", "") or "").rstrip("/")
+    if app_root and callback_path != app_root and not callback_path.startswith(f"{app_root}/"):
+        callback_path = f"{app_root}{callback_path}"
+    return f"{request.scheme}://{request.host}{callback_path}"
+
+
 def _build_auth_url(authority: str | None = None, scopes: list[str] | None = None, state: str | None = None) -> str:
-    """Build the Entra authorize redirect exactly as the LI O365 implementation does."""
-    return _build_msal_app(authority=authority).get_authorization_request_url(
-        scopes or _MSAL_SCOPES,
-        state=state or str(uuid.uuid4()),
-        redirect_uri=url_for("oidc_auth.oidc_callback", _external=True),
-    )
+    """Build LI's Entra browser authorize URL without server-side discovery.
+
+    MSAL discovers OpenID metadata when constructing a confidential client. The
+    GUI is intentionally isolated from Internet/proxy egress, so login must send
+    the browser directly to the known Entra v2 authorize endpoint instead.
+    """
+    requested_scopes = list(dict.fromkeys([*(scopes or _MSAL_SCOPES), "offline_access", "openid", "profile"]))
+    params = {
+        "client_id": _oidc_client_id(),
+        "response_type": "code",
+        "redirect_uri": _external_callback_url(),
+        "response_mode": "query",
+        "scope": " ".join(requested_scopes),
+        "state": state or str(uuid.uuid4()),
+    }
+    return f"{(authority or _azure_authority()).rstrip('/')}/oauth2/v2.0/authorize?{urlencode(params)}"
 
 
 def _load_cache():
@@ -223,7 +242,7 @@ def configure_app(app) -> None:
 def oidc_login():
     if not _oidc_enabled():
         return redirect(url_for("auth.login"))
-    if msal is None or not _oidc_client_id() or not _oidc_client_secret():
+    if not _oidc_client_id() or not _oidc_client_secret():
         flash("Microsoft 365 authentication is not configured", "danger")
         return redirect(url_for("auth.login"))
     if not current_app.config.get("MSAL_SESSION_CONFIGURED"):

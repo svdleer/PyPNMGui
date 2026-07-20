@@ -88,6 +88,15 @@ services:
       - APPDB_API_URL=${APPDB_API_URL:-https://appdb.oss.local/isw/api}
       - APPDB_API_USER=${APPDB_API_USER:-isw}
       - APPDB_API_PASS=${APPDB_API_PASS:-Spyem_OtGheb4}
+      # The GUI uses direct egress; never inherit build or host proxy settings at runtime.
+      # MSAL/requests treats HTTPS_PROXY=https://... as a TLS proxy and fails against
+      # the plain-HTTP corporate build proxy with WRONG_VERSION_NUMBER.
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
+      - ALL_PROXY=
+      - all_proxy=
       # Proxy bypass for internal services
       - NO_PROXY=localhost,127.0.0.1,appdb.oss.local,.oss.local
       - no_proxy=localhost,127.0.0.1,appdb.oss.local,.oss.local
