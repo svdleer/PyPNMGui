@@ -151,6 +151,21 @@ def _configure_server_side_sessions(app) -> bool:
     return True
 
 
+def _msal_http_timeout() -> int:
+    try:
+        return max(1, int(os.environ.get("MSAL_HTTP_TIMEOUT_SEC", "15")))
+    except (TypeError, ValueError):
+        return 15
+
+
+class _TimeoutSession(requests.Session):
+    """Apply a finite timeout to MSAL's metadata and token HTTP calls."""
+
+    def request(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", _msal_http_timeout())
+        return super().request(method, url, **kwargs)
+
+
 def _build_msal_app(cache=None, authority: str | None = None):
     if msal is None:
         raise RuntimeError("MSAL is not installed")
@@ -159,6 +174,7 @@ def _build_msal_app(cache=None, authority: str | None = None):
         authority=authority or _azure_authority(),
         client_credential=_oidc_client_secret(),
         token_cache=cache,
+        http_client=_TimeoutSession(),
     )
 
 
@@ -172,22 +188,12 @@ def _external_callback_url() -> str:
 
 
 def _build_auth_url(authority: str | None = None, scopes: list[str] | None = None, state: str | None = None) -> str:
-    """Build LI's Entra browser authorize URL without server-side discovery.
-
-    MSAL discovers OpenID metadata when constructing a confidential client. The
-    GUI is intentionally isolated from Internet/proxy egress, so login must send
-    the browser directly to the known Entra v2 authorize endpoint instead.
-    """
-    requested_scopes = list(dict.fromkeys([*(scopes or _MSAL_SCOPES), "offline_access", "openid", "profile"]))
-    params = {
-        "client_id": _oidc_client_id(),
-        "response_type": "code",
-        "redirect_uri": _external_callback_url(),
-        "response_mode": "query",
-        "scope": " ".join(requested_scopes),
-        "state": state or str(uuid.uuid4()),
-    }
-    return f"{(authority or _azure_authority()).rstrip('/')}/oauth2/v2.0/authorize?{urlencode(params)}"
+    """Build the Entra authorization URL through the LI-compatible MSAL client."""
+    return _build_msal_app(authority=authority).get_authorization_request_url(
+        scopes or _MSAL_SCOPES,
+        state=state or str(uuid.uuid4()),
+        redirect_uri=_external_callback_url(),
+    )
 
 
 def _load_cache():
@@ -242,7 +248,7 @@ def configure_app(app) -> None:
 def oidc_login():
     if not _oidc_enabled():
         return redirect(url_for("auth.login"))
-    if not _oidc_client_id() or not _oidc_client_secret():
+    if msal is None or not _oidc_client_id() or not _oidc_client_secret():
         flash("Microsoft 365 authentication is not configured", "danger")
         return redirect(url_for("auth.login"))
     if not current_app.config.get("MSAL_SESSION_CONFIGURED"):
@@ -283,7 +289,8 @@ def oidc_callback():
         result = _build_msal_app(cache=cache).acquire_token_by_authorization_code(
             request.args["code"],
             scopes=_MSAL_SCOPES,
-            redirect_uri=url_for("oidc_auth.oidc_callback", _external=True),
+            # Must exactly match the URI supplied to Entra during oidc_login.
+            redirect_uri=_external_callback_url(),
         )
     except Exception as exc:
         current_app.logger.error("O365 token acquisition failed: %s", exc)
