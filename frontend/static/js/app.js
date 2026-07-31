@@ -2378,8 +2378,9 @@ createApp({
             try {
                 const buildUrl = (limit, enrichEnabled, forceRefresh = false) => {
                     let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=${limit}`;
+                    u += `&enrich=${enrichEnabled ? 'true' : 'false'}`;
                     if (enrichEnabled) {
-                        u += `&enrich=true&modem_community=${this.snmpCommunityModem || 'private'}`;
+                        u += `&modem_community=${this.snmpCommunityModem || 'private'}`;
                     }
                     if (forceRefresh) {
                         u += '&refresh=true';

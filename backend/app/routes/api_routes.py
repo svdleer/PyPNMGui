@@ -817,20 +817,24 @@ def get_cmts_modems(cmts_name):
                     cached_modems = filter_ignored_modems(data.get('modems', []))
                     cached_count = len(cached_modems)
                     cached_requested_limit = int(data.get('requested_limit') or 0)
-                    cache_limit_mismatch = False
+                    cached_source = str(data.get('source') or '')
+                    cache_limit_mismatch = not (
+                        cached_count >= limit
+                        or (
+                            cached_source == 'pypnm-live'
+                            and cached_requested_limit >= limit
+                        )
+                    )
                     cache_needs_enrich = False
 
-                    # Ignore cache entries built with a smaller request limit.
-                    if cached_requested_limit and cached_requested_limit < limit:
-                        cache_limit_mismatch = True
+                    # Inventory backfills do not prove that the query captured the
+                    # complete CMTS population. Only row count or a completed live
+                    # request can establish that this cache covers the new limit.
+                    if cache_limit_mismatch:
                         logger.info(
-                            f"Using partial Redis cache for {cmts_name}: cached_limit={cached_requested_limit} < requested_limit={limit}"
-                        )
-                    elif not cached_requested_limit and cached_count < limit:
-                        # Legacy entries have no requested_limit metadata.
-                        cache_limit_mismatch = True
-                        logger.info(
-                            f"Using partial legacy Redis cache for {cmts_name}: cached_count={cached_count} < requested_limit={limit}"
+                            f"Using partial Redis cache for {cmts_name}: "
+                            f"cached_count={cached_count}, cached_limit={cached_requested_limit}, "
+                            f"requested_limit={limit}, source={cached_source or 'unknown'}"
                         )
 
                     # Fill missing CMTS fields on cached rows.
@@ -847,16 +851,15 @@ def get_cmts_modems(cmts_name):
                             f"Redis cache for {cmts_name} is not enriched; live enrichment state must be fetched from PyPNM."
                         )
 
-                    # For enrich requests, don't keep serving partial/non-enriched
-                    # Redis snapshots during polling. PyPNM maintains the live
-                    # in-memory enrichment state and progress; bypass Redis so the
-                    # frontend sees current progress and updated modem fields.
-                    if enrich and (cache_limit_mismatch or cache_needs_enrich):
+                    # Never serve a cache that does not cover the requested
+                    # inventory footprint. Enrichment quality matters only when
+                    # enrichment was requested.
+                    if cache_limit_mismatch or (enrich and cache_needs_enrich):
                         logger.info(
                             f"Bypassing Redis cache for {cmts_name} "
                             f"(partial={cache_limit_mismatch}, needs_enrich={cache_needs_enrich})"
                         )
-                        raise RuntimeError("bypass-redis-enrichment-cache")
+                        raise RuntimeError("bypass-redis-incomplete-cache")
 
                     # Guard against stale/partial empty cache loops.
                     # If Redis has 0 rows while marked partial/non-enriched, returning it causes
@@ -902,7 +905,12 @@ def get_cmts_modems(cmts_name):
                 )
                 inventory_modems = inventory_resp.get('modems') or []
                 inventory_modems = filter_ignored_modems(inventory_modems)
-                if inventory_modems and _inventory_snapshot_is_fresh(inventory_modems):
+                inventory_covers_request = limit <= 200 or len(inventory_modems) >= limit
+                if (
+                    inventory_modems
+                    and inventory_covers_request
+                    and _inventory_snapshot_is_fresh(inventory_modems)
+                ):
                     inventory_enriched = _modems_are_enriched(inventory_modems)
                     if not inventory_enriched:
                         logger.info(

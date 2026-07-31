@@ -57,6 +57,11 @@ class CMTSProvider:
             logger.error(f"Failed to fetch CMTS data from appdb: {e}")
             return {"status": 500, "count": 0, "data": []}
     
+    @staticmethod
+    def _is_vcas_hostname(hostname: Any) -> bool:
+        """Return True when a hostname has the non-CMTS VCAS role."""
+        return '-vcas' in str(hostname or '').strip().casefold()
+
     @classmethod
     def get_all_cmts(cls, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
@@ -96,6 +101,21 @@ class CMTSProvider:
         data = cls._fetch_from_api()
         
         if data.get('status') == 200:
+            records = data.get('data')
+            if isinstance(records, list):
+                filtered_records = [
+                    record for record in records
+                    if not isinstance(record, dict)
+                    or not cls._is_vcas_hostname(record.get('HostName'))
+                ]
+                removed_count = len(records) - len(filtered_records)
+                data['data'] = filtered_records
+                data['count'] = len(filtered_records)
+                if removed_count:
+                    logger.info(
+                        f"Filtered {removed_count} VCAS non-CMTS devices from appdb CMTS list"
+                    )
+
             cls._cache = data
             cls._cache_time = current_time
             logger.info(f"Cached {data.get('count', 0)} CMTS systems")
