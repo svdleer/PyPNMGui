@@ -3703,7 +3703,7 @@ def configure_utsc(mac_address):
     write_community = data.get('write_community', get_cmts_write_community())
     logger.info(
         f"=== UTSC CONFIGURE === MAC: {mac_address} cmts_ip={cmts_ip} "
-        f"rf_port_ifindex={rf_port_ifindex} community={community!r} write_community={write_community!r}"
+        f"rf_port_ifindex={rf_port_ifindex} communities=<redacted>"
     )
     
     if not cmts_ip:

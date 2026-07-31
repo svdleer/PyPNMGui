@@ -12,6 +12,33 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+_SENSITIVE_PAYLOAD_KEYS = {
+    "community",
+    "write_community",
+    "password",
+    "token",
+    "auth_token",
+    "secret",
+}
+
+
+def _redact_payload(value: Any) -> Any:
+    """Return a logging-safe copy of a nested request payload."""
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            sensitive = (
+                normalized in _SENSITIVE_PAYLOAD_KEYS
+                or normalized.endswith(("_community", "_password", "_token", "_secret"))
+            )
+            redacted[key] = "<redacted>" if sensitive else _redact_payload(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_payload(item) for item in value]
+    return value
+
+
 def _cm_modem_limit_default() -> int:
     raw = os.environ.get('CM_MODEM_LIMIT', '10000')
     try:
@@ -109,7 +136,7 @@ class PyPNMClient:
             timeout = 300 if 'spectrumAnalyzer' in endpoint else self.config.timeout
         
         try:
-            logger.debug(f"POST {url} with payload: {payload}")
+            logger.debug("POST %s with payload: %s", url, _redact_payload(payload))
             response = self.session.post(
                 url,
                 json=payload,
@@ -212,7 +239,7 @@ class PyPNMClient:
         """Make GET request to PyPNM API."""
         url = f"{self.config.base_url}{endpoint}"
         try:
-            logger.debug(f"GET {url} params={params}")
+            logger.debug("GET %s params=%s", url, _redact_payload(params))
             timeout = request_timeout if request_timeout is not None else self.config.timeout
             response = self.session.get(url, params=params, timeout=timeout)
             if response.status_code >= 400:
@@ -1014,7 +1041,7 @@ class PyPNMClient:
             payload["tftp_server"] = tftp_server
         if dest_path:
             payload["dest_path"] = dest_path
-        logger.info(f"UTSC configure payload: {payload}")
+        logger.info("UTSC configure payload: %s", _redact_payload(payload))
         return self._post("/pnm/us/utsc/configure", payload)
 
     def start_utsc(
@@ -1168,7 +1195,11 @@ class PyPNMClient:
                 "output_type": output_type
             }
         }
-        logger.info(f"UTSC payload trigger_count={'OMITTED' if trigger_count is None else trigger_count}: {payload}")
+        logger.info(
+            "UTSC payload trigger_count=%s: %s",
+            "OMITTED" if trigger_count is None else trigger_count,
+            _redact_payload(payload),
+        )
         return self._post("/pnm/us/utsc/data", payload)
     
     def get_cmts_modems(
@@ -1197,18 +1228,17 @@ class PyPNMClient:
         if limit is None:
             limit = _cm_modem_limit_default()
 
-        params = {
+        payload = {
             "cmts_ip": cmts_ip,
             "community": community,
             "limit": limit,
-            "enrich": str(enrich).lower(),
-            "modem_community": modem_community
+            "enrich": enrich,
+            "modem_community": modem_community,
+            "cmts_hostname": cmts_hostname,
         }
-        if cmts_hostname:
-            params["cmts_hostname"] = cmts_hostname
 
         try:
-            response = self._get("/cmts/modems", params)
+            response = self._post("/cmts/modems/query", payload)
             return response
         except Exception as e:
             logger.error(f"Error getting modems from CMTS {cmts_ip}: {e}")

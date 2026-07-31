@@ -99,7 +99,7 @@ class CmtsPnmClient:
         url = f"{self.base_url}{endpoint}"
 
         try:
-            logger.debug(f"GET {url} params={params}")
+            logger.debug("GET %s param_keys=%s", url, sorted((params or {}).keys()))
             response = self.session.get(url, params=params, timeout=self.timeout)
 
             if response.status_code >= 400:
