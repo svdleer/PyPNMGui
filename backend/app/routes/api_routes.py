@@ -69,12 +69,12 @@ logger = logging.getLogger(__name__)
 
 
 def _cm_modem_limit_default() -> int:
-    value = current_app.config.get('CM_MODEM_LIMIT', os.environ.get('CM_MODEM_LIMIT', 10000))
+    value = current_app.config.get('CM_MODEM_LIMIT', os.environ.get('CM_MODEM_LIMIT', 50000))
     try:
         parsed = int(value)
-        return parsed if parsed > 0 else 10000
+        return parsed if parsed > 0 else 50000
     except (TypeError, ValueError):
-        return 10000
+        return 50000
 
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '127.0.0.1')
@@ -838,10 +838,12 @@ def get_cmts_modems(cmts_name):
                     cached_count = len(cached_modems)
                     cached_requested_limit = int(data.get('requested_limit') or 0)
                     cached_source = str(data.get('source') or '')
+                    cached_complete = data.get('complete') is True
                     cache_limit_mismatch = not (
                         cached_count >= limit
                         or (
                             cached_source == 'pypnm-live'
+                            and cached_complete
                             and cached_requested_limit >= limit
                         )
                     )
@@ -908,7 +910,9 @@ def get_cmts_modems(cmts_name):
                         "enriched": cache_is_enriched,
                         "cached": True,
                         "enriching": bool(cache_needs_enrich),
-                        "partial": bool(cache_limit_mismatch or cache_needs_enrich),
+                        "complete": cached_complete,
+                        "truncated": data.get('truncated') is True,
+                        "partial": bool(not cached_complete or cache_limit_mismatch or cache_needs_enrich),
                         "cached_requested_limit": cached_requested_limit,
                         "requested_limit": limit,
                     })
@@ -999,7 +1003,9 @@ def get_cmts_modems(cmts_name):
                         "timestamp": result.get('timestamp'),
                         "enriched": is_enriched,
                         "enriching": is_enriching,
-                        "source": "pypnm-live",
+                        "source": "pypnm-live" if result.get('source') == 'snmp-live' else (result.get('source') or 'pypnm-inventory'),
+                        "complete": result.get('complete') is True,
+                        "truncated": result.get('truncated') is True,
                     }
                     redis_client.setex(f"modems:{cmts_name}", REDIS_TTL, json.dumps(cache_payload))
                     # Alias by CMTS IP so lookups by either hostname or IP hit cache.
@@ -1022,6 +1028,12 @@ def get_cmts_modems(cmts_name):
                 "enriched": result.get('enriched', False),
                 "cached": result.get('cached', False),
                 "enriching": result.get('enriching', False),
+                "source": result.get('source'),
+                "complete": result.get('complete') is True,
+                "truncated": result.get('truncated') is True,
+                "partial": result.get('complete') is not True,
+                "raw_legacy_mac_count": result.get('raw_legacy_mac_count'),
+                "raw_d3_mac_count": result.get('raw_d3_mac_count'),
                 # PyPNM stores it as 'enrich_progress' — pass through under both names for compat
                 "enrichment_progress": result.get('enrichment_progress') or result.get('enrich_progress'),
             })

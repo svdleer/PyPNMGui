@@ -24,7 +24,7 @@ def index():
     response = make_response(render_template(
         'index.html',
         base_path=base_path,
-        cm_modem_limit=current_app.config.get('CM_MODEM_LIMIT', 10000),
+        cm_modem_limit=current_app.config.get('CM_MODEM_LIMIT', 50000),
         auth_username=session.get('username', ''),
         auth_role=session.get('role', 'user'),
         current_locale=normalize_locale(session.get('locale') or DEFAULT_LOCALE),

@@ -8,7 +8,7 @@ const API_BASE = BASE_PATH + '/api';
 const GUI_LOCALE = window.GUI_LOCALE || 'en-US';
 const GUI_I18N = window.GUI_I18N || {};
 const TOPOLOGY_ENABLED = window.ENABLE_TOPOLOGY || false;
-const CM_MODEM_LIMIT = Number.parseInt(window.CM_MODEM_LIMIT, 10) > 0 ? Number.parseInt(window.CM_MODEM_LIMIT, 10) : 10000;
+const CM_MODEM_LIMIT = Number.parseInt(window.CM_MODEM_LIMIT, 10) > 0 ? Number.parseInt(window.CM_MODEM_LIMIT, 10) : 50000;
 
 createApp({
     data() {

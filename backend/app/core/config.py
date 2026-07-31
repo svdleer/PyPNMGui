@@ -45,7 +45,7 @@ class Config:
     DEFAULT_SNMP_VERSION = 'v2c'
     DEFAULT_SNMP_TIMEOUT = 5
     DEFAULT_SNMP_RETRIES = 3
-    CM_MODEM_LIMIT = _int_env('CM_MODEM_LIMIT', 10000)
+    CM_MODEM_LIMIT = _int_env('CM_MODEM_LIMIT', 50000)
     
     # TFTP Configuration — generic fallback
     TFTP_IPV4 = os.environ.get('TFTP_IPV4', '192.168.1.100')
