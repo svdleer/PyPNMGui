@@ -265,23 +265,37 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
     try:
         conn = topology_db._connect()
         cur = conn.cursor()
+        cur.execute("SELECT MAX(id) AS id FROM topology_snapshots")
+        snapshot_row = cur.fetchone() or {}
+        snapshot_id = snapshot_row.get("id") if hasattr(snapshot_row, "get") else None
+        if snapshot_id is None:
+            return out
+
         marker = "%s"
         for i in range(0, len(wanted), 500):
             chunk = wanted[i:i + 500]
-            placeholders = ",".join([marker] * len(chunk))
+            # topology_modems is indexed by (snapshot_id, mac). Query common
+            # stored MAC formats directly so MySQL can use that index instead
+            # of repeatedly scanning the table through REPLACE/UPPER.
+            candidates = set()
+            for mac in chunk:
+                pairs = [mac[j:j + 2] for j in range(0, 12, 2)]
+                candidates.add(mac)
+                candidates.add(":".join(pairs))
+                candidates.add("-".join(pairs))
+                candidates.add(f"{mac[:4]}.{mac[4:8]}.{mac[8:12]}")
+            candidate_list = sorted(candidates)
+            placeholders = ",".join([marker] * len(candidate_list))
             sql = (
-                "SELECT UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) AS mac_norm, "
-                "MIN(linked_node_id) AS linked_node_id, MIN(lat) AS lat, MIN(lon) AS lon, "
-                "MIN(fibernode) AS fibernode, MIN(customer_id) AS customer_id, MIN(address) AS address "
+                "SELECT mac, linked_node_id, lat, lon, fibernode, customer_id, address "
                 "FROM topology_modems "
-                f"WHERE UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-','')) IN ({placeholders}) "
-                "GROUP BY UPPER(REPLACE(REPLACE(COALESCE(mac,''),':',''),'-',''))"
+                f"WHERE snapshot_id={marker} AND mac IN ({placeholders})"
             )
-            cur.execute(sql, tuple(chunk))
+            cur.execute(sql, tuple([snapshot_id, *candidate_list]))
             rows = cur.fetchall() or []
             for row in rows:
                 r = dict(row) if hasattr(row, "keys") else row
-                mac_norm = str(r.get("mac_norm") or "").strip().upper()
+                mac_norm = _bare(r.get("mac"))
                 if not mac_norm:
                     continue
                 out[mac_norm] = {
