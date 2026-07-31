@@ -94,7 +94,12 @@ createApp({
             showRawData: false,
             expandedPlotJson: [],
             selectedMeasurementData: null,
-            
+            impulseSource: 'existing',
+            impulseDirection: 'both',
+            impulseFiles: [],
+            impulseFileId: '',
+            impulseFilesLoading: false,
+
             // Upstream PNM (CMTS-side)
             upstreamInterfaces: {
                 loading: false,
@@ -171,6 +176,12 @@ createApp({
             fnScanMaxModems: 20,
             fnScanRunning: false,
             fnScanResult: null,
+            fnImpulseSource: 'existing',
+            fnImpulseDirection: 'both',
+            fnImpulseRunning: false,
+            fnImpulseJobId: null,
+            fnImpulseProgress: null,
+            fnImpulseResult: null,
             fnScanProgress: null,   // { step, total, modem, modem_idx, modem_total, channel, action, pct, done }
             fnScanId: null,         // UUID sent to backend for progress tracking
             fnScanStartedAt: null,
@@ -328,6 +339,7 @@ createApp({
         // Modems after fiber-node and cable-mac filters, then sorted
         filteredModems() {
             const filtered = this.modems.filter(m => {
+                if (!this._filterBySelectedInterface([m]).length) return false;
                 if (this.modemFilterFn) {
                     const selectedFn = String(this.modemFilterFn || '').trim().toLowerCase();
                     const modemFn = String(m.fiber_node || '').trim().toLowerCase();
@@ -948,6 +960,18 @@ createApp({
         },
         modemPage(newPage) {
             if (newPage > 1) this._maybeStartDeferredFullLoad();
+        },
+        selectedInterface() {
+            this.modemPage = 1;
+        },
+        modemFilterFn() {
+            this.modemPage = 1;
+        },
+        modemFilterCableMac() {
+            this.modemPage = 1;
+        },
+        totalPages(newTotal) {
+            if (this.modemPage > newTotal) this.modemPage = newTotal;
         },
         fnScanMaxModems() {
             const maxAllowed = this.fnScanMaxSelectableModems;
@@ -1877,6 +1901,9 @@ createApp({
             this.cmtsSearch = '';
             this.cmtsList = this.cmtsListFull;
             this.selectedInterface = '';
+            this.modemFilterFn = '';
+            this.modemFilterCableMac = '';
+            this.modemPage = 1;
             await this.loadCmtsInterfaces();
         },
         
@@ -1906,6 +1933,8 @@ createApp({
             this.searchHouseNumber = '';
             this.selectedCmts = '';
             this.selectedInterface = '';
+            this.modemFilterFn = '';
+            this.modemFilterCableMac = '';
             this.modems = [];
             this.searchPerformed = false;
             this.modemPage = 1;
@@ -2377,11 +2406,10 @@ createApp({
             
             try {
                 const buildUrl = (limit, enrichEnabled, forceRefresh = false) => {
-                    let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=${limit}`;
+                    // This same-origin API uses configured server-side communities.
+                    // Never put SNMP credentials in browser URLs or access logs.
+                    let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${limit}`;
                     u += `&enrich=${enrichEnabled ? 'true' : 'false'}`;
-                    if (enrichEnabled) {
-                        u += `&modem_community=${this.snmpCommunityModem || 'private'}`;
-                    }
                     if (forceRefresh) {
                         u += '&refresh=true';
                     }
@@ -2426,8 +2454,7 @@ createApp({
                 if (this._liveLoadToken !== loadToken) return;
 
                 const previewRaw = Array.isArray(preview.modems) ? preview.modems : [];
-                const previewVisible = this._filterBySelectedInterface(previewRaw);
-                this.modems = previewVisible.map(m => mapModem(m, preview));
+                this.modems = previewRaw.map(m => mapModem(m, preview));
                 this._mergeSearchSeed(this.modems);
                 this.searchPerformed = true;
                 this.liveModemSource = `Live preview from ${preview.cmts_hostname} (${preview.cmts_ip}) - ${this.modems.length}/${preview.count} modems (first page loaded)`;
@@ -2523,16 +2550,22 @@ createApp({
             const iface = String(this.selectedInterface || '').trim().toLowerCase();
             if (!iface) return rows || [];
             return (rows || []).filter(m => {
-                const upstream = String(m?.upstream_interface || '').toLowerCase();
-                const cableMac = String(m?.cable_mac || '').toLowerCase();
-                return upstream.includes(iface) || cableMac.includes(iface);
+                const candidates = [
+                    m?.interface,
+                    m?.cmts_interface,
+                    m?.upstream_interface,
+                    m?.cable_mac,
+                ].map(value => String(value || '').trim().toLowerCase());
+                return candidates.some(value => value.includes(iface));
             });
         },
 
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
                 const data = await this._fetchJsonWithTimeout(url, 180000);
-                if (data.status !== 'success') return;
+                if (data.status !== 'success') {
+                    throw new Error(data.message || 'Full modem load failed');
+                }
                 if (this._liveLoadToken !== loadToken) return;
 
                 const CHUNK_SIZE = 200;
@@ -2567,18 +2600,18 @@ createApp({
                     }
                     return row;
                 });
-                const visibleMapped = this._filterBySelectedInterface(mapped);
-                this._mergeSearchSeed(visibleMapped);
+                this._mergeSearchSeed(mapped);
 
-                // Append in chunks to avoid freezing the UI.
+                // Append the complete dataset in chunks to avoid freezing the UI.
+                // Selected interface/FN/Cable-MAC values are display filters only.
                 this.modems = [];
                 let nextIdx = 0;
                 const appendChunk = () => {
                     if (this._liveLoadToken !== loadToken) return;
-                    if (nextIdx >= visibleMapped.length) return;
-                    this.modems.push(...visibleMapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
+                    if (nextIdx >= mapped.length) return;
+                    this.modems.push(...mapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
                     nextIdx += CHUNK_SIZE;
-                    if (nextIdx < visibleMapped.length) setTimeout(appendChunk, 0);
+                    if (nextIdx < mapped.length) setTimeout(appendChunk, 0);
                 };
                 appendChunk();
 
@@ -2617,8 +2650,15 @@ createApp({
                     this.liveCacheRefreshing = false;
                 }
             } catch (error) {
-                console.warn('Background full modem load failed:', error);
+                console.warn('Background full modem load failed:', error?.message || error);
+                if (this._liveLoadToken !== loadToken) return;
                 this.liveCacheRefreshing = false;
+                this.liveCachePartial = true;
+                const reason = String(error?.message || '').toLowerCase().includes('timed out')
+                    ? 'timed out'
+                    : 'failed';
+                this.liveModemSource = `${this.liveModemSource} — preview only; full load ${reason}`;
+                this.$toast?.warning(`Full modem inventory ${reason}; the preview remains available.`);
             }
         },
         
@@ -2660,9 +2700,10 @@ createApp({
 
             try {
                 // Poll cached state here; avoid forcing a fresh walk each time.
-                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?community=${this.snmpCommunity}&limit=${CM_MODEM_LIMIT}`;
+                // Communities remain server-side and never enter browser URLs.
+                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${CM_MODEM_LIMIT}`;
                 if (this.enrichModems) {
-                    url += `&enrich=true&modem_community=${this.snmpCommunityModem || 'private'}`;
+                    url += '&enrich=true';
                 }
 
                 const data = await this._fetchJsonWithTimeout(url, 120000);
@@ -4807,6 +4848,110 @@ createApp({
             }
         },
 
+        async runFiberNodeImpulse() {
+            const selected = new Set(
+                (this.fnScanSelectedModemMacs || []).map(mac => this.normalizeMacForMatch(mac)).filter(Boolean)
+            );
+            let rows = (this.fnScanFilteredModems || []).filter(modem => {
+                if (!this.fnScanUseModemSelector) return true;
+                return selected.has(this.normalizeMacForMatch(modem.mac_address));
+            });
+            rows = rows.slice(0, Math.max(1, parseInt(this.fnScanMaxModems) || 20));
+            const targets = rows
+                .filter(modem => modem.mac_address)
+                .map(modem => ({ mac_address: modem.mac_address, ip_address: modem.ip_address || '' }));
+            if (!targets.length) {
+                this.$toast?.warning('No modems are available in the current fiber-node scope');
+                return;
+            }
+
+            const fresh = this.fnImpulseSource === 'fresh';
+            if (fresh) {
+                const confirmed = window.confirm(
+                    `Capture fresh PNM coefficients for ${targets.length} modems? This performs bulk SNMP SET/TFTP operations with bounded concurrency. Continue?`
+                );
+                if (!confirmed) return;
+            }
+            if (!(await this.prepareUiTask('Fiber Node Impulse Response'))) return;
+            const { token, signal } = this._beginUiTask('Fiber Node Impulse Response');
+            const jobId = crypto.randomUUID ? crypto.randomUUID() : `impulse_${Date.now()}`;
+            this.fnImpulseRunning = true;
+            this.fnImpulseJobId = jobId;
+            this.fnImpulseResult = null;
+            this.fnImpulseProgress = { total: targets.length, completed: 0, success_count: 0, pct: 0, action: 'Starting' };
+
+            try {
+                const startResponse = await fetch(`${API_BASE}/pypnm/impulse-response/fibernode/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        job_id: jobId,
+                        targets,
+                        source: this.fnImpulseSource,
+                        direction: this.fnImpulseDirection,
+                        topology_date: this.fnScanModemLoadedAt || null,
+                        fiber_node: this.fnScanFiberNode || null,
+                        concurrency: 3,
+                        community: this.fnScanWriteCommunity || this.snmpCommunityModem,
+                        confirm_fresh_capture: fresh,
+                    }),
+                    signal,
+                });
+                const started = await startResponse.json();
+                if (!startResponse.ok || !started.started) throw new Error(started.error || 'Could not start bulk analysis');
+
+                const deadline = Date.now() + 15 * 60 * 1000;
+                let done = false;
+                while (!done && Date.now() < deadline && this._isTaskActive(token)) {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    const progressResponse = await fetch(
+                        `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}`,
+                        { signal }
+                    );
+                    const progress = await progressResponse.json();
+                    if (progress.found) {
+                        this.fnImpulseProgress = progress;
+                        done = !!progress.done;
+                    }
+                }
+                if (!this._isTaskActive(token)) return;
+                if (!done) throw new Error('Bulk impulse-response job timed out');
+
+                const resultResponse = await fetch(
+                    `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}/results`,
+                    { signal }
+                );
+                const result = await resultResponse.json();
+                if (!resultResponse.ok || !result.found) throw new Error(result.error || 'Bulk result was not found');
+                this.fnImpulseResult = result;
+                const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems analyzed`;
+                if (result.success) this.$toast?.success(`Fiber-node impulse response: ${summary}`);
+                else this.$toast?.warning(`Fiber-node impulse response completed with no usable data: ${summary}`);
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                this.fnImpulseResult = { success: false, error: error.message, modems: [] };
+                this.$toast?.error(error.message || 'Bulk impulse-response analysis failed');
+            } finally {
+                if (this._isTaskActive(token)) {
+                    this.fnImpulseRunning = false;
+                    this._activeTaskLabel = null;
+                }
+            }
+        },
+
+        async abortFiberNodeImpulse() {
+            if (!this.fnImpulseJobId || !this.fnImpulseRunning) return;
+            try {
+                await fetch(
+                    `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(this.fnImpulseJobId)}`,
+                    { method: 'DELETE' }
+                );
+                if (this.fnImpulseProgress) this.fnImpulseProgress.action = 'Cancellation requested';
+            } catch (_) {
+                this.$toast?.error('Could not request bulk impulse cancellation');
+            }
+        },
+
         async scanFiberNodeGroup() {
             if (!this.fnScanCmtsIp || !this.fnScanCommunity) {
                 this.$toast?.error('CMTS IP and community required');
@@ -5584,6 +5729,79 @@ createApp({
             };
         },
 
+        async loadImpulseFiles() {
+            if (!this.selectedModem || this.impulseSource !== 'existing') return;
+            this.impulseFilesLoading = true;
+            try {
+                const response = await fetch(
+                    `${API_BASE}/pypnm/impulse-response/${encodeURIComponent(this.selectedModem.mac_address)}/files?direction=${encodeURIComponent(this.impulseDirection)}`
+                );
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || 'Could not list PNM files');
+                this.impulseFiles = data.files || [];
+                if (this.impulseFileId && !this.impulseFiles.some(file => file.file_id === this.impulseFileId)) {
+                    this.impulseFileId = '';
+                }
+            } catch (error) {
+                this.impulseFiles = [];
+                this.impulseFileId = '';
+                this.showError('PNM File Catalog', error.message);
+            } finally {
+                this.impulseFilesLoading = false;
+            }
+        },
+
+        async runImpulseResponse() {
+            if (!this.selectedModem) return;
+            const fresh = this.impulseSource === 'fresh';
+            if (fresh) {
+                const confirmed = window.confirm(
+                    'Capture fresh PNN data? This performs SNMP SET/TFTP operations on the modem. Existing-file analysis has no device side effects.'
+                );
+                if (!confirmed) return;
+            }
+            if (!(await this.prepareUiTask('OFDM/OFDMA Impulse Response'))) return;
+            const { token, signal } = this._beginUiTask('OFDM/OFDMA Impulse Response', 'impulse_response');
+            this.showRawData = false;
+            try {
+                const payload = {
+                    source: this.impulseSource,
+                    direction: this.impulseDirection,
+                    file_id: this.impulseSource === 'existing' ? (this.impulseFileId || null) : null,
+                    modem_ip: this.selectedModem.ip_address,
+                    community: this.snmpCommunityModem,
+                    confirm_fresh_capture: fresh,
+                };
+                const response = await fetch(
+                    `${API_BASE}/pypnm/impulse-response/${encodeURIComponent(this.selectedModem.mac_address)}/analyze`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal,
+                    }
+                );
+                const data = await response.json();
+                if (!this._isTaskActive(token)) return;
+                if (!response.ok || !data.success) throw new Error(data.error || 'Impulse-response analysis failed');
+                this.selectedMeasurementData = data;
+                this.$nextTick(() => this.drawMeasurementCharts('impulse_response', data));
+                this.showSuccess(
+                    'Impulse Response Complete',
+                    `${data.results?.length || 0} channel response(s) analyzed from ${fresh ? 'fresh capture' : 'existing files'}`
+                );
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                this.showError('Impulse Response Failed', error.message);
+            } finally {
+                if (this._isTaskActive(token)) {
+                    this.runningTest = false;
+                    this.activeMeasurement = null;
+                    this._activeTaskLabel = null;
+                }
+            }
+        },
+
         async runPnmMeasurement(measurementType) {
             if (!this.selectedModem) return;
             const typeNames = {
@@ -5940,11 +6158,135 @@ createApp({
                 this.drawConstellationCharts(data.data);
             } else if (type === 'us_pre_eq') {
                 this.drawPreEqCharts();
+            } else if (type === 'impulse_response') {
+                this.drawImpulseResponseCharts(data);
             } else {
                 container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>No visualization available for this measurement type. Click "Raw Data" to see the results.</div>';
             }
         },
         
+        drawImpulseResponseCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            if (!container) return;
+            const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            })[ch]);
+            const warnings = data.warnings || [];
+            if (warnings.length) {
+                const warning = document.createElement('div');
+                warning.className = 'alert alert-warning py-2';
+                warning.textContent = warnings.join(' · ');
+                container.appendChild(warning);
+            }
+
+            const results = data.results || [];
+            if (!results.length) {
+                container.innerHTML += '<div class="alert alert-warning">No impulse-response data returned.</div>';
+                return;
+            }
+
+            results.forEach((item, resultIndex) => {
+                const analysis = item.analysis || {};
+                const report = analysis.echo?.report || {};
+                const timeResponse = report.time_response || {};
+                const times = timeResponse.time_axis_s || [];
+                const amplitudes = timeResponse.time_response || [];
+                const maxDelay = Number(report.max_delay_s || 3.5e-6);
+                const timePoints = [];
+                for (let i = 0; i < Math.min(times.length, amplitudes.length); i++) {
+                    if (Number(times[i]) > maxDelay) break;
+                    timePoints.push({
+                        x: Number(times[i]) * 1e6,
+                        y: 20 * Math.log10(Math.max(Number(amplitudes[i]), 1e-12)),
+                    });
+                }
+                const echoes = report.echoes || [];
+                const echoPoints = echoes.map(echo => ({
+                    x: Number(echo.time_s) * 1e6,
+                    y: 20 * Math.log10(Math.max(Number(echo.amplitude), 1e-12)),
+                }));
+                const carrier = analysis.carrier_values || {};
+                const frequencies = carrier.frequency || [];
+                const magnitudes = carrier.magnitudes || [];
+                const freqStep = Math.max(1, Math.ceil(frequencies.length / 2500));
+                const freqPoints = [];
+                for (let i = 0; i < Math.min(frequencies.length, magnitudes.length); i += freqStep) {
+                    freqPoints.push({ x: Number(frequencies[i]) / 1e6, y: Number(magnitudes[i]) });
+                }
+
+                const channelId = analysis.channel_id ?? report.channel_id ?? '?';
+                const directionLabel = item.direction === 'upstream'
+                    ? 'Upstream pre-equalizer response'
+                    : 'Downstream channel response';
+                const block = document.createElement('div');
+                block.className = 'mb-4 border rounded p-3';
+                block.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                        <div>
+                            <h6 class="mb-1"><i class="bi bi-soundwave me-1"></i>${escapeHtml(directionLabel)} · Channel ${escapeHtml(channelId)}</h6>
+                            <small class="text-muted">${escapeHtml(item.pnm_file_type)} · ${escapeHtml(item.filename || 'fresh capture')} · ${report.dataset?.subcarriers || 0} active carriers · FFT ${timeResponse.n_fft || report.dataset?.subcarriers || 0}</small>
+                        </div>
+                        <span class="badge bg-secondary">${escapeHtml(report.response_kind || 'detector_windowed')} / ${escapeHtml(report.window || 'hann')}</span>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-lg-6"><canvas id="impulse-freq-${resultIndex}" height="230"></canvas></div>
+                        <div class="col-lg-6"><canvas id="impulse-time-${resultIndex}" height="230"></canvas></div>
+                    </div>
+                    <div class="table-responsive mt-3">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead><tr><th>Echo</th><th>Delay (µs)</th><th>Distance (ft)</th><th>Relative level (dB)</th><th>Bin</th></tr></thead>
+                            <tbody>${echoes.length ? echoes.map((echo, index) => `
+                                <tr><td>${index + 1}</td><td>${(Number(echo.time_s) * 1e6).toFixed(3)}</td><td>${Number(echo.distance_ft).toFixed(1)}</td><td>${(20 * Math.log10(Math.max(Number(echo.amplitude), 1e-12))).toFixed(1)}</td><td>${echo.bin_index}</td></tr>
+                            `).join('') : '<tr><td colspan="5" class="text-muted">No prominent post-main-tap peaks detected</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                    <small class="text-muted d-block mt-2">Guard: ${report.guard_bins ?? '-'} bins · prominence: ${report.min_prominence_db ?? '-'} dB · sample rate: ${report.dataset?.sample_rate_hz ? (report.dataset.sample_rate_hz / 1e6).toFixed(1) + ' MHz' : '-'}</small>
+                `;
+                container.appendChild(block);
+
+                const commonOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    parsing: false,
+                    interaction: { mode: 'nearest', intersect: false },
+                };
+                const freqCanvas = block.querySelector(`#impulse-freq-${resultIndex}`);
+                if (freqCanvas && freqPoints.length) {
+                    new Chart(freqCanvas.getContext('2d'), {
+                        type: 'line',
+                        data: { datasets: [{ label: 'Magnitude (dB)', data: freqPoints, borderColor: '#0d6efd', borderWidth: 1, pointRadius: 0 }] },
+                        options: {
+                            ...commonOptions,
+                            scales: {
+                                x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' } },
+                                y: { title: { display: true, text: 'Magnitude (dB)' } },
+                            },
+                            plugins: { title: { display: true, text: 'Frequency Response' }, legend: { display: false } },
+                        },
+                    });
+                }
+                const timeCanvas = block.querySelector(`#impulse-time-${resultIndex}`);
+                if (timeCanvas && timePoints.length) {
+                    new Chart(timeCanvas.getContext('2d'), {
+                        type: 'line',
+                        data: { datasets: [
+                            { label: 'Detector response', data: timePoints, borderColor: '#198754', borderWidth: 1, pointRadius: 0 },
+                            { label: 'Detected echoes', data: echoPoints, showLine: false, pointRadius: 5, pointStyle: 'triangle', backgroundColor: '#dc3545' },
+                        ] },
+                        options: {
+                            ...commonOptions,
+                            scales: {
+                                x: { type: 'linear', title: { display: true, text: 'Delay after main tap (µs)' } },
+                                y: { suggestedMin: -70, suggestedMax: 2, title: { display: true, text: 'Relative magnitude (dB)' } },
+                            },
+                            plugins: { title: { display: true, text: 'Detector-windowed Impulse Response' } },
+                        },
+                    });
+                }
+            });
+        },
+
         drawSpectrumCharts(data) {
             const container = document.getElementById('measurement-charts-container');
             

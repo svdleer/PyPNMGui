@@ -264,36 +264,56 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
 
 
 def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> dict[str, dict]:
-    """Bulk lookup of fiber_node/cable_mac from PyPNM inventory API."""
+    """Bulk lookup of inventory fields, chunked to the PyPNM API limit."""
     if not mac_addresses:
         return {}
 
     def _bare(mac: str) -> str:
         return re.sub(r'[^A-F0-9]', '', str(mac or '').upper())
 
-    wanted = {m for m in (_bare(v) for v in mac_addresses) if m}
+    wanted = sorted({m for m in (_bare(v) for v in mac_addresses) if m})
     if not wanted:
         return {}
 
+    chunk_size = 5000
+    chunk_count = (len(wanted) + chunk_size - 1) // chunk_size
     out: dict[str, dict] = {}
     try:
         client = PyPNMClient()
-        inv_resp = client.get_inventory_modems_bulk([v for v in mac_addresses if v])
+    except Exception as exc:
+        logger.warning("Inventory MAC lookup via PyPNM API unavailable: %s", exc)
+        return out
+    for offset in range(0, len(wanted), chunk_size):
+        chunk = wanted[offset:offset + chunk_size]
+        chunk_number = (offset // chunk_size) + 1
+        try:
+            inv_resp = client.get_inventory_modems_bulk(chunk)
+        except Exception as exc:
+            logger.warning(
+                "Inventory MAC lookup chunk %d/%d via PyPNM API skipped: %s",
+                chunk_number,
+                chunk_count,
+                exc,
+            )
+            continue
+        if inv_resp.get('status') != 'success':
+            logger.warning(
+                "Inventory MAC lookup chunk %d/%d via PyPNM API returned an error",
+                chunk_number,
+                chunk_count,
+            )
+            continue
         for m in (inv_resp.get('modems') or []):
             mac_norm = _bare(m.get('mac_address') or m.get('mac') or '')
             if mac_norm and mac_norm in wanted:
-                fn = m.get('fiber_node') or ''
-                if fn:
-                    out[mac_norm] = {
-                        'fiber_node': fn,
-                        'cable_mac': m.get('cable_mac') or '',
-                        'ofdm_enabled': m.get('ofdm_enabled'),
-                        'ofdma_enabled': m.get('ofdma_enabled'),
-                        'docsis_version': m.get('docsis_version') or '',
-                        'vendor': m.get('vendor') or '',
-                    }
-    except Exception as exc:
-        logger.warning(f"Inventory MAC lookup via PyPNM API skipped: {exc}")
+                out[mac_norm] = {
+                    'fiber_node': m.get('fiber_node') or '',
+                    'cable_mac': m.get('cable_mac') or '',
+                    'ofdm_enabled': m.get('ofdm_enabled'),
+                    'ofdma_enabled': m.get('ofdma_enabled'),
+                    'docsis_version': m.get('docsis_version') or '',
+                    'vendor': m.get('vendor') or '',
+                }
     return out
 
 
@@ -793,7 +813,7 @@ def get_cmts_modems(cmts_name):
     enrich = request.args.get('enrich', 'true').lower() == 'true'  # Enable enrichment by default
     modem_community = request.args.get('modem_community') or get_default_community()
     if not request.args.get('modem_community'):
-        logger.warning(f"modem_community not provided for {cmts_name} — using configured default '{modem_community}'")
+        logger.warning("modem_community not provided for %s — using configured default", cmts_name)
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
     
     try:

@@ -4386,3 +4386,418 @@ def cleanup_old_files():
     except Exception as e:
         logger.error(f"Cleanup failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ============== OFDM/OFDMA Impulse Response (existing files by default) ==============
+
+_impulse_job_progress: dict[str, dict] = {}
+_impulse_job_results: dict[str, dict] = {}
+_impulse_job_abort: set[str] = set()
+_impulse_job_lock = _threading.Lock()
+_IMPULSE_JOB_TTL = 3600
+
+
+def _impulse_progress_key(job_id: str) -> str:
+    return f"impulse_progress:{job_id}"
+
+
+def _impulse_result_key(job_id: str) -> str:
+    return f"impulse_result:{job_id}"
+
+
+def _set_impulse_job_progress(job_id: str, **fields):
+    if not job_id:
+        return
+    with _impulse_job_lock:
+        current = _impulse_job_progress.setdefault(job_id, {})
+        current.update(fields)
+    if REDIS_AVAILABLE:
+        try:
+            redis_client.hset(_impulse_progress_key(job_id), mapping={k: str(v) for k, v in fields.items()})
+            redis_client.expire(_impulse_progress_key(job_id), _IMPULSE_JOB_TTL)
+        except Exception:
+            pass
+
+
+def _store_impulse_job_result(job_id: str, result: dict):
+    with _impulse_job_lock:
+        _impulse_job_results[job_id] = result
+    if REDIS_AVAILABLE:
+        try:
+            redis_client.set(_impulse_result_key(job_id), json.dumps(result), ex=_IMPULSE_JOB_TTL)
+        except Exception:
+            pass
+
+
+def _get_impulse_job_result(job_id: str) -> dict | None:
+    with _impulse_job_lock:
+        result = _impulse_job_results.get(job_id)
+    if result is not None:
+        return result
+    if REDIS_AVAILABLE:
+        try:
+            raw = redis_client.get(_impulse_result_key(job_id))
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
+    return None
+
+
+def _is_impulse_job_aborted(job_id: str) -> bool:
+    with _impulse_job_lock:
+        return job_id in _impulse_job_abort
+
+
+def _capture_response_ok(result: dict) -> bool:
+    status = result.get('status')
+    if isinstance(status, int):
+        return status == 0
+    if status is not None:
+        return str(status).upper() in {'SUCCESS', '0'}
+    return result.get('success') is True
+
+
+def _capture_analysis_items(result: dict, direction: str) -> list[dict]:
+    data = result.get('data')
+    if isinstance(data, dict):
+        analyses = data.get('analysis') or data.get('data') or []
+    else:
+        analyses = data or []
+    if isinstance(analyses, dict):
+        analyses = [analyses]
+    if not isinstance(analyses, list):
+        return []
+    pnm_type = 'PNN2' if direction == 'downstream' else 'PNN6'
+    return [
+        {
+            'file_id': '',
+            'filename': '',
+            'pnm_file_type': pnm_type,
+            'direction': direction,
+            'analysis': analysis,
+        }
+        for analysis in analyses
+        if isinstance(analysis, dict)
+    ]
+
+
+def _compact_bulk_impulse_result(item: dict) -> dict:
+    """Keep bulk manifests bounded; full arrays remain available in single-modem analysis."""
+    analysis = item.get('analysis') or {}
+    echo = analysis.get('echo') or {}
+    report = dict(echo.get('report') or {})
+    report.pop('time_response', None)
+    carrier = analysis.get('carrier_values') or {}
+    return {
+        'file_id': item.get('file_id', ''),
+        'filename': item.get('filename', ''),
+        'pnm_file_type': item.get('pnm_file_type', ''),
+        'direction': item.get('direction', ''),
+        'analysis': {
+            'channel_id': analysis.get('channel_id'),
+            'subcarrier_spacing': analysis.get('subcarrier_spacing'),
+            'first_active_subcarrier_index': analysis.get('first_active_subcarrier_index'),
+            'subcarrier_zero_frequency': analysis.get('subcarrier_zero_frequency'),
+            'carrier_values': {
+                'carrier_count': carrier.get('carrier_count'),
+                'occupied_channel_bandwidth': carrier.get('occupied_channel_bandwidth'),
+            },
+            'echo': {'type': echo.get('type'), 'report': report},
+        },
+    }
+
+
+def _run_fresh_impulse_capture(
+    client,
+    mac_address: str,
+    modem_ip: str,
+    direction: str,
+    community: str,
+    tftp_ip: str,
+) -> dict:
+    """Explicit side-effecting path. Existing-file callers never enter here."""
+    results: list[dict] = []
+    warnings: list[str] = []
+    directions = [direction] if direction != 'both' else ['downstream', 'upstream']
+    for item_direction in directions:
+        if item_direction == 'downstream':
+            response = client.get_channel_estimation(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6='::1', output_type='json',
+            )
+        else:
+            response = client.get_us_ofdma_pre_equalization(
+                mac_address, modem_ip, tftp_ip, community,
+                tftp_ipv6='::1', output_type='json',
+            )
+        if not isinstance(response, dict) or not _capture_response_ok(response):
+            message = response.get('message') or response.get('error') if isinstance(response, dict) else 'invalid response'
+            warnings.append(f'{item_direction} capture failed: {message}')
+            continue
+        items = _capture_analysis_items(response, item_direction)
+        if not items:
+            warnings.append(f'{item_direction} capture returned no analysis')
+        results.extend(items)
+    return {
+        'success': bool(results),
+        'source': 'fresh_capture',
+        'mac_address': mac_address,
+        'direction': direction,
+        'results': results,
+        'warnings': warnings,
+        'error': None if results else 'No fresh capture could be analyzed',
+    }
+
+
+@pypnm_bp.route('/impulse-response/<mac_address>/files', methods=['GET'])
+def list_impulse_response_files(mac_address):
+    """List sanitized existing PNN2/PNN6/PNN7 files through the PyPNM API."""
+    from app.core.pypnm_client import PyPNMClient
+
+    direction = request.args.get('direction', 'both')
+    if direction not in {'downstream', 'upstream', 'both'}:
+        return jsonify({'success': False, 'error': 'Invalid direction'}), 400
+    result = PyPNMClient().list_remote_impulse_files(mac_address, direction)
+    http_status = 200 if result.get('success') else 503
+    return jsonify(result), http_status
+
+
+@pypnm_bp.route('/impulse-response/<mac_address>/analyze', methods=['POST'])
+def analyze_impulse_response(mac_address):
+    """Analyze existing files by default; fresh capture requires explicit confirmation."""
+    from app.core.pypnm_client import PyPNMClient
+
+    data = request.get_json(silent=True) or {}
+    source = data.get('source', 'existing')
+    direction = data.get('direction', 'both')
+    if source not in {'existing', 'fresh'} or direction not in {'downstream', 'upstream', 'both'}:
+        return jsonify({'success': False, 'status': 1, 'error': 'Invalid source or direction'}), 400
+
+    client = PyPNMClient()
+    if source == 'existing':
+        # This branch is intentionally incapable of invoking capture/SNMP methods.
+        result = client.analyze_remote_impulse(
+            mac_address=mac_address,
+            direction=direction,
+            file_id=data.get('file_id') or None,
+        )
+    else:
+        if data.get('confirm_fresh_capture') is not True:
+            return jsonify({
+                'success': False,
+                'status': 1,
+                'error': 'Fresh capture requires explicit confirmation',
+            }), 409
+        modem_ip = str(data.get('modem_ip') or '').strip()
+        if not modem_ip:
+            return jsonify({'success': False, 'status': 1, 'error': 'modem_ip required for fresh capture'}), 400
+        result = _run_fresh_impulse_capture(
+            client=client,
+            mac_address=mac_address,
+            modem_ip=modem_ip,
+            direction=direction,
+            community=data.get('community') or get_default_write_community(),
+            tftp_ip=data.get('tftp_ip') or get_tftp_for_cm(),
+        )
+
+    result['status'] = 0 if result.get('success') else 1
+    return jsonify(result), 200 if result.get('success') else 404
+
+
+@pypnm_bp.route('/impulse-response/fibernode/jobs', methods=['POST'])
+def start_fibernode_impulse_job():
+    """Start a bounded-concurrency bulk impulse analysis over an immutable modem snapshot."""
+    from app.core.pypnm_client import PyPNMClient
+    import uuid
+
+    data = request.get_json(silent=True) or {}
+    source = data.get('source', 'existing')
+    direction = data.get('direction', 'both')
+    if source not in {'existing', 'fresh'} or direction not in {'downstream', 'upstream', 'both'}:
+        return jsonify({'success': False, 'error': 'Invalid source or direction'}), 400
+    if source == 'fresh' and data.get('confirm_fresh_capture') is not True:
+        return jsonify({'success': False, 'error': 'Bulk fresh capture requires explicit confirmation'}), 409
+
+    raw_targets = data.get('targets') or []
+    targets: list[dict] = []
+    seen: set[str] = set()
+    for raw in raw_targets[:100]:
+        mac = str(raw.get('mac_address') or '').strip()
+        normalized = re.sub(r'[^0-9a-f]', '', mac.lower())
+        if len(normalized) != 12 or normalized in seen:
+            continue
+        seen.add(normalized)
+        targets.append({'mac_address': mac, 'ip_address': str(raw.get('ip_address') or '').strip()})
+    if not targets:
+        return jsonify({'success': False, 'error': 'At least one valid modem target is required'}), 400
+    if source == 'fresh' and any(not target['ip_address'] for target in targets):
+        return jsonify({'success': False, 'error': 'Every fresh-capture target requires an IP address'}), 400
+
+    job_id = str(data.get('job_id') or uuid.uuid4())
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', job_id):
+        return jsonify({'success': False, 'error': 'Invalid job_id'}), 400
+    with _impulse_job_lock:
+        existing_job = _impulse_job_progress.get(job_id)
+        if existing_job and str(existing_job.get('done', False)).lower() != 'true':
+            return jsonify({'success': False, 'error': 'A job with this ID is already running'}), 409
+    concurrency = max(1, min(int(data.get('concurrency') or 3), 5))
+    community = data.get('community') or get_default_write_community()
+    tftp_ip = data.get('tftp_ip') or get_tftp_for_cm()
+    topology_date = data.get('topology_date')
+    fiber_node = data.get('fiber_node')
+    target_snapshot = [dict(target) for target in targets]
+
+    with _impulse_job_lock:
+        _impulse_job_abort.discard(job_id)
+    _set_impulse_job_progress(
+        job_id,
+        total=len(target_snapshot), completed=0, success_count=0,
+        modem='', action='Starting', pct=0, done=False,
+    )
+
+    def _worker(target: dict) -> dict:
+        if _is_impulse_job_aborted(job_id):
+            return {'mac_address': target['mac_address'], 'success': False, 'aborted': True, 'results': []}
+        worker_client = PyPNMClient()
+        if source == 'existing':
+            response = worker_client.analyze_remote_impulse(target['mac_address'], direction)
+        else:
+            response = _run_fresh_impulse_capture(
+                worker_client,
+                target['mac_address'],
+                target['ip_address'],
+                direction,
+                community,
+                tftp_ip,
+            )
+        return {
+            'mac_address': target['mac_address'],
+            'ip_address': target['ip_address'],
+            'success': bool(response.get('success')),
+            'results': [_compact_bulk_impulse_result(item) for item in (response.get('results') or [])],
+            'warnings': response.get('warnings') or [],
+            'error': response.get('error') or response.get('message'),
+        }
+
+    def _run_job():
+        modem_results: list[dict] = []
+        completed = 0
+        success_count = 0
+        try:
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                future_map = {pool.submit(_worker, target): target for target in target_snapshot}
+                for future in as_completed(future_map):
+                    target = future_map[future]
+                    try:
+                        modem_result = future.result()
+                    except Exception as exc:
+                        modem_result = {
+                            'mac_address': target['mac_address'],
+                            'ip_address': target['ip_address'],
+                            'success': False,
+                            'results': [],
+                            'warnings': [],
+                            'error': str(exc),
+                        }
+                    modem_results.append(modem_result)
+                    completed += 1
+                    if modem_result.get('success'):
+                        success_count += 1
+                    _set_impulse_job_progress(
+                        job_id,
+                        total=len(target_snapshot), completed=completed,
+                        success_count=success_count,
+                        modem=target['mac_address'],
+                        action='Analyzed' if modem_result.get('success') else 'No data',
+                        pct=round(completed * 100 / len(target_snapshot), 1),
+                        done=False,
+                    )
+                    if _is_impulse_job_aborted(job_id):
+                        for pending in future_map:
+                            pending.cancel()
+                        break
+
+            aborted = _is_impulse_job_aborted(job_id)
+            modem_results.sort(key=lambda item: item.get('mac_address', ''))
+            result = {
+                'success': success_count > 0,
+                'job_id': job_id,
+                'source': source,
+                'direction': direction,
+                'topology_date': topology_date,
+                'fiber_node': fiber_node,
+                'aborted': aborted,
+                'target_snapshot': target_snapshot,
+                'total': len(target_snapshot),
+                'completed': completed,
+                'success_count': success_count,
+                'failure_count': completed - success_count,
+                'modems': modem_results,
+            }
+            _store_impulse_job_result(job_id, result)
+            _set_impulse_job_progress(
+                job_id,
+                total=len(target_snapshot), completed=completed,
+                success_count=success_count,
+                modem='', action='Aborted' if aborted else 'Complete',
+                pct=round(completed * 100 / len(target_snapshot), 1), done=True,
+            )
+        except Exception as exc:
+            logger.exception('Fiber-node impulse job %s failed', job_id)
+            _store_impulse_job_result(job_id, {'success': False, 'job_id': job_id, 'error': str(exc)})
+            _set_impulse_job_progress(job_id, action='Error', done=True)
+
+    _threading.Thread(target=_run_job, daemon=True).start()
+    return jsonify({
+        'success': True,
+        'started': True,
+        'job_id': job_id,
+        'source': source,
+        'direction': direction,
+        'target_count': len(target_snapshot),
+        'concurrency': concurrency,
+    })
+
+
+@pypnm_bp.route('/impulse-response/fibernode/jobs/<job_id>', methods=['GET'])
+def get_fibernode_impulse_job(job_id):
+    with _impulse_job_lock:
+        progress = dict(_impulse_job_progress.get(job_id, {}))
+    if not progress and REDIS_AVAILABLE:
+        try:
+            progress = redis_client.hgetall(_impulse_progress_key(job_id)) or {}
+        except Exception:
+            progress = {}
+    if not progress:
+        return jsonify({'found': False}), 404
+
+    def _as_bool(value):
+        return value is True or str(value).lower() == 'true'
+
+    return jsonify({
+        'found': True,
+        'job_id': job_id,
+        'total': int(progress.get('total', 0)),
+        'completed': int(progress.get('completed', 0)),
+        'success_count': int(progress.get('success_count', 0)),
+        'modem': progress.get('modem', ''),
+        'action': progress.get('action', ''),
+        'pct': float(progress.get('pct', 0)),
+        'done': _as_bool(progress.get('done', False)),
+    })
+
+
+@pypnm_bp.route('/impulse-response/fibernode/jobs/<job_id>/results', methods=['GET'])
+def get_fibernode_impulse_job_results(job_id):
+    result = _get_impulse_job_result(job_id)
+    if result is None:
+        return jsonify({'found': False}), 404
+    return jsonify({'found': True, **result})
+
+
+@pypnm_bp.route('/impulse-response/fibernode/jobs/<job_id>', methods=['DELETE'])
+def cancel_fibernode_impulse_job(job_id):
+    with _impulse_job_lock:
+        _impulse_job_abort.add(job_id)
+    _set_impulse_job_progress(job_id, action='Cancellation requested', done=False)
+    return jsonify({'success': True, 'job_id': job_id})

@@ -8,6 +8,7 @@ import logging
 import requests
 from typing import Optional, Dict, Any, List, Union
 from dataclasses import dataclass
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -440,6 +441,40 @@ class PyPNMClient:
     
     # ============== PNM Measurements ==============
     
+    def list_remote_impulse_files(
+        self,
+        mac_address: str,
+        direction: str = "both",
+        request_timeout: int = 120,
+    ) -> Dict[str, Any]:
+        """List existing PNN2/PNN6/PNN7 files through PyPNM file agents."""
+        safe_mac = quote(mac_address, safe="")
+        return self._get(
+            f"/docs/pnm/files/remote/impulseResponse/files/{safe_mac}",
+            params={"direction": direction},
+            request_timeout=request_timeout,
+        )
+
+    def analyze_remote_impulse(
+        self,
+        mac_address: str,
+        direction: str = "both",
+        file_id: Optional[str] = None,
+        request_timeout: int = 180,
+    ) -> Dict[str, Any]:
+        """Analyze existing file-agent data without triggering a modem capture."""
+        payload: Dict[str, Any] = {
+            "mac_address": mac_address,
+            "direction": direction,
+        }
+        if file_id:
+            payload["file_id"] = file_id
+        return self._post(
+            "/docs/pnm/files/remote/impulseResponse/analyze",
+            payload,
+            request_timeout=request_timeout,
+        )
+
     def get_rxmer_capture(
         self,
         mac_address: str,

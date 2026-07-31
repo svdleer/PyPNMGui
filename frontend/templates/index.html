@@ -1737,6 +1737,61 @@
                                                 </button>
                                             </div>
                                         </div>
+
+                                        <div class="border rounded p-3 mt-3 bg-body-tertiary">
+                                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                                                <div>
+                                                    <h6 class="mb-0"><i class="bi bi-bezier2 me-1"></i>OFDM/OFDMA Impulse Response</h6>
+                                                    <small class="text-muted">Existing PNN2/PNN6/PNN7 files are analyzed without contacting the modem.</small>
+                                                </div>
+                                                <span class="badge" :class="impulseSource === 'existing' ? 'bg-success' : 'bg-warning text-dark'">
+                                                    {{ impulseSource === 'existing' ? 'Offline / no device changes' : 'Fresh capture / SNMP SET' }}
+                                                </span>
+                                            </div>
+                                            <div class="row g-2 align-items-end">
+                                                <div class="col-md-3">
+                                                    <label class="form-label small mb-1">Source</label>
+                                                    <select v-model="impulseSource" @change="impulseFileId = ''; loadImpulseFiles()" class="form-select form-select-sm">
+                                                        <option value="existing">Existing file (default)</option>
+                                                        <option value="fresh">Capture fresh coefficients</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small mb-1">Direction</label>
+                                                    <select v-model="impulseDirection" @change="impulseFileId = ''; loadImpulseFiles()" class="form-select form-select-sm">
+                                                        <option value="both">DS + US</option>
+                                                        <option value="downstream">Downstream PNN2</option>
+                                                        <option value="upstream">Upstream PNN6/7</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-5" v-if="impulseSource === 'existing'">
+                                                    <label class="form-label small mb-1">File</label>
+                                                    <div class="input-group input-group-sm">
+                                                        <select v-model="impulseFileId" class="form-select">
+                                                            <option value="">Latest matching file(s)</option>
+                                                            <option v-for="file in impulseFiles" :key="file.file_id" :value="file.file_id">
+                                                                {{ file.direction === 'downstream' ? 'DS' : 'US' }} ch {{ file.channel_id }} · {{ file.pnm_file_type }} · {{ file.filename }}
+                                                            </option>
+                                                        </select>
+                                                        <button @click="loadImpulseFiles" class="btn btn-outline-secondary" :disabled="impulseFilesLoading" title="Refresh file catalog">
+                                                            <span v-if="impulseFilesLoading" class="spinner-border spinner-border-sm"></span>
+                                                            <i v-else class="bi bi-arrow-clockwise"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div :class="impulseSource === 'existing' ? 'col-md-2' : 'col-md-7'">
+                                                    <button @click="runImpulseResponse" class="btn btn-sm w-100"
+                                                            :class="impulseSource === 'existing' ? 'btn-success' : 'btn-warning'"
+                                                            :disabled="runningTest || (impulseSource === 'fresh' && !selectedModem?.ip_address)">
+                                                        <span v-if="activeMeasurement === 'impulse_response'" class="spinner-border spinner-border-sm me-1"></span>
+                                                        <i v-else class="bi bi-graph-up-arrow me-1"></i>{{ impulseSource === 'existing' ? 'Analyze' : 'Capture & Analyze' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div v-if="impulseSource === 'fresh'" class="alert alert-warning py-1 px-2 mt-2 mb-0 small">
+                                                Fresh mode changes modem PNM control state and transfers new files. A confirmation is required before it starts.
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2722,6 +2777,26 @@
                                             <i class="bi bi-question-circle text-muted ms-1" title="Collect ATDMA pre-eq tap coefficients and group delay per modem. Enables the Plant vs In-Home Assessment panel: classifies each modem as plant-impaired, in-home, or clean using tap shape similarity, group delay deviation, and shared impaired subcarriers."></i>
                                         </label>
                                     </div>
+                                    <hr class="my-2">
+                                    <div class="form-label small fw-bold mb-1 text-muted">Impulse response bulk</div>
+                                    <div class="row g-1">
+                                        <div class="col-6">
+                                            <select v-model="fnImpulseSource" class="form-select form-select-sm" title="Existing files do not contact modems">
+                                                <option value="existing">Existing files</option>
+                                                <option value="fresh">Fresh capture</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6">
+                                            <select v-model="fnImpulseDirection" class="form-select form-select-sm">
+                                                <option value="both">DS + US</option>
+                                                <option value="downstream">DS PNN2</option>
+                                                <option value="upstream">US PNN6/7</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <small :class="fnImpulseSource === 'existing' ? 'text-success' : 'text-warning'">
+                                        {{ fnImpulseSource === 'existing' ? 'No capture or SNMP SET operations' : 'Requires confirmation; concurrency capped at 3' }}
+                                    </small>
                                 </div>
                             </div>
                             <!-- Fullband suckout mode toggle -->
@@ -2742,24 +2817,45 @@
                                 Selected channel has <strong>0 modems</strong>. Try a different channel or fiber node.
                             </div>
                             <div class="d-flex gap-2 mt-2">
-                                <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || fnImpulseRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
                                         class="btn btn-primary flex-fill">
                                     <span v-if="fnScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                     <i v-else class="bi bi-play-fill me-1"></i>
                                     {{ fnScanRunning ? 'Scanning…' : (fnScanFN2Name ? 'US RxMER (FN1 vs FN2)' : fnScanExtraIfindices.length ? 'US RxMER (' + (fnScanExtraIfindices.length + 1) + ' ch)' : 'US RxMER Scan') }}
                                 </button>
-                                <button type="button" @click="runDsSuckoutScan" :disabled="dsScanRunning || fnScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
+                                <button type="button" @click="runDsSuckoutScan" :disabled="dsScanRunning || fnScanRunning || fnImpulseRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
                                         class="btn btn-danger flex-fill">
                                     <span v-if="dsScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                     <i v-else class="bi bi-reception-4 me-1"></i>
                                     {{ dsScanRunning ? 'DS Scanning…' : 'DS Suckout Scan' }}
                                 </button>
-                                <button type="button" @click="runFullbandScan" :disabled="fbScanRunning || fnScanRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
+                                <button type="button" @click="runFullbandScan" :disabled="fbScanRunning || fnScanRunning || fnImpulseRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
                                         class="btn btn-warning flex-fill">
                                     <span v-if="fbScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                     <i v-else class="bi bi-broadcast me-1"></i>
                                     {{ fbScanRunning ? 'Fullband…' : 'Fullband Scan' }}
                                 </button>
+                            </div>
+                            <div class="d-flex gap-2 mt-2">
+                                <button type="button" @click="runFiberNodeImpulse"
+                                        :disabled="fnImpulseRunning || fnScanRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                        class="btn btn-outline-success flex-fill">
+                                    <span v-if="fnImpulseRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                    <i v-else class="bi bi-bezier2 me-1"></i>
+                                    {{ fnImpulseRunning ? 'Impulse analysis…' : 'Bulk Impulse Response' }}
+                                </button>
+                                <button v-if="fnImpulseRunning" type="button" @click="abortFiberNodeImpulse" class="btn btn-outline-danger">
+                                    <i class="bi bi-x-circle me-1"></i>Cancel
+                                </button>
+                            </div>
+                            <div v-if="fnImpulseProgress" class="mt-2">
+                                <div class="d-flex justify-content-between small text-muted">
+                                    <span>{{ fnImpulseProgress.action }} <span v-if="fnImpulseProgress.modem">· {{ fnImpulseProgress.modem }}</span></span>
+                                    <span>{{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} · {{ Number(fnImpulseProgress.pct || 0).toFixed(0) }}%</span>
+                                </div>
+                                <div class="progress" style="height:6px;">
+                                    <div class="progress-bar bg-success" :style="{ width: (fnImpulseProgress.pct || 0) + '%' }"></div>
+                                </div>
                             </div>
                             <div v-if="fnScanPreEtaText" class="small text-muted mt-2">
                                 <i class="bi bi-hourglass-split me-1"></i>{{ fnScanPreEtaText }}
@@ -2924,6 +3020,36 @@
                         <button class="btn btn-sm btn-outline-secondary" @click="fnConfigCollapsed = false" title="Show Scan Configuration">
                             <i class="bi bi-layout-sidebar me-1"></i>Show Configuration
                         </button>
+                    </div>
+                    <div v-if="fnImpulseResult" class="card shadow-sm mb-3 border-success">
+                        <div class="card-header bg-success bg-opacity-10 d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0"><i class="bi bi-bezier2 me-1"></i>Fiber-node Impulse Response</h6>
+                            <span class="badge bg-success">{{ fnImpulseResult.success_count || 0 }}/{{ fnImpulseResult.completed || fnImpulseResult.total || 0 }} modems</span>
+                        </div>
+                        <div v-if="fnImpulseResult.error" class="card-body text-danger">{{ fnImpulseResult.error }}</div>
+                        <div v-else class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead><tr><th>Modem</th><th>Status</th><th>Channel responses / echoes</th><th>Warnings</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="modem in (fnImpulseResult.modems || [])" :key="modem.mac_address">
+                                        <td class="font-monospace small">{{ modem.mac_address }}</td>
+                                        <td><span class="badge" :class="modem.success ? 'bg-success' : 'bg-secondary'">{{ modem.success ? 'Analyzed' : 'No data' }}</span></td>
+                                        <td>
+                                            <div v-for="result in (modem.results || [])" :key="result.file_id || result.direction + '-' + result.analysis?.channel_id" class="mb-1">
+                                                <strong>{{ result.direction === 'downstream' ? 'DS' : 'US' }} ch {{ result.analysis?.channel_id }}</strong>
+                                                <span class="text-muted"> · {{ result.pnm_file_type }}</span>
+                                                <span v-if="result.analysis?.echo?.report?.echoes?.length">
+                                                    · {{ result.analysis.echo.report.echoes.map(e => Number(e.distance_ft).toFixed(1) + ' ft / ' + (20 * Math.log10(Math.max(Number(e.amplitude), 1e-12))).toFixed(1) + ' dB').join(', ') }}
+                                                </span>
+                                                <span v-else class="text-muted"> · no prominent echoes</span>
+                                            </div>
+                                            <span v-if="!(modem.results || []).length" class="text-muted">{{ modem.error || 'No matching PNM file' }}</span>
+                                        </td>
+                                        <td class="small text-warning">{{ (modem.warnings || []).join(' · ') }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                     <div v-if="!fnScanResult && !fnScanRunning" class="alert alert-info">
                         <i class="bi bi-info-circle me-2"></i>Configure CMTS details and OFDMA ifIndex, then click <strong>Start Scan</strong>.
