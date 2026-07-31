@@ -20,6 +20,12 @@ _SENSITIVE_PAYLOAD_KEYS = {
     "token",
     "auth_token",
     "secret",
+    "mac",
+    "mac_address",
+    "mac_addresses",
+    "ip_address",
+    "target_ip",
+    "cmts_ip",
 }
 
 
