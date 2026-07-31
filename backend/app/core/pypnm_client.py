@@ -1243,8 +1243,10 @@ class PyPNMClient:
         community: str = "public",
         limit: Optional[int] = None,
         enrich: bool = False,
+        refresh: bool = False,
         modem_community: str = os.environ.get('MODEM_COMMUNITY', 'private'),
         cmts_hostname: str = "",
+        request_timeout: int = 330,
     ) -> Dict[str, Any]:
         """
         Get cable modems from CMTS via PyPNM API (which uses agent for SNMP).
@@ -1268,12 +1270,13 @@ class PyPNMClient:
             "community": community,
             "limit": limit,
             "enrich": enrich,
+            "refresh": refresh,
             "modem_community": modem_community,
             "cmts_hostname": cmts_hostname,
         }
 
         try:
-            response = self._post("/cmts/modems/query", payload)
+            response = self._post("/cmts/modems/query", payload, request_timeout=request_timeout)
             return response
         except Exception as e:
             logger.error(f"Error getting modems from CMTS {cmts_ip}: {e}")

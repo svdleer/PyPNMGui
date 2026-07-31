@@ -1184,7 +1184,7 @@ createApp({
                 const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/enrich/delta`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ max_batch: 250 }),
+                    body: JSON.stringify({ max_batch: 10 }),
                 });
                 const data = await response.json();
                 if (data?.status === 'success' && Number(data?.enqueued || 0) > 0) {
@@ -2444,7 +2444,7 @@ createApp({
 
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 180000);
+                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 360000);
 
                 if (preview.status !== 'success') {
                     this.showError('Failed to get modems', preview.message || 'Unknown error');
@@ -2470,28 +2470,24 @@ createApp({
                 this.loadProgress = 100;
                 this.loadingLiveModems = false;
 
-                // If most preview rows miss both vendor and firmware, cached data is stale.
-                // Flush CMTS cache and force a fresh enriched load.
+                // Full inventory loads never launch per-modem enrichment. Optional
+                // metadata refresh uses the bounded delta queue instead.
                 if (metadataCheck.refresh && !backendEnriching && !backendEnriched && !alreadyTriggered) {
-                    this.$toast?.info(`Metadata quality low (${Math.round(metadataCheck.ratio * 100)}% missing vendor+firmware). Forcing fresh inventory reload...`);
+                    this.$toast?.info(`Metadata quality low (${Math.round(metadataCheck.ratio * 100)}% missing vendor+firmware). Loading complete inventory and queuing delta enrichment...`);
                     if (cmtsKey) this._metadataRefreshTriggeredByCmts[cmtsKey] = true;
-                    this._loadAllModemsInBackground(buildUrl(CM_MODEM_LIMIT, true, true), mapModem, loadToken);
+                    this._loadAllModemsInBackground(buildUrl(CM_MODEM_LIMIT, false), mapModem, loadToken);
                     return;
                 }
 
-                // Always run full load (+ enrichment if enabled) in background
-                // so enriched fields arrive even while user stays on page 1.
+                // Always load the complete base inventory in the background.
+                // Enrichment is deliberately separate to avoid querying every modem.
                 let backgroundUrl;
                 if (preview?.partial) {
                     this.liveCacheRefreshing = true;
-                    // Delta-friendly: first refresh inventory footprint to full limit,
-                    // then only enrich when metadata check explicitly requests it.
                     backgroundUrl = buildUrl(CM_MODEM_LIMIT, false, true);
-                    this._requestDeltaEnrichmentForSelectedCmts();
                 } else {
-                    const shouldRequestEnrich = this.enrichModems && !preview?.cached;
-                    this.liveCacheRefreshing = shouldRequestEnrich;
-                    backgroundUrl = buildUrl(CM_MODEM_LIMIT, shouldRequestEnrich);
+                    this.liveCacheRefreshing = false;
+                    backgroundUrl = buildUrl(CM_MODEM_LIMIT, false);
                 }
                 this._loadAllModemsInBackground(backgroundUrl, mapModem, loadToken);
                 return;
@@ -2562,7 +2558,7 @@ createApp({
 
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
-                const data = await this._fetchJsonWithTimeout(url, 180000);
+                const data = await this._fetchJsonWithTimeout(url, 360000);
                 if (data.status !== 'success') {
                     throw new Error(data.message || 'Full modem load failed');
                 }
@@ -2601,6 +2597,9 @@ createApp({
                     return row;
                 });
                 this._mergeSearchSeed(mapped);
+                // The full response has already refreshed Redis server-side, so
+                // queue only a small delta batch against the complete inventory.
+                this._requestDeltaEnrichmentForSelectedCmts();
 
                 // Append the complete dataset in chunks to avoid freezing the UI.
                 // Selected interface/FN/Cable-MAC values are display filters only.
@@ -2701,12 +2700,9 @@ createApp({
             try {
                 // Poll cached state here; avoid forcing a fresh walk each time.
                 // Communities remain server-side and never enter browser URLs.
-                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${CM_MODEM_LIMIT}`;
-                if (this.enrichModems) {
-                    url += '&enrich=true';
-                }
+                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${CM_MODEM_LIMIT}&enrich=false`;
 
-                const data = await this._fetchJsonWithTimeout(url, 120000);
+                const data = await this._fetchJsonWithTimeout(url, 360000);
 
                 if (data.status === 'success' && data.modems) {
                     // Always update progress bar from the latest poll response
