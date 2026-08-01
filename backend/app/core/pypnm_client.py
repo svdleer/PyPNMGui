@@ -294,6 +294,13 @@ class PyPNMClient:
     def get_inventory_modem_by_mac(self, mac_address: str, request_timeout: int | None = None) -> Dict[str, Any]:
         return self._get(f"/api/admin/inventory/modems/{mac_address}", request_timeout=request_timeout)
 
+    def get_inventory_snapshots(self, request_timeout: int | None = None) -> Dict[str, Any]:
+        """Return current inventory cache revisions without transferring modem rows."""
+        return self._get(
+            "/api/admin/inventory/snapshots/current",
+            request_timeout=request_timeout,
+        )
+
     def get_inventory_modems_bulk(self, mac_addresses: list[str]) -> Dict[str, Any]:
         return self._post("/api/admin/inventory/modems/bulk", {"mac_addresses": mac_addresses})
 

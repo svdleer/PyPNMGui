@@ -95,7 +95,9 @@ try:
     import redis
     REDIS_HOST = os.environ.get('REDIS_HOST', 'eve-li-redis')
     REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
-    REDIS_TTL = int(os.environ.get('REDIS_TTL', '86400'))  # 24 hour cache
+    # Hard safety cap: modem data must never survive more than 24 hours,
+    # even if REDIS_TTL is accidentally configured to a larger value.
+    REDIS_TTL = max(1, min(int(os.environ.get('REDIS_TTL', '86400')), 86400))
     redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     # Test connection
     redis_client.ping()
@@ -116,6 +118,7 @@ def _redis_cache_modems_for_key(
     complete: bool = False,
     truncated: bool = False,
     collected_at=None,
+    inventory_revision=None,
     critical_oid_errors: dict | None = None,
 ) -> None:
     if not REDIS_AVAILABLE or not redis_client or not cache_key:
@@ -124,7 +127,7 @@ def _redis_cache_modems_for_key(
         requested_limit = _cm_modem_limit_default()
     try:
         modems = filter_ignored_modems(modems)
-        payload = json.dumps({
+        payload_data = {
             "cmts": cmts_name,
             "requested_limit": requested_limit,
             "modems": modems,
@@ -133,9 +136,15 @@ def _redis_cache_modems_for_key(
             "complete": complete is True,
             "truncated": truncated is True,
             "collected_at": collected_at,
+            "inventory_revision": inventory_revision,
             "critical_oid_errors": critical_oid_errors or {},
-        })
-        redis_client.setex(cache_key, REDIS_TTL, payload)
+        }
+        ttl = _cache_remaining_ttl(payload_data)
+        if ttl <= 0:
+            redis_client.delete(cache_key)
+            logger.info("Skipped stale modem cache write for %s", cache_key)
+            return
+        redis_client.setex(cache_key, ttl, json.dumps(payload_data))
     except Exception as exc:
         logger.warning(f"Redis modem cache write error for {cache_key}: {exc}")
 
@@ -147,6 +156,7 @@ def _backfill_redis_from_inventory(
     complete: bool = False,
     truncated: bool = False,
     collected_at=None,
+    inventory_revision=None,
     critical_oid_errors: dict | None = None,
 ) -> None:
     if not REDIS_AVAILABLE or not redis_client or not modems:
@@ -168,7 +178,23 @@ def _backfill_redis_from_inventory(
         elif cmts_ip:
             grouped.setdefault(cmts_ip, []).append(modem)
 
+    def _group_cache_metadata(rows: list[dict]):
+        if collected_at is not None:
+            return collected_at, inventory_revision
+        timestamps = [
+            _parse_inventory_timestamp(row.get("updated_at"))
+            for row in rows
+            if isinstance(row, dict)
+        ]
+        timestamps = [value for value in timestamps if value is not None]
+        if not timestamps:
+            return None, inventory_revision
+        # The dataset is only as fresh as its oldest row, while its revision
+        # is the newest row change represented by this payload.
+        return min(timestamps).isoformat(), inventory_revision or max(timestamps).isoformat()
+
     for group_name, rows in grouped.items():
+        group_collected_at, group_revision = _group_cache_metadata(rows)
         _redis_cache_modems_for_key(
             f"modems:{group_name}",
             group_name,
@@ -176,13 +202,15 @@ def _backfill_redis_from_inventory(
             requested_limit=requested_limit,
             complete=complete,
             truncated=truncated,
-            collected_at=collected_at,
+            collected_at=group_collected_at,
+            inventory_revision=group_revision,
             critical_oid_errors=critical_oid_errors,
         )
 
     for alias_key, group_name in aliases.items():
         rows = grouped.get(group_name) or []
         if rows:
+            group_collected_at, group_revision = _group_cache_metadata(rows)
             _redis_cache_modems_for_key(
                 f"modems:{alias_key}",
                 group_name,
@@ -190,12 +218,18 @@ def _backfill_redis_from_inventory(
                 requested_limit=requested_limit,
                 complete=complete,
                 truncated=truncated,
-                collected_at=collected_at,
+                collected_at=group_collected_at,
+                inventory_revision=group_revision,
                 critical_oid_errors=critical_oid_errors,
             )
 
 
 def _parse_inventory_timestamp(value):
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
     text = str(value or "").strip()
     if not text:
         return None
@@ -208,6 +242,80 @@ def _parse_inventory_timestamp(value):
         return dt
     except Exception:
         return None
+
+
+def _cache_reference_time(payload: dict):
+    return _parse_inventory_timestamp(payload.get("collected_at")) or _parse_inventory_timestamp(
+        payload.get("timestamp")
+    )
+
+
+def _cache_remaining_ttl(payload: dict) -> int:
+    """Cap Redis lifetime at 24 hours from authoritative collection time."""
+    reference = _cache_reference_time(payload)
+    if reference is None:
+        # Legacy payloads are still bounded by their existing Redis TTL.
+        return REDIS_TTL
+    age = max(0.0, (datetime.now(timezone.utc) - reference).total_seconds())
+    return max(0, min(REDIS_TTL, int(REDIS_TTL - age)))
+
+
+def _inventory_revision_map() -> dict[str, datetime]:
+    """Load lightweight CMTS revisions; fail open if PyPNM is unavailable."""
+    revisions: dict[str, datetime] = {}
+    try:
+        response = PyPNMClient().get_inventory_snapshots(request_timeout=5)
+        for snapshot in response.get("snapshots") or []:
+            revision = _parse_inventory_timestamp(
+                snapshot.get("revision_at") or snapshot.get("collected_at")
+            )
+            if revision is None:
+                continue
+            for alias in (snapshot.get("cmts"), snapshot.get("cmts_ip")):
+                key = str(alias or "").strip().lower()
+                if key:
+                    revisions[key] = revision
+    except Exception as exc:
+        logger.warning("Inventory revision lookup skipped: %s", exc)
+    return revisions
+
+
+def _cache_payload_is_current(payload: dict, revisions: dict[str, datetime] | None = None) -> bool:
+    if _cache_remaining_ttl(payload) <= 0:
+        return False
+    if not revisions:
+        return True
+
+    aliases = [str(payload.get("cmts") or "").strip().lower()]
+    modems = payload.get("modems") or []
+    if modems and isinstance(modems[0], dict):
+        aliases.append(str(modems[0].get("cmts_ip") or "").strip().lower())
+    current = max((revisions[a] for a in aliases if a in revisions), default=None)
+    if current is None:
+        return True
+
+    cached_revision = _parse_inventory_timestamp(payload.get("inventory_revision"))
+    cached_revision = cached_revision or _cache_reference_time(payload)
+    return cached_revision is not None and current <= cached_revision
+
+
+def _read_modem_cache(cache_key: str, revisions: dict[str, datetime] | None = None):
+    """Read a valid modem cache payload and delete stale generations."""
+    cached = redis_client.get(cache_key) if redis_client else None
+    if not cached:
+        return None
+    try:
+        payload = json.loads(cached)
+    except Exception:
+        if redis_client:
+            redis_client.delete(cache_key)
+        return None
+    if not isinstance(payload, dict) or not _cache_payload_is_current(payload, revisions):
+        if redis_client:
+            redis_client.delete(cache_key)
+        logger.info("Invalidated stale modem cache key %s", cache_key)
+        return None
+    return payload
 
 
 def _inventory_snapshot_is_fresh(modems: list[dict]) -> bool:
@@ -553,15 +661,15 @@ def get_modems():
             }), 503
 
     try:
-        keys = [f"modems:{cmts_filter}"] if cmts_filter else redis_client.keys('modems:*')
+        keys = [f"modems:{cmts_filter}"] if cmts_filter else list(redis_client.scan_iter('modems:*'))
+        revisions = _inventory_revision_map()
         seen_macs: set[str] = set()
         modems = []
 
         for key in keys:
-            cached = redis_client.get(key)
-            if not cached:
+            payload = _read_modem_cache(key, revisions)
+            if not payload:
                 continue
-            payload = json.loads(cached)
             cmts_name = str(payload.get('cmts') or key.split(':', 1)[-1])
             for m in payload.get('modems', []):
                 mac_key = str(m.get('mac_address', '')).lower().replace(':', '').replace('-', '')
@@ -595,6 +703,7 @@ def get_modems():
                     ),
                     truncated=db_resp.get('truncated') is True,
                     collected_at=db_resp.get('collected_at'),
+                    inventory_revision=db_resp.get('revision_at'),
                     critical_oid_errors=db_resp.get('critical_oid_errors') or {},
                 )
                 _augment_modems_with_topology_fields(db_modems)
@@ -682,11 +791,11 @@ def get_modem(mac_address):
     # Try to find in Redis cache first
     if REDIS_AVAILABLE and redis_client:
         try:
-            keys = redis_client.keys('modems:*')
+            revisions = _inventory_revision_map()
+            keys = list(redis_client.scan_iter('modems:*'))
             for key in keys:
-                cached = redis_client.get(key)
-                if cached:
-                    data = json.loads(cached)
+                data = _read_modem_cache(key, revisions)
+                if data:
                     modems = data.get('modems', [])
                     for modem in modems:
                         if _bare(modem.get('mac_address', '')) == mac_bare:
@@ -895,9 +1004,9 @@ def get_cmts_modems(cmts_name):
         if REDIS_AVAILABLE and redis_client and not force_refresh:
             try:
                 cache_key = f"modems:{cmts_name}"
-                cached = redis_client.get(cache_key)
-                if cached:
-                    data = json.loads(cached)
+                revisions = _inventory_revision_map()
+                data = _read_modem_cache(cache_key, revisions)
+                if data:
                     cached_modems = filter_ignored_modems(data.get('modems', []))
                     cached_count = len(cached_modems)
                     cached_requested_limit = int(data.get('requested_limit') or 0)
@@ -1027,6 +1136,7 @@ def get_cmts_modems(cmts_name):
                             complete=inventory_complete,
                             truncated=inventory_resp.get('truncated') is True,
                             collected_at=inventory_resp.get('collected_at'),
+                            inventory_revision=inventory_resp.get('revision_at'),
                             critical_oid_errors=inventory_resp.get('critical_oid_errors') or {},
                         )
                         logger.info(
@@ -1088,22 +1198,31 @@ def get_cmts_modems(cmts_name):
                         "cmts": cmts_name,
                         "requested_limit": result.get('requested_limit') or limit,
                         "modems": modems,
-                        "timestamp": result.get('timestamp'),
+                        "timestamp": int(time.time()),
                         "enriched": is_enriched,
                         "enriching": is_enriching,
                         "source": "pypnm-live" if result.get('source') == 'snmp-live' else (result.get('source') or 'pypnm-inventory'),
                         "complete": result.get('complete') is True,
                         "truncated": result.get('truncated') is True,
                         "collected_at": result.get('collected_at'),
+                        "inventory_revision": result.get('revision_at'),
                         "critical_oid_errors": result.get('critical_oid_errors') or {},
                     }
-                    redis_client.setex(f"modems:{cmts_name}", REDIS_TTL, json.dumps(cache_payload))
-                    # Alias by CMTS IP so lookups by either hostname or IP hit cache.
+                    ttl = _cache_remaining_ttl(cache_payload)
+                    cache_keys = [f"modems:{cmts_name}"]
                     if cmts_ip and cmts_ip != cmts_name:
-                        redis_client.setex(f"modems:{cmts_ip}", REDIS_TTL, json.dumps(cache_payload))
-                    logger.info(
-                        f"Cached {len(modems)} modems for {cmts_name} (enriched={is_enriched}, enriching={is_enriching}, TTL={REDIS_TTL}s)"
-                    )
+                        cache_keys.append(f"modems:{cmts_ip}")
+                    if ttl > 0:
+                        payload_json = json.dumps(cache_payload)
+                        for cache_key in cache_keys:
+                            redis_client.setex(cache_key, ttl, payload_json)
+                        logger.info(
+                            f"Cached {len(modems)} modems for {cmts_name} "
+                            f"(enriched={is_enriched}, enriching={is_enriching}, TTL={ttl}s)"
+                        )
+                    else:
+                        redis_client.delete(*cache_keys)
+                        logger.info("Skipped stale modem cache write for %s", cmts_name)
                 except Exception as e:
                     logger.warning(f"Redis cache error: {e}")
             
@@ -1299,6 +1418,7 @@ def refresh_cmts_modem_cache(cmts_name):
             ),
             truncated=inv_resp.get('truncated') is True,
             collected_at=inv_resp.get('collected_at'),
+            inventory_revision=inv_resp.get('revision_at'),
             critical_oid_errors=inv_resp.get('critical_oid_errors') or {},
         )
         _log.info(f"cache/refresh: wrote {len(inv_modems)} enriched modems to Redis for {cmts_name}")
@@ -1317,14 +1437,12 @@ def enqueue_delta_enrichment(cmts_name):
     payload = request.get_json(silent=True) or {}
     max_batch = max(1, min(int(payload.get('max_batch') or 10), 25))
 
-    cached = redis_client.get(f"modems:{cmts_name}")
-    if not cached:
-        return jsonify({"status": "error", "message": f"No cached modems for {cmts_name}"}), 404
-
-    try:
-        data = json.loads(cached)
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"Invalid cache payload: {exc}"}), 500
+    data = _read_modem_cache(
+        f"modems:{cmts_name}",
+        _inventory_revision_map(),
+    )
+    if not data:
+        return jsonify({"status": "error", "message": f"No current cached modems for {cmts_name}"}), 404
 
     modems = data.get('modems') or []
     if not modems:
