@@ -2338,93 +2338,10 @@
                                 </div>
                             </div>
 
-                            <!-- RxMER Results (only show when no matplotlib plots available) -->
-                            <div class="col-12 mb-4" v-if="rxmerData && (pnmOutputType === 'json' || !(selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length))">
-                                <div class="card shadow-sm border-success">
-                                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>RxMER Measurement Results</h5>
-                                        <div class="d-flex align-items-center gap-2">
-                                            <small>{{ rxmerData.timestamp || new Date().toLocaleString() }}</small>
-                                            <button @click="downloadChartData" class="btn btn-sm btn-light">
-                                                <i class="bi bi-download me-1"></i>JSON
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="card-body">
-                                        <div v-if="rxmerData.data && rxmerData.data.rxmer_measurements">
-                                            <div v-for="meas in rxmerData.data.rxmer_measurements" :key="meas.channel_id" class="mb-4">
-                                                <h6 class="border-bottom pb-2">Channel {{ meas.channel_id }}</h6>
-                                                <div class="row">
-                                                    <div class="col-md-3">
-                                                        <div class="text-center p-3 bg-light rounded">
-                                                            <small class="text-muted d-block">Average MER</small>
-                                                            <h3 class="mb-0 text-primary">{{ meas.average_mer_db }} dB</h3>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-3">
-                                                        <div class="text-center p-3 bg-light rounded">
-                                                            <small class="text-muted d-block">Minimum MER</small>
-                                                            <h3 class="mb-0 text-warning">{{ meas.min_mer_db }} dB</h3>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-3">
-                                                        <div class="text-center p-3 bg-light rounded">
-                                                            <small class="text-muted d-block">Maximum MER</small>
-                                                            <h3 class="mb-0 text-success">{{ meas.max_mer_db }} dB</h3>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-3">
-                                                        <div class="text-center p-3 bg-light rounded">
-                                                            <small class="text-muted d-block">Std Deviation</small>
-                                                            <h3 class="mb-0 text-secondary">{{ meas.std_dev_mer_db }} dB</h3>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div class="chart-container mt-3" style="height: 200px;">
-                                                    <canvas :id="'rxmer-chart-' + meas.channel_id"></canvas>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div v-else class="text-center py-3">
-                                            <pre class="text-start bg-light p-3 rounded">{{ JSON.stringify(rxmerData, null, 2) }}</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- FEC Results -->
-                            <div class="col-12 mb-4" v-if="fecData">
-                                <div class="card shadow-sm border-warning">
-                                    <div class="card-header bg-warning text-dark">
-                                        <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>FEC Summary</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow-y: auto;">{{ JSON.stringify(fecData, null, 2) }}</pre>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Pre-EQ Results -->
-                            <div class="col-12 mb-4" v-if="preEqData && preEqData.results">
-                                <div class="card shadow-sm border-primary">
-                                    <div class="card-header bg-primary text-white">
-                                        <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Pre-Equalization Coefficients</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row" v-for="(chData, chId) in preEqData.results" :key="chId">
-                                            <div class="col-12 mb-3">
-                                                <h6>Channel {{ chId }}</h6>
-                                                <div class="chart-container" style="height: 180px;">
-                                                    <canvas :id="'preeq-chart-' + chId"></canvas>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            <!-- Interactive Chart.js renders canonical and legacy PNM payloads above. -->
 
                             <!-- No Results -->
-                            <div class="col-12" v-if="!selectedMeasurementData && !rxmerData && !spectrumData && !fecData && !preEqData && !utscSpectrumData && !usRxmerSpectrumData">
+                            <div class="col-12" v-if="!runningTest && !selectedMeasurementData && !rxmerData && !spectrumData && !fecData && !preEqData && !utscSpectrumData && !usRxmerSpectrumData">
                                 <div class="card shadow-sm">
                                     <div class="card-body text-center py-5">
                                         <i class="bi bi-graph-up text-muted" style="font-size: 4rem;"></i>
@@ -3659,7 +3576,7 @@
     <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <!-- Shared engineering chart theme and PNG export -->
     <script src="[[ base_path ]]/static/js/chart-theme.js?v=2"></script>
     <!-- Application JS with cache busting -->

@@ -3120,6 +3120,9 @@ createApp({
             this.channelStats = null;
             this.channelStatsError = null;
             this.rxmerData = null;
+            this.spectrumData = null;
+            this.fecData = null;
+            this.preEqData = null;
             this.eventLog = [];
             this.selectedMeasurementData = null;
             this.showRawData = false;
@@ -5812,8 +5815,21 @@ createApp({
             };
             const taskLabel = typeNames[measurementType] || measurementType;
             const { token, signal } = this._beginUiTask(taskLabel, measurementType);
-            
+
+            // A new request owns the result area. Clear stale data immediately so a
+            // failed/aborted request cannot leave another measurement or modem visible.
             this.showRawData = false;
+            const previousChartContainer = document.getElementById('measurement-charts-container');
+            previousChartContainer?.querySelectorAll('canvas').forEach(canvas => {
+                const chart = typeof Chart.getChart === 'function' ? Chart.getChart(canvas) : null;
+                if (chart) chart.destroy();
+            });
+            this.selectedMeasurementData = null;
+            this.rxmerData = null;
+            this.spectrumData = null;
+            this.fecData = null;
+            this.preEqData = null;
+            this.expandedPlotJson = [];
             
             try {
                 const payload = {
@@ -5871,16 +5887,20 @@ createApp({
                 console.log('Plots count:', data.plots ? data.plots.length : 0);
                 console.log('================================');
                 
-                if (data.status === 0) {
-                    // Store data in the appropriate variable
+                const statusText = String(data.status ?? '').toLowerCase();
+                const measurementSucceeded = data.status === 0
+                    || data.status === '0'
+                    || statusText === 'success'
+                    || data.success === true;
+
+                if (measurementSucceeded) {
+                    // Preserve the untouched response for Raw Data and archive downloads.
                     this.selectedMeasurementData = data;
-                    
-                    // Map to legacy variables for compatibility
+
+                    // Keep legacy state populated for old response shapes, but render all
+                    // interactive responses through the canonical compatibility layer below.
                     if (measurementType === 'rxmer') {
                         this.rxmerData = data;
-                        this.$nextTick(() => {
-                            this.drawRxmerCharts();
-                        });
                     } else if (measurementType === 'spectrum') {
                         this.spectrumData = data;
                     } else if (measurementType === 'fec_summary') {
@@ -5888,32 +5908,27 @@ createApp({
                     } else if (measurementType === 'us_pre_eq') {
                         this.preEqData = data;
                     }
-                    
-                    // Interactive mode renders structured JSON with Chart.js;
-                    // archive mode keeps the existing Matplotlib/ZIP workflow.
-                    const hasJsonData = data.data || measurementType === 'rxmer' || measurementType === 'us_pre_eq';
-                    const hasMatplotlibPlots = data.plots && data.plots.length > 0;
+
+                    // Interactive mode always attempts Chart.js rendering. Archive mode
+                    // retains Matplotlib when plots are present and only falls back to
+                    // structured charts when the backend returned no plot artifacts.
+                    const hasMatplotlibPlots = Array.isArray(data.plots) && data.plots.length > 0;
                     const useInteractiveCharts = this.pnmOutputType === 'json';
-                    
-                    if (hasJsonData && (useInteractiveCharts || !hasMatplotlibPlots)) {
-                        console.log('Will call drawMeasurementCharts with:', measurementType, data);
-                        this.$nextTick(() => {
-                            this.drawMeasurementCharts(measurementType, data);
-                        });
-                    } else if (hasMatplotlibPlots) {
-                        console.log(`Using ${data.plots.length} matplotlib plot(s) for ${measurementType}`);
+
+                    if (useInteractiveCharts || !hasMatplotlibPlots) {
+                        this.$nextTick(() => this.drawMeasurementCharts(measurementType, data));
                     } else {
-                        console.log('Skipping chart draw - no JSON data available. Output type:', this.pnmOutputType);
+                        console.log(`Using ${data.plots.length} matplotlib plot(s) for ${measurementType}`);
                     }
-                    
+
                     this.showSuccess(
                         `${typeNames[measurementType] || measurementType} Complete`,
-                        this.pnmOutputType === 'archive' 
+                        this.pnmOutputType === 'archive'
                             ? 'Plots and CSV data generated successfully'
                             : 'Measurement data retrieved successfully'
                     );
                 } else {
-                    this.showError('Measurement Failed', data.message || `Error code: ${data.status}`);
+                    this.showError('Measurement Failed', data.message || data.error || `Error code: ${data.status}`);
                 }
             } catch (error) {
                 if (error?.name === 'AbortError') return;
@@ -5935,17 +5950,17 @@ createApp({
         },
 
         getPlotChannelData(filename) {
-            // Try to match channel number from filename (e.g. _34_rxmer.png)
-            if (this.rxmerData && this.rxmerData.data && this.rxmerData.data.rxmer_measurements) {
-                const m = filename.match(/_(\d{1,3})_rxmer/i);
-                if (m) {
-                    const ch = parseInt(m[1]);
-                    const meas = this.rxmerData.data.rxmer_measurements.find(r => r.channel_id == ch);
-                    if (meas) return meas;
+            const selected = this.selectedMeasurementData;
+            const rxmerMeasurements = selected?.data?.rxmer_measurements;
+            if (Array.isArray(rxmerMeasurements)) {
+                const match = filename.match(/_(\d{1,3})_rxmer/i);
+                if (match) {
+                    const channelId = Number.parseInt(match[1], 10);
+                    const channel = rxmerMeasurements.find(item => item.channel_id == channelId);
+                    if (channel) return channel;
                 }
-                return this.rxmerData.data.rxmer_measurements;
             }
-            return this.selectedMeasurementData;
+            return selected;
         },
 
         toggleRawData() {
@@ -5955,27 +5970,9 @@ createApp({
         downloadChartData() {
             let payload = null;
 
-            // US RxMER chart data
-            if (this.rxmerData && this.rxmerData.data && this.rxmerData.data.rxmer_measurements) {
-                payload = {
-                    type: 'us_ofdma_rxmer',
-                    modem: this.selectedModem ? this.selectedModem.mac_address : null,
-                    timestamp: new Date().toISOString(),
-                    channels: this.rxmerData.data.rxmer_measurements.map(meas => ({
-                        channel_id: meas.channel_id,
-                        ofdma_ifindex: meas.ofdma_ifindex,
-                        num_subcarriers: meas.num_subcarriers,
-                        mean_mer_db: meas.mean_mer_db,
-                        min_mer_db: meas.min_mer_db,
-                        max_mer_db: meas.max_mer_db,
-                        std_dev_mer_db: meas.std_dev_mer_db,
-                        subcarrier_samples: meas.subcarrier_samples.map(s => ({
-                            subcarrier_index: s.subcarrier_index,
-                            mer_db: s.mer_db
-                        }))
-                    }))
-                };
-            } else if (this.selectedMeasurementData) {
+            // The visible/current measurement is authoritative. Preserve its
+            // canonical response exactly instead of rebuilding a lossy legacy DTO.
+            if (this.selectedMeasurementData) {
                 payload = {
                     type: 'measurement_data',
                     modem: this.selectedModem ? this.selectedModem.mac_address : null,
@@ -6114,44 +6111,167 @@ createApp({
         
         // ============== Chart Drawing ==============
         
+        normalizePnmResponse(type, response) {
+            const payload = response && response.data !== undefined ? response.data : (response || {});
+            const analyses = Array.isArray(payload?.analysis)
+                ? payload.analysis
+                : (Array.isArray(payload) ? payload : []);
+            const normalized = { type, payload, analyses };
+
+            if (type === 'rxmer') {
+                const legacy = Array.isArray(payload?.rxmer_measurements) ? payload.rxmer_measurements : [];
+                normalized.channels = legacy.length ? legacy.map(item => ({
+                    channelId: item.channel_id,
+                    firstActiveIndex: 0,
+                    frequencies: [],
+                    magnitudes: (item.subcarrier_samples || []).map(sample => Number(sample.mer_db)),
+                    statuses: [],
+                    indices: (item.subcarrier_samples || []).map(sample => Number(sample.subcarrier_index)),
+                })) : analyses.map(item => {
+                    const carrier = item.carrier_values || {};
+                    const magnitudes = Array.isArray(carrier.magnitude) ? carrier.magnitude.map(Number) : [];
+                    const firstActiveIndex = Number(item.first_active_subcarrier_index || 0);
+                    return {
+                        channelId: item.channel_id,
+                        firstActiveIndex,
+                        frequencies: Array.isArray(carrier.frequency) ? carrier.frequency.map(Number) : [],
+                        magnitudes,
+                        statuses: Array.isArray(carrier.carrier_status) ? carrier.carrier_status.map(Number) : [],
+                        statusMap: carrier.carrier_status_map || {},
+                        indices: magnitudes.map((_, index) => firstActiveIndex + index),
+                    };
+                });
+            } else if (type === 'channel_estimation' || type === 'us_pre_eq') {
+                normalized.channels = analyses;
+            } else if (type === 'modulation_profile') {
+                const profiles = [];
+                if (Array.isArray(payload?.modulation_profiles)) {
+                    payload.modulation_profiles.forEach(profile => profiles.push({
+                        channelId: profile.channel_id ?? '?',
+                        profileId: profile.profile_id,
+                        carriers: (profile.subcarriers || []).map(item => ({
+                            frequency: Number(item.frequency || item.index || 0),
+                            modulation: item.modulation_order ?? item.modulation,
+                            shannonMinMer: item.shannon_min_mer,
+                        })),
+                    }));
+                } else {
+                    analyses.forEach(channel => (channel.profiles || []).forEach(profile => {
+                        const carrierValues = profile.carrier_values || {};
+                        const carriers = carrierValues.layout === 'list'
+                            ? (carrierValues.carriers || []).map(item => ({
+                                frequency: Number(item.frequency),
+                                modulation: item.modulation,
+                                shannonMinMer: Number(item.shannon_min_mer),
+                            }))
+                            : (carrierValues.frequency || []).map((frequency, index) => ({
+                                frequency: Number(frequency),
+                                modulation: (carrierValues.modulation || [])[index],
+                                shannonMinMer: Number((carrierValues.shannon_min_mer || [])[index]),
+                            }));
+                        profiles.push({ channelId: channel.channel_id, profileId: profile.profile_id, carriers });
+                    }));
+                }
+                normalized.profiles = profiles;
+            } else if (type === 'fec_summary') {
+                const series = [];
+                if (Array.isArray(payload?.fec_summaries)) {
+                    payload.fec_summaries.forEach(item => series.push({
+                        channelId: item.channel_id,
+                        profileId: item.profile_id,
+                        timestamps: ['Latest sample'],
+                        total: [Number(item.total_codewords || 0)],
+                        corrected: [Number(item.corrected_codewords || 0)],
+                        uncorrected: [Number(item.uncorrectable_codewords || 0)],
+                    }));
+                } else {
+                    analyses.forEach(channel => (channel.profiles || []).forEach(profile => {
+                        const codewords = profile.codewords || {};
+                        const count = Math.min(
+                            (codewords.total_codewords || []).length,
+                            (codewords.corrected || []).length,
+                            (codewords.uncorrected || []).length
+                        );
+                        series.push({
+                            channelId: channel.channel_id,
+                            profileId: profile.profile,
+                            timestamps: (codewords.timestamps || []).slice(0, count),
+                            total: (codewords.total_codewords || []).slice(0, count).map(Number),
+                            corrected: (codewords.corrected || []).slice(0, count).map(Number),
+                            uncorrected: (codewords.uncorrected || []).slice(0, count).map(Number),
+                        });
+                    }));
+                }
+                normalized.series = series;
+            } else if (type === 'histogram') {
+                normalized.histograms = Array.isArray(payload?.histograms)
+                    ? payload.histograms.map(item => ({
+                        channelId: item.channel_id,
+                        symmetry: item.symmetry,
+                        dwellCounts: item.dwell_counts || [],
+                        bins: item.bins || item.histogram_data || [],
+                    }))
+                    : analyses.map(item => ({
+                        channelId: item.channel_id,
+                        symmetry: item.symmetry,
+                        dwellCounts: item.dwell_counts || [],
+                        bins: (item.hit_counts || []).map((count, index) => ({ index, count: Number(count) })),
+                    }));
+            } else if (type === 'constellation') {
+                normalized.constellations = Array.isArray(payload?.constellations)
+                    ? payload.constellations.map(item => ({
+                        channelId: item.channel_id,
+                        soft: (item.points || []).map(point => [point.i ?? point.real, point.q ?? point.imag]),
+                        hard: [],
+                    }))
+                    : analyses.map(item => ({
+                        channelId: item.channel_id,
+                        modulationOrder: item.modulation_order,
+                        soft: item.soft || [],
+                        hard: item.hard || [],
+                    }));
+            }
+
+            return normalized;
+        },
+
         drawMeasurementCharts(type, data) {
             const container = document.getElementById('measurement-charts-container');
             if (!container) {
                 console.warn('Chart container not found');
                 return;
             }
-            
-            // Clear old charts
+
+            container.querySelectorAll('canvas').forEach(canvas => {
+                const chart = typeof Chart.getChart === 'function' ? Chart.getChart(canvas) : null;
+                if (chart) chart.destroy();
+            });
             container.innerHTML = '';
-            
-            console.log('Drawing charts for type:', type, 'with data:', data);
-            
-            if (type === 'spectrum') {
-                const spectrumData = data.data || data;
-                if (Array.isArray(spectrumData.analysis) && spectrumData.analysis.length) {
-                    this.drawSpectrumCharts(spectrumData);
-                } else {
-                    this.drawSpectrumFromChannels(spectrumData);
-                }
+
+            console.log('Drawing charts for type:', type);
+            if (type === 'impulse_response') {
+                this.drawImpulseResponseCharts(data);
                 return;
             }
-            
-            if (type === 'rxmer') {
-                this.drawRxmerCharts();
-            } else if (type === 'channel_estimation' && data.data) {
-                this.drawChannelEstimationCharts(data.data);
-            } else if (type === 'modulation_profile' && data.data) {
-                this.drawModulationProfileCharts(data.data);
-            } else if (type === 'fec_summary' && data.data) {
-                this.drawFecSummaryCharts(data.data);
-            } else if (type === 'histogram' && data.data) {
-                this.drawHistogramCharts(data.data);
-            } else if (type === 'constellation' && data.data) {
-                this.drawConstellationCharts(data.data);
+
+            const normalized = this.normalizePnmResponse(type, data);
+            if (type === 'spectrum') {
+                if (normalized.analyses.length) this.drawSpectrumCharts(normalized.payload);
+                else this.drawSpectrumFromChannels(normalized.payload);
+            } else if (type === 'rxmer') {
+                this.drawRxmerCharts(normalized);
+            } else if (type === 'channel_estimation') {
+                this.drawChannelEstimationCharts(normalized.channels || []);
+            } else if (type === 'modulation_profile') {
+                this.drawModulationProfileCharts(normalized);
+            } else if (type === 'fec_summary') {
+                this.drawFecSummaryCharts(normalized);
+            } else if (type === 'histogram') {
+                this.drawHistogramCharts(normalized);
+            } else if (type === 'constellation') {
+                this.drawConstellationCharts(normalized);
             } else if (type === 'us_pre_eq') {
-                this.drawPreEqCharts();
-            } else if (type === 'impulse_response') {
-                this.drawImpulseResponseCharts(data);
+                this.drawPreEqCharts(normalized);
             } else {
                 container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>No visualization available for this measurement type. Click "Raw Data" to see the results.</div>';
             }
@@ -6279,139 +6399,115 @@ createApp({
             });
         },
 
+        _decimateExtrema(points, maxPoints = 5000) {
+            if (!Array.isArray(points) || points.length <= maxPoints) return points || [];
+            const bucketSize = Math.ceil(points.length / Math.max(1, Math.floor(maxPoints / 2)));
+            const sampled = [];
+            for (let start = 0; start < points.length; start += bucketSize) {
+                const bucket = points.slice(start, start + bucketSize);
+                let minimum = bucket[0];
+                let maximum = bucket[0];
+                bucket.forEach(point => {
+                    if (point.y < minimum.y) minimum = point;
+                    if (point.y > maximum.y) maximum = point;
+                });
+                if (minimum === maximum) sampled.push(minimum);
+                else if (minimum.x <= maximum.x) sampled.push(minimum, maximum);
+                else sampled.push(maximum, minimum);
+            }
+            return sampled;
+        },
+
         drawSpectrumCharts(data) {
             const container = document.getElementById('measurement-charts-container');
-            
-            console.log('=== drawSpectrumCharts Debug ===');
-            console.log('data:', data);
-            console.log('data.analysis:', data.analysis);
-            
-            // Extract spectrum analysis data
-            const analysis = data.analysis && data.analysis.length > 0 ? data.analysis[0] : null;
-            console.log('analysis:', analysis);
-            
-            if (!analysis || !analysis.signal_analysis) {
-                console.error('No spectrum analysis data found');
-                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No spectrum analysis data available.</div>';
-                return;
-            }
-            
-            const signalAnalysis = analysis.signal_analysis;
-            const frequencies = signalAnalysis.frequencies || [];
-            const magnitudes = signalAnalysis.magnitudes || [];
-            
-            if (frequencies.length === 0 || magnitudes.length === 0) {
-                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Empty spectrum data.</div>';
-                return;
-            }
-            
-            // Convert frequencies from Hz to MHz for display
-            const freqsMHz = frequencies.map(f => f / 1000000);
-            
-            // Downsample if too many points (for performance)
-            const maxPoints = 5000;
-            let displayFreqs = freqsMHz;
-            let displayMags = magnitudes;
-            
-            if (frequencies.length > maxPoints) {
-                const step = Math.ceil(frequencies.length / maxPoints);
-                displayFreqs = freqsMHz.filter((_, i) => i % step === 0);
-                displayMags = magnitudes.filter((_, i) => i % step === 0);
-            }
-            
-            // Create chart container
-            const chartDiv = document.createElement('div');
-            chartDiv.className = 'mb-4';
-            chartDiv.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="mb-0">Full Spectrum Analysis (${analysis.capture_parameters.first_segment_center_freq / 1e6} - ${analysis.capture_parameters.last_segment_center_freq / 1e6} MHz)</h6>
-                    <small class="text-muted">${displayFreqs.length} points displayed (${frequencies.length} total)</small>
-                </div>
-                <canvas id="spectrum-chart" height="300"></canvas>
-            `;
-            container.appendChild(chartDiv);
-            
-            const canvas = chartDiv.querySelector('canvas');
-            
-            new Chart(canvas.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: displayFreqs,
-                    datasets: [{
-                        label: 'Magnitude (dBmV)',
-                        data: displayMags,
-                        borderColor: 'rgb(54, 162, 235)',
-                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
-                        borderWidth: 1,
-                        pointRadius: 0,
-                        tension: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'nearest',
-                        axis: 'x',
-                        intersect: false
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: 'Spectrum Analyzer - Full Frequency Sweep'
-                        },
-                        legend: {
-                            display: true
-                        },
-                        tooltip: {
-                            callbacks: {
-                                title: function(context) {
-                                    return `${context[0].label} MHz`;
-                                },
-                                label: function(context) {
-                                    return `Power: ${context.parsed.y.toFixed(2)} dBmV`;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            title: {
-                                display: true,
-                                text: 'Frequency (MHz)'
-                            },
-                            ticks: {
-                                callback: function(value) {
-                                    return value.toFixed(0);
-                                }
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Magnitude (dBmV)'
-                            }
-                        }
-                    }
+            const analyses = Array.isArray(data?.analysis) ? data.analysis : [];
+            let rendered = 0;
+
+            analyses.forEach((analysis, analysisIndex) => {
+                const signal = analysis.signal_analysis || {};
+                const frequencies = Array.isArray(signal.frequencies) ? signal.frequencies : [];
+                const magnitudes = Array.isArray(signal.magnitudes) ? signal.magnitudes : [];
+                const count = Math.min(frequencies.length, magnitudes.length);
+                if (!count) return;
+
+                const rawPoints = [];
+                for (let index = 0; index < count; index++) {
+                    const point = { x: Number(frequencies[index]) / 1e6, y: Number(magnitudes[index]) };
+                    if (Number.isFinite(point.x) && Number.isFinite(point.y)) rawPoints.push(point);
                 }
+                if (!rawPoints.length) return;
+                const displayPoints = this._decimateExtrema(rawPoints, 5000);
+
+                const averageValues = signal.window_average?.magnitudes || [];
+                const averagePoints = [];
+                for (let index = 0; index < Math.min(frequencies.length, averageValues.length); index++) {
+                    const point = { x: Number(frequencies[index]) / 1e6, y: Number(averageValues[index]) };
+                    if (Number.isFinite(point.x) && Number.isFinite(point.y)) averagePoints.push(point);
+                }
+                const displayAverage = this._decimateExtrema(averagePoints, 5000);
+
+                const capture = analysis.capture_parameters || {};
+                const startMhz = Number.isFinite(Number(capture.first_segment_center_freq))
+                    ? Number(capture.first_segment_center_freq) / 1e6
+                    : rawPoints[0].x;
+                const endMhz = Number.isFinite(Number(capture.last_segment_center_freq))
+                    ? Number(capture.last_segment_center_freq) / 1e6
+                    : rawPoints[rawPoints.length - 1].x;
+                const channelLabel = analysis.channel_id !== undefined ? ` · Ch ${analysis.channel_id}` : '';
+
+                const block = document.createElement('div');
+                block.className = 'mb-4';
+                const heading = document.createElement('div');
+                heading.className = 'd-flex justify-content-between align-items-center flex-wrap gap-2 mb-2';
+                const title = document.createElement('h6');
+                title.className = 'mb-0';
+                title.textContent = `Full Spectrum Analysis${channelLabel} (${startMhz.toFixed(1)}–${endMhz.toFixed(1)} MHz)`;
+                const detail = document.createElement('small');
+                detail.className = 'text-muted';
+                detail.textContent = `${displayPoints.length} extrema-preserved display points · ${rawPoints.length} total`;
+                heading.append(title, detail);
+                const chartWrap = document.createElement('div');
+                chartWrap.style.height = '340px';
+                const canvas = document.createElement('canvas');
+                chartWrap.appendChild(canvas);
+                block.append(heading, chartWrap);
+                container.appendChild(block);
+
+                new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: { datasets: [
+                        {
+                            label: 'Magnitude (dB)', data: displayPoints, parsing: false,
+                            borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.08)',
+                            borderWidth: 1, pointRadius: 0, tension: 0,
+                        },
+                        ...(displayAverage.length ? [{
+                            label: `Moving average (${signal.window_average?.points ?? '?'} points)`,
+                            data: displayAverage, parsing: false, borderColor: '#dc3545',
+                            borderWidth: 1, pointRadius: 0, tension: 0,
+                        }] : []),
+                    ]},
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                        plugins: {
+                            title: { display: true, text: `Spectrum Analyzer${channelLabel}` },
+                            tooltip: { callbacks: {
+                                title: context => `${Number(context[0].parsed.x).toFixed(3)} MHz`,
+                                label: context => `${context.dataset.label}: ${Number(context.parsed.y).toFixed(2)}`,
+                            }},
+                        },
+                        scales: {
+                            x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' } },
+                            y: { title: { display: true, text: 'Magnitude (dB)' } },
+                        },
+                    },
+                });
+                rendered += 1;
             });
-            
-            // Add device info if available
-            if (analysis.device_details && analysis.device_details.system_description) {
-                const deviceInfo = analysis.device_details.system_description;
-                const infoDiv = document.createElement('div');
-                infoDiv.className = 'alert alert-info mt-3';
-                infoDiv.innerHTML = `
-                    <h6><i class="bi bi-info-circle me-2"></i>Device Information</h6>
-                    <div class="row">
-                        <div class="col-md-3"><strong>Vendor:</strong> ${deviceInfo.VENDOR || 'N/A'}</div>
-                        <div class="col-md-3"><strong>Model:</strong> ${deviceInfo.MODEL || 'N/A'}</div>
-                        <div class="col-md-3"><strong>SW Version:</strong> ${deviceInfo.SW_REV || 'N/A'}</div>
-                        <div class="col-md-3"><strong>HW Version:</strong> ${deviceInfo.HW_REV || 'N/A'}</div>
-                    </div>
-                `;
-                container.appendChild(infoDiv);
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No spectrum analysis samples were returned. Raw Data remains available for schema inspection.</div>';
             }
         },
         
@@ -6462,15 +6558,20 @@ createApp({
                 return;
             }
 
+            let rendered = 0;
             for (const ch of channels) {
-                const cv       = ch.carrier_values || {};
-                const freqsHz  = cv.frequency   || [];
-                const magsLin  = cv.magnitudes  || [];
-                const gd       = (cv.group_delay || {}).magnitude || [];
-                if (!freqsHz.length || !magsLin.length) continue;
+                const cv = ch.carrier_values || {};
+                const freqsHz = Array.isArray(cv.frequency) ? cv.frequency : [];
+                const magsLin = Array.isArray(cv.magnitudes) ? cv.magnitudes : [];
+                const gdInfo = cv.group_delay || {};
+                const gdValues = Array.isArray(gdInfo.magnitude) ? gdInfo.magnitude : [];
+                const gdUnit = gdInfo.group_delay_unit || 'reported unit';
+                const carrierCount = Math.min(freqsHz.length, magsLin.length);
+                if (!carrierCount) continue;
 
-                const freqsMhz = freqsHz.map(f => f / 1e6);
-                const ampDb    = magsLin.map(m => 20 * Math.log10(Math.max(m, 1e-12)));
+                const freqsMhz = freqsHz.slice(0, carrierCount).map(f => Number(f) / 1e6);
+                const ampDb = magsLin.slice(0, carrierCount).map(m => 20 * Math.log10(Math.max(Number(m), 1e-12)));
+                const gd = gdValues.slice(0, carrierCount).map(Number);
                 const regY     = this._linRegY(freqsMhz, ampDb);
                 const suckouts = this._detectSuckouts(freqsMhz, ampDb, regY, 3.0);
 
@@ -6497,39 +6598,39 @@ createApp({
                     </div>` : '<div class="alert alert-success py-1 mt-2 mb-0"><i class="bi bi-check-circle me-1"></i>No suckouts detected ≥3 dB below trend</div>'}
                 `;
                 container.appendChild(chanDiv);
+                rendered += 1;
 
                 // ── Amplitude chart ──────────────────────────────────────────
                 const ampCtx = chanDiv.querySelector(`#chanest-amp-${cid}`);
-                const tickStep = Math.max(1, Math.floor(freqsMhz.length / 12));
-                const labels   = freqsMhz.map((f, i) => i % tickStep === 0 ? f.toFixed(0) : '');
+                const ampPoints = freqsMhz.map((frequency, index) => ({ x: frequency, y: ampDb[index] }));
+                const regressionPoints = freqsMhz.map((frequency, index) => ({ x: frequency, y: regY[index] }));
 
                 new Chart(ampCtx.getContext('2d'), {
                     type: 'line',
                     data: {
-                        labels,
                         datasets: [
                             {
                                 label: 'Amplitude (dB)',
-                                data: ampDb,
+                                data: ampPoints,
+                                parsing: false,
                                 borderColor: '#0d6efd', borderWidth: 1,
                                 pointRadius: 0, tension: 0,
                                 fill: { target: '-1', above: 'rgba(13,110,253,0.08)' },
                             },
                             {
                                 label: 'Trend (regression)',
-                                data: regY,
+                                data: regressionPoints,
+                                parsing: false,
                                 borderColor: '#adb5bd', borderWidth: 1,
                                 borderDash: [5, 5], pointRadius: 0, tension: 0,
                             },
                             ...(suckouts.length ? [{
                                 label: 'Suckout peak',
-                                data: freqsMhz.map((_, i) => {
-                                    const s = suckouts.find(su => su.idx === i);
-                                    return s ? ampDb[i] : null;
-                                }),
+                                data: suckouts.map(suckout => ({ x: freqsMhz[suckout.idx], y: ampDb[suckout.idx] })),
+                                parsing: false,
                                 borderColor: 'transparent',
                                 backgroundColor: '#dc3545',
-                                pointRadius: freqsMhz.map((_, i) => suckouts.some(s => s.idx === i) ? 7 : 0),
+                                pointRadius: 7,
                                 pointStyle: 'triangle',
                                 showLine: false,
                             }] : []),
@@ -6537,9 +6638,11 @@ createApp({
                     },
                     options: {
                         responsive: true,
-                        interaction: { mode: 'index', intersect: false },
+                        animation: false,
+                        parsing: false,
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false },
                         scales: {
-                            x: { title: { display: true, text: 'Frequency (MHz)' }, ticks: { maxTicksLimit: 14 } },
+                            x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' }, ticks: { maxTicksLimit: 14 } },
                             y: { title: { display: true, text: 'Amplitude (dB)' } },
                         },
                         plugins: {
@@ -6552,22 +6655,26 @@ createApp({
                 // ── Group delay chart ────────────────────────────────────────
                 if (gd.length) {
                     const gdCtx = chanDiv.querySelector(`#chanest-gd-${cid}`);
+                    const gdPoints = freqsMhz.slice(0, gd.length).map((frequency, index) => ({ x: frequency, y: gd[index] }));
                     new Chart(gdCtx.getContext('2d'), {
                         type: 'line',
                         data: {
-                            labels,
                             datasets: [{
-                                label: 'Group Delay (µs)',
-                                data: gd,
+                                label: `Group delay (${gdUnit})`,
+                                data: gdPoints,
+                                parsing: false,
                                 borderColor: '#198754', borderWidth: 1,
                                 pointRadius: 0, tension: 0,
                             }],
                         },
                         options: {
                             responsive: true,
+                            animation: false,
+                            parsing: false,
+                            interaction: { mode: 'nearest', axis: 'x', intersect: false },
                             scales: {
-                                x: { title: { display: true, text: 'Frequency (MHz)' }, ticks: { maxTicksLimit: 14 } },
-                                y: { title: { display: true, text: 'Group Delay (µs)' } },
+                                x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' }, ticks: { maxTicksLimit: 14 } },
+                                y: { title: { display: true, text: `Group delay (${gdUnit})` } },
                             },
                             plugins: {
                                 title: { display: true, text: `DS OFDM Group Delay · Ch ${cid}` },
@@ -6577,157 +6684,236 @@ createApp({
                     });
                 }
             }
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No usable channel-estimation carrier data was returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
         
         drawModulationProfileCharts(data) {
             const container = document.getElementById('measurement-charts-container');
-            const profiles = data.modulation_profiles || [];
-            
-            profiles.forEach(prof => {
-                const chartDiv = document.createElement('div');
-                chartDiv.className = 'mb-4';
-                chartDiv.innerHTML = `
-                    <h6>Profile ${prof.profile_id}</h6>
-                    <canvas id="modprof-${prof.profile_id}" height="250"></canvas>
-                `;
-                container.appendChild(chartDiv);
-                
-                const canvas = chartDiv.querySelector('canvas');
-                const subcarriers = prof.subcarriers || [];
-                
-                new Chart(canvas.getContext('2d'), {
-                    type: 'bar',
-                    data: {
-                        labels: subcarriers.map(s => s.index),
-                        datasets: [{
-                            label: 'Modulation Order',
-                            data: subcarriers.map(s => s.modulation_order || s.modulation),
-                            backgroundColor: 'rgba(54, 162, 235, 0.5)'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: { title: { display: true, text: `Modulation Profile · Profile ${prof.profile_id}` } }
-                    }
+            const profiles = data.profiles || [];
+            let rendered = 0;
+
+            profiles.forEach(profile => {
+                const carriers = (profile.carriers || []).filter(item => Number.isFinite(Number(item.frequency)));
+                if (!carriers.length) return;
+
+                const usesFrequency = carriers.some(item => Number(item.frequency) > 1e6);
+                const points = carriers.map((item, index) => {
+                    const text = String(item.modulation ?? '').toLowerCase();
+                    const match = text.match(/(?:qam[_-]?)?(\d+)/);
+                    const order = Number.isFinite(Number(item.modulation))
+                        ? Number(item.modulation)
+                        : (match ? Number(match[1]) : null);
+                    return {
+                        x: usesFrequency ? Number(item.frequency) / 1e6 : index,
+                        y: order,
+                        modulation: item.modulation ?? 'unknown',
+                        shannonMinMer: Number(item.shannonMinMer),
+                    };
                 });
+
+                const block = document.createElement('div');
+                block.className = 'mb-4';
+                const heading = document.createElement('h6');
+                heading.textContent = `Channel ${profile.channelId ?? '?'} — Profile ${profile.profileId ?? '?'}`;
+                const chartWrap = document.createElement('div');
+                chartWrap.style.height = '300px';
+                const canvas = document.createElement('canvas');
+                chartWrap.appendChild(canvas);
+                block.append(heading, chartWrap);
+                container.appendChild(block);
+
+                const shannonPoints = points.filter(point => Number.isFinite(point.shannonMinMer));
+                new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: { datasets: [
+                        {
+                            label: 'QAM order', data: points, parsing: false,
+                            borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.15)',
+                            borderWidth: 1, pointRadius: 0, stepped: true, spanGaps: false,
+                            yAxisID: 'y',
+                        },
+                        ...(shannonPoints.length ? [{
+                            label: 'Shannon minimum MER (dB)',
+                            data: shannonPoints.map(point => ({ x: point.x, y: point.shannonMinMer })),
+                            parsing: false, borderColor: '#dc3545', borderWidth: 1,
+                            pointRadius: 0, yAxisID: 'yMer',
+                        }] : []),
+                    ]},
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                        plugins: {
+                            title: { display: true, text: `DS OFDM Modulation Profile · Ch ${profile.channelId ?? '?'} · Profile ${profile.profileId ?? '?'}` },
+                            tooltip: { callbacks: { label: context => {
+                                if (context.datasetIndex === 0) return `Modulation: ${context.raw.modulation}`;
+                                return `Shannon minimum MER: ${Number(context.parsed.y).toFixed(2)} dB`;
+                            }}},
+                        },
+                        scales: {
+                            x: { type: 'linear', title: { display: true, text: usesFrequency ? 'Frequency (MHz)' : 'Subcarrier index' } },
+                            y: { position: 'left', beginAtZero: true, title: { display: true, text: 'QAM order' } },
+                            yMer: { position: 'right', display: shannonPoints.length > 0, grid: { drawOnChartArea: false }, title: { display: true, text: 'Minimum MER (dB)' } },
+                        },
+                    },
+                });
+                rendered += 1;
             });
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No modulation-profile carrier data was returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
-        
+
         drawFecSummaryCharts(data) {
             const container = document.getElementById('measurement-charts-container');
-            const summaries = data.fec_summaries || [];
-            
-            summaries.forEach(fec => {
-                const chartDiv = document.createElement('div');
-                chartDiv.className = 'mb-4';
-                chartDiv.innerHTML = `
-                    <h6>Channel ${fec.channel_id} - Profile ${fec.profile_id}</h6>
-                    <canvas id="fec-${fec.channel_id}-${fec.profile_id}" height="250"></canvas>
-                `;
-                container.appendChild(chartDiv);
-                
-                const canvas = chartDiv.querySelector('canvas');
-                
-                new Chart(canvas.getContext('2d'), {
-                    type: 'bar',
-                    data: {
-                        labels: ['Total', 'Corrected', 'Uncorrectable'],
-                        datasets: [{
-                            label: 'Codewords',
-                            data: [
-                                fec.total_codewords || 0,
-                                fec.corrected_codewords || 0,
-                                fec.uncorrectable_codewords || 0
-                            ],
-                            backgroundColor: [
-                                'rgba(54, 162, 235, 0.5)',
-                                'rgba(75, 192, 192, 0.5)',
-                                'rgba(255, 99, 132, 0.5)'
-                            ]
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: { title: { display: true, text: `FEC Statistics · Ch ${fec.channel_id} — Profile ${fec.profile_id}` } }
-                    }
+            const series = data.series || [];
+            let rendered = 0;
+
+            series.forEach(item => {
+                const count = Math.min(item.total.length, item.corrected.length, item.uncorrected.length);
+                if (!count) return;
+                const labels = Array.from({ length: count }, (_, index) => {
+                    const timestamp = item.timestamps[index];
+                    const numeric = Number(timestamp);
+                    return Number.isFinite(numeric) && numeric > 0
+                        ? new Date(numeric * 1000).toLocaleString()
+                        : (timestamp || `Sample ${index + 1}`);
                 });
+
+                const block = document.createElement('div');
+                block.className = 'mb-4';
+                const heading = document.createElement('h6');
+                heading.textContent = `Channel ${item.channelId ?? '?'} — Profile ${item.profileId ?? '?'}`;
+                const chartWrap = document.createElement('div');
+                chartWrap.style.height = '300px';
+                const canvas = document.createElement('canvas');
+                chartWrap.appendChild(canvas);
+                block.append(heading, chartWrap);
+                container.appendChild(block);
+
+                new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: { labels, datasets: [
+                        { label: 'Total codewords', data: item.total.slice(0, count), borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)', borderWidth: 1, pointRadius: count === 1 ? 4 : 2, yAxisID: 'yTotal' },
+                        { label: 'Corrected', data: item.corrected.slice(0, count), borderColor: '#fd7e14', backgroundColor: 'rgba(253,126,20,0.1)', borderWidth: 1, pointRadius: count === 1 ? 4 : 2, yAxisID: 'yErrors' },
+                        { label: 'Uncorrectable', data: item.uncorrected.slice(0, count), borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.1)', borderWidth: 1, pointRadius: count === 1 ? 4 : 2, yAxisID: 'yErrors' },
+                    ]},
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: { title: { display: true, text: `FEC Codewords per Reported Sample · Ch ${item.channelId ?? '?'} · Profile ${item.profileId ?? '?'}` } },
+                        scales: {
+                            x: { title: { display: true, text: 'Capture timestamp' } },
+                            yTotal: { position: 'left', beginAtZero: true, title: { display: true, text: 'Total codewords' } },
+                            yErrors: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'Corrected / uncorrectable' } },
+                        },
+                    },
+                });
+                rendered += 1;
             });
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No aligned FEC codeword samples were returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
-        
+
         drawHistogramCharts(data) {
             const container = document.getElementById('measurement-charts-container');
             const histograms = data.histograms || [];
-            
-            histograms.forEach(hist => {
-                const chartDiv = document.createElement('div');
-                chartDiv.className = 'mb-4';
-                chartDiv.innerHTML = `
-                    <h6>Channel ${hist.channel_id}</h6>
-                    <canvas id="hist-${hist.channel_id}" height="250"></canvas>
-                `;
-                container.appendChild(chartDiv);
-                
-                const canvas = chartDiv.querySelector('canvas');
-                const bins = hist.bins || hist.histogram_data || [];
-                
+            let rendered = 0;
+
+            histograms.forEach(histogram => {
+                const bins = histogram.bins || [];
+                if (!bins.length) return;
+                const labels = bins.map((bin, index) => bin.index ?? bin.power_level ?? bin.bin ?? index);
+                const counts = bins.map(bin => Number(bin.count ?? bin.value ?? 0));
+
+                const block = document.createElement('div');
+                block.className = 'mb-4';
+                const heading = document.createElement('h6');
+                heading.textContent = `Channel ${histogram.channelId ?? '?'} — ${bins.length} histogram bins`;
+                const detail = document.createElement('small');
+                detail.className = 'text-muted d-block mb-2';
+                detail.textContent = `Symmetry: ${histogram.symmetry ?? 'not reported'} · dwell samples: ${(histogram.dwellCounts || []).length}`;
+                const chartWrap = document.createElement('div');
+                chartWrap.style.height = '300px';
+                const canvas = document.createElement('canvas');
+                chartWrap.appendChild(canvas);
+                block.append(heading, detail, chartWrap);
+                container.appendChild(block);
+
                 new Chart(canvas.getContext('2d'), {
                     type: 'bar',
-                    data: {
-                        labels: bins.map(b => b.power_level || b.bin),
-                        datasets: [{
-                            label: 'Count',
-                            data: bins.map(b => b.count || b.value),
-                            backgroundColor: 'rgba(153, 102, 255, 0.5)'
-                        }]
-                    },
+                    data: { labels, datasets: [{
+                        label: 'Hit count', data: counts,
+                        backgroundColor: 'rgba(111,66,193,0.55)', borderColor: '#6f42c1', borderWidth: 1,
+                    }]},
                     options: {
-                        responsive: true,
-                        plugins: { title: { display: true, text: `DS Power Histogram · Ch ${hist.channel_id}` } },
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        plugins: { title: { display: true, text: `DS Histogram · Ch ${histogram.channelId ?? '?'}` }, legend: { display: false } },
                         scales: {
-                            x: { title: { display: true, text: 'Power Level (dBmV)' } },
-                            y: { title: { display: true, text: 'Count' } }
-                        }
-                    }
+                            x: { title: { display: true, text: 'Histogram bin index' }, ticks: { maxTicksLimit: 20 } },
+                            y: { beginAtZero: true, title: { display: true, text: 'Hit count' } },
+                        },
+                    },
                 });
+                rendered += 1;
             });
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No histogram hit-count data was returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
-        
+
         drawConstellationCharts(data) {
             const container = document.getElementById('measurement-charts-container');
             const constellations = data.constellations || [];
-            
-            constellations.forEach(constellation => {
-                const chartDiv = document.createElement('div');
-                chartDiv.className = 'mb-4';
-                chartDiv.innerHTML = `
-                    <h6>Channel ${constellation.channel_id}</h6>
-                    <canvas id="constellation-${constellation.channel_id}" height="400"></canvas>
-                `;
-                container.appendChild(chartDiv);
-                
-                const canvas = chartDiv.querySelector('canvas');
-                const points = constellation.points || [];
-                
+            let rendered = 0;
+
+            const toPoints = pairs => (pairs || []).map(pair => ({
+                x: Number(pair?.[0]), y: Number(pair?.[1]),
+            })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+            constellations.forEach(item => {
+                const soft = toPoints(item.soft);
+                const hard = toPoints(item.hard);
+                if (!soft.length && !hard.length) return;
+
+                const block = document.createElement('div');
+                block.className = 'mb-4';
+                const heading = document.createElement('h6');
+                heading.textContent = `Channel ${item.channelId ?? '?'}${item.modulationOrder ? ` — ${item.modulationOrder}` : ''}`;
+                const chartWrap = document.createElement('div');
+                chartWrap.style.height = '420px';
+                const canvas = document.createElement('canvas');
+                chartWrap.appendChild(canvas);
+                block.append(heading, chartWrap);
+                container.appendChild(block);
+
                 new Chart(canvas.getContext('2d'), {
                     type: 'scatter',
-                    data: {
-                        datasets: [{
-                            label: 'IQ Points',
-                            data: points.map(p => ({ x: p.i || p.real, y: p.q || p.imag })),
-                            backgroundColor: 'rgba(255, 159, 64, 0.5)',
-                            pointRadius: 2
-                        }]
-                    },
+                    data: { datasets: [
+                        ...(soft.length ? [{ label: 'Received symbols (soft)', data: soft, parsing: false, backgroundColor: 'rgba(13,110,253,0.35)', pointRadius: 1.5 }] : []),
+                        ...(hard.length ? [{ label: 'Reference decisions (hard)', data: hard, parsing: false, borderColor: 'rgba(220,53,69,0.7)', backgroundColor: 'rgba(220,53,69,0.15)', pointStyle: 'crossRot', pointRadius: 3 }] : []),
+                    ]},
                     options: {
-                        responsive: true,
-                        plugins: { title: { display: true, text: `IQ Constellation · Ch ${constellation.channel_id}` } },
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        plugins: { title: { display: true, text: `IQ Constellation · Ch ${item.channelId ?? '?'}` } },
                         scales: {
-                            x: { title: { display: true, text: 'I (In-Phase)' } },
-                            y: { title: { display: true, text: 'Q (Quadrature)' } }
-                        }
-                    }
+                            x: { type: 'linear', title: { display: true, text: 'I (in-phase)' } },
+                            y: { type: 'linear', title: { display: true, text: 'Q (quadrature)' } },
+                        },
+                    },
                 });
+                rendered += 1;
             });
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No constellation IQ samples were returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
         
         drawSpectrumFromChannels(data) {
@@ -6834,69 +7020,114 @@ createApp({
             }
         },
         
-        drawRxmerCharts() {
-            if (!this.rxmerData || !this.rxmerData.data || !this.rxmerData.data.rxmer_measurements) {
-                console.warn('RxMER data not available for charting');
-                return;
-            }
-            
-            this.rxmerData.data.rxmer_measurements.forEach(meas => {
-                const canvasId = `rxmer-chart-${meas.channel_id}`;
-                const canvas = document.getElementById(canvasId);
-                
-                if (!canvas) return;
-                
-                // Destroy existing chart if any
-                if (this.charts[canvasId]) {
-                    this.charts[canvasId].destroy();
+        drawRxmerCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const channels = data.channels || [];
+            let rendered = 0;
+
+            channels.forEach(channel => {
+                const count = Math.min(channel.indices.length, channel.magnitudes.length);
+                if (!count) return;
+                const finiteMagnitudes = channel.magnitudes.slice(0, count).filter(Number.isFinite);
+                if (!finiteMagnitudes.length) return;
+
+                const normalStatusEntry = Object.entries(channel.statusMap || {}).find(([name, value]) =>
+                    name.toLowerCase().includes('normal') || String(value).toLowerCase().includes('normal')
+                );
+                const normalStatus = normalStatusEntry
+                    ? (Number.isFinite(Number(normalStatusEntry[1])) ? Number(normalStatusEntry[1]) : Number(normalStatusEntry[0]))
+                    : 2;
+                const finiteSamples = channel.magnitudes.slice(0, count)
+                    .map((value, index) => ({ value, status: channel.statuses[index] }))
+                    .filter(sample => Number.isFinite(sample.value));
+                const normalSamples = channel.statuses.length
+                    ? finiteSamples.filter(sample => sample.status === normalStatus)
+                    : finiteSamples;
+                const values = (normalSamples.length ? normalSamples : finiteSamples).map(sample => sample.value);
+                const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+                const minimum = Math.min(...values);
+                const maximum = Math.max(...values);
+                const deviation = Math.sqrt(values.reduce((sum, value) => sum + ((value - average) ** 2), 0) / values.length);
+
+                const points = [];
+                const flagged = [];
+                for (let index = 0; index < count; index++) {
+                    const point = {
+                        x: Number(channel.indices[index]),
+                        y: Number(channel.magnitudes[index]),
+                        frequency: channel.frequencies[index],
+                        status: channel.statuses[index],
+                    };
+                    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+                    points.push(point);
+                    if (Number.isFinite(point.status) && point.status !== normalStatus) flagged.push(point);
                 }
-                
-                const ctx = canvas.getContext('2d');
-                
-                const labels = meas.subcarrier_samples.map(s => s.subcarrier_index);
-                const data = meas.subcarrier_samples.map(s => s.mer_db);
-                
-                this.charts[canvasId] = new Chart(ctx, {
+
+                const block = document.createElement('div');
+                block.className = 'mb-4 border rounded p-3';
+                const heading = document.createElement('h6');
+                heading.textContent = `DS OFDM RxMER · Channel ${channel.channelId ?? '?'}`;
+                const summary = document.createElement('div');
+                summary.className = 'row g-2 mb-3';
+                [
+                    ['Average MER', average], ['Minimum MER', minimum],
+                    ['Maximum MER', maximum], ['Std deviation', deviation],
+                ].forEach(([label, value]) => {
+                    const column = document.createElement('div');
+                    column.className = 'col-6 col-lg-3';
+                    const card = document.createElement('div');
+                    card.className = 'bg-light rounded p-2 text-center';
+                    const labelNode = document.createElement('small');
+                    labelNode.className = 'text-muted d-block';
+                    labelNode.textContent = label;
+                    const valueNode = document.createElement('strong');
+                    valueNode.textContent = `${Number(value).toFixed(2)} dB`;
+                    card.append(labelNode, valueNode);
+                    column.appendChild(card);
+                    summary.appendChild(column);
+                });
+                const chartWrap = document.createElement('div');
+                chartWrap.style.height = '320px';
+                const canvas = document.createElement('canvas');
+                chartWrap.appendChild(canvas);
+                block.append(heading, summary, chartWrap);
+                container.appendChild(block);
+
+                new Chart(canvas.getContext('2d'), {
                     type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'MER (dB)',
-                            data: data,
-                            borderColor: 'rgb(13, 110, 253)',
-                            backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                            fill: true,
-                            tension: 0.1,
-                            pointRadius: 0
-                        }]
-                    },
+                    data: { datasets: [
+                        {
+                            label: 'RxMER (dB)', data: points, parsing: false,
+                            borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.08)',
+                            borderWidth: 1, pointRadius: 0, fill: true, tension: 0,
+                        },
+                        ...(flagged.length ? [{
+                            label: 'Non-normal carrier', data: flagged, parsing: false,
+                            showLine: false, pointRadius: 3, pointStyle: 'triangle', backgroundColor: '#dc3545',
+                        }] : []),
+                    ]},
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false },
                         plugins: {
-                            legend: {
-                                display: false
-                            }
+                            title: { display: true, text: `RxMER per Subcarrier · Ch ${channel.channelId ?? '?'}` },
+                            tooltip: { callbacks: { afterLabel: context => {
+                                const frequency = Number(context.raw.frequency);
+                                return Number.isFinite(frequency) ? `Frequency: ${(frequency / 1e6).toFixed(3)} MHz` : '';
+                            }}},
                         },
                         scales: {
-                            x: {
-                                title: {
-                                    display: true,
-                                    text: 'Subcarrier Index'
-                                }
-                            },
-                            y: {
-                                title: {
-                                    display: true,
-                                    text: 'MER (dB)'
-                                },
-                                min: 25,
-                                max: 50
-                            }
-                        }
-                    }
+                            x: { type: 'linear', title: { display: true, text: 'Subcarrier index' } },
+                            y: { suggestedMin: 25, suggestedMax: 50, title: { display: true, text: 'MER (dB)' } },
+                        },
+                    },
                 });
+                rendered += 1;
             });
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No RxMER carrier values were returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
         
         drawDsChannelChart() {
@@ -7002,45 +7233,101 @@ createApp({
             });
         },
         
-        drawPreEqCharts() {
-            if (!this.preEqData || !this.preEqData.results) return;
-            
-            Object.entries(this.preEqData.results).forEach(([chId, chData]) => {
-                const canvasId = `preeq-chart-${chId}`;
-                const canvas = document.getElementById(canvasId);
-                if (!canvas) return;
-                
-                if (this.charts[canvasId]) {
-                    this.charts[canvasId].destroy();
-                }
-                
-                const coeffs = chData.forward_coefficients || [];
-                const labels = coeffs.map((_, i) => i);
-                const magnitudes = coeffs.map(c => c.magnitude_power_dB);
-                
-                this.charts[canvasId] = new Chart(canvas.getContext('2d'), {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Tap Magnitude (dB)',
-                            data: magnitudes,
-                            backgroundColor: 'rgba(111, 66, 193, 0.7)',
-                            borderColor: 'rgb(111, 66, 193)',
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false }, title: { display: true, text: `Pre-Equalizer Tap Magnitude · Ch ${chId}` } },
-                        scales: {
-                            x: { title: { display: true, text: 'Tap Index' } },
-                            y: { title: { display: true, text: 'Magnitude (dB)' } }
-                        }
+        drawPreEqCharts(data) {
+            const container = document.getElementById('measurement-charts-container');
+            const channels = data.channels || [];
+            let rendered = 0;
+
+            channels.forEach(channel => {
+                const carrier = channel.carrier_values || {};
+                const frequencies = Array.isArray(carrier.frequency) ? carrier.frequency.map(Number) : [];
+                const magnitudes = Array.isArray(carrier.magnitudes) ? carrier.magnitudes.map(Number) : [];
+                const groupDelayInfo = carrier.group_delay || {};
+                const groupDelay = Array.isArray(groupDelayInfo.magnitude) ? groupDelayInfo.magnitude.map(Number) : [];
+                const groupDelayUnit = groupDelayInfo.group_delay_unit || 'reported unit';
+                const count = Math.min(frequencies.length, magnitudes.length);
+                if (!count) return;
+
+                const responsePoints = [];
+                const delayPoints = [];
+                for (let index = 0; index < count; index++) {
+                    const frequencyMhz = frequencies[index] / 1e6;
+                    const magnitudeDb = 20 * Math.log10(Math.max(Math.abs(magnitudes[index]), 1e-12));
+                    if (Number.isFinite(frequencyMhz) && Number.isFinite(magnitudeDb)) {
+                        responsePoints.push({ x: frequencyMhz, y: magnitudeDb });
                     }
+                    if (index < groupDelay.length && Number.isFinite(groupDelay[index])) {
+                        delayPoints.push({ x: frequencyMhz, y: groupDelay[index] });
+                    }
+                }
+
+                const block = document.createElement('div');
+                block.className = 'mb-4 border rounded p-3';
+                const heading = document.createElement('h6');
+                heading.textContent = `US OFDMA Pre-equalizer Carrier Response · Channel ${channel.channel_id ?? '?'}`;
+                const detail = document.createElement('small');
+                detail.className = 'text-muted d-block mb-2';
+                detail.textContent = `${count} carrier coefficients · frequency-domain magnitude (not time-domain tap magnitude)`;
+                const responseWrap = document.createElement('div');
+                responseWrap.style.height = '300px';
+                const responseCanvas = document.createElement('canvas');
+                responseWrap.appendChild(responseCanvas);
+                block.append(heading, detail, responseWrap);
+
+                let delayCanvas = null;
+                if (delayPoints.length) {
+                    const delayHeading = document.createElement('h6');
+                    delayHeading.className = 'mt-3';
+                    delayHeading.textContent = `Group Delay (${groupDelayUnit})`;
+                    const delayWrap = document.createElement('div');
+                    delayWrap.style.height = '220px';
+                    delayCanvas = document.createElement('canvas');
+                    delayWrap.appendChild(delayCanvas);
+                    block.append(delayHeading, delayWrap);
+                }
+                container.appendChild(block);
+
+                const commonOptions = {
+                    responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                };
+                new Chart(responseCanvas.getContext('2d'), {
+                    type: 'line',
+                    data: { datasets: [{
+                        label: 'Coefficient magnitude (dB)', data: responsePoints,
+                        borderColor: '#6f42c1', backgroundColor: 'rgba(111,66,193,0.08)',
+                        borderWidth: 1, pointRadius: 0, fill: true,
+                    }]},
+                    options: {
+                        ...commonOptions,
+                        plugins: { title: { display: true, text: `US OFDMA Pre-equalizer Frequency Response · Ch ${channel.channel_id ?? '?'}` }, legend: { display: false } },
+                        scales: {
+                            x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' } },
+                            y: { title: { display: true, text: 'Magnitude (dB)' } },
+                        },
+                    },
                 });
+
+                if (delayCanvas) {
+                    new Chart(delayCanvas.getContext('2d'), {
+                        type: 'line',
+                        data: { datasets: [{ label: `Group delay (${groupDelayUnit})`, data: delayPoints, borderColor: '#198754', borderWidth: 1, pointRadius: 0 }] },
+                        options: {
+                            ...commonOptions,
+                            plugins: { title: { display: true, text: `US OFDMA Group Delay · Ch ${channel.channel_id ?? '?'}` }, legend: { display: false } },
+                            scales: {
+                                x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' } },
+                                y: { title: { display: true, text: `Group delay (${groupDelayUnit})` } },
+                            },
+                        },
+                    });
+                }
+                rendered += 1;
             });
+
+            if (!rendered) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>No upstream pre-equalization carrier response was returned. Raw Data remains available for schema inspection.</div>';
+            }
         },
         
         // ============== Formatting Helpers ==============
