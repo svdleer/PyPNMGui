@@ -1232,7 +1232,7 @@
                                                             <span v-else class="text-muted">-</span>
                                                         </td>
                                                         <td>
-                                                            <span v-if="normalizePartialService(ch.is_partial)" class="badge bg-warning text-dark">Partial</span>
+                                                            <span v-if="isDirectionalPartialService(selectedModem, 'downstream')" class="badge bg-warning text-dark">Partial</span>
                                                             <span v-else class="badge bg-success">Full</span>
                                                         </td>
                                                     </tr>
@@ -1383,7 +1383,7 @@
                                                             <span v-else class="text-muted">-</span>
                                                         </td>
                                                         <td>
-                                                            <span v-if="normalizePartialService(ch.is_partial)" class="badge bg-warning text-dark" title="Partial Service">Partial</span>
+                                                            <span v-if="isDirectionalPartialService(selectedModem, 'upstream')" class="badge bg-warning text-dark" title="Partial Service">Partial</span>
                                                             <span v-else class="badge bg-success" title="Active">Active</span>
                                                         </td>
                                                     </tr>

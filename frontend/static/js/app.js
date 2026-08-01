@@ -431,10 +431,7 @@ createApp({
                 return 'red';
             }
             const ofdmChannels = this.channelStats?.downstream?.ofdm?.channels || [];
-            const channelPartial = ofdmChannels.some(ch =>
-                ch.is_partial != null && this.normalizePartialService(ch.is_partial)
-            );
-            if (channelPartial || this.isDirectionalPartialService(this.selectedModem, 'downstream')) {
+            if (this.isDirectionalPartialService(this.selectedModem, 'downstream')) {
                 return 'orange';
             }
             if (ofdmChannels.length > 0) return 'green';
@@ -449,10 +446,7 @@ createApp({
                 return 'red';
             }
             const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
-            const channelPartial = ofdmaChannels.some(ch =>
-                ch.is_partial != null && this.normalizePartialService(ch.is_partial)
-            );
-            if (channelPartial || this.isDirectionalPartialService(this.selectedModem, 'upstream')) {
+            if (this.isDirectionalPartialService(this.selectedModem, 'upstream')) {
                 return 'orange';
             }
             if (ofdmaChannels.length > 0) return 'green';
@@ -1094,7 +1088,7 @@ createApp({
         },
 
         partialServiceDirectionKnown(modem) {
-            return modem?.partial_service_downstream != null && modem?.partial_service_upstream != null;
+            return modem?.partial_service_downstream != null || modem?.partial_service_upstream != null;
         },
 
         isDirectionalPartialService(modem, direction) {
@@ -1105,9 +1099,11 @@ createApp({
         },
 
         isUndirectedPartialService(modem) {
+            if (this.partialServiceDirectionKnown(modem)) return false;
             const state = String(modem?.partial_service_state || '').trim().toLowerCase();
-            return !this.partialServiceDirectionKnown(modem)
-                && ['downstream', 'upstream', 'both'].includes(state);
+            if (['downstream', 'upstream', 'both'].includes(state)) return true;
+            if (['none', 'other'].includes(state)) return false;
+            return this.normalizePartialService(modem?.partial_service);
         },
 
         setModemSort(key) {
@@ -3395,7 +3391,6 @@ createApp({
                         subcarrier_spacing_khz: ch.subcarrier_spacing_khz || (subcarrierSpacing / 1000),
                         profiles: ch.profiles || [],
                         active_profiles: ch.active_profiles || (ch.profiles ? ch.profiles.length : 0),
-                        is_partial: ch.is_partial || false,
                         modulation: ch.modulation || null,
                         type: 'OFDM'
                     });
