@@ -1172,6 +1172,23 @@ def _extract_scqam_channels(data: Dict[str, Any]) -> list:
     return []
 
 
+def _normalize_channel_partial_service(value: Any) -> bool:
+    """Decode a channel partial-service flag without Python truthiness traps."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        # SNMP TruthValue uses true(1), false(2); tolerate conventional 0.
+        return int(value) == 1
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "true(1)", "yes", "on", "1"}:
+        return True
+    if normalized in {"false", "false(2)", "no", "off", "0", "2", ""}:
+        return False
+    return False
+
+
 def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
     """Extract OFDM channel info with profile data, MER, and power."""
     if data.get('status') != 0:
@@ -1255,7 +1272,7 @@ def _extract_ofdm_channels(data: Dict[str, Any]) -> list:
                 'mer_db': round(mer_db, 1) if mer_db else None,
                 'modulation': modulation,
                 'profiles': profiles,
-                'is_partial': bool(is_partial),
+                'is_partial': _normalize_channel_partial_service(is_partial),
                 'ncp_profile': 255 in [p.get('profileId', p) if isinstance(p, dict) else p for p in (profiles_raw if isinstance(profiles_raw, list) else [])],
                 'active_profiles': len(profiles)
             })
@@ -1403,7 +1420,7 @@ def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
                 'tx_power_dbmv': round(tx_power / 10, 1) if tx_power is not None else None,
                 'rx_mer': round(rx_mer / 10, 1) if rx_mer is not None else None,
                 'current_iuc': current_iuc,
-                'is_partial': bool(is_partial),
+                'is_partial': _normalize_channel_partial_service(is_partial),
                 'profiles': profiles,
                 # IUC fields for GUI badge display
                 'active_iucs': profiles,          # profiles list doubles as active IUC list

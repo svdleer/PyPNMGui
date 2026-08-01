@@ -430,27 +430,32 @@ createApp({
             if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
                 return 'red';
             }
-            // Use enriched modem flag if channelStats not yet loaded
             const ofdmChannels = this.channelStats?.downstream?.ofdm?.channels || [];
-            if (ofdmChannels.length > 0) {
-                const hasPartialService = ofdmChannels.some(ch => this.normalizePartialService(ch.is_partial));
-                return hasPartialService ? 'orange' : 'green';
+            const channelPartial = ofdmChannels.some(ch =>
+                ch.is_partial != null && this.normalizePartialService(ch.is_partial)
+            );
+            if (channelPartial || this.isDirectionalPartialService(this.selectedModem, 'downstream')) {
+                return 'orange';
             }
-            // Fall back to modem-level flag from enrichment
+            if (ofdmChannels.length > 0) return 'green';
             if (this.selectedModem?.ofdm_enabled) return 'green';
             if (this.selectedModem?.docsis_version?.includes('3.1') || this.selectedModem?.docsis_version?.includes('4.0')) return 'green';
             return 'red';
         },
 
-        // OFDMA status: 'green' (operational), 'red' (offline/no channels)
+        // OFDMA status: 'green' (operational), 'orange' (partial service), 'red' (offline/no channels)
         ofdmaStatus() {
             if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
                 return 'red';
             }
-            // Use channelStats if loaded
             const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
+            const channelPartial = ofdmaChannels.some(ch =>
+                ch.is_partial != null && this.normalizePartialService(ch.is_partial)
+            );
+            if (channelPartial || this.isDirectionalPartialService(this.selectedModem, 'upstream')) {
+                return 'orange';
+            }
             if (ofdmaChannels.length > 0) return 'green';
-            // Fall back to enriched modem flag
             if (this.selectedModem?.ofdma_enabled) return 'green';
             if (this.selectedModem?.upstream_interface?.toLowerCase()?.includes('ofdma')) return 'green';
             return 'red';
@@ -1089,7 +1094,7 @@ createApp({
         },
 
         partialServiceDirectionKnown(modem) {
-            return modem?.partial_service_downstream != null || modem?.partial_service_upstream != null;
+            return modem?.partial_service_downstream != null && modem?.partial_service_upstream != null;
         },
 
         isDirectionalPartialService(modem, direction) {
@@ -1100,8 +1105,9 @@ createApp({
         },
 
         isUndirectedPartialService(modem) {
+            const state = String(modem?.partial_service_state || '').trim().toLowerCase();
             return !this.partialServiceDirectionKnown(modem)
-                && this.normalizePartialService(modem?.partial_service);
+                && ['downstream', 'upstream', 'both'].includes(state);
         },
 
         setModemSort(key) {
@@ -2191,6 +2197,7 @@ createApp({
                     partial_service: this.normalizePartialService(patch.partial_service ?? m.partial_service),
                     partial_service_downstream: patch.partial_service_downstream ?? m.partial_service_downstream ?? null,
                     partial_service_upstream: patch.partial_service_upstream ?? m.partial_service_upstream ?? null,
+                    partial_service_state: patch.partial_service_state ?? m.partial_service_state ?? null,
                     upstream_interface: patch.upstream_interface || m.upstream_interface,
                     upstream_ifindex: m.upstream_ifindex ?? patch.upstream_ifindex ?? patch.md_if_index ?? null,
                     md_if_index: m.md_if_index ?? patch.md_if_index ?? null,
@@ -2497,6 +2504,7 @@ createApp({
                     partial_service: this.normalizePartialService(m.partial_service),
                     partial_service_downstream: m.partial_service_downstream ?? null,
                     partial_service_upstream: m.partial_service_upstream ?? null,
+                    partial_service_state: m.partial_service_state ?? null,
                     ofdma_enabled: m.ofdma_enabled ?? null,
                     ofdma_ifindex: m.ofdma_ifindex ?? null,
                     ofdm_enabled: m.ofdm_enabled ?? null,
@@ -2804,6 +2812,9 @@ createApp({
                         if (updated.partial_service_upstream != null) {
                             modem.partial_service_upstream = updated.partial_service_upstream;
                         }
+                        if (updated.partial_service_state != null) {
+                            modem.partial_service_state = updated.partial_service_state;
+                        }
                     }
                     // New shallow array ref forces Vue computed props to recompute
                     // and re-render rows with updated vendor/model/docsis fields.
@@ -2815,7 +2826,8 @@ createApp({
                         if (updatedSel) {
                             ['cable_mac','upstream_interface','upstream_ifindex','ofdma_enabled',
                              'ofdma_ifindex','ofdm_enabled','fiber_node','docsis_version','vendor',
-                             'model','software_version','partial_service_downstream','partial_service_upstream'].forEach(k => {
+                             'model','software_version','partial_service_downstream','partial_service_upstream',
+                             'partial_service_state'].forEach(k => {
                                 if (updatedSel[k] != null) this.selectedModem[k] = updatedSel[k];
                             });
                             this.selectedModem.partial_service = this.normalizePartialService(updatedSel.partial_service);
@@ -4773,6 +4785,7 @@ createApp({
                         partial_service: this.normalizePartialService(m.partial_service),
                         partial_service_downstream: m.partial_service_downstream ?? existing.partial_service_downstream ?? null,
                         partial_service_upstream: m.partial_service_upstream ?? existing.partial_service_upstream ?? null,
+                        partial_service_state: m.partial_service_state ?? existing.partial_service_state ?? null,
                         cmts_ip: m.cmts_ip || data.cmts_ip || this.fnScanCmtsIp,
                         linked_node_id: linkedNodeId,
                         lat: m.lat ?? existing.lat ?? null,
