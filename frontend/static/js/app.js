@@ -5388,7 +5388,7 @@ createApp({
             ));
             const skipped = scopedTargets.length - targets.length;
             if (!targets.length) {
-                this.$toast?.warning('No selected modem has a valid current IP address for a new PNN capture');
+                this.$toast?.warning('No selected modem has a valid current IP address for a new PNM capture');
                 return;
             }
             if (skipped) {
@@ -5414,8 +5414,8 @@ createApp({
                 await this.$nextTick();
                 this.renderFiberNodeImpulseCharts();
                 const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems with analysis`;
-                if (result.success) this.$toast?.success(`New PNN capture and impulse analysis complete: ${summary}`);
-                else this.$toast?.warning(`New PNN capture completed with no usable analysis data: ${summary}`);
+                if (result.success) this.$toast?.success(`New PNM capture and impulse analysis complete: ${summary}`);
+                else this.$toast?.warning(`New PNM capture completed with no usable analysis data: ${summary}`);
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 this.fnImpulseResult = { success: false, error: error.message, modems: [] };
@@ -5460,9 +5460,9 @@ createApp({
             if (skipped) {
                 this.$toast?.warning(`Skipped ${skipped} missing-file operation${skipped === 1 ? '' : 's'} without a current valid modem IP address`);
             }
-            if (!(await this.prepareUiTask('Capture Missing PNN Files'))) return;
+            if (!(await this.prepareUiTask('Capture Missing PNM Files'))) return;
 
-            const { token, signal } = this._beginUiTask('Capture Missing PNN Files');
+            const { token, signal } = this._beginUiTask('Capture Missing PNM Files');
             this.fnImpulseRunning = true;
             const baseResult = this.fnImpulseResult;
             const captureResults = [];
