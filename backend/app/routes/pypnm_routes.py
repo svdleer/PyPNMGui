@@ -214,16 +214,19 @@ def get_fibernode_scan_progress():
         if not raw:
             return jsonify({"found": False})
         return jsonify({
-            "found":     True,
-            "step":      int(raw.get('step', 0)),
-            "total":     int(raw.get('total', 0)),
-            "modem":     raw.get('modem', ''),
-            "modem_idx": int(raw.get('modem_idx', 0)),
+            "found":       True,
+            "step":        int(raw.get('step', 0)),
+            "total":       int(raw.get('total', 0)),
+            "modem":       raw.get('modem', ''),
+            "modem_idx":   int(raw.get('modem_idx', 0)),
             "modem_total": int(raw.get('modem_total', 0)),
-            "channel":   raw.get('channel', ''),
-            "action":    raw.get('action', ''),
-            "pct":       float(raw.get('pct', 0)),
-            "done":      raw.get('done', 'false') == 'true',
+            "channel":     raw.get('channel', ''),
+            "action":      raw.get('action', ''),
+            "phase":       raw.get('phase', ''),
+            "phase_current": int(raw.get('phase_current', 0)),
+            "phase_total": int(raw.get('phase_total', 0)),
+            "pct":         float(raw.get('pct', 0)),
+            "done":        raw.get('done', 'false') == 'true',
         })
     except Exception as e:
         return jsonify({"found": False, "error": str(e)})
@@ -2441,17 +2444,34 @@ def get_cmts_us_rxmer_fibernode_scan():
         try:
             import requests as req
             base_url = get_pypnm_api_url()
+            last_progress_pct = 0.0
+
+            def _progress(*, pct: float | None = None, **fields):
+                """Publish monotonic weighted progress for every scan phase."""
+                nonlocal last_progress_pct
+                if pct is not None:
+                    numeric_pct = max(0.0, min(100.0, float(pct)))
+                    last_progress_pct = max(last_progress_pct, numeric_pct)
+                fields['pct'] = round(last_progress_pct, 1)
+                _set_scan_progress(scan_id, **fields)
 
             def _aborted() -> bool:
                 return _is_scan_abort_requested(scan_id)
 
-            def _finish_aborted(action: str, pct: float = 0):
+            def _finish_aborted(action: str, pct: float | None = None):
                 _store_scan_result(scan_id, {
                     "success": False,
                     "error": "Scan aborted by user",
                     "aborted": True,
                 })
-                _set_scan_progress(scan_id, done='true', action=action, pct=pct)
+                _progress(done='true', action=action, pct=pct)
+
+            _progress(
+                pct=2,
+                phase='discovery', phase_current=0, phase_total=len(ofdma_ifindices),
+                step=0, total=0, modem='', modem_idx=0, modem_total=0, channel='',
+                action='Discovering modems…', done='false',
+            )
 
             # Build modem list + per-modem channel mapping.
             mac_info: dict[str, dict] = {}        # mac -> modem dict
@@ -2472,9 +2492,19 @@ def get_cmts_us_rxmer_fibernode_scan():
                     mac_info[mac] = {'cm_mac_address': mac}
                     mac_ifindices[mac] = [primary_ifidx]
                 logger.info(f"FN scan: using {len(mac_info)} pre-selected modems on ifindex {primary_ifidx}")
+                _progress(
+                    pct=7, phase='discovery', phase_current=1, phase_total=1,
+                    action=f'{len(mac_info)} selected modems ready', done='false',
+                )
             else:
                 # No selection — discover modems via SNMP walk.
-                for ifidx in ofdma_ifindices:
+                for channel_idx, ifidx in enumerate(ofdma_ifindices, start=1):
+                    _progress(
+                        pct=2 + (4 * (channel_idx - 1) / max(1, len(ofdma_ifindices))),
+                        phase='discovery', phase_current=channel_idx - 1, phase_total=len(ofdma_ifindices),
+                        channel=str(ifidx), action=f'Discovering modems on channel {channel_idx}/{len(ofdma_ifindices)}…',
+                        done='false',
+                    )
                     modem_resp = req.get(
                         f"{base_url}/pnm/us/ofdma/rxmer/channel/modems",
                         params={
@@ -2500,10 +2530,17 @@ def get_cmts_us_rxmer_fibernode_scan():
 
             modems = list(mac_info.values())
             if not modems:
-                _set_scan_progress(scan_id, done='true', action='No modems found')
+                _progress(
+                    done='true', phase='discovery', phase_current=len(ofdma_ifindices),
+                    phase_total=len(ofdma_ifindices), action='No modems found',
+                )
                 _store_scan_result(scan_id, {"success": False, "error": "No modems found on requested OFDMA channel(s)"})
                 return
 
+            _progress(
+                pct=7, phase='setup', phase_current=0, phase_total=2,
+                modem_total=len(modems), action=f'Preparing {len(modems)} modems…', done='false',
+            )
             if _aborted():
                 _finish_aborted('Aborted before capture start')
                 return
@@ -2511,7 +2548,11 @@ def get_cmts_us_rxmer_fibernode_scan():
             # Total capture steps for progress tracking.
             preeq_modes_tmp = [True, False] if compare_preeq else [preeq_enabled]
             total_steps = sum(len(mac_ifindices.get(m.get('cm_mac_address') or m.get('mac_address',''), [ofdma_ifindex])) * len(preeq_modes_tmp) for m in modems)
-            _set_scan_progress(scan_id, step=0, total=total_steps, modem='', modem_idx=0, modem_total=len(modems), channel='', action='Starting…', pct=0, done='false')
+            _progress(
+                pct=8, phase='setup', phase_current=1, phase_total=2,
+                step=0, total=total_steps, modem='', modem_idx=0, modem_total=len(modems),
+                channel='', action='Cleaning previous capture files…', done='false',
+            )
 
             # Remove stale rxmer files via FTP.
             try:
@@ -2554,6 +2595,11 @@ def get_cmts_us_rxmer_fibernode_scan():
                 logger.info(f"Fiber node scan: bulk dest configured at index {bulk_dest_index} -> {tftp_server}")
             else:
                 logger.warning(f"Fiber node scan: bulk dest setup failed ({_prime_resp.status_code}), using index 1")
+
+            _progress(
+                pct=10, phase='capture', phase_current=0, phase_total=total_steps,
+                step=0, total=total_steps, action='Capture setup complete', done='false',
+            )
 
             def _capture_modem(mac: str, pre_eq: bool, modem_ifindex: int) -> dict | None:
                 """Capture a single modem with the given pre-eq setting on its channel."""
@@ -2624,8 +2670,9 @@ def get_cmts_us_rxmer_fibernode_scan():
             # Capture each modem on every registered channel.
             step_done = 0
             for modem_idx, modem in enumerate(modems):
+                capture_pct = 10 + (65 * step_done / total_steps) if total_steps else 10
                 if _aborted():
-                    _finish_aborted('Aborted during capture loop', round(step_done / total_steps * 100, 1) if total_steps else 0)
+                    _finish_aborted('Aborted during capture loop', capture_pct)
                     return
                 mac = modem.get('cm_mac_address') or modem.get('mac_address')
                 if not mac:
@@ -2636,29 +2683,31 @@ def get_cmts_us_rxmer_fibernode_scan():
 
                 for modem_ifindex in ch_ifindices:
                     for pre_eq in preeq_modes:
+                        capture_pct = 10 + (65 * step_done / total_steps) if total_steps else 10
                         if _aborted():
-                            _finish_aborted('Aborted during modem capture', round(step_done / total_steps * 100, 1) if total_steps else 0)
+                            _finish_aborted('Aborted during modem capture', capture_pct)
                             return
-                        _set_scan_progress(
-                            scan_id,
+                        _progress(
+                            pct=capture_pct,
+                            phase='capture', phase_current=step_done, phase_total=total_steps,
                             step=step_done, total=total_steps,
                             modem=mac_short, modem_idx=modem_idx + 1, modem_total=len(modems),
                             channel=str(modem_ifindex),
                             action=f"{'Pre-EQ ON' if pre_eq else 'Pre-EQ OFF'} — capturing…",
-                            pct=round(step_done / total_steps * 100, 1) if total_steps else 0,
                             done='false',
                         )
                         capture = _capture_modem(mac, pre_eq, modem_ifindex)
                         if capture:
                             captures.append(capture)
                         step_done += 1
-                        _set_scan_progress(
-                            scan_id,
+                        capture_pct = 10 + (65 * step_done / total_steps) if total_steps else 75
+                        _progress(
+                            pct=capture_pct,
+                            phase='capture', phase_current=step_done, phase_total=total_steps,
                             step=step_done, total=total_steps,
                             modem=mac_short, modem_idx=modem_idx + 1, modem_total=len(modems),
                             channel=str(modem_ifindex),
-                            action=f"Done ({step_done}/{total_steps})",
-                            pct=round(step_done / total_steps * 100, 1) if total_steps else 0,
+                            action=f"Capture {step_done}/{total_steps} complete",
                             done='false',
                         )
 
@@ -2668,7 +2717,7 @@ def get_cmts_us_rxmer_fibernode_scan():
             # pool caps total elapsed time to roughly max(individual_call_times).
             if include_group_delay:
                 if _aborted():
-                    _finish_aborted('Aborted before group delay collection', round(step_done / total_steps * 100, 1) if total_steps else 0)
+                    _finish_aborted('Aborted before group delay collection', 75)
                     return
                 gd_macs = [
                     (modem.get('cm_mac_address') or modem.get('mac_address'))
@@ -2694,14 +2743,25 @@ def get_cmts_us_rxmer_fibernode_scan():
                         return mac, None
 
                 from concurrent.futures import ThreadPoolExecutor as _GdPool, as_completed as _as_completed
-                _set_scan_progress(scan_id, action='Collecting group delay…', pct=97, done='false')
+                gd_done = 0
+                _progress(
+                    pct=75, phase='group_delay', phase_current=0, phase_total=len(gd_macs),
+                    action='Collecting group delay…', done='false',
+                )
                 with _GdPool(max_workers=min(len(gd_macs), 10)) as _gd_pool:
                     _gd_futures = {_gd_pool.submit(_fetch_group_delay, m): m for m in gd_macs}
                     for _fut in _as_completed(_gd_futures):
                         if _aborted():
-                            _finish_aborted('Aborted during group delay collection', 97)
+                            _finish_aborted('Aborted during group delay collection')
                             return
                         _mac, _preeq_data = _fut.result()
+                        gd_done += 1
+                        _progress(
+                            pct=75 + (15 * gd_done / max(1, len(gd_macs))),
+                            phase='group_delay', phase_current=gd_done, phase_total=len(gd_macs),
+                            modem=_mac[-8:] if _mac else '',
+                            action=f'Group delay {gd_done}/{len(gd_macs)} complete', done='false',
+                        )
                         if not _preeq_data or not _preeq_data.get('success') or not _preeq_data.get('channels'):
                             continue
                         preeq_full_data[_mac] = {"mac": _mac, "channels": _preeq_data['channels']}
@@ -2726,15 +2786,18 @@ def get_cmts_us_rxmer_fibernode_scan():
                         group_delay_data[_mac] = gd_summary
 
             if not captures:
-                _set_scan_progress(scan_id, done='true', action='No captures completed', pct=0)
+                _progress(done='true', phase='capture', action='No captures completed')
                 _store_scan_result(scan_id, {"success": False, "error": "No captures completed"})
                 return
 
             if _aborted():
-                _finish_aborted('Aborted before analysis', 99)
+                _finish_aborted('Aborted before file retrieval')
                 return
 
-            _set_scan_progress(scan_id, action='Analysing…', pct=99, done='false')
+            _progress(
+                pct=90, phase='retrieval', phase_current=0, phase_total=len(captures),
+                action='Locating capture files…', done='false',
+            )
             # FTP mode: pull capture files not already on the local TFTP mount
             _effective_tftp_path = tftp_path
             if ftp_prefetch_enabled:
@@ -2749,6 +2812,7 @@ def get_cmts_us_rxmer_fibernode_scan():
                     if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
                         continue
                     pending.append(_fn)
+                fetch_total = len(pending)
                 max_fetch_rounds = 8
                 for round_idx in range(max_fetch_rounds):
                     still_pending = []
@@ -2757,6 +2821,12 @@ def get_cmts_us_rxmer_fibernode_scan():
                         if not files:
                             still_pending.append(_prefix)
                     pending = still_pending
+                    retrieved = fetch_total - len(pending)
+                    _progress(
+                        pct=90 + (4 * retrieved / max(1, fetch_total)),
+                        phase='retrieval', phase_current=retrieved, phase_total=fetch_total,
+                        action=f'Retrieved {retrieved}/{fetch_total} capture files', done='false',
+                    )
                     if not still_pending:
                         break
                     if round_idx < max_fetch_rounds - 1:
@@ -2765,8 +2835,20 @@ def get_cmts_us_rxmer_fibernode_scan():
                     logger.warning(f"fiberNode scan: FTP prefetch missing {len(pending)} capture(s) after retries; sample={pending[:3]}")
                 _effective_tftp_path = os.environ.get('PNM_CACHE_DIR', '/app/data/pnm_cache')
             payload = {"captures": captures, "tftp_path": _effective_tftp_path}
-            img_resp  = req.post(f"{base_url}/pnm/us/ofdma/rxmer/fiberNode/plot",    json=payload, timeout=180)
+            _progress(
+                pct=95, phase='analysis', phase_current=0, phase_total=4,
+                action='Generating RxMER plot…', done='false',
+            )
+            img_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/fiberNode/plot", json=payload, timeout=180)
+            _progress(
+                pct=97, phase='analysis', phase_current=1, phase_total=4,
+                action='Analyzing RxMER captures…', done='false',
+            )
             data_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/fiberNode/analyze", json=payload, timeout=60)
+            _progress(
+                pct=98, phase='analysis', phase_current=2, phase_total=4,
+                action='Building scan results…', done='false',
+            )
 
             if img_resp.status_code == 200 and 'image/png' in img_resp.headers.get('Content-Type', ''):
                 _image_data = base64.b64encode(img_resp.content).decode('utf-8')
@@ -2792,6 +2874,10 @@ def get_cmts_us_rxmer_fibernode_scan():
 
             # Plant vs in-home assessment — requires pre-eq taps + subcarrier MER stats
             if preeq_full_data and data_resp.status_code == 200:
+                _progress(
+                    pct=99, phase='analysis', phase_current=3, phase_total=4,
+                    action='Assessing plant and tap distances…', done='false',
+                )
                 try:
                     analyze_json = data_resp.json()
                     sc_stats     = analyze_json.get('subcarrier_stats', [])
@@ -2830,11 +2916,14 @@ def get_cmts_us_rxmer_fibernode_scan():
                     logger.warning(f"plant-assessment skipped: {_pa_err}")
 
             _store_scan_result(scan_id, result)
-            _set_scan_progress(scan_id, done='true', action='Complete', pct=100)
+            _progress(
+                pct=100, done='true', phase='complete', phase_current=4, phase_total=4,
+                action='Complete',
+            )
         except Exception as e:
             logger.error(f"Fiber node scan failed: {e}")
             _store_scan_result(scan_id, {'success': False, 'error': str(e)})
-            _set_scan_progress(scan_id, done='true', action=f'Error: {e}', pct=0)
+            _progress(done='true', phase='error', action=f'Error: {e}')
         finally:
             _set_scan_abort(scan_id, False)
 

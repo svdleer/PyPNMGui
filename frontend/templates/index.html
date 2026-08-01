@@ -20,6 +20,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Leaflet map renderer (pinned, uses OpenStreetMap tiles) -->
+    <link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
     <!-- Custom CSS -->
     <link href="[[ base_path ]]/static/css/style.css" rel="stylesheet">
     <style>
@@ -441,6 +443,25 @@
                                          :style="{width: enrichmentProgress.total > 0 ? ((enrichmentProgress.current / enrichmentProgress.total) * 100) + '%' : '5%'}"></div>
                                 </div>
                             </div>
+                            <div v-if="targetedEnrichmentProgress.total > 0" class="px-3 py-2 border-bottom"
+                                 :class="targetedEnrichmentProgress.status === 'warning' ? 'bg-warning-subtle' : 'bg-info-subtle'">
+                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                                    <small class="fw-semibold" :class="targetedEnrichmentProgress.status === 'warning' ? 'text-warning-emphasis' : 'text-primary'">
+                                        <i class="bi me-1" :class="targetedEnrichmentRunning ? 'bi-arrow-repeat spin' : (targetedEnrichmentProgress.status === 'warning' ? 'bi-exclamation-triangle-fill' : 'bi-check-circle-fill')"></i>
+                                        Enriching {{ targetedEnrichmentProgress.scope }} — vendor / firmware
+                                    </small>
+                                    <small class="fw-semibold">
+                                        {{ targetedEnrichmentProgress.current }}/{{ targetedEnrichmentProgress.total }}
+                                        <span class="badge rounded-pill ms-1" :class="targetedEnrichmentProgress.status === 'warning' ? 'bg-warning text-dark' : 'bg-primary'">{{ targetedEnrichmentPct }}%</span>
+                                    </small>
+                                </div>
+                                <div class="progress rounded-pill mb-1" style="height:6px;">
+                                    <div class="progress-bar rounded-pill"
+                                         :class="targetedEnrichmentRunning ? 'progress-bar-striped progress-bar-animated bg-info' : (targetedEnrichmentProgress.status === 'warning' ? 'bg-warning' : 'bg-success')"
+                                         :style="{width: targetedEnrichmentPct + '%'}"></div>
+                                </div>
+                                <small class="text-muted">{{ targetedEnrichmentProgress.action }}</small>
+                            </div>
                             <div class="card-body p-0">
                                 <div class="table-responsive">
                                     <table class="table table-hover mb-0">
@@ -653,6 +674,44 @@
                     </div>
                 </div>
 
+                <!-- Refresh Info progress remains visible on every modem tab -->
+                <div v-if="loadingSystemInfo" class="card border-primary shadow-sm mb-3">
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                            <span class="small fw-semibold text-primary">
+                                <span class="spinner-border spinner-border-sm me-2" style="width:0.9rem;height:0.9rem;"></span>
+                                Refreshing modem information
+                            </span>
+                            <span class="small text-muted">{{ channelStatsProgress.pct }}% · {{ channelStatsProgress.eta }}</span>
+                        </div>
+                        <div class="progress mb-2" style="height:10px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                                 role="progressbar"
+                                 :style="{ width: Math.min(100, Math.max(0, Number(channelStatsProgress.pct || 0))) + '%' }"
+                                 :aria-valuenow="channelStatsProgress.pct" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-3" style="font-size:0.78rem;">
+                            <span v-for="step in channelStatsProgress.steps" :key="step.id"
+                                  :class="{
+                                      'text-muted': step.status === 'pending',
+                                      'text-primary fw-semibold': step.status === 'active',
+                                      'text-success': step.status === 'done',
+                                      'text-warning': step.status === 'warn',
+                                      'text-danger': step.status === 'error'
+                                  }">
+                                <i class="bi me-1" :class="{
+                                    'bi-circle': step.status === 'pending',
+                                    'bi-arrow-repeat spin': step.status === 'active',
+                                    'bi-check-circle-fill': step.status === 'done',
+                                    'bi-exclamation-circle-fill': step.status === 'warn',
+                                    'bi-x-circle-fill': step.status === 'error'
+                                }"></i>{{ step.label }}
+                            </span>
+                        </div>
+                        <div class="text-muted mt-1" style="font-size:0.72rem;">Estimated while the modem and CMTS requests are running; final step states come from the response.</div>
+                    </div>
+                </div>
+
                 <!-- Navigation Tabs -->
                 <ul class="nav nav-tabs nav-fill mb-4" id="pnmTabs" role="tablist">
                     <li class="nav-item" role="presentation">
@@ -697,46 +756,6 @@
                     
                     <!-- Overview Tab -->
                     <div class="tab-pane fade show active" id="overview" role="tabpanel">
-                        <!-- Loading Overlay -->
-                        <div v-if="loadingSystemInfo" class="position-relative">
-                            <div class="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style="background: rgba(255,255,255,0.95); z-index: 1000; min-height: 300px;">
-                                <div class="text-center" style="min-width: 320px; max-width: 400px;">
-                                    <div class="spinner-border text-primary mb-3" role="status" style="width: 2.5rem; height: 2.5rem;">
-                                        <span class="visually-hidden">Loading...</span>
-                                    </div>
-                                    <p class="text-primary fw-bold mb-3">Loading channel information</p>
-                                    <!-- Progress bar -->
-                                    <div class="progress mb-3" style="height: 6px;">
-                                        <div class="progress-bar bg-primary" role="progressbar"
-                                             :style="{ width: channelStatsProgress.pct + '%' }"
-                                             :aria-valuenow="channelStatsProgress.pct" aria-valuemin="0" aria-valuemax="100">
-                                        </div>
-                                    </div>
-                                    <!-- Phase steps -->
-                                    <div class="text-start px-2">
-                                        <div v-for="step in channelStatsProgress.steps" :key="step.id"
-                                             class="d-flex align-items-center mb-1" style="font-size: 0.82rem;">
-                                            <i v-if="step.status === 'done'"  class="bi bi-check-circle-fill text-success me-2"></i>
-                                            <i v-else-if="step.status === 'warn'"  class="bi bi-exclamation-circle-fill text-warning me-2"></i>
-                                            <i v-else-if="step.status === 'error'" class="bi bi-x-circle-fill text-danger me-2"></i>
-                                            <span v-else-if="step.status === 'active'" class="spinner-border spinner-border-sm text-primary me-2" style="width: 0.85rem; height: 0.85rem;"></span>
-                                            <i v-else class="bi bi-circle text-muted me-2" style="opacity: 0.4;"></i>
-                                            <span :class="{
-                                                    'text-muted':   step.status === 'pending',
-                                                    'fw-semibold':  step.status === 'active',
-                                                    'text-warning': step.status === 'warn',
-                                                    'text-danger':  step.status === 'error'
-                                                  }"
-                                                  v-text="step.label"></span>
-                                        </div>
-                                    </div>
-                                    <!-- ETA -->
-                                    <div class="mt-3">
-                                        <small class="text-muted" v-text="channelStatsProgress.eta"></small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                         <!-- Channel stats error banner -->
                         <div v-if="channelStatsError && !channelStatsLoading" class="alert alert-danger d-flex align-items-start gap-2 mb-3" role="alert">
                             <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
@@ -2835,18 +2854,22 @@
                                                     <i class="bi bi-stop-circle me-1"></i>{{ fnScanAbortRequested ? 'Aborting…' : 'Abort' }}
                                                 </button>
                                             </div>
+                                            <div class="d-flex justify-content-between align-items-center small mb-1">
+                                                <span class="fw-semibold text-primary">{{ fnScanPhaseLabel }}</span>
+                                                <span class="text-muted">{{ fnScanProgressPct.toFixed(1) }}%</span>
+                                            </div>
                                             <div class="progress mb-2" style="height: 14px;">
                                                 <div class="progress-bar progress-bar-striped progress-bar-animated"
-                                                     role="progressbar" :style="{ width: (fnScanProgress?.pct || 0) + '%' }"
-                                                     :aria-valuenow="fnScanProgress?.pct || 0" aria-valuemin="0" aria-valuemax="100">
-                                                    {{ (fnScanProgress?.pct || 0).toFixed(0) }}%
+                                                     role="progressbar" :style="{ width: fnScanProgressPct + '%' }"
+                                                     :aria-valuenow="fnScanProgressPct" aria-valuemin="0" aria-valuemax="100">
+                                                    {{ fnScanProgressPct.toFixed(0) }}%
                                                 </div>
                                             </div>
                                             <div v-if="fnScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
                                                 <span v-if="fnScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fnScanProgress.modem }}</span>
                                                 <span v-if="fnScanProgress.channel"><i class="bi bi-arrow-up-circle me-1"></i>ch {{ fnScanProgress.channel }}</span>
                                                 <span v-if="fnScanProgress.action"><i class="bi bi-activity me-1"></i>{{ fnScanProgress.action }}</span>
-                                                <span v-if="fnScanProgress.total"><i class="bi bi-check2-all me-1"></i>{{ fnScanProgress.step }}/{{ fnScanProgress.total }}</span>
+                                                <span v-if="fnScanProgress.phase_total"><i class="bi bi-check2-all me-1"></i>{{ fnScanProgress.phase_current || 0 }}/{{ fnScanProgress.phase_total }}</span>
                                                 <span v-if="fnScanEtaText"><i class="bi bi-hourglass-split me-1"></i>{{ fnScanEtaText }}</span>
                                             </div>
                                             <div v-else class="small text-muted">Starting scan, please wait…</div>
@@ -2971,6 +2994,13 @@
                                     <i class="bi bi-x-lg"></i>
                                 </button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @click="fnScanSelectAllVisibleModems" :disabled="!fnScanCandidateModems.length">Select visible</button>
+                                <button type="button" class="btn btn-sm btn-outline-success"
+                                        @click="toggleFnSelectedMap"
+                                        :disabled="!fnScanSelectedMappableModems.length"
+                                        :title="fnScanSelectedMissingCoordinatesCount ? fnScanSelectedMissingCoordinatesCount + ' selected modem(s) have no valid coordinates' : 'Plot selected modems on OpenStreetMap'">
+                                    <i class="bi bi-map me-1"></i>{{ fnSelectedMapVisible ? 'Hide map' : 'Map selected' }}
+                                    <span v-if="fnScanSelectedMappableModems.length" class="badge bg-success-subtle text-success-emphasis ms-1">{{ fnScanSelectedMappableModems.length }}</span>
+                                </button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @click="fnScanClearSelectedModems" :disabled="!fnScanSelectedModemCount">Clear</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary"
                                         :disabled="fnScanSelectorRefreshInFlight"
@@ -2980,9 +3010,35 @@
                                 </button>
                             </div>
                         </div>
+                        <div v-if="targetedEnrichmentProgress.total > 0" class="mx-2 mt-2 px-2 py-2 border rounded small"
+                             :class="targetedEnrichmentProgress.status === 'warning' ? 'bg-warning-subtle border-warning' : 'bg-info-subtle border-info'">
+                            <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+                                <span class="fw-semibold">
+                                    <i class="bi me-1" :class="targetedEnrichmentRunning ? 'bi-arrow-repeat spin' : (targetedEnrichmentProgress.status === 'warning' ? 'bi-exclamation-triangle-fill' : 'bi-check-circle-fill')"></i>
+                                    {{ targetedEnrichmentProgress.scope }} identity enrichment
+                                </span>
+                                <span>{{ targetedEnrichmentProgress.current }}/{{ targetedEnrichmentProgress.total }} · {{ targetedEnrichmentPct }}%</span>
+                            </div>
+                            <div class="progress rounded-pill mb-1" style="height:5px;">
+                                <div class="progress-bar rounded-pill"
+                                     :class="targetedEnrichmentRunning ? 'progress-bar-striped progress-bar-animated bg-info' : (targetedEnrichmentProgress.status === 'warning' ? 'bg-warning' : 'bg-success')"
+                                     :style="{width: targetedEnrichmentPct + '%'}"></div>
+                            </div>
+                            <span class="text-muted">{{ targetedEnrichmentProgress.action }}</span>
+                        </div>
                         <div v-if="fnScanSelectedDocsis30Count > 0" class="alert alert-warning mx-2 mt-2 mb-0 py-2 small">
                             <i class="bi bi-exclamation-triangle me-1"></i>
                             {{ fnScanSelectedDocsis30Count }} selected modem(s) are DOCSIS 3.0. Certain OFDM/OFDMA-dependent tests will be skipped for DOCSIS 3.0 modems.
+                        </div>
+                        <div v-if="fnSelectedMapVisible" class="border rounded mx-2 mt-2 overflow-hidden">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 bg-light border-bottom px-2 py-1 small">
+                                <span class="fw-semibold"><i class="bi bi-map me-1 text-success"></i>Selected cable modem locations</span>
+                                <span class="text-muted">
+                                    {{ fnScanSelectedMappableModems.length }}/{{ fnScanSelectedModemCount }} plotted
+                                    <span v-if="fnScanSelectedMissingCoordinatesCount" class="text-warning ms-1">· {{ fnScanSelectedMissingCoordinatesCount }} without coordinates</span>
+                                </span>
+                            </div>
+                            <div ref="fnSelectedModemMap" style="height:360px;min-height:280px;background:#e9ecef;"></div>
                         </div>
                         <div class="card-body p-0 flex-grow-1" style="overflow-y:auto;">
                             <table class="table table-sm table-hover mb-0">
@@ -3701,6 +3757,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Leaflet (pinned) for selected-modem OpenStreetMap plots -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Shared engineering chart theme and PNG export -->
     <script src="[[ base_path ]]/static/js/chart-theme.js?v=3"></script>
     <!-- Application JS with cache busting -->

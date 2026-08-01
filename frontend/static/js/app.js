@@ -214,6 +214,7 @@ createApp({
             fnScanSelectorFilterImpairment: '',
             fnScanTopologyBridgeNodeId: '',
             fnScanExpectedServingGroup: '',
+            fnSelectedMapVisible: false,
 
             // Live Spectrum Analyzer with Buffering
             liveSpectrumEnabled: false,
@@ -241,6 +242,16 @@ createApp({
             enrichModems: true,
             enrichmentProgress: { current: 0, total: 0 },
             isEnriching: false,    // reactive flag — drives progress bar in card header
+            targetedEnrichmentRunning: false,
+            targetedEnrichmentProgress: {
+                current: 0,
+                total: 0,
+                failed: 0,
+                unresolved: 0,
+                scope: '',
+                action: '',
+                status: 'idle',
+            },
             _enrichBatch1Refreshed: false,  // one-time full refresh after first ~200 enriched
             _metadataRefreshTriggeredByCmts: {},
             _forceNextLiveRefreshByCmts: {},
@@ -395,6 +406,13 @@ createApp({
             return Math.max(1, Math.ceil(this.filteredModems.length / this.modemsPerPage));
         },
 
+        targetedEnrichmentPct() {
+            const total = Number(this.targetedEnrichmentProgress?.total || 0);
+            const current = Number(this.targetedEnrichmentProgress?.current || 0);
+            if (!total) return 0;
+            return Math.min(100, Math.max(0, Math.round(current * 100 / total)));
+        },
+
         modemTableShowCmts() {
             // Show CMTS column when any modem has a cmts name (multi-CMTS / topology search)
             return (this.modems || []).some(m => m.cmts && m.cmts !== 'unknown');
@@ -469,17 +487,34 @@ createApp({
             return `Frequency span: ${minF.toFixed(1)} - ${maxF.toFixed(1)} MHz`;
         },
 
+        fnScanProgressPct() {
+            const pct = Number(this.fnScanProgress?.pct || 0);
+            return Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
+        },
+
+        fnScanPhaseLabel() {
+            const labels = {
+                discovery: 'Discovering modems',
+                setup: 'Preparing capture',
+                capture: 'Capturing RxMER',
+                group_delay: 'Collecting group delay',
+                retrieval: 'Retrieving files',
+                analysis: 'Plotting and analysis',
+                complete: 'Complete',
+                error: 'Failed',
+            };
+            return labels[this.fnScanProgress?.phase] || 'Starting scan';
+        },
+
         fnScanEtaText() {
             const p = this.fnScanProgress;
             if (!this.fnScanRunning || !p || !this.fnScanStartedAt) return '';
-            const total = Number(p.total || 0);
-            const step = Number(p.step || 0);
-            if (!total || step <= 0) return '';
-            if (step >= total) return 'Finalizing analysis...';
+            const pct = this.fnScanProgressPct;
+            if (pct >= 99) return 'Finalizing analysis...';
+            if (pct < 3) return 'Estimating time remaining...';
 
             const elapsedSec = (Date.now() - this.fnScanStartedAt) / 1000;
-            const secPerStep = elapsedSec / Math.max(step, 1);
-            const remSec = Math.max(0, Math.round((total - step) * secPerStep));
+            const remSec = Math.max(0, Math.round((elapsedSec / pct) * (100 - pct)));
             const mm = Math.floor(remSec / 60);
             const ss = remSec % 60;
             return `ETA ~${mm}:${String(ss).padStart(2, '0')}`;
@@ -864,6 +899,27 @@ createApp({
             return (this.fnScanSelectedModemMacs || []).length;
         },
 
+        fnScanSelectedMappableModems() {
+            const selected = new Set((this.fnScanSelectedModemMacs || [])
+                .map(mac => this.normalizeMacForMatch(mac))
+                .filter(Boolean));
+            const seen = new Set();
+            const points = [];
+            for (const modem of (this.fnScanBaseModems || [])) {
+                const mac = this.normalizeMacForMatch(modem?.mac_address);
+                if (!mac || !selected.has(mac) || seen.has(mac)) continue;
+                seen.add(mac);
+                const coordinates = this.modemCoordinates(modem);
+                if (!coordinates) continue;
+                points.push({ ...modem, coordinates });
+            }
+            return points;
+        },
+
+        fnScanSelectedMissingCoordinatesCount() {
+            return Math.max(0, this.fnScanSelectedModemCount - this.fnScanSelectedMappableModems.length);
+        },
+
         fnScanScopeLabel() {
             return this.fnScanUseModemSelector ? 'Scope: Selected Modems' : 'Scope: Full FiberNode';
         },
@@ -974,6 +1030,7 @@ createApp({
         });
         this._dsHeatmapResizeObserver?.disconnect();
         this._dsHeatmapResizeObserver = null;
+        this._destroyFnSelectedMap();
         this.charts = {};
     },
 
@@ -981,11 +1038,34 @@ createApp({
         sidebarCollapsed(val) {
             localStorage.setItem('sidebarCollapsed', val);
         },
+        fnScanSelectedMappableModems: {
+            deep: true,
+            handler(points) {
+                if (!this.fnSelectedMapVisible) return;
+                if (!points.length) {
+                    this.fnSelectedMapVisible = false;
+                    this._destroyFnSelectedMap();
+                    return;
+                }
+                this.$nextTick(() => this._scheduleFnSelectedMapRender());
+            },
+        },
         fnScanUseModemSelector(newVal) {
+            if (!newVal) {
+                this.fnSelectedMapVisible = false;
+                this._destroyFnSelectedMap();
+                return;
+            }
             // Keep titlebar filters at explicit user choice; do not auto-apply FN filter.
-            if (newVal && this.fnScanCandidateModems.length === 0) {
+            if (this.fnScanCandidateModems.length === 0) {
                 // Force refresh when enabling selector so list is populated immediately.
                 this.refreshFnSelectorModems(true);
+            }
+        },
+        fnConfigCollapsed(collapsed) {
+            if (collapsed) {
+                this.fnSelectedMapVisible = false;
+                this._destroyFnSelectedMap();
             }
         },
         modemPage(newPage) {
@@ -1015,6 +1095,10 @@ createApp({
             if (oldView && newView !== oldView) {
                 this.previousView = oldView;
                 this.cancelActiveUiTasks({ silent: true, stopBackend: false });
+            }
+            if (oldView === 'fibernode' && newView !== 'fibernode') {
+                this.fnSelectedMapVisible = false;
+                this._destroyFnSelectedMap();
             }
             if (newView === 'fibernode') {
                 // If user enters FiberNode from main menu with a CMTS selected on Home,
@@ -1284,7 +1368,9 @@ createApp({
             const fw = String(modem?.firmware || modem?.software_version || '').trim();
             const vendorMissing = !vendor || vendor === 'unknown' || vendor === 'n/a';
             const firmwareMissing = !fw || fw.toLowerCase() === 'unknown' || fw.toLowerCase() === 'n/a';
-            return vendorMissing && firmwareMissing;
+            // Either missing field needs identity enrichment; requiring both to
+            // be absent left vendor-only and firmware-only gaps untouched.
+            return vendorMissing || firmwareMissing;
         },
 
         _shouldRefreshCacheForMetadata(modems) {
@@ -1312,21 +1398,140 @@ createApp({
             }
         },
 
-        async _requestDeltaEnrichmentForSelectedCmts() {
-            if (!this.selectedCmts || !this.enrichModems) return;
+        queueSelectedModemEnrichment(rows, options = {}) {
+            if (!this.enrichModems || !this.hasCmAgent) return 0;
+            const maxBatch = Math.max(1, Math.min(Number(options.maxBatch || 20), 20));
+            const scope = options.scope || 'selected modems';
+            const fallbackCmts = options.cmts || this.selectedCmts || this.fnScanCmtsIp || '';
+            if (!Array.isArray(this._targetedEnrichmentQueue)) this._targetedEnrichmentQueue = [];
+            if (!(this._targetedEnrichmentKnown instanceof Set)) this._targetedEnrichmentKnown = new Set();
+
+            let added = 0;
+            for (const modem of (Array.isArray(rows) ? rows : [])) {
+                if (added >= maxBatch || !this._isMissingVendorFirmware(modem)) continue;
+                const rawMac = modem?.mac_address || modem?.cm_mac_address || modem?.mac || '';
+                const normalizedMac = this.normalizeMacForMatch(rawMac);
+                if (!normalizedMac || this._targetedEnrichmentKnown.has(normalizedMac)) continue;
+                const cmts = modem?.cmts || modem?.cmts_hostname || modem?.cmts_ip || fallbackCmts;
+                if (!cmts) continue;
+                this._targetedEnrichmentKnown.add(normalizedMac);
+                this._targetedEnrichmentQueue.push({
+                    mac: this.normalizeMacForDisplay(rawMac),
+                    normalizedMac,
+                    cmts,
+                });
+                added += 1;
+            }
+            if (!added) return 0;
+
+            if (!this.targetedEnrichmentRunning) {
+                this.targetedEnrichmentProgress = {
+                    current: 0,
+                    total: added,
+                    failed: 0,
+                    unresolved: 0,
+                    scope,
+                    action: 'Queueing selected modems…',
+                    status: 'running',
+                };
+                this._runTargetedEnrichmentQueue().catch(error => {
+                    console.warn('Targeted enrichment failed:', error?.message || error);
+                });
+            } else {
+                this.targetedEnrichmentProgress = {
+                    ...this.targetedEnrichmentProgress,
+                    total: Number(this.targetedEnrichmentProgress.total || 0) + added,
+                    scope: this.targetedEnrichmentProgress.scope === scope ? scope : 'selected modems',
+                };
+            }
+            return added;
+        },
+
+        async _runTargetedEnrichmentQueue() {
+            if (this.targetedEnrichmentRunning) return;
+            this.targetedEnrichmentRunning = true;
+            const worker = async () => {
+                while (this._targetedEnrichmentQueue?.length) {
+                    const target = this._targetedEnrichmentQueue.shift();
+                    this.targetedEnrichmentProgress = {
+                        ...this.targetedEnrichmentProgress,
+                        action: `Reading vendor and firmware for ${target.mac}…`,
+                    };
+                    const outcome = await this._refreshTargetedModemIdentity(target);
+                    this.targetedEnrichmentProgress = {
+                        ...this.targetedEnrichmentProgress,
+                        current: Number(this.targetedEnrichmentProgress.current || 0) + 1,
+                        failed: Number(this.targetedEnrichmentProgress.failed || 0) + (outcome === 'failed' ? 1 : 0),
+                        unresolved: Number(this.targetedEnrichmentProgress.unresolved || 0) + (outcome === 'unresolved' ? 1 : 0),
+                    };
+                }
+            };
+
+            await Promise.all([worker(), worker()]);
+            this.targetedEnrichmentRunning = false;
+            const issues = Number(this.targetedEnrichmentProgress.failed || 0) + Number(this.targetedEnrichmentProgress.unresolved || 0);
+            this.targetedEnrichmentProgress = {
+                ...this.targetedEnrichmentProgress,
+                action: issues ? `Completed with ${issues} unresolved modem(s)` : 'Vendor and firmware enrichment complete',
+                status: issues ? 'warning' : 'completed',
+            };
+            this._targetedEnrichmentKnown?.clear();
+
+            const completedTotal = this.targetedEnrichmentProgress.total;
+            setTimeout(() => {
+                if (!this.targetedEnrichmentRunning && this.targetedEnrichmentProgress.total === completedTotal) {
+                    this.targetedEnrichmentProgress = {
+                        current: 0, total: 0, failed: 0, unresolved: 0,
+                        scope: '', action: '', status: 'idle',
+                    };
+                }
+            }, 10000);
+        },
+
+        async _refreshTargetedModemIdentity(target) {
             try {
-                const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/enrich/delta`, {
+                const response = await fetch(`${API_BASE}/modems/${encodeURIComponent(target.mac)}/refresh`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ max_batch: 10 }),
+                    body: JSON.stringify({ cmts: target.cmts }),
                 });
-                const data = await response.json();
-                if (data?.status === 'success' && Number(data?.enqueued || 0) > 0) {
-                    this.$toast?.info(`Delta enrichment queued for ${data.enqueued} modem(s).`);
+                const queued = await response.json();
+                if (!response.ok || queued?.status !== 'success' || !queued?.request_id) return 'failed';
+                const requestId = Number(queued.request_id);
+                const terminalStates = new Set(['completed', 'failed', 'timed_out', 'cancelled']);
+
+                for (let attempt = 0; attempt < 180; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    const statusResponse = await fetch(`${API_BASE}/modems/${encodeURIComponent(target.mac)}/refresh/status`);
+                    const statusData = await statusResponse.json();
+                    const refresh = statusData?.refresh || statusData?.request;
+                    if (!statusResponse.ok || !refresh) continue;
+                    if (refresh.id && Number(refresh.id) !== requestId) continue;
+                    const status = String(refresh.status || '').toLowerCase();
+                    if (!terminalStates.has(status)) continue;
+                    if (status !== 'completed') return 'failed';
+
+                    const modemResponse = await fetch(`${API_BASE}/modems/${encodeURIComponent(target.mac)}`);
+                    const modemData = await modemResponse.json();
+                    if (!modemResponse.ok || modemData?.status !== 'success' || !modemData.modem) return 'unresolved';
+                    const updated = modemData.modem;
+                    let mergedTarget = updated;
+                    for (const modem of (this.modems || [])) {
+                        if (this.normalizeMacForMatch(modem?.mac_address) !== target.normalizedMac) continue;
+                        this._mergeModemPreservingCmts(modem, updated);
+                        mergedTarget = modem;
+                    }
+                    if (this.selectedModem && this.normalizeMacForMatch(this.selectedModem.mac_address) === target.normalizedMac) {
+                        this._mergeModemPreservingCmts(this.selectedModem, updated);
+                        mergedTarget = this.selectedModem;
+                    }
+                    this.modems = this.modems.slice();
+                    return this._isMissingVendorFirmware(mergedTarget) ? 'unresolved' : 'completed';
                 }
             } catch (error) {
-                console.warn('Delta enrichment request failed:', error?.message || error);
+                console.warn(`Targeted enrichment failed for ${target.mac}:`, error?.message || error);
             }
+            return 'failed';
         },
 
         async _discoverPreferredOFDMAIfindex(macAddress, cmtsIp) {
@@ -1848,6 +2053,96 @@ createApp({
             if (mapWindow) mapWindow.opener = null;
         },
 
+        _applyFnScanProgress(progress) {
+            if (!progress?.found) return;
+            const incoming = Number(progress.pct || 0);
+            const current = Number(this.fnScanProgress?.pct || 0);
+            const safeIncoming = Number.isFinite(incoming) ? Math.min(100, Math.max(0, incoming)) : current;
+            this.fnScanProgress = {
+                ...this.fnScanProgress,
+                ...progress,
+                pct: Math.max(current, safeIncoming),
+            };
+        },
+
+        _destroyFnSelectedMap() {
+            if (this._fnSelectedMapRenderTimer) {
+                clearTimeout(this._fnSelectedMapRenderTimer);
+                this._fnSelectedMapRenderTimer = null;
+            }
+            if (this._fnSelectedMapInstance) {
+                try { this._fnSelectedMapInstance.remove(); } catch (_) {}
+                this._fnSelectedMapInstance = null;
+            }
+        },
+
+        _scheduleFnSelectedMapRender() {
+            if (!this.fnSelectedMapVisible) return;
+            if (this._fnSelectedMapRenderTimer) clearTimeout(this._fnSelectedMapRenderTimer);
+            this._fnSelectedMapRenderTimer = setTimeout(() => {
+                this._fnSelectedMapRenderTimer = null;
+                this.renderFnSelectedMap();
+            }, 80);
+        },
+
+        toggleFnSelectedMap() {
+            this.fnSelectedMapVisible = !this.fnSelectedMapVisible;
+            if (!this.fnSelectedMapVisible) {
+                this._destroyFnSelectedMap();
+                return;
+            }
+            this.$nextTick(() => this._scheduleFnSelectedMapRender());
+        },
+
+        renderFnSelectedMap() {
+            if (!this.fnSelectedMapVisible) return;
+            const mapElement = this.$refs.fnSelectedModemMap;
+            const points = this.fnScanSelectedMappableModems;
+            if (!mapElement || !points.length) {
+                this._destroyFnSelectedMap();
+                return;
+            }
+            if (!window.L) {
+                this.$toast?.error('The map renderer could not be loaded');
+                this.fnSelectedMapVisible = false;
+                return;
+            }
+
+            this._destroyFnSelectedMap();
+            const map = window.L.map(mapElement, { scrollWheelZoom: true });
+            this._fnSelectedMapInstance = map;
+            window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+            }).addTo(map);
+
+            const bounds = [];
+            for (const modem of points) {
+                const { lat, lon } = modem.coordinates;
+                const marker = window.L.marker([lat, lon]).addTo(map);
+                const popup = document.createElement('div');
+                const title = document.createElement('strong');
+                title.textContent = modem.mac_address || 'Cable modem';
+                popup.appendChild(title);
+                for (const value of [modem.ip_address, modem.fiber_node, modem.address]) {
+                    if (!value) continue;
+                    const line = document.createElement('div');
+                    line.textContent = value;
+                    popup.appendChild(line);
+                }
+                const coordinateLine = document.createElement('div');
+                coordinateLine.className = 'text-muted small';
+                coordinateLine.textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+                popup.appendChild(coordinateLine);
+                marker.bindPopup(popup);
+                bounds.push([lat, lon]);
+            }
+
+            if (bounds.length === 1) map.setView(bounds[0], 17);
+            else map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
+            setTimeout(() => map.invalidateSize(), 0);
+        },
+
         hasActiveUiTask() {
             return !!(
                 this.runningTest ||
@@ -2295,6 +2590,10 @@ createApp({
                         }));
                         await this._enrichTopologySearchModems(500);
                         this._mergeSearchSeed(this.modems);
+                        this.queueSelectedModemEnrichment(this.modems, {
+                            scope: 'topology search results',
+                            maxBatch: 20,
+                        });
                     } else {
                         this.showError('Search failed', data?.message || 'Topology search failed');
                     }
@@ -2321,6 +2620,11 @@ createApp({
                 if (data.status === 'success') {
                     this.modems = data.modems;
                     this._mergeSearchSeed(this.modems);
+                    this.queueSelectedModemEnrichment(this.modems, {
+                        scope: 'cable modem search results',
+                        maxBatch: 20,
+                        cmts: this.selectedCmts,
+                    });
                 } else {
                     this.showError('Search failed', data.message || 'Unknown error');
                 }
@@ -2777,6 +3081,11 @@ createApp({
                 const previewRaw = Array.isArray(preview.modems) ? preview.modems : [];
                 this.modems = previewRaw.map(m => mapModem(m, preview));
                 this._mergeSearchSeed(this.modems);
+                this.queueSelectedModemEnrichment(this.modems, {
+                    scope: 'initial CMTS results',
+                    maxBatch: 20,
+                    cmts: this.selectedCmts || preview.cmts_hostname || preview.cmts_ip,
+                });
                 this.searchPerformed = true;
                 this.liveModemSource = `Live preview from ${preview.cmts_hostname} (${preview.cmts_ip}) - ${this.modems.length}/${preview.count} modems (first page loaded)`;
                 this.liveCachePartial = Boolean(preview?.partial);
@@ -2910,9 +3219,8 @@ createApp({
                     return this._mergeModemPreservingCmts({ ...prev }, row);
                 });
                 this._mergeSearchSeed(mapped);
-                // The full response has already refreshed Redis server-side, so
-                // queue only a small delta batch against the complete inventory.
-                this._requestDeltaEnrichmentForSelectedCmts();
+                // Identity enrichment is selection-scoped and starts from the
+                // initial preview/search rows. Never probe the full CMTS list.
 
                 // Append the complete dataset in chunks to avoid freezing the UI.
                 // Selected interface/FN/Cable-MAC values are display filters only.
@@ -4903,6 +5211,15 @@ createApp({
                 this.$toast?.warning(`Maximum ${maxAllowed} modems can be selected.`);
             }
             this._normalizeFnSelectedMacsToCurrentRows();
+            const addedMacs = new Set(toAdd.map(mac => this.normalizeMacForMatch(mac)).filter(Boolean));
+            const addedRows = (this.fnScanCandidateModems || []).filter(modem => (
+                addedMacs.has(this.normalizeMacForMatch(modem?.mac_address))
+            ));
+            this.queueSelectedModemEnrichment(addedRows, {
+                scope: 'Fiber Node selection',
+                maxBatch: 20,
+                cmts: this.fnScanCmts?.name || this.fnScanCmtsIp,
+            });
         },
 
         fnScanClearSelectedModems() {
@@ -4935,6 +5252,14 @@ createApp({
                     this.$toast?.warning('DOCSIS 3.0 modem — no OFDM/OFDMA. Will be skipped during US RxMER scan.');
                 }
                 current.push(mac);
+                this.queueSelectedModemEnrichment([modem || {
+                    mac_address: mac,
+                    cmts_ip: this.fnScanCmtsIp,
+                }], {
+                    scope: 'Fiber Node selection',
+                    maxBatch: 1,
+                    cmts: this.fnScanCmts?.name || this.fnScanCmtsIp,
+                });
             }
             this.fnScanSelectedModemMacs = current;
             this._normalizeFnSelectedMacsToCurrentRows();
@@ -5616,6 +5941,24 @@ createApp({
                 }
             }
 
+            if (this.fnScanUseModemSelector && this.fnScanSelectedModemMacs.length > 0) {
+                const selectedRowsByMac = new Map((this.fnScanBaseModems || []).map(modem => [
+                    this.normalizeMacForMatch(modem?.mac_address),
+                    modem,
+                ]));
+                const selectedRows = this.fnScanSelectedModemMacs.map(mac => (
+                    selectedRowsByMac.get(this.normalizeMacForMatch(mac)) || {
+                        mac_address: mac,
+                        cmts_ip: this.fnScanCmtsIp,
+                    }
+                ));
+                this.queueSelectedModemEnrichment(selectedRows, {
+                    scope: 'Fiber Node selection',
+                    maxBatch: 20,
+                    cmts: this.fnScanCmts?.name || this.fnScanCmtsIp,
+                });
+            }
+
             if (!(await this.prepareUiTask('Fiber Node Scan'))) return;
             const { token, signal } = this._beginUiTask('Fiber Node Scan');
             // Generate a unique scan ID for progress polling
@@ -5629,17 +5972,12 @@ createApp({
             this.fnScanPlantAssessment = null;
             this.fnScanTapPlotImage   = null;
             this.fnScanTapProfile     = null;
-            this.fnScanProgress = { step: 0, total: 0, modem: '', modem_idx: 0, modem_total: 0, action: 'Starting…', pct: 0, done: false };
+            this.fnScanProgress = {
+                step: 0, total: 0, modem: '', modem_idx: 0, modem_total: 0,
+                phase: 'discovery', phase_current: 0, phase_total: 0,
+                action: 'Starting…', pct: 0, done: false,
+            };
             this.fnConfigCollapsed = false; // keep panel open so progress stays in-page
-
-            // Start polling progress every 2 s
-            this._fnScanPollTimer = setInterval(async () => {
-                try {
-                    const pr = await fetch(`${API_BASE}/pypnm/cmts/ofdma/rxmer/fibernode/scan/progress?scan_id=${scanId}`);
-                    const pd = await pr.json();
-                    if (this._isTaskActive(token) && pd.found) this.fnScanProgress = pd;
-                } catch (_) {}
-            }, 2000);
 
             try {
                 const response = await fetch(`${API_BASE}/pypnm/cmts/ofdma/rxmer/fibernode/scan`, {
@@ -5674,7 +6012,7 @@ createApp({
                             try {
                                 const pr = await fetch(`${API_BASE}/pypnm/cmts/ofdma/rxmer/fibernode/scan/progress?scan_id=${scanId}`);
                                 const pd = await pr.json();
-                                if (this._isTaskActive(token) && pd.found) this.fnScanProgress = pd;
+                                if (this._isTaskActive(token) && pd.found) this._applyFnScanProgress(pd);
                                 if (pd.done || (Date.now() - waitStart) > maxWaitMs) {
                                     clearInterval(this._fnScanWaitTimer);
                                     this._fnScanWaitTimer = null;
@@ -5711,6 +6049,22 @@ createApp({
                     }
                     this.fnScanTapProfile = result.tap_profile || null;
                     this.$nextTick(() => this.renderBulkFiberNodeCharts());
+                    const scanRowsByMac = new Map((this.fnScanBaseModems || []).map(modem => [
+                        this.normalizeMacForMatch(modem?.mac_address),
+                        modem,
+                    ]));
+                    const capturedRows = (result.captures || []).map(capture => {
+                        const rawMac = capture?.cm_mac_address || capture?.mac_address || '';
+                        return scanRowsByMac.get(this.normalizeMacForMatch(rawMac)) || {
+                            mac_address: rawMac,
+                            cmts_ip: this.fnScanCmtsIp,
+                        };
+                    });
+                    this.queueSelectedModemEnrichment(capturedRows, {
+                        scope: 'Fiber Node scan modems',
+                        maxBatch: 20,
+                        cmts: this.fnScanCmts?.name || this.fnScanCmtsIp,
+                    });
                     const s = result.analysis?.summary;
                     this.$toast?.success(`Scanned ${s?.num_modems} modems — ${s?.pct_network_impaired?.toFixed(1)}% network-impaired`);
                 } else {
