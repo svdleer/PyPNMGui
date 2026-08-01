@@ -176,12 +176,17 @@ createApp({
             fnScanMaxModems: 20,
             fnScanRunning: false,
             fnScanResult: null,
-            fnImpulseSource: 'existing',
             fnImpulseDirection: 'both',
             fnImpulseRunning: false,
             fnImpulseJobId: null,
             fnImpulseProgress: null,
             fnImpulseResult: null,
+            fnImpulseChartAvailability: {
+                dsFrequency: false,
+                dsImpulse: false,
+                usFrequency: false,
+                usImpulse: false,
+            },
             fnScanProgress: null,   // { step, total, modem, modem_idx, modem_total, channel, action, pct, done }
             fnScanId: null,         // UUID sent to backend for progress tracking
             fnScanStartedAt: null,
@@ -751,6 +756,28 @@ createApp({
                 if (docsis.includes('3.0') && !docsis.includes('3.1') && !docsis.includes('4.0')) count += 1;
             }
             return count;
+        },
+
+        fnImpulseMissingCapturePlan() {
+            const plan = [];
+            for (const modem of (this.fnImpulseResult?.modems || [])) {
+                const macAddress = String(modem?.mac_address || '').trim();
+                if (!macAddress) continue;
+                for (const state of (modem?.direction_statuses || [])) {
+                    if (state?.status !== 'missing') continue;
+                    if (!['downstream', 'upstream'].includes(state?.direction)) continue;
+                    plan.push({ mac_address: macAddress, direction: state.direction });
+                }
+            }
+            return plan;
+        },
+
+        fnImpulseMissingCounts() {
+            return this.fnImpulseMissingCapturePlan.reduce((counts, item) => {
+                if (item.direction === 'downstream') counts.downstream += 1;
+                if (item.direction === 'upstream') counts.upstream += 1;
+                return counts;
+            }, { downstream: 0, upstream: 0 });
         },
 
         fnScanFilteredModems() {
@@ -4419,8 +4446,10 @@ createApp({
             this.fnScanPlantAssessment = null;
             this.fnScanTapPlotImage   = null;
             this.fnScanTapProfile     = null;
+            this.fnImpulseResult       = null;
             this._destroyChartSurface('surface-bulk-fn-rxmer');
             this._destroyChartSurface('surface-fn-tap-profile');
+            this._destroyFiberNodeImpulseCharts();
             this.fnScanChannels       = [];
             this.fnScanFiberNodes     = [];
             this.fnScanModemSearch    = '';
@@ -4882,97 +4911,296 @@ createApp({
             return 'bg-secondary';
         },
 
-        async runFiberNodeImpulse() {
+        _fiberNodeImpulseScopeTargets() {
             const selected = new Set(
                 (this.fnScanSelectedModemMacs || []).map(mac => this.normalizeMacForMatch(mac)).filter(Boolean)
             );
-            let rows = (this.fnScanFilteredModems || []).filter(modem => {
-                if (!this.fnScanUseModemSelector) return true;
-                return selected.has(this.normalizeMacForMatch(modem.mac_address));
-            });
-            rows = rows.slice(0, Math.max(1, parseInt(this.fnScanMaxModems) || 20));
-            const targets = rows
+            return (this.fnScanFilteredModems || [])
+                .filter(modem => !this.fnScanUseModemSelector || selected.has(this.normalizeMacForMatch(modem.mac_address)))
+                .slice(0, Math.max(1, parseInt(this.fnScanMaxModems) || 20))
                 .filter(modem => modem.mac_address)
-                .map(modem => {
-                    const target = { mac_address: modem.mac_address };
-                    if (this.fnImpulseSource === 'fresh') target.ip_address = modem.ip_address || '';
-                    return target;
-                });
+                .map(modem => ({ mac_address: modem.mac_address }));
+        },
+
+        _destroyFiberNodeImpulseCharts() {
+            [
+                'surface-fn-impulse-ds-frequency',
+                'surface-fn-impulse-ds-time',
+                'surface-fn-impulse-us-frequency',
+                'surface-fn-impulse-us-time',
+            ].forEach(key => this._destroyChartSurface(key));
+            this.fnImpulseChartAvailability = {
+                dsFrequency: false,
+                dsImpulse: false,
+                usFrequency: false,
+                usImpulse: false,
+            };
+        },
+
+        renderFiberNodeImpulseCharts() {
+            this._destroyFiberNodeImpulseCharts();
+            const datasets = {
+                downstream: { frequency: [], impulse: [] },
+                upstream: { frequency: [], impulse: [] },
+            };
+            let seriesIndex = 0;
+            for (const [modemIndex, modem] of (this.fnImpulseResult?.modems || []).entries()) {
+                for (const result of (modem?.results || [])) {
+                    const direction = result?.direction;
+                    if (!datasets[direction]) continue;
+                    const channelId = result?.analysis?.channel_id ?? '?';
+                    const directionLabel = direction === 'downstream' ? 'DS' : 'US';
+                    const label = `Modem ${modemIndex + 1} · ${directionLabel} ch ${channelId}`;
+                    const color = this._seriesColor(seriesIndex++);
+                    const frequency = result?.chart_data?.frequency_response || {};
+                    const impulse = result?.chart_data?.impulse_response || {};
+                    const frequencyPoints = this._numericPoints(frequency.frequency_mhz, frequency.magnitude_db);
+                    const impulsePoints = this._numericPoints(impulse.delay_us, impulse.relative_db);
+                    if (frequencyPoints.length) {
+                        datasets[direction].frequency.push({ label, data: frequencyPoints, borderColor: color });
+                    }
+                    if (impulsePoints.length) {
+                        datasets[direction].impulse.push({ label, data: impulsePoints, borderColor: color });
+                    }
+                }
+            }
+
+            this.fnImpulseChartAvailability = {
+                dsFrequency: datasets.downstream.frequency.length > 0,
+                dsImpulse: datasets.downstream.impulse.length > 0,
+                usFrequency: datasets.upstream.frequency.length > 0,
+                usImpulse: datasets.upstream.impulse.length > 0,
+            };
+            this.$nextTick(() => {
+                this._renderQuantitativeChart(
+                    'surface-fn-impulse-ds-frequency', 'fnImpulseDsFrequencyChart', datasets.downstream.frequency,
+                    { title: 'Downstream Frequency-response Comparison', xTitle: 'Frequency (MHz)', yTitle: 'Magnitude (dB)', maxPoints: 2000 }
+                );
+                this._renderQuantitativeChart(
+                    'surface-fn-impulse-ds-time', 'fnImpulseDsTimeChart', datasets.downstream.impulse,
+                    { title: 'Downstream Detector-windowed Impulse Response', xTitle: 'Delay after main tap (µs)', yTitle: 'Relative magnitude (dB)', maxPoints: 2000 }
+                );
+                this._renderQuantitativeChart(
+                    'surface-fn-impulse-us-frequency', 'fnImpulseUsFrequencyChart', datasets.upstream.frequency,
+                    { title: 'Upstream Frequency-response Comparison', xTitle: 'Frequency (MHz)', yTitle: 'Magnitude (dB)', maxPoints: 2000 }
+                );
+                this._renderQuantitativeChart(
+                    'surface-fn-impulse-us-time', 'fnImpulseUsTimeChart', datasets.upstream.impulse,
+                    { title: 'Upstream Detector-windowed Impulse Response', xTitle: 'Delay after main tap (µs)', yTitle: 'Relative magnitude (dB)', maxPoints: 2000 }
+                );
+            });
+        },
+
+        async _runFiberNodeImpulseJob({ targets, source, direction, token, signal }) {
+            const jobId = crypto.randomUUID ? crypto.randomUUID() : `impulse_${Date.now()}_${direction}`;
+            this.fnImpulseJobId = jobId;
+            this.fnImpulseProgress = {
+                total: targets.length,
+                completed: 0,
+                success_count: 0,
+                pct: 0,
+                action: source === 'existing' ? 'Requesting fresh agent catalog' : `Starting confirmed ${direction} capture`,
+            };
+            const jobPayload = {
+                job_id: jobId,
+                targets,
+                source,
+                direction,
+                topology_date: this.fnScanModemLoadedAt || null,
+                fiber_node: this.fnScanFiberNode || null,
+                concurrency: 3,
+            };
+            if (source === 'fresh') {
+                jobPayload.confirm_fresh_capture = true;
+                jobPayload.community = this.fnScanWriteCommunity || this.snmpCommunityModem;
+            }
+
+            const startResponse = await fetch(`${API_BASE}/pypnm/impulse-response/fibernode/jobs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(jobPayload),
+                signal,
+            });
+            const started = await startResponse.json();
+            if (!startResponse.ok || !started.started) throw new Error(started.error || 'Could not start bulk analysis');
+
+            const deadline = Date.now() + 15 * 60 * 1000;
+            let done = false;
+            while (!done && Date.now() < deadline && this._isTaskActive(token)) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                const progressResponse = await fetch(
+                    `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}`,
+                    { signal }
+                );
+                const progress = await progressResponse.json();
+                if (progress.found) {
+                    this.fnImpulseProgress = progress;
+                    done = !!progress.done;
+                }
+            }
+            if (!this._isTaskActive(token)) return null;
+            if (!done) throw new Error('Bulk impulse-response job timed out');
+
+            const resultResponse = await fetch(
+                `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}/results`,
+                { signal }
+            );
+            const result = await resultResponse.json();
+            if (!resultResponse.ok || !result.found) throw new Error(result.error || 'Bulk result was not found');
+            return result;
+        },
+
+        _mergeFiberNodeImpulseCaptureResults(baseResult, captureResults, captureCounts) {
+            const modems = (baseResult?.modems || []).map(modem => ({
+                ...modem,
+                results: [...(modem.results || [])],
+                direction_statuses: (modem.direction_statuses || []).map(state => ({ ...state })),
+                warnings: [...(modem.warnings || [])],
+            }));
+            const modemByMac = new Map(
+                modems.map(modem => [this.normalizeMacForMatch(modem.mac_address), modem])
+            );
+
+            for (const captureResult of captureResults) {
+                const direction = captureResult?.direction;
+                if (!['downstream', 'upstream'].includes(direction)) continue;
+                for (const captured of (captureResult?.modems || [])) {
+                    const modem = modemByMac.get(this.normalizeMacForMatch(captured?.mac_address));
+                    if (!modem) continue;
+                    const captureState = (captured.direction_statuses || []).find(state => state.direction === direction);
+                    const stateIndex = modem.direction_statuses.findIndex(
+                        state => state.direction === direction && state.status === 'missing'
+                    );
+                    if (stateIndex >= 0 && captureState) modem.direction_statuses.splice(stateIndex, 1, { ...captureState });
+                    const capturedItems = (captured.results || []).filter(item => item.direction === direction);
+                    if (capturedItems.length) {
+                        modem.results = modem.results.filter(item => item.direction !== direction).concat(capturedItems);
+                    }
+                    if (captured.warnings?.length) modem.warnings.push(...captured.warnings);
+                    modem.success = modem.results.length > 0;
+                }
+            }
+
+            const successCount = modems.filter(modem => modem.results.length > 0).length;
+            const completed = Number(baseResult?.completed || baseResult?.total || modems.length);
+            return {
+                ...baseResult,
+                success: successCount > 0,
+                retrieval_mode: 'fresh_agent_catalog_with_confirmed_missing_capture',
+                confirmed_missing_capture: { ...captureCounts },
+                success_count: successCount,
+                failure_count: Math.max(0, completed - successCount),
+                modems,
+            };
+        },
+
+        async runFiberNodeImpulse() {
+            const targets = this._fiberNodeImpulseScopeTargets();
             if (!targets.length) {
                 this.$toast?.warning('No modems are available in the current fiber-node scope');
                 return;
             }
-
-            const fresh = this.fnImpulseSource === 'fresh';
-            if (fresh) {
-                const confirmed = window.confirm(
-                    `Capture fresh PNM coefficients for ${targets.length} modems? This performs bulk SNMP SET/TFTP operations with bounded concurrency. Continue?`
-                );
-                if (!confirmed) return;
-            }
             if (!(await this.prepareUiTask('Fiber Node Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('Fiber Node Impulse Response');
-            const jobId = crypto.randomUUID ? crypto.randomUUID() : `impulse_${Date.now()}`;
             this.fnImpulseRunning = true;
-            this.fnImpulseJobId = jobId;
             this.fnImpulseResult = null;
-            this.fnImpulseProgress = { total: targets.length, completed: 0, success_count: 0, pct: 0, action: 'Starting' };
+            this._destroyFiberNodeImpulseCharts();
 
             try {
-                const jobPayload = {
-                    job_id: jobId,
+                const result = await this._runFiberNodeImpulseJob({
                     targets,
-                    source: this.fnImpulseSource,
+                    source: 'existing',
                     direction: this.fnImpulseDirection,
-                    topology_date: this.fnScanModemLoadedAt || null,
-                    fiber_node: this.fnScanFiberNode || null,
-                    concurrency: 3,
-                    confirm_fresh_capture: fresh,
-                };
-                if (fresh) jobPayload.community = this.fnScanWriteCommunity || this.snmpCommunityModem;
-                const startResponse = await fetch(`${API_BASE}/pypnm/impulse-response/fibernode/jobs`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(jobPayload),
+                    token,
                     signal,
                 });
-                const started = await startResponse.json();
-                if (!startResponse.ok || !started.started) throw new Error(started.error || 'Could not start bulk analysis');
-
-                const deadline = Date.now() + 15 * 60 * 1000;
-                let done = false;
-                while (!done && Date.now() < deadline && this._isTaskActive(token)) {
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    const progressResponse = await fetch(
-                        `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}`,
-                        { signal }
-                    );
-                    const progress = await progressResponse.json();
-                    if (progress.found) {
-                        this.fnImpulseProgress = progress;
-                        done = !!progress.done;
-                    }
-                }
-                if (!this._isTaskActive(token)) return;
-                if (!done) throw new Error('Bulk impulse-response job timed out');
-
-                const resultResponse = await fetch(
-                    `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}/results`,
-                    { signal }
-                );
-                const result = await resultResponse.json();
-                if (!resultResponse.ok || !result.found) throw new Error(result.error || 'Bulk result was not found');
+                if (!result) return;
                 this.fnImpulseResult = result;
+                await this.$nextTick();
+                this.renderFiberNodeImpulseCharts();
                 const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems analyzed`;
-                const mode = result.retrieval_mode === 'fresh_agent_catalog'
-                    ? 'fresh agent catalog/retrieval'
-                    : 'confirmed fresh capture';
-                if (result.success) this.$toast?.success(`Fiber-node impulse response (${mode}): ${summary}`);
-                else this.$toast?.warning(`Fiber-node impulse response (${mode}) completed with no usable data: ${summary}`);
+                if (result.success) this.$toast?.success(`Fiber-node impulse response (fresh agent catalog/retrieval): ${summary}`);
+                else this.$toast?.warning(`Fiber-node impulse response completed with no usable existing files: ${summary}`);
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 this.fnImpulseResult = { success: false, error: error.message, modems: [] };
                 this.$toast?.error(error.message || 'Bulk impulse-response analysis failed');
+            } finally {
+                if (this._isTaskActive(token)) {
+                    this.fnImpulseRunning = false;
+                    this._activeTaskLabel = null;
+                }
+            }
+        },
+
+        async captureMissingFiberNodeImpulse() {
+            const plan = [...this.fnImpulseMissingCapturePlan];
+            if (!plan.length || this.fnImpulseRunning) return;
+
+            const currentByMac = new Map();
+            for (const modem of [...(this.modems || []), ...(this.fnScanFilteredModems || [])]) {
+                const normalized = this.normalizeMacForMatch(modem?.mac_address);
+                if (normalized) currentByMac.set(normalized, modem);
+            }
+            const grouped = { downstream: [], upstream: [] };
+            let skipped = 0;
+            for (const item of plan) {
+                const modem = currentByMac.get(this.normalizeMacForMatch(item.mac_address));
+                const ipAddress = String(modem?.ip_address || '').trim();
+                if (!ipAddress || ipAddress.length > 64 || !/^[0-9a-f:.]+$/i.test(ipAddress)) {
+                    skipped += 1;
+                    continue;
+                }
+                grouped[item.direction].push({ mac_address: item.mac_address, ip_address: ipAddress });
+            }
+            const counts = {
+                downstream: grouped.downstream.length,
+                upstream: grouped.upstream.length,
+            };
+            const operationCount = counts.downstream + counts.upstream;
+            if (!operationCount) {
+                this.$toast?.warning('No missing-file targets currently have a valid modem IP address');
+                return;
+            }
+            if (skipped) {
+                this.$toast?.warning(`Skipped ${skipped} missing-file operation${skipped === 1 ? '' : 's'} without a current valid modem IP address`);
+            }
+            const confirmed = window.confirm(
+                `Capture only genuinely missing PNN files?\n\nDownstream PNN2 operations: ${counts.downstream}\nUpstream PNN6/7 operations: ${counts.upstream}\n\nThis performs ${operationCount} confirmed SNMP SET/TFTP operation${operationCount === 1 ? '' : 's'}. Downstream and upstream jobs run sequentially with concurrency capped at 3.`
+            );
+            if (!confirmed) return;
+            if (!(await this.prepareUiTask('Capture Missing PNN Files'))) return;
+
+            const { token, signal } = this._beginUiTask('Capture Missing PNN Files');
+            this.fnImpulseRunning = true;
+            const baseResult = this.fnImpulseResult;
+            const captureResults = [];
+            try {
+                for (const direction of ['downstream', 'upstream']) {
+                    if (!grouped[direction].length) continue;
+                    const result = await this._runFiberNodeImpulseJob({
+                        targets: grouped[direction],
+                        source: 'fresh',
+                        direction,
+                        token,
+                        signal,
+                    });
+                    if (!result) return;
+                    captureResults.push(result);
+                    this.fnImpulseResult = this._mergeFiberNodeImpulseCaptureResults(
+                        baseResult,
+                        captureResults,
+                        counts
+                    );
+                    await this.$nextTick();
+                    this.renderFiberNodeImpulseCharts();
+                }
+                const captured = captureResults.reduce((total, result) => total + Number(result.success_count || 0), 0);
+                if (captured) this.$toast?.success(`Confirmed missing-file capture analyzed ${captured}/${operationCount} operations`);
+                else this.$toast?.warning('Confirmed missing-file capture completed without analyzable data');
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                this.$toast?.error(error.message || 'Missing-file capture failed');
             } finally {
                 if (this._isTaskActive(token)) {
                     this.fnImpulseRunning = false;

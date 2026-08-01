@@ -4490,18 +4490,142 @@ def _capture_analysis_items(result: dict, direction: str) -> list[dict]:
     ]
 
 
+_BULK_IMPULSE_CHART_MAX_POINTS = 1024
+
+
+def _paired_vector_extrema(
+    x_values: object,
+    y_values: object,
+    *,
+    max_points: int = _BULK_IMPULSE_CHART_MAX_POINTS,
+    max_x: float | None = None,
+) -> tuple[list[tuple[float, float]], int]:
+    """Return finite paired samples with endpoints and per-bucket extrema preserved."""
+    if not isinstance(x_values, list) or not isinstance(y_values, list):
+        return [], 0
+
+    pairs: list[tuple[int, float, float]] = []
+    for index, (raw_x, raw_y) in enumerate(zip(x_values, y_values)):
+        try:
+            x_value = float(raw_x)
+            y_value = float(raw_y)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(x_value) or not math.isfinite(y_value):
+            continue
+        if max_x is not None:
+            boundary_tolerance = max(abs(max_x) * 1e-12, 1e-15)
+            if x_value > max_x + boundary_tolerance:
+                continue
+        pairs.append((index, x_value, y_value))
+
+    source_count = len(pairs)
+    max_points = max(2, int(max_points))
+    if source_count <= max_points:
+        return [(x_value, y_value) for _, x_value, y_value in pairs], source_count
+
+    bucket_count = max(1, (max_points - 2) // 2)
+    bucket_size = math.ceil((source_count - 2) / bucket_count)
+    sampled = [pairs[0]]
+    for start in range(1, source_count - 1, bucket_size):
+        bucket = pairs[start:min(source_count - 1, start + bucket_size)]
+        minimum = min(bucket, key=lambda pair: pair[2])
+        maximum = max(bucket, key=lambda pair: pair[2])
+        if minimum[0] == maximum[0]:
+            sampled.append(minimum)
+        elif minimum[0] < maximum[0]:
+            sampled.extend((minimum, maximum))
+        else:
+            sampled.extend((maximum, minimum))
+    sampled.append(pairs[-1])
+    return [(x_value, y_value) for _, x_value, y_value in sampled[:max_points]], source_count
+
+
+def _linear_carrier_magnitudes(carrier: dict) -> object:
+    """Prefer unambiguous complex amplitudes; fall back to schema-declared linear magnitudes."""
+    complex_values = carrier.get('complex')
+    if not isinstance(complex_values, list):
+        return carrier.get('magnitudes')
+
+    amplitudes: list[float] = []
+    valid_count = 0
+    for value in complex_values:
+        try:
+            if isinstance(value, complex):
+                amplitude = abs(value)
+            elif isinstance(value, (list, tuple)) and len(value) == 2:
+                amplitude = math.hypot(float(value[0]), float(value[1]))
+            else:
+                amplitude = float('nan')
+        except (TypeError, ValueError):
+            amplitude = float('nan')
+        if math.isfinite(amplitude):
+            valid_count += 1
+        amplitudes.append(amplitude)
+    return amplitudes if valid_count else carrier.get('magnitudes')
+
+
 def _compact_bulk_impulse_result(item: dict) -> dict:
-    """Keep bulk manifests bounded; full arrays remain available in single-modem analysis."""
+    """Keep bulk manifests bounded while retaining display-only comparison vectors."""
     analysis = item.get('analysis') or {}
     echo = analysis.get('echo') or {}
     report = dict(echo.get('report') or {})
-    report.pop('time_response', None)
+    time_response = report.pop('time_response', None) or {}
     carrier = analysis.get('carrier_values') or {}
+    chart_data: dict[str, dict] = {}
+
+    frequency_pairs, frequency_source_count = _paired_vector_extrema(
+        carrier.get('frequency'),
+        _linear_carrier_magnitudes(carrier),
+    )
+    frequency_points = [
+        (frequency_hz / 1e6, 20.0 * math.log10(max(magnitude, 1e-12)))
+        for frequency_hz, magnitude in frequency_pairs
+        if magnitude >= 0
+    ]
+    if frequency_points:
+        chart_data['frequency_response'] = {
+            'frequency_mhz': [round(point[0], 6) for point in frequency_points],
+            'magnitude_db': [round(point[1], 4) for point in frequency_points],
+            'source_point_count': frequency_source_count,
+            'display_point_count': len(frequency_points),
+        }
+
+    max_delay_s = report.get('max_delay_s')
+    try:
+        max_delay_s = float(max_delay_s) if max_delay_s is not None else None
+        if max_delay_s is not None and (not math.isfinite(max_delay_s) or max_delay_s < 0):
+            max_delay_s = None
+    except (TypeError, ValueError):
+        max_delay_s = None
+    impulse_pairs, impulse_source_count = _paired_vector_extrema(
+        time_response.get('time_axis_s'),
+        time_response.get('time_response'),
+        max_x=max_delay_s,
+    )
+    positive_amplitudes = [amplitude for _, amplitude in impulse_pairs if amplitude >= 0]
+    reference = max(positive_amplitudes, default=0.0)
+    impulse_points = [
+        (delay_s * 1e6, 20.0 * math.log10(max(amplitude, 1e-12) / max(reference, 1e-12)))
+        for delay_s, amplitude in impulse_pairs
+        if amplitude >= 0
+    ]
+    if impulse_points:
+        chart_data['impulse_response'] = {
+            'delay_us': [round(point[0], 6) for point in impulse_points],
+            'relative_db': [round(point[1], 4) for point in impulse_points],
+            'source_point_count': impulse_source_count,
+            'display_point_count': len(impulse_points),
+            'max_delay_us': round(max_delay_s * 1e6, 6) if max_delay_s is not None else None,
+            'response_kind': report.get('response_kind', 'detector_windowed'),
+        }
+
     return {
         'file_id': item.get('file_id', ''),
         'filename': item.get('filename', ''),
         'pnm_file_type': item.get('pnm_file_type', ''),
         'direction': item.get('direction', ''),
+        'chart_data': chart_data,
         'analysis': {
             'channel_id': analysis.get('channel_id'),
             'subcarrier_spacing': analysis.get('subcarrier_spacing'),

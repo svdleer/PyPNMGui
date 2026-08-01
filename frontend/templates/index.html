@@ -2736,14 +2736,13 @@
                                     </div>
                                     <hr class="my-2">
                                     <div class="form-label small fw-bold mb-1 text-muted">Impulse response bulk</div>
-                                    <div class="row g-1">
-                                        <div class="col-6">
-                                            <select v-model="fnImpulseSource" class="form-select form-select-sm" title="Existing files do not contact modems">
-                                                <option value="existing">Existing files</option>
-                                                <option value="fresh">Fresh capture</option>
-                                            </select>
+                                    <div class="row g-1 align-items-center">
+                                        <div class="col-7">
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle w-100 py-2">
+                                                Existing files
+                                            </span>
                                         </div>
-                                        <div class="col-6">
+                                        <div class="col-5">
                                             <select v-model="fnImpulseDirection" class="form-select form-select-sm">
                                                 <option value="both">DS + US</option>
                                                 <option value="downstream">DS PNN2</option>
@@ -2751,8 +2750,11 @@
                                             </select>
                                         </div>
                                     </div>
-                                    <small :class="fnImpulseSource === 'existing' ? 'text-success' : 'text-warning'">
-                                        {{ fnImpulseSource === 'existing' ? 'No capture or SNMP SET operations' : 'Requires confirmation; concurrency capped at 3' }}
+                                    <small class="text-success d-block mt-1">
+                                        Fresh agent catalog + immediate retrieval every run. No capture or SNMP SET occurs unless missing files are explicitly confirmed afterward.
+                                    </small>
+                                    <small class="text-muted d-block">
+                                        Files deleted by cleanup cannot be retrieved.
                                     </small>
                                 </div>
                             </div>
@@ -2979,14 +2981,52 @@
                         </button>
                     </div>
                     <div v-if="fnImpulseResult" class="card shadow-sm mb-3 border-success">
-                        <div class="card-header bg-success bg-opacity-10 d-flex justify-content-between align-items-center">
+                        <div class="card-header bg-success bg-opacity-10 d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <h6 class="mb-0"><i class="bi bi-bezier2 me-1"></i>Fiber-node Impulse Response</h6>
-                            <span class="badge bg-success">{{ fnImpulseResult.success_count || 0 }}/{{ fnImpulseResult.completed || fnImpulseResult.total || 0 }} modems</span>
+                            <div class="d-flex align-items-center gap-2">
+                                <button v-if="fnImpulseMissingCapturePlan.length" type="button"
+                                        @click="captureMissingFiberNodeImpulse"
+                                        :disabled="fnImpulseRunning"
+                                        class="btn btn-sm btn-warning"
+                                        title="Requires confirmation before SNMP SET and TFTP operations">
+                                    <i class="bi bi-record-circle me-1"></i>
+                                    Capture Missing PNN Files
+                                    (DS {{ fnImpulseMissingCounts.downstream }} / US {{ fnImpulseMissingCounts.upstream }})
+                                </button>
+                                <span class="badge bg-success">{{ fnImpulseResult.success_count || 0 }}/{{ fnImpulseResult.completed || fnImpulseResult.total || 0 }} modems</span>
+                            </div>
                         </div>
                         <div v-if="fnImpulseResult.error" class="card-body text-danger">{{ fnImpulseResult.error }}</div>
-                        <div v-if="!fnImpulseResult.error && fnImpulseResult.retrieval_mode === 'fresh_agent_catalog'" class="card-body py-2 border-bottom small text-muted">
+                        <div v-if="!fnImpulseResult.error && ['fresh_agent_catalog', 'fresh_agent_catalog_with_confirmed_missing_capture'].includes(fnImpulseResult.retrieval_mode)" class="card-body py-2 border-bottom small text-muted">
                             <i class="bi bi-cloud-download me-1"></i>
-                            A new agent catalog was requested for this job and each selected PNN file was retrieved immediately before analysis. No cached file ID, fresh capture, or SNMP SET was used.
+                            A new agent catalog was requested for this job and each selected PNN file was retrieved immediately before analysis. No cached file ID was reused. Deleted files cannot be retrieved.
+                            <span v-if="fnImpulseResult.retrieval_mode === 'fresh_agent_catalog'">No capture or SNMP SET was used.</span>
+                            <span v-else class="text-warning">Only directions reported exactly as missing were captured after explicit confirmation.</span>
+                        </div>
+                        <div v-if="!fnImpulseResult.error" class="card-body border-bottom">
+                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                                <div>
+                                    <h6 class="mb-1">Comparison graphs</h6>
+                                    <small class="text-muted">Display vectors are extrema-preserving and server-decimated; detection and DSP analysis remain full resolution.</small>
+                                </div>
+                            </div>
+                            <div class="row g-3">
+                                <div v-show="fnImpulseChartAvailability.dsFrequency" class="col-xl-6">
+                                    <div style="height:300px"><canvas id="fnImpulseDsFrequencyChart"></canvas></div>
+                                </div>
+                                <div v-show="fnImpulseChartAvailability.dsImpulse" class="col-xl-6">
+                                    <div style="height:300px"><canvas id="fnImpulseDsTimeChart"></canvas></div>
+                                </div>
+                                <div v-show="fnImpulseChartAvailability.usFrequency" class="col-xl-6">
+                                    <div style="height:300px"><canvas id="fnImpulseUsFrequencyChart"></canvas></div>
+                                </div>
+                                <div v-show="fnImpulseChartAvailability.usImpulse" class="col-xl-6">
+                                    <div style="height:300px"><canvas id="fnImpulseUsTimeChart"></canvas></div>
+                                </div>
+                            </div>
+                            <div v-if="!fnImpulseChartAvailability.dsFrequency && !fnImpulseChartAvailability.dsImpulse && !fnImpulseChartAvailability.usFrequency && !fnImpulseChartAvailability.usImpulse" class="text-muted small py-2">
+                                No comparison vectors are available for the analyzed directions.
+                            </div>
                         </div>
                         <div v-if="!fnImpulseResult.error" class="table-responsive">
                             <table class="table table-sm table-bordered align-middle mb-0">
