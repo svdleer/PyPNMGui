@@ -90,7 +90,7 @@ createApp({
             
             // PNM Measurement selection
             pnmMeasurementType: 'rxmer',
-            pnmOutputType: 'archive',  // archive (with plots) or json
+            pnmOutputType: 'json',  // json = interactive Chart.js; archive = Matplotlib/ZIP
             showRawData: false,
             expandedPlotJson: [],
             selectedMeasurementData: null,
@@ -5889,12 +5889,13 @@ createApp({
                         this.preEqData = data;
                     }
                     
-                    // Draw charts if we have JSON data (data.data exists) or for measurements that always have charts
-                    // For spectrum, we rely on matplotlib plots from the backend (in data.plots)
+                    // Interactive mode renders structured JSON with Chart.js;
+                    // archive mode keeps the existing Matplotlib/ZIP workflow.
                     const hasJsonData = data.data || measurementType === 'rxmer' || measurementType === 'us_pre_eq';
                     const hasMatplotlibPlots = data.plots && data.plots.length > 0;
+                    const useInteractiveCharts = this.pnmOutputType === 'json';
                     
-                    if (hasJsonData && !hasMatplotlibPlots) {
+                    if (hasJsonData && (useInteractiveCharts || !hasMatplotlibPlots)) {
                         console.log('Will call drawMeasurementCharts with:', measurementType, data);
                         this.$nextTick(() => {
                             this.drawMeasurementCharts(measurementType, data);
@@ -6125,18 +6126,13 @@ createApp({
             
             console.log('Drawing charts for type:', type, 'with data:', data);
             
-            // Check if we have matplotlib plots - if so, those are shown separately
-            const hasPlots = data.plots && data.plots.length > 0;
-            
-            // For spectrum without matplotlib plots, draw from channel data
-            if (type === 'spectrum' && !hasPlots && data.data) {
-                this.drawSpectrumFromChannels(data.data);
-                return;
-            }
-            
-            // SKIP Chart.js if we have matplotlib plots
-            if (type === 'spectrum' && hasPlots) {
-                console.log('Spectrum uses matplotlib plots - skipping Chart.js');
+            if (type === 'spectrum') {
+                const spectrumData = data.data || data;
+                if (Array.isArray(spectrumData.analysis) && spectrumData.analysis.length) {
+                    this.drawSpectrumCharts(spectrumData);
+                } else {
+                    this.drawSpectrumFromChannels(spectrumData);
+                }
                 return;
             }
             
