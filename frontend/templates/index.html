@@ -1787,13 +1787,29 @@
                                         <div class="row g-2 align-items-end">
                                             <div class="col-md-4">
                                                 <label class="form-label small mb-1">Direction</label>
-                                                <select v-model="impulseDirection" class="form-select form-select-sm">
+                                                <select v-model="impulseDirection" class="form-select form-select-sm"
+                                                        :disabled="runningTest">
                                                     <option value="both">DS + US</option>
                                                     <option value="downstream">Downstream PNM2</option>
                                                     <option value="upstream">Upstream PNM6/7</option>
                                                 </select>
                                             </div>
-                                            <div class="col-md-8">
+                                            <div class="col-md-5">
+                                                <label class="form-label small mb-1">
+                                                    VOP · {{ formatVelocityFactor(impulseVelocityFactor) }}
+                                                </label>
+                                                <input v-model.number="impulseVelocityFactor" type="range"
+                                                       class="form-range" min="0.50" max="1.00" step="0.01"
+                                                       :disabled="runningTest">
+                                            </div>
+                                            <div class="col-md-3">
+                                                <label class="form-label small mb-1">Manual VOP</label>
+                                                <input v-model.number="impulseVelocityFactor" type="number"
+                                                       class="form-control form-control-sm" min="0.50" max="1.00" step="0.01"
+                                                       :disabled="runningTest"
+                                                       @blur="clampVelocityFactor('impulseVelocityFactor')">
+                                            </div>
+                                            <div class="col-12">
                                                 <button @click="runImpulseResponse" class="btn btn-warning btn-sm w-100"
                                                         :disabled="runningTest || !selectedModem?.ip_address">
                                                     <span v-if="activeMeasurement === 'impulse_response'" class="spinner-border spinner-border-sm me-1"></span>
@@ -2742,6 +2758,23 @@
                                         <i class="bi bi-bezier2 me-1"></i>Bulk impulse response
                                     </div>
                                     <span class="badge bg-warning text-dark">New PNM capture every run</span>
+                                </div>
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-8">
+                                        <label class="form-label small mb-1">
+                                            VOP · {{ formatVelocityFactor(fnImpulseVelocityFactor) }}
+                                        </label>
+                                        <input v-model.number="fnImpulseVelocityFactor" type="range"
+                                               class="form-range" min="0.50" max="1.00" step="0.01"
+                                               :disabled="fnImpulseRunning">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small mb-1">Manual VOP</label>
+                                        <input v-model.number="fnImpulseVelocityFactor" type="number"
+                                               class="form-control form-control-sm" min="0.50" max="1.00" step="0.01"
+                                               :disabled="fnImpulseRunning"
+                                               @blur="clampVelocityFactor('fnImpulseVelocityFactor')">
+                                    </div>
                                 </div>
                                 <div class="d-flex gap-2 mt-2">
                                     <button type="button" @click="runFiberNodeImpulse"

@@ -9,6 +9,9 @@ const GUI_LOCALE = window.GUI_LOCALE || 'en-US';
 const GUI_I18N = window.GUI_I18N || {};
 const TOPOLOGY_ENABLED = window.ENABLE_TOPOLOGY || false;
 const CM_MODEM_LIMIT = Number.parseInt(window.CM_MODEM_LIMIT, 10) > 0 ? Number.parseInt(window.CM_MODEM_LIMIT, 10) : 50000;
+const DEFAULT_VELOCITY_FACTOR = 0.87;
+const MIN_VELOCITY_FACTOR = 0.50;
+const MAX_VELOCITY_FACTOR = 1.00;
 
 createApp({
     data() {
@@ -96,6 +99,7 @@ createApp({
             selectedMeasurementData: null,
             impulseSource: 'fresh',
             impulseDirection: 'both',
+            impulseVelocityFactor: DEFAULT_VELOCITY_FACTOR,
             impulseFiles: [],
             impulseFileId: '',
             impulseFilesLoading: false,
@@ -177,6 +181,7 @@ createApp({
             fnScanRunning: false,
             fnScanResult: null,
             fnImpulseDirection: 'both',
+            fnImpulseVelocityFactor: DEFAULT_VELOCITY_FACTOR,
             fnImpulseRunning: false,
             fnImpulseJobId: null,
             fnImpulseProgress: null,
@@ -1167,6 +1172,35 @@ createApp({
 
     methods: {
         // ============== Utility Methods ==============
+
+        _validVelocityFactor(value) {
+            const velocityFactor = Number(value);
+            if (!Number.isFinite(velocityFactor)) return null;
+            if (velocityFactor < MIN_VELOCITY_FACTOR || velocityFactor > MAX_VELOCITY_FACTOR) return null;
+            return velocityFactor;
+        },
+
+        formatVelocityFactor(value) {
+            const velocityFactor = this._validVelocityFactor(value);
+            if (velocityFactor === null) return 'Invalid (0.50–1.00)';
+            return `${velocityFactor.toFixed(2)} / ${(velocityFactor * 100).toFixed(0)}%`;
+        },
+
+        clampVelocityFactor(fieldName) {
+            const parsed = Number(this[fieldName]);
+            const velocityFactor = Number.isFinite(parsed)
+                ? Math.min(MAX_VELOCITY_FACTOR, Math.max(MIN_VELOCITY_FACTOR, parsed))
+                : DEFAULT_VELOCITY_FACTOR;
+            this[fieldName] = Number(velocityFactor.toFixed(2));
+        },
+
+        requireVelocityFactor(value) {
+            const velocityFactor = this._validVelocityFactor(value);
+            if (velocityFactor === null) {
+                this.$toast?.error('VOP must be a finite value from 0.50 through 1.00');
+            }
+            return velocityFactor;
+        },
 
         t(key, fallback = null) {
             if (this.messages && Object.prototype.hasOwnProperty.call(this.messages, key)) {
@@ -5868,7 +5902,7 @@ createApp({
             });
         },
 
-        async _runFiberNodeImpulseJob({ targets, source, direction, token, signal }) {
+        async _runFiberNodeImpulseJob({ targets, source, direction, velocityFactor, token, signal }) {
             const jobId = crypto.randomUUID ? crypto.randomUUID() : `impulse_${Date.now()}_${direction}`;
             this.fnImpulseJobId = jobId;
             this.fnImpulseProgress = {
@@ -5896,6 +5930,7 @@ createApp({
                 targets,
                 source,
                 direction,
+                velocity_factor: velocityFactor,
                 topology_date: this.fnScanModemLoadedAt || null,
                 fiber_node: this.fnScanFiberNode || null,
                 concurrency: 3,
@@ -6039,6 +6074,8 @@ createApp({
             if (skipped) {
                 this.$toast?.warning(`Skipped ${skipped} modem${skipped === 1 ? '' : 's'} without a valid current IP address`);
             }
+            const velocityFactor = this.requireVelocityFactor(this.fnImpulseVelocityFactor);
+            if (velocityFactor === null) return;
 
             if (!(await this.prepareUiTask('Fiber Node Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('Fiber Node Impulse Response');
@@ -6051,6 +6088,7 @@ createApp({
                     targets,
                     source: 'fresh',
                     direction: this.fnImpulseDirection,
+                    velocityFactor,
                     token,
                     signal,
                 });
@@ -6106,6 +6144,8 @@ createApp({
             if (skipped) {
                 this.$toast?.warning(`Skipped ${skipped} missing-file operation${skipped === 1 ? '' : 's'} without a current valid modem IP address`);
             }
+            const velocityFactor = this.requireVelocityFactor(this.fnImpulseVelocityFactor);
+            if (velocityFactor === null) return;
             if (!(await this.prepareUiTask('Capture Missing PNM Files'))) return;
 
             const { token, signal } = this._beginUiTask('Capture Missing PNM Files');
@@ -6119,6 +6159,7 @@ createApp({
                         targets: grouped[direction],
                         source: 'fresh',
                         direction,
+                        velocityFactor,
                         token,
                         signal,
                     });
@@ -7067,6 +7108,8 @@ createApp({
 
         async runImpulseResponse() {
             if (!this.selectedModem?.ip_address) return;
+            const velocityFactor = this.requireVelocityFactor(this.impulseVelocityFactor);
+            if (velocityFactor === null) return;
             if (!(await this.prepareUiTask('OFDM/OFDMA Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('OFDM/OFDMA Impulse Response', 'impulse_response');
             this.impulseSource = 'fresh';
@@ -7075,6 +7118,7 @@ createApp({
                 const payload = {
                     source: 'fresh',
                     direction: this.impulseDirection,
+                    velocity_factor: velocityFactor,
                     modem_ip: this.selectedModem.ip_address,
                     community: this.snmpCommunityModem,
                 };

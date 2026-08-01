@@ -605,7 +605,8 @@ class PyPNMClient:
         tftp_ipv4: str,
         community: str = "private",
         tftp_ipv6: Optional[str] = None,
-        output_type: str = "json"
+        output_type: str = "json",
+        velocity_factor: float = 0.87,
     ) -> Dict[str, Any]:
         """
         Get channel estimation coefficients.
@@ -627,7 +628,8 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "plot": {"ui": {"theme": "light"}},
+                "velocity_factor": velocity_factor,
             }
         }
         
@@ -811,7 +813,8 @@ class PyPNMClient:
         tftp_ipv4: str,
         community: str = "private",
         tftp_ipv6: Optional[str] = None,
-        output_type: str = "json"
+        output_type: str = "json",
+        velocity_factor: float = 0.87,
     ) -> Dict[str, Any]:
         """
         Upstream OFDMA Pre-Equalization capture with plots.
@@ -835,7 +838,8 @@ class PyPNMClient:
             "analysis": {
                 "type": "basic",
                 "output": {"type": output_type},
-                "plot": {"ui": {"theme": "light"}}
+                "plot": {"ui": {"theme": "light"}},
+                "velocity_factor": velocity_factor,
             }
         }
         return self._post("/pnm/us/ofdma/preEqualization/getCapture", payload)

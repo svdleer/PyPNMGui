@@ -37,6 +37,26 @@ logger = logging.getLogger(__name__)
 
 PYPNM_API_TIMEOUT = int(os.environ.get('PYPNM_API_TIMEOUT', '45'))
 PYPNM_OFDMA_TIMEOUT = int(os.environ.get('PYPNM_OFDMA_TIMEOUT', '120'))
+DEFAULT_VELOCITY_FACTOR = 0.87
+MIN_VELOCITY_FACTOR = 0.50
+MAX_VELOCITY_FACTOR = 1.00
+
+
+def _parse_velocity_factor(value: object) -> float:
+    """Validate a user-selected velocity factor without coercing booleans."""
+    if value is None:
+        return DEFAULT_VELOCITY_FACTOR
+    if isinstance(value, bool):
+        raise ValueError('velocity_factor must be a number, not a boolean')
+    try:
+        velocity_factor = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('velocity_factor must be a finite number from 0.50 to 1.00') from exc
+    if not math.isfinite(velocity_factor):
+        raise ValueError('velocity_factor must be a finite number from 0.50 to 1.00')
+    if not MIN_VELOCITY_FACTOR <= velocity_factor <= MAX_VELOCITY_FACTOR:
+        raise ValueError('velocity_factor must be between 0.50 and 1.00 inclusive')
+    return velocity_factor
 
 pypnm_bp = Blueprint('pypnm', __name__, url_prefix='/api/pypnm')
 
@@ -4790,6 +4810,7 @@ def _run_fresh_impulse_capture(
     direction: str,
     community: str,
     tftp_ip: str,
+    velocity_factor: float,
 ) -> dict:
     """Explicit side-effecting path. Existing-file callers never enter here."""
     results: list[dict] = []
@@ -4801,12 +4822,12 @@ def _run_fresh_impulse_capture(
             if item_direction == 'downstream':
                 response = client.get_channel_estimation(
                     mac_address, modem_ip, tftp_ip, community,
-                    tftp_ipv6='::1', output_type='json',
+                    tftp_ipv6='::1', output_type='json', velocity_factor=velocity_factor,
                 )
             else:
                 response = client.get_us_ofdma_pre_equalization(
                     mac_address, modem_ip, tftp_ip, community,
-                    tftp_ipv6='::1', output_type='json',
+                    tftp_ipv6='::1', output_type='json', velocity_factor=velocity_factor,
                 )
         except Exception as exc:
             response = {'success': False, 'error': str(exc)}
@@ -4838,6 +4859,7 @@ def _run_fresh_impulse_capture(
         'source': 'fresh_capture',
         'mac_address': mac_address,
         'direction': direction,
+        'velocity_factor': velocity_factor,
         'results': results,
         'direction_outcomes': outcomes,
         'warnings': warnings,
@@ -4902,6 +4924,10 @@ def analyze_impulse_response(mac_address):
     direction = data.get('direction', 'both')
     if direction not in {'downstream', 'upstream', 'both'}:
         return jsonify({'success': False, 'status': 1, 'error': 'Invalid direction'}), 400
+    try:
+        velocity_factor = _parse_velocity_factor(data.get('velocity_factor'))
+    except ValueError as exc:
+        return jsonify({'success': False, 'status': 1, 'error': str(exc)}), 400
 
     modem_ip = str(data.get('modem_ip') or '').strip()
     if not modem_ip:
@@ -4914,6 +4940,7 @@ def analyze_impulse_response(mac_address):
         direction=direction,
         community=data.get('community') or get_default_write_community(),
         tftp_ip=data.get('tftp_ip') or get_tftp_for_cm(),
+        velocity_factor=velocity_factor,
     )
 
     result['status'] = 0 if result.get('success') else 1
@@ -4931,6 +4958,10 @@ def start_fibernode_impulse_job():
     direction = data.get('direction', 'both')
     if source not in {'existing', 'fresh'} or direction not in {'downstream', 'upstream', 'both'}:
         return jsonify({'success': False, 'error': 'Invalid source or direction'}), 400
+    try:
+        velocity_factor = _parse_velocity_factor(data.get('velocity_factor'))
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
 
     raw_targets = data.get('targets') or []
     targets: list[dict] = []
@@ -4974,6 +5005,7 @@ def start_fibernode_impulse_job():
         total=len(target_snapshot), completed=0, success_count=0, failure_count=0,
         running_count=0, queued_count=len(target_snapshot),
         modem='', action='Queued', state='queued', elapsed_s=0, pct=0, done=False,
+        velocity_factor=velocity_factor,
         **empty_direction_counts,
     )
 
@@ -4991,11 +5023,13 @@ def start_fibernode_impulse_job():
                 direction,
                 community,
                 tftp_ip,
+                velocity_factor,
             )
         return {
             'mac_address': target['mac_address'],
             'ip_address': target['ip_address'] if source == 'fresh' else '',
             'success': bool(response.get('success')),
+            'velocity_factor': velocity_factor if source == 'fresh' else None,
             'retrieval_mode': 'fresh_agent_catalog' if source == 'existing' else 'fresh_capture',
             'direction_statuses': _bulk_impulse_direction_statuses(response, direction, source),
             'results': [_compact_bulk_impulse_result(item) for item in (response.get('results') or [])],
@@ -5079,6 +5113,7 @@ def start_fibernode_impulse_job():
                 'job_id': job_id,
                 'source': source,
                 'direction': direction,
+                'velocity_factor': velocity_factor,
                 'retrieval_mode': 'fresh_agent_catalog' if source == 'existing' else 'fresh_capture',
                 'topology_date': topology_date,
                 'fiber_node': fiber_node,
@@ -5116,6 +5151,7 @@ def start_fibernode_impulse_job():
             _store_impulse_job_result(job_id, {
                 'success': False,
                 'job_id': job_id,
+                'velocity_factor': velocity_factor,
                 'error': str(exc),
                 'total': total,
                 'completed': completed,
@@ -5141,6 +5177,7 @@ def start_fibernode_impulse_job():
         'job_id': job_id,
         'source': source,
         'direction': direction,
+        'velocity_factor': velocity_factor,
         'target_count': len(target_snapshot),
         'concurrency': concurrency,
         'timeout_budget_s': timeout_budget_s,
@@ -5181,6 +5218,7 @@ def get_fibernode_impulse_job(job_id):
         'modem': progress.get('modem', ''),
         'action': progress.get('action', ''),
         'state': progress.get('state', 'running'),
+        'velocity_factor': float(progress.get('velocity_factor', DEFAULT_VELOCITY_FACTOR)),
         'elapsed_s': float(progress.get('elapsed_s', 0)),
         'pct': float(progress.get('pct', 0)),
         'done': _as_bool(progress.get('done', False)),
