@@ -492,11 +492,11 @@
                                                           class="badge ms-1" 
                                                           :class="{
                                                               'bg-secondary': modem.ofdm_enabled == null,
-                                                              'bg-success': modem.ofdm_enabled === true && (modem.status === 'operational' || modem.status === 'online') && !modem.partial_service,
-                                                              'bg-warning text-dark': modem.ofdm_enabled === true && modem.partial_service,
+                                                              'bg-success': modem.ofdm_enabled === true && (modem.status === 'operational' || modem.status === 'online') && !isDirectionalPartialService(modem, 'downstream'),
+                                                              'bg-warning text-dark': modem.ofdm_enabled === true && isDirectionalPartialService(modem, 'downstream'),
                                                               'bg-danger': modem.ofdm_enabled === false
                                                           }"
-                                                          :title="modem.ofdm_enabled == null ? 'OFDM (enriching...)' : (modem.partial_service ? 'OFDM Partial Service' : ((modem.status === 'operational' || modem.status === 'online') ? 'OFDM Operational' : 'OFDM ' + modem.status))">
+                                                          :title="modem.ofdm_enabled == null ? 'OFDM (enriching...)' : (isDirectionalPartialService(modem, 'downstream') ? 'OFDM Partial Service' : ((modem.status === 'operational' || modem.status === 'online') ? 'OFDM Operational' : 'OFDM ' + modem.status))">
                                                         <i class="bi bi-arrow-down"></i>
                                                     </span>
                                                     <!-- OFDMA Status Box (Upstream) - Only for DOCSIS 3.1+ -->
@@ -504,12 +504,16 @@
                                                           class="badge ms-1" 
                                                           :class="{
                                                               'bg-secondary': modem.ofdma_enabled == null,
-                                                              'bg-success': modem.ofdma_enabled === true && !modem.partial_service && modem.status !== 'offline',
-                                                              'bg-warning text-dark': modem.ofdma_enabled === true && modem.partial_service && modem.status !== 'offline',
+                                                              'bg-success': modem.ofdma_enabled === true && !isDirectionalPartialService(modem, 'upstream') && modem.status !== 'offline',
+                                                              'bg-warning text-dark': modem.ofdma_enabled === true && isDirectionalPartialService(modem, 'upstream') && modem.status !== 'offline',
                                                               'bg-danger': modem.ofdma_enabled === false && modem.status !== 'offline'
                                                           }"
-                                                          :title="modem.ofdma_enabled == null ? 'OFDMA (enriching...)' : (modem.ofdma_enabled === false ? 'OFDMA Inactive' : (modem.partial_service ? 'OFDMA Partial Service' : 'OFDMA Active'))">
+                                                          :title="modem.ofdma_enabled == null ? 'OFDMA (enriching...)' : (modem.ofdma_enabled === false ? 'OFDMA Inactive' : (isDirectionalPartialService(modem, 'upstream') ? 'OFDMA Partial Service' : 'OFDMA Active'))">
                                                         <i class="bi bi-arrow-up"></i>
+                                                    </span>
+                                                    <span v-if="isUndirectedPartialService(modem)" class="badge bg-warning text-dark ms-1"
+                                                          title="CMTS reports modem partial service; downstream/upstream direction is unavailable">
+                                                        PS
                                                     </span>
                                                 </td>
                                                 <td>
@@ -2958,16 +2962,18 @@
                                             </span>
                                             <span v-if="!m.docsis_version?.includes('3.0')" class="badge ms-1" :class="{
                                                 'bg-secondary': m.ofdm_enabled == null,
-                                                'bg-success': m.ofdm_enabled === true && !m.partial_service,
-                                                'bg-warning text-dark': m.ofdm_enabled === true && m.partial_service,
+                                                'bg-success': m.ofdm_enabled === true && !isDirectionalPartialService(m, 'downstream'),
+                                                'bg-warning text-dark': m.ofdm_enabled === true && isDirectionalPartialService(m, 'downstream'),
                                                 'bg-danger': m.ofdm_enabled === false
-                                            }" title="DS OFDM status"><i class="bi bi-arrow-down"></i></span>
+                                            }" :title="isDirectionalPartialService(m, 'downstream') ? 'DS OFDM partial service' : 'DS OFDM status'"><i class="bi bi-arrow-down"></i></span>
                                             <span v-if="!m.docsis_version?.includes('3.0')" class="badge ms-1" :class="{
                                                 'bg-secondary': m.ofdma_enabled == null,
-                                                'bg-success': m.ofdma_enabled === true && !m.partial_service,
-                                                'bg-warning text-dark': m.ofdma_enabled === true && m.partial_service,
+                                                'bg-success': m.ofdma_enabled === true && !isDirectionalPartialService(m, 'upstream'),
+                                                'bg-warning text-dark': m.ofdma_enabled === true && isDirectionalPartialService(m, 'upstream'),
                                                 'bg-danger': m.ofdma_enabled === false
-                                            }" title="US OFDMA status"><i class="bi bi-arrow-up"></i></span>
+                                            }" :title="isDirectionalPartialService(m, 'upstream') ? 'US OFDMA partial service' : 'US OFDMA status'"><i class="bi bi-arrow-up"></i></span>
+                                            <span v-if="isUndirectedPartialService(m)" class="badge bg-warning text-dark ms-1"
+                                                  title="CMTS reports modem partial service; downstream/upstream direction is unavailable">PS</span>
                                         </td>
                                         <td class="small text-muted text-center">{{ (m.cable_mac || '').replace(/^cable-mac\s*/i,'') }}</td>
                                         <td class="small text-muted text-center">{{ m.fiber_node }}</td>
