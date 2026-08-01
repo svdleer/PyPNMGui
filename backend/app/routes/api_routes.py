@@ -22,8 +22,8 @@ def _viewer_readonly():
         return jsonify({'status': 'error', 'message': 'Viewer role is read-only'}), 403
 
 # ── Background modem-load job store ─────────────────────────────────────────
-# job_id -> {status, modems, count, enriched, enriching, enrichment_progress,
-#             error, cmts_ip, cmts_hostname, agent_id, started_at}
+# job_id -> {status, modems, count, enriched, capability_enriched, enriching,
+#             enrichment_progress, error, cmts_ip, cmts_hostname, agent_id, started_at}
 _modem_jobs: dict = {}
 _modem_jobs_lock = threading.Lock()
 
@@ -50,6 +50,7 @@ def _run_modem_job(job_id: str, cmts_ip: str, cmts_name: str,
                     'modems': modems,
                     'count': len(modems),
                     'enriched': result.get('enriched', False),
+                    'capability_enriched': result.get('capability_enriched') is True,
                     'enriching': result.get('enriching', False),
                     'enrichment_progress': result.get('enrichment_progress') or result.get('enrich_progress'),
                     'agent_id': result.get('agent_id', 'agent'),
@@ -115,6 +116,7 @@ def _redis_cache_modems_for_key(
     modems: list[dict],
     requested_limit: int | None = None,
     *,
+    capability_enriched: bool = False,
     complete: bool = False,
     truncated: bool = False,
     collected_at=None,
@@ -133,6 +135,7 @@ def _redis_cache_modems_for_key(
             "modems": modems,
             "timestamp": int(time.time()),
             "source": "pypnm-inventory",
+            "capability_enriched": capability_enriched is True,
             "complete": complete is True,
             "truncated": truncated is True,
             "collected_at": collected_at,
@@ -153,6 +156,7 @@ def _backfill_redis_from_inventory(
     modems: list[dict],
     requested_limit: int | None = None,
     *,
+    capability_enriched: bool = False,
     complete: bool = False,
     truncated: bool = False,
     collected_at=None,
@@ -200,6 +204,7 @@ def _backfill_redis_from_inventory(
             group_name,
             rows,
             requested_limit=requested_limit,
+            capability_enriched=capability_enriched,
             complete=complete,
             truncated=truncated,
             collected_at=group_collected_at,
@@ -216,6 +221,7 @@ def _backfill_redis_from_inventory(
                 group_name,
                 rows,
                 requested_limit=requested_limit,
+                capability_enriched=capability_enriched,
                 complete=complete,
                 truncated=truncated,
                 collected_at=group_collected_at,
@@ -874,6 +880,7 @@ def get_modems():
                 _backfill_redis_from_inventory(
                     db_modems,
                     requested_limit=db_resp.get('requested_limit') or default_limit,
+                    capability_enriched=db_resp.get('capability_enriched') is True,
                     complete=(
                         db_resp.get('complete') is True
                         and db_resp.get('truncated') is not True
@@ -1279,6 +1286,7 @@ def get_cmts_modems(cmts_name):
                         "modems": response_modems,
                         "count": cached_count,
                         "enriched": cache_is_enriched,
+                        "capability_enriched": data.get('capability_enriched') is True,
                         "cached": True,
                         "enriching": bool(cache_needs_enrich),
                         "complete": cached_complete,
@@ -1331,6 +1339,7 @@ def get_cmts_modems(cmts_name):
                         _backfill_redis_from_inventory(
                             inventory_modems,
                             requested_limit=inventory_resp.get('requested_limit') or limit,
+                            capability_enriched=inventory_resp.get('capability_enriched') is True,
                             complete=inventory_complete,
                             truncated=inventory_resp.get('truncated') is True,
                             collected_at=inventory_resp.get('collected_at'),
@@ -1349,6 +1358,7 @@ def get_cmts_modems(cmts_name):
                             "modems": inventory_modems,
                             "count": len(inventory_modems),
                             "enriched": True,
+                            "capability_enriched": inventory_resp.get('capability_enriched') is True,
                             "cached": True,
                             "enriching": False,
                             "source": inventory_resp.get('source') or "pypnm-inventory",
@@ -1399,6 +1409,7 @@ def get_cmts_modems(cmts_name):
                         "timestamp": int(time.time()),
                         "enriched": is_enriched,
                         "enriching": is_enriching,
+                        "capability_enriched": result.get('capability_enriched') is True,
                         "source": "pypnm-live" if result.get('source') == 'snmp-live' else (result.get('source') or 'pypnm-inventory'),
                         "complete": result.get('complete') is True,
                         "truncated": result.get('truncated') is True,
@@ -1433,6 +1444,7 @@ def get_cmts_modems(cmts_name):
                 "modems": modems,
                 "count": len(modems),
                 "enriched": result.get('enriched', False),
+                "capability_enriched": result.get('capability_enriched') is True,
                 "cached": result.get('cached', False),
                 "enriching": result.get('enriching', False),
                 "source": result.get('source'),
@@ -1610,6 +1622,7 @@ def refresh_cmts_modem_cache(cmts_name):
         _backfill_redis_from_inventory(
             inv_modems,
             requested_limit=inv_resp.get('requested_limit') or default_limit,
+            capability_enriched=inv_resp.get('capability_enriched') is True,
             complete=(
                 inv_resp.get('complete') is True
                 and inv_resp.get('truncated') is not True

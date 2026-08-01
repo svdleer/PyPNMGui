@@ -2666,6 +2666,8 @@ createApp({
                         docsis_version: m.docsis_version || 'Unknown',
                         cmts: resp.cmts_hostname,
                         cmts_ip: resp.cmts_ip,
+                        cmts_index: m.cmts_index ?? null,
+                        docsif3_index: m.docsif3_index ?? null,
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || '',
                         cable_mac: m.cable_mac || '',
@@ -2730,6 +2732,11 @@ createApp({
                 const alreadyTriggered = !!this._metadataRefreshTriggeredByCmts[cmtsKey];
                 const backendEnriching = preview?.enriching === true;
                 const backendEnriched = preview?.enriched === true;
+                // Capability collection is a CMTS-wide base walk, distinct
+                // from direct per-modem metadata enrichment. A legacy cache
+                // without the marker gets exactly one complete live refresh.
+                const needsCapabilityRefresh = this.enrichModems && preview?.capability_enriched !== true;
+                const forceCompleteRefresh = Boolean(preview?.partial) || needsCapabilityRefresh;
 
                 // Release UI immediately; continue full inventory/enrichment in background.
                 if (this._progressTimer) { clearInterval(this._progressTimer); this._progressTimer = null; }
@@ -2741,20 +2748,21 @@ createApp({
                 if (metadataCheck.refresh && !backendEnriching && !backendEnriched && !alreadyTriggered) {
                     this.$toast?.info(`Metadata quality low (${Math.round(metadataCheck.ratio * 100)}% missing vendor+firmware). Loading complete inventory and queuing delta enrichment...`);
                     if (cmtsKey) this._metadataRefreshTriggeredByCmts[cmtsKey] = true;
-                    this._loadAllModemsInBackground(buildUrl(CM_MODEM_LIMIT, false), mapModem, loadToken);
+                    this.liveCacheRefreshing = forceCompleteRefresh;
+                    this._loadAllModemsInBackground(
+                        buildUrl(CM_MODEM_LIMIT, false, forceCompleteRefresh),
+                        mapModem,
+                        loadToken,
+                    );
                     return;
                 }
 
                 // Always load the complete base inventory in the background.
-                // Enrichment is deliberately separate to avoid querying every modem.
-                let backgroundUrl;
-                if (preview?.partial) {
-                    this.liveCacheRefreshing = true;
-                    backgroundUrl = buildUrl(CM_MODEM_LIMIT, false, true);
-                } else {
-                    this.liveCacheRefreshing = false;
-                    backgroundUrl = buildUrl(CM_MODEM_LIMIT, false);
-                }
+                // A partial cache or a legacy generation without authoritative
+                // capability collection forces one live CMTS walk. enrich=false
+                // ensures this never launches direct per-modem SNMP enrichment.
+                this.liveCacheRefreshing = forceCompleteRefresh;
+                const backgroundUrl = buildUrl(CM_MODEM_LIMIT, false, forceCompleteRefresh);
                 this._loadAllModemsInBackground(backgroundUrl, mapModem, loadToken);
                 return;
             } catch (error) {
