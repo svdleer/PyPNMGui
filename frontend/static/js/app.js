@@ -5158,7 +5158,7 @@ createApp({
                 this.renderFiberNodeImpulseCharts();
                 const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems analyzed`;
                 if (result.success) this.$toast?.success(`Fiber-node impulse response (fresh agent catalog/retrieval): ${summary}`);
-                else this.$toast?.warning(`Fiber-node impulse response completed with no usable existing files: ${summary}`);
+                else this.$toast?.warning(`Fiber-node impulse response completed with no usable freshly retrieved PNN data: ${summary}`);
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 this.fnImpulseResult = { success: false, error: error.message, modems: [] };

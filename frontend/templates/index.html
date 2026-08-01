@@ -2734,30 +2734,72 @@
                                             <i class="bi bi-question-circle text-muted ms-1" title="Collect ATDMA pre-eq tap coefficients and group delay per modem. Enables the Plant vs In-Home Assessment panel: classifies each modem as plant-impaired, in-home, or clean using tap shape similarity, group delay deviation, and shared impaired subcarriers."></i>
                                         </label>
                                     </div>
-                                    <hr class="my-2">
-                                    <div class="form-label small fw-bold mb-1 text-muted">Impulse response bulk</div>
-                                    <div class="row g-1 align-items-center">
-                                        <div class="col-7">
-                                            <span class="badge bg-success-subtle text-success border border-success-subtle w-100 py-2">
-                                                Existing files
-                                            </span>
-                                        </div>
-                                        <div class="col-5">
-                                            <select v-model="fnImpulseDirection" class="form-select form-select-sm">
-                                                <option value="both">DS + US</option>
-                                                <option value="downstream">DS PNN2</option>
-                                                <option value="upstream">US PNN6/7</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <small class="text-success d-block mt-1">
-                                        Fresh agent catalog + immediate retrieval every run. No capture or SNMP SET occurs unless missing files are explicitly confirmed afterward.
-                                    </small>
-                                    <small class="text-muted d-block">
-                                        Files deleted by cleanup cannot be retrieved.
-                                    </small>
                                 </div>
                             </div>
+
+                            <!-- Bulk impulse response: independent latest-file retrieval workflow -->
+                            <div class="border border-success rounded p-2 mt-2" style="background:#f6fff9;">
+                                <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                    <div class="form-label small fw-bold mb-0 text-success">
+                                        <i class="bi bi-bezier2 me-1"></i>Bulk impulse response
+                                    </div>
+                                    <span class="badge bg-success">Fresh PNN retrieval every run</span>
+                                </div>
+                                <div class="row g-2 align-items-center">
+                                    <div class="col-7">
+                                        <small class="text-muted">
+                                            Requests a new agent catalog and downloads a fresh copy of each latest available PNN file. Cached file IDs and file bodies are never reused.
+                                        </small>
+                                    </div>
+                                    <div class="col-5">
+                                        <select v-model="fnImpulseDirection" class="form-select form-select-sm">
+                                            <option value="both">DS + US</option>
+                                            <option value="downstream">DS PNN2</option>
+                                            <option value="upstream">US PNN6/7</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <small class="text-muted d-block mt-1">
+                                    Fresh retrieval does not create a new modem capture. If cleanup deleted a file, capture is offered separately and requires explicit SNMP SET/TFTP confirmation.
+                                </small>
+                                <div class="d-flex gap-2 mt-2">
+                                    <button type="button" @click="runFiberNodeImpulse"
+                                            :disabled="fnImpulseRunning || fnScanRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                            class="btn btn-success flex-fill">
+                                        <span v-if="fnImpulseRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-bezier2 me-1"></i>
+                                        {{ fnImpulseRunning ? 'Retrieving and analyzing…' : 'Run Bulk Impulse Response' }}
+                                    </button>
+                                    <button v-if="fnImpulseRunning" type="button" @click="abortFiberNodeImpulse" class="btn btn-outline-danger">
+                                        <i class="bi bi-x-circle me-1"></i>Cancel
+                                    </button>
+                                </div>
+                                <div v-if="fnImpulseProgress" class="mt-2">
+                                    <div class="d-flex justify-content-between small text-muted flex-wrap gap-1">
+                                        <span>
+                                            {{ fnImpulseProgress.action }}
+                                            <span v-if="!fnImpulseProgress.done && fnImpulseProgress.running_count"> · {{ fnImpulseProgress.running_count }} running</span>
+                                            <span v-if="!fnImpulseProgress.done && fnImpulseProgress.queued_count"> · {{ fnImpulseProgress.queued_count }} queued</span>
+                                        </span>
+                                        <span>
+                                            {{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} attempts finished
+                                            · {{ fnImpulseProgress.success_count || 0 }} analyzed
+                                            <span v-if="fnImpulseProgress.failure_count"> · {{ fnImpulseProgress.failure_count }} unavailable</span>
+                                            <span v-if="fnImpulseProgress.elapsed_s !== undefined"> · {{ Number(fnImpulseProgress.elapsed_s || 0).toFixed(1) }}s</span>
+                                        </span>
+                                    </div>
+                                    <div class="progress" style="height:6px;">
+                                        <div class="progress-bar"
+                                             :class="{
+                                                 'progress-bar-striped progress-bar-animated bg-info': !fnImpulseProgress.done,
+                                                 'bg-success': fnImpulseProgress.done && !fnImpulseProgress.failure_count,
+                                                 'bg-warning': fnImpulseProgress.done && fnImpulseProgress.failure_count
+                                             }"
+                                             :style="{ width: (fnImpulseProgress.done ? Number(fnImpulseProgress.pct || 0) : Math.max(3, Number(fnImpulseProgress.pct || 0))) + '%' }"></div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Fullband suckout mode toggle -->
                             <div class="border rounded p-2 mt-2" style="background:#f8f9fa;">
                                 <div class="form-label small fw-bold mb-1 text-muted">Fullband suckout detection</div>
@@ -2794,42 +2836,6 @@
                                     <i v-else class="bi bi-broadcast me-1"></i>
                                     {{ fbScanRunning ? 'Fullband…' : 'Fullband Scan' }}
                                 </button>
-                            </div>
-                            <div class="d-flex gap-2 mt-2">
-                                <button type="button" @click="runFiberNodeImpulse"
-                                        :disabled="fnImpulseRunning || fnScanRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
-                                        class="btn btn-outline-success flex-fill">
-                                    <span v-if="fnImpulseRunning" class="spinner-border spinner-border-sm me-1"></span>
-                                    <i v-else class="bi bi-bezier2 me-1"></i>
-                                    {{ fnImpulseRunning ? 'Impulse analysis…' : 'Bulk Impulse Response' }}
-                                </button>
-                                <button v-if="fnImpulseRunning" type="button" @click="abortFiberNodeImpulse" class="btn btn-outline-danger">
-                                    <i class="bi bi-x-circle me-1"></i>Cancel
-                                </button>
-                            </div>
-                            <div v-if="fnImpulseProgress" class="mt-2">
-                                <div class="d-flex justify-content-between small text-muted flex-wrap gap-1">
-                                    <span>
-                                        {{ fnImpulseProgress.action }}
-                                        <span v-if="!fnImpulseProgress.done && fnImpulseProgress.running_count"> · {{ fnImpulseProgress.running_count }} running</span>
-                                        <span v-if="!fnImpulseProgress.done && fnImpulseProgress.queued_count"> · {{ fnImpulseProgress.queued_count }} queued</span>
-                                    </span>
-                                    <span>
-                                        {{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} attempts finished
-                                        · {{ fnImpulseProgress.success_count || 0 }} analyzed
-                                        <span v-if="fnImpulseProgress.failure_count"> · {{ fnImpulseProgress.failure_count }} unavailable</span>
-                                        <span v-if="fnImpulseProgress.elapsed_s !== undefined"> · {{ Number(fnImpulseProgress.elapsed_s || 0).toFixed(1) }}s</span>
-                                    </span>
-                                </div>
-                                <div class="progress" style="height:6px;">
-                                    <div class="progress-bar"
-                                         :class="{
-                                             'progress-bar-striped progress-bar-animated bg-info': !fnImpulseProgress.done,
-                                             'bg-success': fnImpulseProgress.done && !fnImpulseProgress.failure_count,
-                                             'bg-warning': fnImpulseProgress.done && fnImpulseProgress.failure_count
-                                         }"
-                                         :style="{ width: (fnImpulseProgress.done ? Number(fnImpulseProgress.pct || 0) : Math.max(3, Number(fnImpulseProgress.pct || 0))) + '%' }"></div>
-                                </div>
                             </div>
                             <div v-if="fnScanPreEtaText" class="small text-muted mt-2">
                                 <i class="bi bi-hourglass-split me-1"></i>{{ fnScanPreEtaText }}
