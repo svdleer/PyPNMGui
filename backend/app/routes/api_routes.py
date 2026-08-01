@@ -1384,7 +1384,9 @@ def get_cmts_modems(cmts_name):
         )
         
         if result.get('success'):
-            modems = filter_ignored_modems(result.get('modems', []))
+            raw_modems = result.get('modems', [])
+            returned_row_count = len(raw_modems)
+            modems = filter_ignored_modems(raw_modems)
             logger.info(f"Retrieved {len(modems)} modems from {cmts_name} via PyPNM API/agent")
 
             # Stamp CMTS fields onto every modem record.
@@ -1397,6 +1399,14 @@ def get_cmts_modems(cmts_name):
 
             is_enriched = result.get('enriched', False)
             is_enriching = result.get('enriching', False)
+            # A complete upstream generation may still be sliced to this
+            # endpoint's requested preview limit. Do not label that sliced
+            # Redis payload as a complete inventory; the background full-load
+            # request must be allowed to bypass it and retrieve every row.
+            cache_contains_complete_generation = bool(
+                result.get('complete') is True
+                and returned_row_count < limit
+            )
 
             # Cache successful modem data immediately so subsequent CMTS searches
             # can reuse inventory even while enrichment is still running.
@@ -1411,7 +1421,7 @@ def get_cmts_modems(cmts_name):
                         "enriching": is_enriching,
                         "capability_enriched": result.get('capability_enriched') is True,
                         "source": "pypnm-live" if result.get('source') == 'snmp-live' else (result.get('source') or 'pypnm-inventory'),
-                        "complete": result.get('complete') is True,
+                        "complete": cache_contains_complete_generation,
                         "truncated": result.get('truncated') is True,
                         "collected_at": result.get('collected_at'),
                         "inventory_revision": result.get('revision_at'),
