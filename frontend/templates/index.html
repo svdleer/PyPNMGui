@@ -1780,57 +1780,29 @@
                             <div class="col-12 mb-4">
                                 <div class="card shadow-sm border-light">
                                     <div class="card-header pnm-card-header pnm-card-header--upstream flex-wrap gap-2">
-                                        <div>
-                                            <h5 class="mb-0"><i class="bi bi-bezier2 me-2"></i>OFDM/OFDMA Impulse Response</h5>
-                                            <small class="text-muted">Existing PNM2/PNM6/PNM7 files are analyzed without contacting the modem.</small>
-                                        </div>
-                                        <span class="badge" :class="impulseSource === 'existing' ? 'bg-success' : 'bg-warning text-dark'">
-                                            {{ impulseSource === 'existing' ? 'Offline / no device changes' : 'Fresh capture / SNMP SET' }}
-                                        </span>
+                                        <h5 class="mb-0"><i class="bi bi-bezier2 me-2"></i>OFDM/OFDMA Impulse Response</h5>
+                                        <span class="badge bg-warning text-dark">Fresh capture / SNMP SET</span>
                                     </div>
                                     <div class="card-body">
                                         <div class="row g-2 align-items-end">
-                                            <div class="col-md-3">
-                                                <label class="form-label small mb-1">Source</label>
-                                                <select v-model="impulseSource" @change="impulseFileId = ''; loadImpulseFiles()" class="form-select form-select-sm">
-                                                    <option value="existing">Existing file (default)</option>
-                                                    <option value="fresh">Capture fresh coefficients</option>
-                                                </select>
-                                            </div>
-                                            <div class="col-md-2">
+                                            <div class="col-md-4">
                                                 <label class="form-label small mb-1">Direction</label>
-                                                <select v-model="impulseDirection" @change="impulseFileId = ''; loadImpulseFiles()" class="form-select form-select-sm">
+                                                <select v-model="impulseDirection" class="form-select form-select-sm">
                                                     <option value="both">DS + US</option>
                                                     <option value="downstream">Downstream PNM2</option>
                                                     <option value="upstream">Upstream PNM6/7</option>
                                                 </select>
                                             </div>
-                                            <div class="col-md-5" v-if="impulseSource === 'existing'">
-                                                <label class="form-label small mb-1">File</label>
-                                                <div class="input-group input-group-sm">
-                                                    <select v-model="impulseFileId" class="form-select">
-                                                        <option value="">Latest matching file(s)</option>
-                                                        <option v-for="file in impulseFiles" :key="file.file_id" :value="file.file_id">
-                                                            {{ file.direction === 'downstream' ? 'DS' : 'US' }} ch {{ file.channel_id }} · {{ file.pnm_file_type }} · {{ file.filename }}
-                                                        </option>
-                                                    </select>
-                                                    <button @click="loadImpulseFiles" class="btn btn-outline-secondary" :disabled="impulseFilesLoading" title="Refresh file catalog">
-                                                        <span v-if="impulseFilesLoading" class="spinner-border spinner-border-sm"></span>
-                                                        <i v-else class="bi bi-arrow-clockwise"></i>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div :class="impulseSource === 'existing' ? 'col-md-2' : 'col-md-7'">
-                                                <button @click="runImpulseResponse" class="btn btn-sm w-100"
-                                                        :class="impulseSource === 'existing' ? 'btn-success' : 'btn-warning'"
-                                                        :disabled="runningTest || (impulseSource === 'fresh' && !selectedModem?.ip_address)">
+                                            <div class="col-md-8">
+                                                <button @click="runImpulseResponse" class="btn btn-warning btn-sm w-100"
+                                                        :disabled="runningTest || !selectedModem?.ip_address">
                                                     <span v-if="activeMeasurement === 'impulse_response'" class="spinner-border spinner-border-sm me-1"></span>
-                                                    <i v-else class="bi bi-graph-up-arrow me-1"></i>{{ impulseSource === 'existing' ? 'Analyze' : 'Capture & Analyze' }}
+                                                    <i v-else class="bi bi-graph-up-arrow me-1"></i>Capture & Analyze
                                                 </button>
                                             </div>
                                         </div>
-                                        <div v-if="impulseSource === 'fresh'" class="alert alert-warning py-1 px-2 mt-2 mb-0 small">
-                                            Fresh mode immediately changes modem PNM control state and transfers new files using SNMP SET and TFTP.
+                                        <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">
+                                            Every run starts a new modem measurement and transfers new PNM files using SNMP SET and TFTP.
                                         </div>
                                     </div>
                                 </div>

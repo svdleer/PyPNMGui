@@ -4895,35 +4895,26 @@ def list_impulse_response_files(mac_address):
 
 @pypnm_bp.route('/impulse-response/<mac_address>/analyze', methods=['POST'])
 def analyze_impulse_response(mac_address):
-    """Analyze existing PNN files or capture and analyze fresh PNN data."""
+    """Always capture and analyze fresh OFDM/OFDMA impulse-response data."""
     from app.core.pypnm_client import PyPNMClient
 
     data = request.get_json(silent=True) or {}
-    source = data.get('source', 'existing')
     direction = data.get('direction', 'both')
-    if source not in {'existing', 'fresh'} or direction not in {'downstream', 'upstream', 'both'}:
-        return jsonify({'success': False, 'status': 1, 'error': 'Invalid source or direction'}), 400
+    if direction not in {'downstream', 'upstream', 'both'}:
+        return jsonify({'success': False, 'status': 1, 'error': 'Invalid direction'}), 400
 
-    client = PyPNMClient()
-    if source == 'existing':
-        # This branch is intentionally incapable of invoking capture/SNMP methods.
-        result = client.analyze_remote_impulse(
-            mac_address=mac_address,
-            direction=direction,
-            file_id=data.get('file_id') or None,
-        )
-    else:
-        modem_ip = str(data.get('modem_ip') or '').strip()
-        if not modem_ip:
-            return jsonify({'success': False, 'status': 1, 'error': 'modem_ip required for fresh capture'}), 400
-        result = _run_fresh_impulse_capture(
-            client=client,
-            mac_address=mac_address,
-            modem_ip=modem_ip,
-            direction=direction,
-            community=data.get('community') or get_default_write_community(),
-            tftp_ip=data.get('tftp_ip') or get_tftp_for_cm(),
-        )
+    modem_ip = str(data.get('modem_ip') or '').strip()
+    if not modem_ip:
+        return jsonify({'success': False, 'status': 1, 'error': 'modem_ip required for fresh capture'}), 400
+
+    result = _run_fresh_impulse_capture(
+        client=PyPNMClient(),
+        mac_address=mac_address,
+        modem_ip=modem_ip,
+        direction=direction,
+        community=data.get('community') or get_default_write_community(),
+        tftp_ip=data.get('tftp_ip') or get_tftp_for_cm(),
+    )
 
     result['status'] = 0 if result.get('success') else 1
     return jsonify(result), 200 if result.get('success') else 404

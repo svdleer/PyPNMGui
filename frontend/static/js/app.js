@@ -94,7 +94,7 @@ createApp({
             showRawData: false,
             expandedPlotJson: [],
             selectedMeasurementData: null,
-            impulseSource: 'existing',
+            impulseSource: 'fresh',
             impulseDirection: 'both',
             impulseFiles: [],
             impulseFileId: '',
@@ -6806,16 +6806,15 @@ createApp({
         },
 
         async runImpulseResponse() {
-            if (!this.selectedModem) return;
-            const fresh = this.impulseSource === 'fresh';
+            if (!this.selectedModem?.ip_address) return;
             if (!(await this.prepareUiTask('OFDM/OFDMA Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('OFDM/OFDMA Impulse Response', 'impulse_response');
+            this.impulseSource = 'fresh';
             this.showRawData = false;
             try {
                 const payload = {
-                    source: this.impulseSource,
+                    source: 'fresh',
                     direction: this.impulseDirection,
-                    file_id: this.impulseSource === 'existing' ? (this.impulseFileId || null) : null,
                     modem_ip: this.selectedModem.ip_address,
                     community: this.snmpCommunityModem,
                 };
@@ -6835,7 +6834,7 @@ createApp({
                 this.$nextTick(() => this.drawMeasurementCharts('impulse_response', data));
                 this.showSuccess(
                     'Impulse Response Complete',
-                    `${data.results?.length || 0} channel response(s) analyzed from ${fresh ? 'fresh capture' : 'existing files'}`
+                    `${data.results?.length || 0} channel response(s) analyzed from fresh capture`
                 );
             } catch (error) {
                 if (error?.name === 'AbortError') return;
