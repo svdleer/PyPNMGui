@@ -1595,14 +1595,12 @@ createApp({
             const raw = (modem?.docsis_version || '').toString().trim();
             if (this.hasKnownDocsisVersion(raw)) return raw;
 
-            const status = String(modem?.status || '').trim().toLowerCase();
-            const statusCode = Number(modem?.status_code ?? modem?.statusCode ?? NaN);
-            const isOperational = status === 'operational' || statusCode === 6;
-            // If ofdm/ofdma are explicitly false OR both null (no OFDM data at all),
-            // the modem is likely DOCSIS 3.0.
-            if (isOperational) {
-                if (modem?.ofdm_enabled === false && modem?.ofdma_enabled === false) return 'DOCSIS 3.0';
-                if (modem?.ofdm_enabled == null && modem?.ofdma_enabled == null) return 'DOCSIS 3.0';
+            // Negative or absent OFDM/OFDMA flags are not authoritative:
+            // older inventory generations may carry false for DOCSIS 3.1
+            // modems. Positive channel capability is sufficient to establish
+            // at least DOCSIS 3.1, but never infer 3.0 from missing evidence.
+            if (modem?.ofdm_enabled === true || modem?.ofdma_enabled === true) {
+                return 'DOCSIS 3.1';
             }
             return fallback;
         },

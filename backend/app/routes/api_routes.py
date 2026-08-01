@@ -356,6 +356,22 @@ def _modem_missing_enrichment(modem: dict) -> bool:
     return vendor_missing or fw_missing
 
 
+def _docsis_version_rank(value) -> int:
+    """Return a monotonic capability rank; unknown values rank as zero."""
+    text = str(value or '').strip().lower()
+    for marker, rank in (
+        ('4.0', 40),
+        ('3.1', 31),
+        ('3.0', 30),
+        ('2.0', 20),
+        ('1.1', 11),
+        ('1.0', 10),
+    ):
+        if marker in text:
+            return rank
+    return 0
+
+
 def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
     """Best-effort lookup of topology fields keyed by bare uppercase MAC."""
     if not mac_addresses:
@@ -480,7 +496,7 @@ def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> d
 
 
 def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = "") -> list[dict]:
-    """In-place best-effort merge of linked_node_id/lat/lon and inventory fiber_node/cable_mac."""
+    """In-place best-effort merge of topology and authoritative inventory fields."""
     if not modems:
         return modems
 
@@ -490,10 +506,13 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
     topo = _topology_fields_by_mac([m.get("mac_address") for m in modems if isinstance(m, dict)])
 
     # Backfill fiber_node / cable_mac / ofdm(a)_enabled / docsis_version from
-    # modem_inventory_current when missing. Critical for the FN scanner.
+    # modem_inventory_current when missing or when cache data represents a
+    # lower capability. Modem capability cannot downgrade in place.
     inv: dict[str, dict] = {}
     need_inv = [m for m in modems if isinstance(m, dict) and (
-        not m.get("fiber_node") or m.get("ofdm_enabled") is None
+        not m.get("fiber_node")
+        or m.get("ofdm_enabled") is None
+        or _docsis_version_rank(m.get("docsis_version")) < 31
     )]
     if need_inv:
         inv = _inventory_fields_by_mac([m.get("mac_address") for m in need_inv], cmts_name=cmts_name)
@@ -526,7 +545,7 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
                 m["ofdm_enabled"] = bool(iv["ofdm_enabled"])
             if m.get("ofdma_enabled") is None and iv.get("ofdma_enabled") is not None:
                 m["ofdma_enabled"] = bool(iv["ofdma_enabled"])
-            if not m.get("docsis_version") and iv.get("docsis_version"):
+            if _docsis_version_rank(iv.get("docsis_version")) > _docsis_version_rank(m.get("docsis_version")):
                 m["docsis_version"] = iv["docsis_version"]
             if not m.get("vendor") and iv.get("vendor"):
                 m["vendor"] = iv["vendor"]
@@ -813,8 +832,12 @@ def get_modem(mac_address):
                                         for field in ('vendor', 'model', 'software_version',
                                                       'docsis_version', 'ofdm_enabled', 'ofdma_enabled',
                                                       'ofdma_ifindex', 'fiber_node', 'cable_mac'):
-                                            if inv_m.get(field) and not modem.get(field):
-                                                modem[field] = inv_m[field]
+                                            incoming = inv_m.get(field)
+                                            if field == 'docsis_version':
+                                                if _docsis_version_rank(incoming) > _docsis_version_rank(modem.get(field)):
+                                                    modem[field] = incoming
+                                            elif incoming and not modem.get(field):
+                                                modem[field] = incoming
                                 except Exception:
                                     pass
                             return jsonify({
