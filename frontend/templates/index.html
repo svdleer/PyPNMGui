@@ -2808,12 +2808,27 @@
                                 </button>
                             </div>
                             <div v-if="fnImpulseProgress" class="mt-2">
-                                <div class="d-flex justify-content-between small text-muted">
-                                    <span>{{ fnImpulseProgress.action }} <span v-if="fnImpulseProgress.modem">· {{ fnImpulseProgress.modem }}</span></span>
-                                    <span>{{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} · {{ Number(fnImpulseProgress.pct || 0).toFixed(0) }}%</span>
+                                <div class="d-flex justify-content-between small text-muted flex-wrap gap-1">
+                                    <span>
+                                        {{ fnImpulseProgress.action }}
+                                        <span v-if="!fnImpulseProgress.done && fnImpulseProgress.running_count"> · {{ fnImpulseProgress.running_count }} running</span>
+                                        <span v-if="!fnImpulseProgress.done && fnImpulseProgress.queued_count"> · {{ fnImpulseProgress.queued_count }} queued</span>
+                                    </span>
+                                    <span>
+                                        {{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} attempts finished
+                                        · {{ fnImpulseProgress.success_count || 0 }} analyzed
+                                        <span v-if="fnImpulseProgress.failure_count"> · {{ fnImpulseProgress.failure_count }} unavailable</span>
+                                        <span v-if="fnImpulseProgress.elapsed_s !== undefined"> · {{ Number(fnImpulseProgress.elapsed_s || 0).toFixed(1) }}s</span>
+                                    </span>
                                 </div>
                                 <div class="progress" style="height:6px;">
-                                    <div class="progress-bar bg-success" :style="{ width: (fnImpulseProgress.pct || 0) + '%' }"></div>
+                                    <div class="progress-bar"
+                                         :class="{
+                                             'progress-bar-striped progress-bar-animated bg-info': !fnImpulseProgress.done,
+                                             'bg-success': fnImpulseProgress.done && !fnImpulseProgress.failure_count,
+                                             'bg-warning': fnImpulseProgress.done && fnImpulseProgress.failure_count
+                                         }"
+                                         :style="{ width: (fnImpulseProgress.done ? Number(fnImpulseProgress.pct || 0) : Math.max(3, Number(fnImpulseProgress.pct || 0))) + '%' }"></div>
                                 </div>
                             </div>
                             <div v-if="fnScanPreEtaText" class="small text-muted mt-2">

@@ -4821,12 +4821,14 @@ def start_fibernode_impulse_job():
     fiber_node = data.get('fiber_node')
     target_snapshot = [dict(target) for target in targets]
 
+    job_started_monotonic = time.monotonic()
     with _impulse_job_lock:
         _impulse_job_abort.discard(job_id)
     _set_impulse_job_progress(
         job_id,
-        total=len(target_snapshot), completed=0, success_count=0,
-        modem='', action='Starting', pct=0, done=False,
+        total=len(target_snapshot), completed=0, success_count=0, failure_count=0,
+        running_count=0, queued_count=len(target_snapshot),
+        modem='', action='Queued', state='queued', elapsed_s=0, pct=0, done=False,
     )
 
     def _worker(target: dict) -> dict:
@@ -4859,7 +4861,17 @@ def start_fibernode_impulse_job():
         modem_results: list[dict] = []
         completed = 0
         success_count = 0
+        total = len(target_snapshot)
+        active_workers = min(concurrency, total)
         try:
+            _set_impulse_job_progress(
+                job_id,
+                total=total, completed=0, success_count=0, failure_count=0,
+                running_count=active_workers, queued_count=max(0, total - active_workers),
+                action=f'Analyzing {total} modem attempt{"s" if total != 1 else ""}',
+                state='running', elapsed_s=round(time.monotonic() - job_started_monotonic, 2),
+                pct=0, done=False,
+            )
             with ThreadPoolExecutor(max_workers=concurrency) as pool:
                 future_map = {pool.submit(_worker, target): target for target in target_snapshot}
                 for future in as_completed(future_map):
@@ -4879,19 +4891,20 @@ def start_fibernode_impulse_job():
                     completed += 1
                     if modem_result.get('success'):
                         success_count += 1
+                    failure_count = completed - success_count
+                    remaining = total - completed
+                    running_count = min(concurrency, remaining)
+                    queued_count = max(0, remaining - running_count)
                     _set_impulse_job_progress(
                         job_id,
-                        total=len(target_snapshot), completed=completed,
-                        success_count=success_count,
-                        modem=target['mac_address'],
-                        action=(
-                            'Fresh file retrieved and analyzed'
-                            if modem_result.get('success') and source == 'existing'
-                            else 'Analyzed' if modem_result.get('success')
-                            else 'No current file' if source == 'existing'
-                            else 'No data'
-                        ),
-                        pct=round(completed * 100 / len(target_snapshot), 1),
+                        total=total, completed=completed,
+                        success_count=success_count, failure_count=failure_count,
+                        running_count=running_count, queued_count=queued_count,
+                        modem='',
+                        action=f'{completed} attempt{"s" if completed != 1 else ""} finished',
+                        state='running',
+                        elapsed_s=round(time.monotonic() - job_started_monotonic, 2),
+                        pct=round(completed * 100 / total, 1),
                         done=False,
                     )
                     if _is_impulse_job_aborted(job_id):
@@ -4900,6 +4913,8 @@ def start_fibernode_impulse_job():
                         break
 
             aborted = _is_impulse_job_aborted(job_id)
+            failure_count = completed - success_count
+            elapsed_s = round(time.monotonic() - job_started_monotonic, 2)
             modem_results.sort(key=lambda item: item.get('mac_address', ''))
             result = {
                 'success': success_count > 0,
@@ -4911,24 +4926,50 @@ def start_fibernode_impulse_job():
                 'fiber_node': fiber_node,
                 'aborted': aborted,
                 'target_snapshot': target_snapshot,
-                'total': len(target_snapshot),
+                'total': total,
                 'completed': completed,
                 'success_count': success_count,
-                'failure_count': completed - success_count,
+                'failure_count': failure_count,
+                'elapsed_s': elapsed_s,
                 'modems': modem_results,
             }
             _store_impulse_job_result(job_id, result)
+            terminal_state = 'aborted' if aborted else 'completed'
+            terminal_action = (
+                'Aborted'
+                if aborted
+                else f'Complete: {success_count} analyzed, {failure_count} unavailable'
+            )
             _set_impulse_job_progress(
                 job_id,
-                total=len(target_snapshot), completed=completed,
-                success_count=success_count,
-                modem='', action='Aborted' if aborted else 'Complete',
-                pct=round(completed * 100 / len(target_snapshot), 1), done=True,
+                total=total, completed=completed,
+                success_count=success_count, failure_count=failure_count,
+                running_count=0, queued_count=max(0, total - completed),
+                modem='', action=terminal_action, state=terminal_state,
+                elapsed_s=elapsed_s,
+                pct=round(completed * 100 / total, 1), done=True,
             )
         except Exception as exc:
             logger.exception('Fiber-node impulse job %s failed', job_id)
-            _store_impulse_job_result(job_id, {'success': False, 'job_id': job_id, 'error': str(exc)})
-            _set_impulse_job_progress(job_id, action='Error', done=True)
+            elapsed_s = round(time.monotonic() - job_started_monotonic, 2)
+            _store_impulse_job_result(job_id, {
+                'success': False,
+                'job_id': job_id,
+                'error': str(exc),
+                'total': total,
+                'completed': completed,
+                'success_count': success_count,
+                'failure_count': completed - success_count,
+                'elapsed_s': elapsed_s,
+            })
+            _set_impulse_job_progress(
+                job_id,
+                total=total, completed=completed,
+                success_count=success_count, failure_count=completed - success_count,
+                running_count=0, queued_count=max(0, total - completed),
+                action='Error', state='failed', elapsed_s=elapsed_s,
+                pct=round(completed * 100 / total, 1), done=True,
+            )
 
     _threading.Thread(target=_run_job, daemon=True).start()
     return jsonify({
@@ -4963,8 +5004,13 @@ def get_fibernode_impulse_job(job_id):
         'total': int(progress.get('total', 0)),
         'completed': int(progress.get('completed', 0)),
         'success_count': int(progress.get('success_count', 0)),
+        'failure_count': int(progress.get('failure_count', 0)),
+        'running_count': int(progress.get('running_count', 0)),
+        'queued_count': int(progress.get('queued_count', 0)),
         'modem': progress.get('modem', ''),
         'action': progress.get('action', ''),
+        'state': progress.get('state', 'running'),
+        'elapsed_s': float(progress.get('elapsed_s', 0)),
         'pct': float(progress.get('pct', 0)),
         'done': _as_bool(progress.get('done', False)),
     })

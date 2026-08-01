@@ -4998,8 +4998,14 @@ createApp({
                 total: targets.length,
                 completed: 0,
                 success_count: 0,
+                failure_count: 0,
+                running_count: 0,
+                queued_count: targets.length,
                 pct: 0,
-                action: source === 'existing' ? 'Requesting fresh agent catalog' : `Starting confirmed ${direction} capture`,
+                state: 'submitting',
+                action: `Submitting ${targets.length} modem target${targets.length === 1 ? '' : 's'}`,
+                elapsed_s: 0,
+                done: false,
             };
             const jobPayload = {
                 job_id: jobId,
@@ -5023,11 +5029,23 @@ createApp({
             });
             const started = await startResponse.json();
             if (!startResponse.ok || !started.started) throw new Error(started.error || 'Could not start bulk analysis');
+            const acceptedTargets = Number(started.target_count || targets.length);
+            const acceptedConcurrency = Math.min(Number(started.concurrency || 1), acceptedTargets);
+            this.fnImpulseProgress = {
+                ...this.fnImpulseProgress,
+                total: acceptedTargets,
+                running_count: acceptedConcurrency,
+                queued_count: Math.max(0, acceptedTargets - acceptedConcurrency),
+                state: 'running',
+                action: `${acceptedTargets} target${acceptedTargets === 1 ? '' : 's'} accepted · up to ${acceptedConcurrency} in parallel`,
+            };
 
             const deadline = Date.now() + 15 * 60 * 1000;
             let done = false;
+            let firstPoll = true;
             while (!done && Date.now() < deadline && this._isTaskActive(token)) {
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                if (!firstPoll) await new Promise(resolve => setTimeout(resolve, 350));
+                firstPoll = false;
                 const progressResponse = await fetch(
                     `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}`,
                     { signal }
@@ -5047,6 +5065,26 @@ createApp({
             );
             const result = await resultResponse.json();
             if (!resultResponse.ok || !result.found) throw new Error(result.error || 'Bulk result was not found');
+            const resultTotal = Number(result.total || acceptedTargets);
+            const resultCompleted = Number(result.completed || 0);
+            const resultSuccess = Number(result.success_count || 0);
+            const resultFailure = Number(result.failure_count ?? Math.max(0, resultCompleted - resultSuccess));
+            this.fnImpulseProgress = {
+                ...this.fnImpulseProgress,
+                total: resultTotal,
+                completed: resultCompleted,
+                success_count: resultSuccess,
+                failure_count: resultFailure,
+                running_count: 0,
+                queued_count: Math.max(0, resultTotal - resultCompleted),
+                state: result.aborted ? 'aborted' : 'completed',
+                action: result.aborted
+                    ? 'Aborted'
+                    : `Complete: ${resultSuccess} analyzed, ${resultFailure} unavailable`,
+                elapsed_s: Number(result.elapsed_s || this.fnImpulseProgress?.elapsed_s || 0),
+                pct: resultTotal ? (resultCompleted * 100 / resultTotal) : 0,
+                done: true,
+            };
             return result;
         },
 
