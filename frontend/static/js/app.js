@@ -409,50 +409,47 @@ createApp({
             return [1, '...', cur-1, cur, cur+1, '...', total];
         },
         
-        // Check if modem has downstream OFDM channels (DOCSIS 3.1)
+        // Positive channel evidence is monotonic. Legacy false flags are not
+        // authoritative and must never override live channel/interface data.
         hasOfdmChannels() {
-            return this.channelStats?.downstream?.ofdm?.count > 0 ||
-                   this.selectedModem?.ofdm_enabled ||
-                   this.selectedModem?.docsis_version?.includes('3.1') ||
-                   this.selectedModem?.docsis_version?.includes('4.0');
+            const ofdm = this.channelStats?.downstream?.ofdm || {};
+            return Number(ofdm.count || 0) > 0 ||
+                   (Array.isArray(ofdm.channels) && ofdm.channels.length > 0) ||
+                   this.hasPositiveOfdmEvidence(this.selectedModem);
         },
 
-        // Check if modem has upstream OFDMA channels (DOCSIS 3.1)
         hasOfdmaChannels() {
-            return this.channelStats?.upstream?.ofdma?.count > 0 ||
-                   this.upstreamInterfaces?.ofdmaChannels?.length > 0 ||
-                   this.selectedModem?.ofdma_enabled ||
-                   this.selectedModem?.upstream_interface?.toLowerCase()?.includes('ofdma');
+            const ofdma = this.channelStats?.upstream?.ofdma || {};
+            return Number(ofdma.count || 0) > 0 ||
+                   (Array.isArray(ofdma.channels) && ofdma.channels.length > 0) ||
+                   (Array.isArray(this.upstreamInterfaces?.ofdmaChannels) && this.upstreamInterfaces.ofdmaChannels.length > 0) ||
+                   this.hasPositiveOfdmaEvidence(this.selectedModem);
+        },
+
+        selectedDocsisVersion() {
+            if (!this.selectedModem) return 'DOCSIS 3.0';
+            return this.resolveDocsisVersion({
+                ...this.selectedModem,
+                ofdm_enabled: this.hasOfdmChannels || this.selectedModem.ofdm_enabled,
+                ofdma_enabled: this.hasOfdmaChannels || this.selectedModem.ofdma_enabled,
+            }, 'DOCSIS 3.0');
         },
         
-        // OFDM status: 'green' (operational), 'orange' (partial service), 'red' (offline/no channels)
+        // Partial service is directional; state=none is healthy. Red is
+        // reserved for offline modems, while missing evidence stays neutral.
         ofdmStatus() {
-            if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
-                return 'red';
-            }
-            const ofdmChannels = this.channelStats?.downstream?.ofdm?.channels || [];
-            if (this.isDirectionalPartialService(this.selectedModem, 'downstream')) {
-                return 'orange';
-            }
-            if (ofdmChannels.length > 0) return 'green';
-            if (this.selectedModem?.ofdm_enabled) return 'green';
-            if (this.selectedModem?.docsis_version?.includes('3.1') || this.selectedModem?.docsis_version?.includes('4.0')) return 'green';
-            return 'red';
+            return this.capabilityStatus({
+                ...this.selectedModem,
+                ofdm_enabled: this.hasOfdmChannels ? true : this.selectedModem?.ofdm_enabled,
+                ofdma_enabled: this.hasOfdmaChannels ? true : this.selectedModem?.ofdma_enabled,
+            }, 'downstream');
         },
 
-        // OFDMA status: 'green' (operational), 'orange' (partial service), 'red' (offline/no channels)
         ofdmaStatus() {
-            if (this.selectedModem?.status === 'offline' || this.selectedModem?.status === 'other') {
-                return 'red';
-            }
-            const ofdmaChannels = this.channelStats?.upstream?.ofdma?.channels || [];
-            if (this.isDirectionalPartialService(this.selectedModem, 'upstream')) {
-                return 'orange';
-            }
-            if (ofdmaChannels.length > 0) return 'green';
-            if (this.selectedModem?.ofdma_enabled) return 'green';
-            if (this.selectedModem?.upstream_interface?.toLowerCase()?.includes('ofdma')) return 'green';
-            return 'red';
+            return this.capabilityStatus({
+                ...this.selectedModem,
+                ofdma_enabled: this.hasOfdmaChannels ? true : this.selectedModem?.ofdma_enabled,
+            }, 'upstream');
         },
         
         // Measurements requiring downstream OFDM
@@ -751,8 +748,8 @@ createApp({
             for (const modem of (this.fnScanFilteredModems || [])) {
                 const mac = this.normalizeMacForMatch(modem?.mac_address || '');
                 if (!mac || !selected.has(mac)) continue;
-                const docsis = String(modem?.docsis_version || '').trim();
-                if (docsis.includes('3.0') && !docsis.includes('3.1') && !docsis.includes('4.0')) count += 1;
+                const docsis = this.resolveDocsisVersion(modem, 'Unknown');
+                if (this.docsisVersionRank(docsis) === 30) count += 1;
             }
             return count;
         },
@@ -816,8 +813,8 @@ createApp({
                     if (filterEa && this.formatTopologyEndAmplifier(m.topology_end_amplifier) !== filterEa) return false;
                     if (filterTap && this.formatTopologyTap(m.topology_tap) !== filterTap) return false;
                     if (filterImpairment) {
-                        const ofdmImpaired = m.ofdm_enabled === false;
-                        const ofdmaImpaired = m.ofdma_enabled === false;
+                        const ofdmImpaired = this.isDirectionalPartialService(m, 'downstream');
+                        const ofdmaImpaired = this.isDirectionalPartialService(m, 'upstream');
                         if (filterImpairment === 'impaired_ofdma' && !ofdmaImpaired) return false;
                         if (filterImpairment === 'impaired_ofdm' && !ofdmImpaired) return false;
                         if (filterImpairment === 'impaired_any' && !(ofdmImpaired || ofdmaImpaired)) return false;
@@ -1092,17 +1089,27 @@ createApp({
         },
 
         isDirectionalPartialService(modem, direction) {
+            // Recognized DOCS-IF31 state values are authoritative, even when
+            // directional booleans contain stale data.
+            const state = String(modem?.partial_service_state || '').trim().toLowerCase();
+            if (state === 'none' || state === 'other') return false;
+            if (['downstream', 'upstream', 'both'].includes(state)) {
+                return state === 'both' || state === direction;
+            }
+
             const field = direction === 'downstream'
                 ? modem?.partial_service_downstream
                 : modem?.partial_service_upstream;
-            return field == null ? false : this.normalizePartialService(field);
+            if (field != null) return this.normalizePartialService(field);
+            return false;
         },
 
         isUndirectedPartialService(modem) {
             if (this.partialServiceDirectionKnown(modem)) return false;
             const state = String(modem?.partial_service_state || '').trim().toLowerCase();
-            if (['downstream', 'upstream', 'both'].includes(state)) return true;
-            if (['none', 'other'].includes(state)) return false;
+            // Directional states are handled by isDirectionalPartialService and
+            // must not also produce the generic undirected PS warning.
+            if (['downstream', 'upstream', 'both', 'none', 'other'].includes(state)) return false;
             return this.normalizePartialService(modem?.partial_service);
         },
 
@@ -1154,17 +1161,82 @@ createApp({
         },
 
         _mergeModemPreservingCmts(target, source) {
-            // Merge source into target but never clobber good CMTS/enrichment
-            // fields with empty or 'unknown' values from inventory fallback.
-            const preserve = ['cmts', 'cmts_ip', 'cmts_hostname', 'cmts_community'];
+            if (!target || !source) return target;
+
+            // Merge ordinary fields normally, but capability evidence is
+            // monotonic: positive evidence and richer indexes/channel rows
+            // cannot be erased by stale false, empty, or nonpositive values.
+            const before = { ...target };
+            const preserve = [
+                'cmts', 'cmts_ip', 'cmts_hostname', 'cmts_community',
+                'fiber_node', 'cable_mac', 'upstream_interface',
+            ];
             const saved = {};
-            for (const k of preserve) {
-                if (target[k] && (!source[k] || source[k] === 'unknown' || source[k] === 'N/A')) {
-                    saved[k] = target[k];
+            for (const key of preserve) {
+                if (before[key] && (!source[key] || source[key] === 'unknown' || source[key] === 'N/A')) {
+                    saved[key] = before[key];
                 }
             }
-            Object.assign(target, source);
-            Object.assign(target, saved);
+
+            const indexFields = [
+                'ofdm_ifindex', 'ofdm_rf_port_ifindex', 'downstream_ofdm_ifindex',
+                'ofdma_ifindex', 'ofdma_rf_port_ifindex', 'upstream_ofdma_ifindex',
+                'upstream_ifindex', 'md_if_index', 'upstream_channel_id',
+            ];
+            const channelFields = [
+                'ofdm_channels', 'downstream_ofdm_channels', 'ofdm',
+                'ofdma_channels', 'upstream_ofdma_channels', 'ofdma',
+            ];
+            const countFields = [
+                'ofdm_count', 'ofdm_channel_count', 'downstream_ofdm_count',
+                'ofdma_count', 'ofdma_channel_count', 'upstream_ofdma_count',
+            ];
+            const savedEvidence = {};
+            for (const key of indexFields) {
+                if (this.isPositiveIndex(before[key]) && !this.isPositiveIndex(source[key])) savedEvidence[key] = before[key];
+            }
+            for (const key of channelFields) {
+                if (this.hasPositiveChannels(before[key]) && !this.hasPositiveChannels(source[key])) savedEvidence[key] = before[key];
+            }
+            if (this.hasPositiveChannels(before.downstream?.ofdm) && !this.hasPositiveChannels(source.downstream?.ofdm)) {
+                savedEvidence.downstream = before.downstream;
+            }
+            if (this.hasPositiveChannels(before.upstream?.ofdma) && !this.hasPositiveChannels(source.upstream?.ofdma)) {
+                savedEvidence.upstream = before.upstream;
+            }
+            for (const key of countFields) {
+                if (this.isPositiveIndex(before[key]) && !this.isPositiveIndex(source[key])) savedEvidence[key] = before[key];
+            }
+            for (const key of ['upstream_interface', 'ofdma_interface', 'interface_name']) {
+                const beforeName = String(before[key] || '');
+                const incomingName = String(source[key] || '');
+                if (beforeName.toLowerCase().includes('ofdma') && !incomingName.toLowerCase().includes('ofdma')) {
+                    savedEvidence[key] = before[key];
+                }
+            }
+
+            const bestDocsis = this.docsisVersionRank(before.docsis_version) >= this.docsisVersionRank(source.docsis_version)
+                ? before.docsis_version
+                : source.docsis_version;
+            Object.assign(target, source, saved, savedEvidence);
+
+            const ofdmaPositive = this.hasPositiveOfdmaEvidence(before) ||
+                this.hasPositiveOfdmaEvidence(source) || this.hasPositiveOfdmaEvidence(target);
+            const ofdmPositive = this.hasPositiveOfdmEvidence(before) ||
+                this.hasPositiveOfdmEvidence(source) || this.hasPositiveOfdmEvidence(target);
+            target.ofdma_enabled = ofdmaPositive
+                ? true
+                : this.mergeCapabilityFlag(before.ofdma_enabled, source.ofdma_enabled);
+            target.ofdm_enabled = ofdmPositive
+                ? true
+                : this.mergeCapabilityFlag(before.ofdm_enabled, source.ofdm_enabled);
+
+            // Resolve DOCSIS only after effective true-dominant evidence exists.
+            target.docsis_version = this.resolveDocsisVersion(
+                { ...target, docsis_version: bestDocsis },
+                bestDocsis || 'Unknown',
+            );
+            return target;
         },
 
         _normalizeFnSelectedMacsToCurrentRows() {
@@ -1587,22 +1659,132 @@ createApp({
         },
 
         hasKnownDocsisVersion(version) {
+            return this.docsisVersionRank(version) > 0;
+        },
+
+        docsisVersionRank(version) {
             const value = (version || '').toString().trim().toLowerCase();
-            return !!value && value !== 'unknown' && value !== 'n/a';
+            if (value.includes('4.0')) return 40;
+            if (value.includes('3.1')) return 31;
+            if (value.includes('3.0')) return 30;
+            if (value.includes('2.0')) return 20;
+            if (value.includes('1.1')) return 11;
+            if (value.includes('1.0')) return 10;
+            return 0;
+        },
+
+        isOnlineModem(modem) {
+            const status = String(modem?.status || '').trim().toLowerCase();
+            const statusCode = Number(modem?.status_code ?? modem?.statusCode ?? NaN);
+            return ['operational', 'online', 'registrationcomplete', 'ipcomplete'].includes(status) ||
+                   statusCode === 6 || statusCode === 8;
+        },
+
+        isPositiveCapability(value) {
+            if (value === true) return true;
+            if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+            return ['true', 'yes', 'on', 'active', 'available'].includes(String(value || '').trim().toLowerCase());
+        },
+
+        isPositiveIndex(value) {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) && parsed > 0;
+        },
+
+        hasPositiveChannels(value) {
+            if (Array.isArray(value)) return value.length > 0;
+            if (!value || typeof value !== 'object') return false;
+            if (this.isPositiveIndex(value.count)) return true;
+            return ['channels', 'entries', 'results'].some(key =>
+                Array.isArray(value[key]) && value[key].length > 0
+            );
+        },
+
+        hasPositiveOfdmaEvidence(modem) {
+            if (!modem) return false;
+            const indexes = [
+                modem.ofdma_ifindex,
+                modem.ofdma_rf_port_ifindex,
+                modem.upstream_ofdma_ifindex,
+            ];
+            const interfaces = [
+                modem.upstream_interface,
+                modem.ofdma_interface,
+                modem.interface_name,
+            ];
+            const counts = [
+                modem.ofdma_count,
+                modem.ofdma_channel_count,
+                modem.upstream_ofdma_count,
+            ];
+            const channels = [
+                modem.ofdma_channels,
+                modem.ofdma,
+                modem.upstream_ofdma_channels,
+                modem.upstream?.ofdma,
+            ];
+            return this.isPositiveCapability(modem.ofdma_enabled) ||
+                   indexes.some(value => this.isPositiveIndex(value)) ||
+                   interfaces.some(value => String(value || '').toLowerCase().includes('ofdma')) ||
+                   counts.some(value => this.isPositiveIndex(value)) ||
+                   channels.some(value => this.hasPositiveChannels(value));
+        },
+
+        hasPositiveOfdmEvidence(modem) {
+            if (!modem) return false;
+            const indexes = [
+                modem.ofdm_ifindex,
+                modem.ofdm_rf_port_ifindex,
+                modem.downstream_ofdm_ifindex,
+            ];
+            const counts = [
+                modem.ofdm_count,
+                modem.ofdm_channel_count,
+                modem.downstream_ofdm_count,
+            ];
+            const channels = [
+                modem.ofdm_channels,
+                modem.ofdm,
+                modem.downstream_ofdm_channels,
+                modem.downstream?.ofdm,
+            ];
+            return this.isPositiveCapability(modem.ofdm_enabled) ||
+                   indexes.some(value => this.isPositiveIndex(value)) ||
+                   counts.some(value => this.isPositiveIndex(value)) ||
+                   channels.some(value => this.hasPositiveChannels(value));
+        },
+
+        mergeCapabilityFlag(...values) {
+            if (values.some(value => this.isPositiveCapability(value))) return true;
+            if (values.every(value => value == null)) return null;
+            return false;
+        },
+
+        capabilityStatus(modem, direction) {
+            const status = String(modem?.status || '').trim().toLowerCase();
+            if (status === 'offline' || status === 'other') return 'red';
+            if (this.isDirectionalPartialService(modem, direction)) return 'orange';
+            const positive = direction === 'downstream'
+                ? this.hasPositiveOfdmEvidence(modem)
+                : this.hasPositiveOfdmaEvidence(modem);
+            if (positive) return 'green';
+            if (this.isOnlineModem(modem)) return 'gray';
+            return 'red';
         },
 
         resolveDocsisVersion(modem, fallback = 'Unknown') {
-            const raw = (modem?.docsis_version || '').toString().trim();
-            if (this.hasKnownDocsisVersion(raw)) return raw;
-
-            // Negative or absent OFDM/OFDMA flags are not authoritative:
-            // older inventory generations may carry false for DOCSIS 3.1
-            // modems. Positive channel capability is sufficient to establish
-            // at least DOCSIS 3.1, but never infer 3.0 from missing evidence.
-            if (modem?.ofdm_enabled === true || modem?.ofdma_enabled === true) {
-                return 'DOCSIS 3.1';
+            let rank = this.docsisVersionRank(modem?.docsis_version);
+            if (this.hasPositiveOfdmEvidence(modem) || this.hasPositiveOfdmaEvidence(modem)) {
+                rank = Math.max(rank, 31);
+            } else if (rank === 0 && this.isOnlineModem(modem)) {
+                rank = 30;
             }
-            return fallback;
+
+            const labels = {
+                10: 'DOCSIS 1.0', 11: 'DOCSIS 1.1', 20: 'DOCSIS 2.0',
+                30: 'DOCSIS 3.0', 31: 'DOCSIS 3.1', 40: 'DOCSIS 4.0',
+            };
+            return labels[rank] || fallback;
         },
 
         fnDocsisShortLabel(version) {
@@ -2175,8 +2357,9 @@ createApp({
             this.modems = this.modems.map(m => {
                 const patch = patchByMac[this.normalizeMacForMatch(m.mac_address)];
                 if (!patch) return m;
+                const merged = this._mergeModemPreservingCmts({ ...m }, patch);
                 return {
-                    ...m,
+                    ...merged,
                     ip_address: m.ip_address || patch.ip_address || '',
                     cmts_ip: m.cmts_ip || patch.cmts_ip || '',
                     cmts: this.resolveCanonicalCmtsDisplayName(m.cmts_ip || patch.cmts_ip || '', m.cmts || patch.cmts || patch.cmts_hostname || ''),
@@ -2184,18 +2367,10 @@ createApp({
                     vendor: patch.vendor || m.vendor,
                     model: patch.model || m.model,
                     software_version: patch.software_version || m.software_version || '',
-                    docsis_version: this.resolveDocsisVersion({ ...m, ...patch }, m.docsis_version || 'Unknown'),
-                    ofdm_enabled: m.ofdm_enabled ?? patch.ofdm_enabled ?? null,
-                    ofdma_enabled: m.ofdma_enabled ?? patch.ofdma_enabled ?? null,
-                    ofdma_ifindex: m.ofdma_ifindex ?? patch.ofdma_ifindex ?? null,
                     partial_service: this.normalizePartialService(patch.partial_service ?? m.partial_service),
                     partial_service_downstream: patch.partial_service_downstream ?? m.partial_service_downstream ?? null,
                     partial_service_upstream: patch.partial_service_upstream ?? m.partial_service_upstream ?? null,
                     partial_service_state: patch.partial_service_state ?? m.partial_service_state ?? null,
-                    upstream_interface: patch.upstream_interface || m.upstream_interface,
-                    upstream_ifindex: m.upstream_ifindex ?? patch.upstream_ifindex ?? patch.md_if_index ?? null,
-                    md_if_index: m.md_if_index ?? patch.md_if_index ?? null,
-                    upstream_channel_id: m.upstream_channel_id ?? patch.upstream_channel_id ?? null,
                     cable_mac: patch.cable_mac || m.cable_mac,
                     fiber_node: m.fiber_node || patch.fiber_node || '',
                 };
@@ -2340,7 +2515,7 @@ createApp({
                         if (ed?.status === 'success' && ed.modem) {
                             selectedModemApi = ed.modem;
                             if (this.selectedModem?.mac_address && this.selectedModem.mac_address === representativeMac) {
-                                Object.assign(this.selectedModem, ed.modem);
+                                this._mergeModemPreservingCmts(this.selectedModem, ed.modem);
                             }
                         }
                     } catch (_) {
@@ -2479,30 +2654,55 @@ createApp({
                     return u;
                 };
 
-                const mapModem = (m, resp) => ({
-                    mac_address: m.mac_address,
-                    ip_address: m.ip_address,
-                    status: m.status || 'unknown',
-                    name: m.mac_address,
-                    vendor: m.vendor || 'Unknown',
-                    model: m.model || 'N/A',
-                    docsis_version: this.resolveDocsisVersion(m, 'Unknown'),
-                    cmts: resp.cmts_hostname,
-                    cmts_ip: resp.cmts_ip,
-                    cmts_interface: m.interface || m.cmts_index || 'N/A',
-                    software_version: m.software_version || '',
-                    cable_mac: m.cable_mac || '',
-                    upstream_interface: m.upstream_interface || '',
-                    upstream_ifindex: m.upstream_ifindex ?? null,
-                    fiber_node: m.fiber_node || '',
-                    partial_service: this.normalizePartialService(m.partial_service),
-                    partial_service_downstream: m.partial_service_downstream ?? null,
-                    partial_service_upstream: m.partial_service_upstream ?? null,
-                    partial_service_state: m.partial_service_state ?? null,
-                    ofdma_enabled: m.ofdma_enabled ?? null,
-                    ofdma_ifindex: m.ofdma_ifindex ?? null,
-                    ofdm_enabled: m.ofdm_enabled ?? null,
-                });
+                const mapModem = (m, resp) => {
+                    const row = {
+                        mac_address: m.mac_address,
+                        ip_address: m.ip_address,
+                        status: m.status || 'unknown',
+                        status_code: m.status_code ?? null,
+                        name: m.mac_address,
+                        vendor: m.vendor || 'Unknown',
+                        model: m.model || 'N/A',
+                        docsis_version: m.docsis_version || 'Unknown',
+                        cmts: resp.cmts_hostname,
+                        cmts_ip: resp.cmts_ip,
+                        cmts_interface: m.interface || m.cmts_index || 'N/A',
+                        software_version: m.software_version || '',
+                        cable_mac: m.cable_mac || '',
+                        upstream_interface: m.upstream_interface || '',
+                        ofdma_interface: m.ofdma_interface || '',
+                        interface_name: m.interface_name || '',
+                        upstream_ifindex: m.upstream_ifindex ?? null,
+                        fiber_node: m.fiber_node || '',
+                        partial_service: this.normalizePartialService(m.partial_service),
+                        partial_service_downstream: m.partial_service_downstream ?? null,
+                        partial_service_upstream: m.partial_service_upstream ?? null,
+                        partial_service_state: m.partial_service_state ?? null,
+                        ofdma_enabled: m.ofdma_enabled ?? null,
+                        ofdma_ifindex: m.ofdma_ifindex ?? null,
+                        ofdma_rf_port_ifindex: m.ofdma_rf_port_ifindex ?? null,
+                        upstream_ofdma_ifindex: m.upstream_ofdma_ifindex ?? null,
+                        ofdm_enabled: m.ofdm_enabled ?? null,
+                        ofdm_ifindex: m.ofdm_ifindex ?? null,
+                        ofdm_rf_port_ifindex: m.ofdm_rf_port_ifindex ?? null,
+                        downstream_ofdm_ifindex: m.downstream_ofdm_ifindex ?? null,
+                        ofdm_channels: m.ofdm_channels ?? null,
+                        ofdma_channels: m.ofdma_channels ?? null,
+                        downstream_ofdm_channels: m.downstream_ofdm_channels ?? null,
+                        upstream_ofdma_channels: m.upstream_ofdma_channels ?? null,
+                        ofdm: m.ofdm ?? null,
+                        ofdma: m.ofdma ?? null,
+                        downstream: m.downstream ?? null,
+                        upstream: m.upstream ?? null,
+                        ofdm_count: m.ofdm_count ?? null,
+                        ofdma_count: m.ofdma_count ?? null,
+                        downstream_ofdm_count: m.downstream_ofdm_count ?? null,
+                        upstream_ofdma_count: m.upstream_ofdma_count ?? null,
+                        ofdm_channel_count: m.ofdm_channel_count ?? null,
+                        ofdma_channel_count: m.ofdma_channel_count ?? null,
+                    };
+                    return this._mergeModemPreservingCmts(row, {});
+                };
 
                 const cmtsKey = String(this.selectedCmts || '').trim();
                 const forcePreviewRefresh = !!this._forceNextLiveRefreshByCmts[cmtsKey];
@@ -2644,23 +2844,9 @@ createApp({
                     const prev = norm ? existingByMac.get(norm) : null;
                     if (!prev) return row;
 
-                    // Non-enriched refresh responses can regress known fields to unknown/null.
-                    // Keep previously known values for stable UI while delta enrichment catches up.
-                    if (!this.hasKnownDocsisVersion(row.docsis_version) && this.hasKnownDocsisVersion(prev.docsis_version)) {
-                        row.docsis_version = prev.docsis_version;
-                    }
-                    if (row.ofdm_enabled == null && prev.ofdm_enabled != null) {
-                        row.ofdm_enabled = prev.ofdm_enabled;
-                    }
-                    if (row.ofdma_enabled == null && prev.ofdma_enabled != null) {
-                        row.ofdma_enabled = prev.ofdma_enabled;
-                    }
-                    // Non-enriched background refreshes can temporarily return empty
-                    // fiber_node even when a previous row had a resolved value.
-                    if (!String(row.fiber_node || '').trim() && String(prev.fiber_node || '').trim()) {
-                        row.fiber_node = prev.fiber_node;
-                    }
-                    return row;
+                    // Non-enriched refresh responses can regress known capability
+                    // fields to false/null. Reconcile through the monotonic merge.
+                    return this._mergeModemPreservingCmts({ ...prev }, row);
                 });
                 this._mergeSearchSeed(mapped);
                 // The full response has already refreshed Redis server-side, so
@@ -2788,43 +2974,43 @@ createApp({
                     for (const modem of this.modems) {
                         const updated = patchMap[this.normalizeMacForMatch(modem.mac_address)];
                         if (!updated) continue;
-                        modem.cable_mac         = updated.cable_mac || modem.cable_mac;
-                        modem.upstream_interface = updated.upstream_interface || modem.upstream_interface;
-                        modem.upstream_ifindex  = updated.upstream_ifindex ?? modem.upstream_ifindex;
-                        modem.ofdma_enabled     = updated.ofdma_enabled ?? modem.ofdma_enabled;
-                        modem.ofdma_ifindex     = updated.ofdma_ifindex ?? modem.ofdma_ifindex;
-                        modem.ofdm_enabled      = updated.ofdm_enabled ?? modem.ofdm_enabled;
-                        modem.fiber_node        = updated.fiber_node || modem.fiber_node;
-                        modem.docsis_version    = this.resolveDocsisVersion({ ...modem, ...updated }, modem.docsis_version || 'Unknown');
-                        modem.vendor            = updated.vendor || modem.vendor;
-                        modem.model             = updated.model || modem.model;
-                        modem.software_version  = updated.software_version || modem.software_version;
-                        modem.partial_service   = this.normalizePartialService(updated.partial_service);
-                        if (updated.partial_service_downstream != null) {
-                            modem.partial_service_downstream = updated.partial_service_downstream;
-                        }
-                        if (updated.partial_service_upstream != null) {
-                            modem.partial_service_upstream = updated.partial_service_upstream;
-                        }
-                        if (updated.partial_service_state != null) {
-                            modem.partial_service_state = updated.partial_service_state;
-                        }
+                        this._mergeModemPreservingCmts(modem, {
+                            ...updated,
+                            cable_mac: updated.cable_mac || modem.cable_mac,
+                            upstream_interface: updated.upstream_interface || modem.upstream_interface,
+                            fiber_node: updated.fiber_node || modem.fiber_node,
+                            vendor: updated.vendor || modem.vendor,
+                            model: updated.model || modem.model,
+                            software_version: updated.software_version || modem.software_version,
+                            partial_service_downstream: updated.partial_service_downstream ?? modem.partial_service_downstream,
+                            partial_service_upstream: updated.partial_service_upstream ?? modem.partial_service_upstream,
+                            partial_service_state: updated.partial_service_state ?? modem.partial_service_state,
+                        });
+                        modem.partial_service = this.normalizePartialService(updated.partial_service ?? modem.partial_service);
                     }
                     // New shallow array ref forces Vue computed props to recompute
                     // and re-render rows with updated vendor/model/docsis fields.
                     this.modems = this.modems.slice();
 
-                    // Patch selectedModem in-place too — don't replace the reference
+                    // Patch selectedModem in-place too — don't replace the reference.
                     if (this.selectedModem) {
                         const updatedSel = patchMap[this.normalizeMacForMatch(this.selectedModem.mac_address)];
                         if (updatedSel) {
-                            ['cable_mac','upstream_interface','upstream_ifindex','ofdma_enabled',
-                             'ofdma_ifindex','ofdm_enabled','fiber_node','docsis_version','vendor',
-                             'model','software_version','partial_service_downstream','partial_service_upstream',
-                             'partial_service_state'].forEach(k => {
-                                if (updatedSel[k] != null) this.selectedModem[k] = updatedSel[k];
+                            this._mergeModemPreservingCmts(this.selectedModem, {
+                                ...updatedSel,
+                                cable_mac: updatedSel.cable_mac || this.selectedModem.cable_mac,
+                                upstream_interface: updatedSel.upstream_interface || this.selectedModem.upstream_interface,
+                                fiber_node: updatedSel.fiber_node || this.selectedModem.fiber_node,
+                                vendor: updatedSel.vendor || this.selectedModem.vendor,
+                                model: updatedSel.model || this.selectedModem.model,
+                                software_version: updatedSel.software_version || this.selectedModem.software_version,
+                                partial_service_downstream: updatedSel.partial_service_downstream ?? this.selectedModem.partial_service_downstream,
+                                partial_service_upstream: updatedSel.partial_service_upstream ?? this.selectedModem.partial_service_upstream,
+                                partial_service_state: updatedSel.partial_service_state ?? this.selectedModem.partial_service_state,
                             });
-                            this.selectedModem.partial_service = this.normalizePartialService(updatedSel.partial_service);
+                            this.selectedModem.partial_service = this.normalizePartialService(
+                                updatedSel.partial_service ?? this.selectedModem.partial_service
+                            );
                         }
                     }
 
@@ -2965,13 +3151,13 @@ createApp({
                 const enrichResp = await fetch(`${API_BASE}/modems/${encodeURIComponent(m.mac_address)}`);
                 const enrichData = await enrichResp.json();
                 if (enrichData?.status === 'success' && enrichData.modem) {
-                    // Merge enriched data onto the modem object
-                    Object.assign(m, enrichData.modem);
+                    // Merge enriched data monotonically onto both references.
+                    this._mergeModemPreservingCmts(m, enrichData.modem);
                     if (!m.fiber_node && preFiberNode) {
                         m.fiber_node = preFiberNode;
                     }
                     if (this.selectedModem?.mac_address === m.mac_address) {
-                        Object.assign(this.selectedModem, enrichData.modem);
+                        this._mergeModemPreservingCmts(this.selectedModem, enrichData.modem);
                         if (!this.selectedModem.fiber_node && preFiberNode) {
                             this.selectedModem.fiber_node = preFiberNode;
                         }
@@ -4701,15 +4887,8 @@ createApp({
 
         fnScanModemSupportsUsRxmer(modem) {
             if (!modem) return false;
-            if (modem.ofdma_enabled === true || modem.ofdm_enabled === true) return true;
-
-            const docsis = (modem.docsis_version || '').toString();
-            if (docsis.includes('3.1') || docsis.includes('4.0')) return true;
-
-            const upstream = (modem.upstream_interface || '').toString().toLowerCase();
-            if (upstream.includes('ofdma')) return true;
-
-            return false;
+            if (this.hasPositiveOfdmaEvidence(modem) || this.hasPositiveOfdmEvidence(modem)) return true;
+            return this.docsisVersionRank(this.resolveDocsisVersion(modem, 'Unknown')) >= 31;
         },
 
         async refreshFnSelectorModems(force = false, liveSnmp = false) {
@@ -4759,27 +4938,20 @@ createApp({
                     const existing = existingByMac.get(this.normalizeMacForMatch(m.mac_address || '')) || {};
                     const linkedNodeId = String(m.linked_node_id || existing.linked_node_id || '').trim();
                     const derived = this._deriveTopologyLevels(linkedNodeId);
-                    const mergedDocsis = this.resolveDocsisVersion({ ...existing, ...m }, existing.docsis_version || '');
+                    const merged = this._mergeModemPreservingCmts({ ...existing }, m);
                     return {
-                        ...existing,
-                        mac_address: m.mac_address || '',
-                        ip_address: m.ip_address || '',
-                        status: m.status || '',
-                        fiber_node: m.fiber_node || '',
-                        upstream_ifindex: m.upstream_ifindex ?? m.md_if_index ?? null,
-                        md_if_index: m.md_if_index ?? null,
-                        upstream_channel_id: m.upstream_channel_id ?? null,
-                        cable_mac: m.cable_mac || '',
-                        vendor: m.vendor || 'Unknown',
-                        docsis_version: mergedDocsis,
-                        upstream_interface: m.upstream_interface || '',
-                        ofdm_enabled: m.ofdm_enabled ?? existing.ofdm_enabled ?? null,
-                        ofdma_enabled: m.ofdma_enabled ?? existing.ofdma_enabled ?? null,
-                        partial_service: this.normalizePartialService(m.partial_service),
+                        ...merged,
+                        mac_address: m.mac_address || existing.mac_address || '',
+                        ip_address: m.ip_address || existing.ip_address || '',
+                        status: m.status || existing.status || '',
+                        fiber_node: m.fiber_node || existing.fiber_node || '',
+                        cable_mac: m.cable_mac || existing.cable_mac || '',
+                        vendor: m.vendor || existing.vendor || 'Unknown',
+                        partial_service: this.normalizePartialService(m.partial_service ?? existing.partial_service),
                         partial_service_downstream: m.partial_service_downstream ?? existing.partial_service_downstream ?? null,
                         partial_service_upstream: m.partial_service_upstream ?? existing.partial_service_upstream ?? null,
                         partial_service_state: m.partial_service_state ?? existing.partial_service_state ?? null,
-                        cmts_ip: m.cmts_ip || data.cmts_ip || this.fnScanCmtsIp,
+                        cmts_ip: m.cmts_ip || data.cmts_ip || existing.cmts_ip || this.fnScanCmtsIp,
                         linked_node_id: linkedNodeId,
                         lat: m.lat ?? existing.lat ?? null,
                         lon: m.lon ?? existing.lon ?? null,
@@ -4812,10 +4984,13 @@ createApp({
                     if (idx >= 0) {
                         // Selected modem is authoritative for FN/OFDMA-related fields.
                         // Keep selected values when present, and only use selector row as fallback.
-                        const merged = { ...this.modems[idx], ...selectedSnapshot };
+                        const merged = this._mergeModemPreservingCmts(
+                            { ...this.modems[idx] },
+                            selectedSnapshot,
+                        );
                         this.modems[idx] = merged;
                         // Keep object identity for bindings that hold selectedModem reference.
-                        Object.assign(this.selectedModem, merged);
+                        this._mergeModemPreservingCmts(this.selectedModem, merged);
                     }
                 }
                 await this._enrichFnSelectorTopologyMetadata();

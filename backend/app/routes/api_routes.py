@@ -372,6 +372,133 @@ def _docsis_version_rank(value) -> int:
     return 0
 
 
+def _positive_capability(value) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, (int, float)):
+        return value > 0
+    return str(value or '').strip().lower() in ('true', 'yes', 'on', 'active', 'available')
+
+
+def _negative_capability(value) -> bool:
+    if value is False:
+        return True
+    if value is True:
+        return False
+    if isinstance(value, (int, float)):
+        return value <= 0
+    return str(value or '').strip().lower() in (
+        'false', 'no', 'off', 'inactive', 'unavailable', '0'
+    )
+
+
+def _positive_index(value) -> bool:
+    try:
+        return int(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _positive_channels(value) -> bool:
+    if isinstance(value, (list, tuple, set)):
+        return bool(value)
+    if isinstance(value, dict):
+        if _positive_index(value.get('count')):
+            return True
+        return any(
+            isinstance(value.get(key), list) and bool(value.get(key))
+            for key in ('channels', 'entries', 'results')
+        )
+    return False
+
+
+def _has_positive_ofdma_evidence(*sources: dict | None) -> bool:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        if _positive_capability(source.get('ofdma_enabled')):
+            return True
+        if any(_positive_index(source.get(key)) for key in (
+            'ofdma_ifindex', 'ofdma_rf_port_ifindex', 'upstream_ofdma_ifindex'
+        )):
+            return True
+        if any('ofdma' in str(source.get(key) or '').lower() for key in (
+            'upstream_interface', 'ofdma_interface', 'interface_name'
+        )):
+            return True
+        if any(_positive_index(source.get(key)) for key in (
+            'ofdma_count', 'ofdma_channel_count', 'upstream_ofdma_count'
+        )):
+            return True
+        if any(_positive_channels(source.get(key)) for key in (
+            'ofdma_channels', 'ofdma', 'upstream_ofdma_channels'
+        )):
+            return True
+    return False
+
+
+def _has_positive_ofdm_evidence(*sources: dict | None) -> bool:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        if _positive_capability(source.get('ofdm_enabled')):
+            return True
+        if any(_positive_index(source.get(key)) for key in (
+            'ofdm_ifindex', 'ofdm_rf_port_ifindex', 'downstream_ofdm_ifindex'
+        )):
+            return True
+        if any(_positive_index(source.get(key)) for key in (
+            'ofdm_count', 'ofdm_channel_count', 'downstream_ofdm_count'
+        )):
+            return True
+        if any(_positive_channels(source.get(key)) for key in (
+            'ofdm_channels', 'ofdm', 'downstream_ofdm_channels'
+        )):
+            return True
+    return False
+
+
+def _modem_is_online(*sources: dict | None) -> bool:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        status = str(source.get('status') or '').strip().lower()
+        if status in ('operational', 'online', 'registrationcomplete', 'ipcomplete'):
+            return True
+        try:
+            if int(source.get('status_code')) in (6, 8):
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
+def _normalize_modem_capability(modem: dict, *sources: dict | None) -> dict:
+    """Merge capability evidence monotonically and enforce online invariants."""
+    evidence = (modem, *sources)
+    ofdma_positive = _has_positive_ofdma_evidence(*evidence)
+    ofdm_positive = _has_positive_ofdm_evidence(*evidence)
+    if ofdma_positive:
+        modem['ofdma_enabled'] = True
+    if ofdm_positive:
+        modem['ofdm_enabled'] = True
+
+    rank = max((_docsis_version_rank(row.get('docsis_version'))
+                for row in evidence if isinstance(row, dict)), default=0)
+    if ofdm_positive or ofdma_positive:
+        rank = max(rank, 31)
+    elif rank == 0 and _modem_is_online(*evidence):
+        rank = 30
+
+    labels = {
+        10: 'DOCSIS 1.0', 11: 'DOCSIS 1.1', 20: 'DOCSIS 2.0',
+        30: 'DOCSIS 3.0', 31: 'DOCSIS 3.1', 40: 'DOCSIS 4.0',
+    }
+    if rank in labels:
+        modem['docsis_version'] = labels[rank]
+    return modem
+
+
 def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
     """Best-effort lookup of topology fields keyed by bare uppercase MAC."""
     if not mac_addresses:
@@ -489,6 +616,16 @@ def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> d
                     'cable_mac': m.get('cable_mac') or '',
                     'ofdm_enabled': m.get('ofdm_enabled'),
                     'ofdma_enabled': m.get('ofdma_enabled'),
+                    'ofdm_ifindex': m.get('ofdm_ifindex'),
+                    'ofdma_ifindex': m.get('ofdma_ifindex'),
+                    'ofdma_rf_port_ifindex': m.get('ofdma_rf_port_ifindex'),
+                    'upstream_interface': m.get('upstream_interface') or '',
+                    'ofdm_channels': m.get('ofdm_channels'),
+                    'ofdma_channels': m.get('ofdma_channels'),
+                    'ofdm': m.get('ofdm'),
+                    'ofdma': m.get('ofdma'),
+                    'ofdm_channel_count': m.get('ofdm_channel_count'),
+                    'ofdma_channel_count': m.get('ofdma_channel_count'),
                     'docsis_version': m.get('docsis_version') or '',
                     'vendor': m.get('vendor') or '',
                 }
@@ -512,6 +649,7 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
     need_inv = [m for m in modems if isinstance(m, dict) and (
         not m.get("fiber_node")
         or m.get("ofdm_enabled") is None
+        or m.get("ofdma_enabled") is None
         or _docsis_version_rank(m.get("docsis_version")) < 31
     )]
     if need_inv:
@@ -541,14 +679,33 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
                 m["fiber_node"] = iv["fiber_node"]
             if not m.get("cable_mac") and iv.get("cable_mac"):
                 m["cable_mac"] = iv["cable_mac"]
-            if m.get("ofdm_enabled") is None and iv.get("ofdm_enabled") is not None:
-                m["ofdm_enabled"] = bool(iv["ofdm_enabled"])
-            if m.get("ofdma_enabled") is None and iv.get("ofdma_enabled") is not None:
-                m["ofdma_enabled"] = bool(iv["ofdma_enabled"])
-            if _docsis_version_rank(iv.get("docsis_version")) > _docsis_version_rank(m.get("docsis_version")):
-                m["docsis_version"] = iv["docsis_version"]
+            if _positive_capability(iv.get("ofdm_enabled")):
+                m["ofdm_enabled"] = True
+            elif m.get("ofdm_enabled") is None and _negative_capability(iv.get("ofdm_enabled")):
+                m["ofdm_enabled"] = False
+            if _positive_capability(iv.get("ofdma_enabled")):
+                m["ofdma_enabled"] = True
+            elif m.get("ofdma_enabled") is None and _negative_capability(iv.get("ofdma_enabled")):
+                m["ofdma_enabled"] = False
+            for field in ('ofdm_ifindex', 'ofdma_ifindex', 'ofdma_rf_port_ifindex'):
+                if _positive_index(iv.get(field)) and not _positive_index(m.get(field)):
+                    m[field] = iv[field]
+            for field in ('ofdm_channels', 'ofdma_channels', 'ofdm', 'ofdma'):
+                if _positive_channels(iv.get(field)) and not _positive_channels(m.get(field)):
+                    m[field] = iv[field]
+            for field in ('ofdm_channel_count', 'ofdma_channel_count'):
+                if _positive_index(iv.get(field)) and not _positive_index(m.get(field)):
+                    m[field] = iv[field]
+            incoming_interface = str(iv.get("upstream_interface") or '').strip()
+            current_interface = str(m.get("upstream_interface") or '').strip()
+            if incoming_interface and (
+                not current_interface
+                or ('ofdma' in incoming_interface.lower() and 'ofdma' not in current_interface.lower())
+            ):
+                m["upstream_interface"] = incoming_interface
             if not m.get("vendor") and iv.get("vendor"):
                 m["vendor"] = iv["vendor"]
+        _normalize_modem_capability(m, iv)
     return modems
 
 
@@ -603,6 +760,7 @@ def get_modems():
             inv_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
             inv_modem = inv_resp.get('modem') if isinstance(inv_resp, dict) else None
             if inv_modem:
+                _normalize_modem_capability(inv_modem)
                 return jsonify({
                     'status': 'success',
                     'modems': [inv_modem],
@@ -821,25 +979,41 @@ def get_modem(mac_address):
                             # Merge enrichment fields from inventory when Redis
                             # cache lacks them (vendor/model/software/ofdm come
                             # from sysDescr refresh, stored in MySQL only).
+                            inv_m = None
                             if (not modem.get('vendor') or not modem.get('model')
                                     or not modem.get('software_version')
                                     or modem.get('ofdm_enabled') is None
-                                    or modem.get('ofdma_enabled') is None):
+                                    or modem.get('ofdma_enabled') is None
+                                    or _docsis_version_rank(modem.get('docsis_version')) < 31):
                                 try:
                                     inv = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
                                     inv_m = inv.get('modem') if isinstance(inv, dict) else None
                                     if inv_m:
                                         for field in ('vendor', 'model', 'software_version',
-                                                      'docsis_version', 'ofdm_enabled', 'ofdma_enabled',
-                                                      'ofdma_ifindex', 'fiber_node', 'cable_mac'):
+                                                      'fiber_node', 'cable_mac'):
                                             incoming = inv_m.get(field)
-                                            if field == 'docsis_version':
-                                                if _docsis_version_rank(incoming) > _docsis_version_rank(modem.get(field)):
-                                                    modem[field] = incoming
-                                            elif incoming and not modem.get(field):
+                                            if incoming and not modem.get(field):
                                                 modem[field] = incoming
+                                        for field in ('ofdm_ifindex', 'ofdma_ifindex',
+                                                      'ofdma_rf_port_ifindex'):
+                                            if (_positive_index(inv_m.get(field))
+                                                    and not _positive_index(modem.get(field))):
+                                                modem[field] = inv_m[field]
+                                        for field in ('ofdm_channels', 'ofdma_channels',
+                                                      'ofdm', 'ofdma'):
+                                            if (_positive_channels(inv_m.get(field))
+                                                    and not _positive_channels(modem.get(field))):
+                                                modem[field] = inv_m[field]
+                                        incoming_interface = str(inv_m.get('upstream_interface') or '').strip()
+                                        current_interface = str(modem.get('upstream_interface') or '').strip()
+                                        if incoming_interface and (
+                                                not current_interface
+                                                or ('ofdma' in incoming_interface.lower()
+                                                    and 'ofdma' not in current_interface.lower())):
+                                            modem['upstream_interface'] = incoming_interface
                                 except Exception:
                                     pass
+                            _normalize_modem_capability(modem, inv_m)
                             return jsonify({
                                 "status": "success",
                                 "modem": modem
@@ -852,6 +1026,7 @@ def get_modem(mac_address):
         modem_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
         modem = modem_resp.get('modem')
         if modem:
+            _normalize_modem_capability(modem)
             return jsonify({
                 "status": "success",
                 "modem": modem,

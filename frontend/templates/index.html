@@ -481,34 +481,34 @@
                                                 <td>{{ modem.firmware || modem.software_version }}</td>
                                                 <td>
                                                     <span class="badge" :class="{
-                                                        'bg-info': modem.docsis_version && (modem.docsis_version.includes('3.1') || modem.docsis_version.includes('4.0')),
-                                                        'bg-warning text-dark': modem.docsis_version && modem.docsis_version.includes('3.0') && !modem.docsis_version.includes('3.1'),
-                                                        'bg-secondary': !modem.docsis_version || modem.docsis_version === 'Unknown'
+                                                        'bg-info': docsisVersionRank(resolveDocsisVersion(modem, 'Unknown')) >= 31,
+                                                        'bg-warning text-dark': docsisVersionRank(resolveDocsisVersion(modem, 'Unknown')) === 30,
+                                                        'bg-secondary': docsisVersionRank(resolveDocsisVersion(modem, 'Unknown')) < 30
                                                     }">
-                                                        {{ modem.docsis_version }}
+                                                        {{ resolveDocsisVersion(modem, 'Unknown') }}
                                                     </span>
-                                                    <!-- OFDM Status Box (Downstream) - Only for DOCSIS 3.1+ -->
-                                                    <span v-if="modem.docsis_version && (modem.docsis_version.includes('3.1') || modem.docsis_version.includes('4.0'))" 
-                                                          class="badge ms-1" 
+                                                    <!-- OFDM Status Box (Downstream) - Only for resolved DOCSIS 3.1+ -->
+                                                    <span v-if="docsisVersionRank(resolveDocsisVersion(modem, 'Unknown')) >= 31"
+                                                          class="badge ms-1"
                                                           :class="{
-                                                              'bg-secondary': modem.ofdm_enabled == null,
-                                                              'bg-success': modem.ofdm_enabled === true && (modem.status === 'operational' || modem.status === 'online') && !isDirectionalPartialService(modem, 'downstream'),
-                                                              'bg-warning text-dark': modem.ofdm_enabled === true && isDirectionalPartialService(modem, 'downstream'),
-                                                              'bg-danger': modem.ofdm_enabled === false
+                                                              'bg-success': capabilityStatus(modem, 'downstream') === 'green',
+                                                              'bg-warning text-dark': capabilityStatus(modem, 'downstream') === 'orange',
+                                                              'bg-secondary': capabilityStatus(modem, 'downstream') === 'gray',
+                                                              'bg-danger': capabilityStatus(modem, 'downstream') === 'red'
                                                           }"
-                                                          :title="modem.ofdm_enabled == null ? 'OFDM (enriching...)' : (isDirectionalPartialService(modem, 'downstream') ? 'OFDM Partial Service' : ((modem.status === 'operational' || modem.status === 'online') ? 'OFDM Operational' : 'OFDM ' + modem.status))">
+                                                          :title="capabilityStatus(modem, 'downstream') === 'orange' ? 'OFDM Partial Service' : (capabilityStatus(modem, 'downstream') === 'green' ? 'OFDM evidence present' : (capabilityStatus(modem, 'downstream') === 'gray' ? 'OFDM evidence unavailable' : 'OFDM modem offline'))">
                                                         <i class="bi bi-arrow-down"></i>
                                                     </span>
-                                                    <!-- OFDMA Status Box (Upstream) - Only for DOCSIS 3.1+ -->
-                                                    <span v-if="modem.docsis_version && (modem.docsis_version.includes('3.1') || modem.docsis_version.includes('4.0'))" 
-                                                          class="badge ms-1" 
+                                                    <!-- OFDMA Status Box (Upstream) - Only for resolved DOCSIS 3.1+ -->
+                                                    <span v-if="docsisVersionRank(resolveDocsisVersion(modem, 'Unknown')) >= 31"
+                                                          class="badge ms-1"
                                                           :class="{
-                                                              'bg-secondary': modem.ofdma_enabled == null,
-                                                              'bg-success': modem.ofdma_enabled === true && !isDirectionalPartialService(modem, 'upstream') && modem.status !== 'offline',
-                                                              'bg-warning text-dark': modem.ofdma_enabled === true && isDirectionalPartialService(modem, 'upstream') && modem.status !== 'offline',
-                                                              'bg-danger': modem.ofdma_enabled === false && modem.status !== 'offline'
+                                                              'bg-success': capabilityStatus(modem, 'upstream') === 'green',
+                                                              'bg-warning text-dark': capabilityStatus(modem, 'upstream') === 'orange',
+                                                              'bg-secondary': capabilityStatus(modem, 'upstream') === 'gray',
+                                                              'bg-danger': capabilityStatus(modem, 'upstream') === 'red'
                                                           }"
-                                                          :title="modem.ofdma_enabled == null ? 'OFDMA (enriching...)' : (modem.ofdma_enabled === false ? 'OFDMA Inactive' : (isDirectionalPartialService(modem, 'upstream') ? 'OFDMA Partial Service' : 'OFDMA Active'))">
+                                                          :title="capabilityStatus(modem, 'upstream') === 'orange' ? 'OFDMA Partial Service' : (capabilityStatus(modem, 'upstream') === 'green' ? 'OFDMA evidence present' : (capabilityStatus(modem, 'upstream') === 'gray' ? 'OFDMA evidence unavailable' : 'OFDMA modem offline'))">
                                                         <i class="bi bi-arrow-up"></i>
                                                     </span>
                                                     <span v-if="isUndirectedPartialService(modem)" class="badge bg-warning text-dark ms-1"
@@ -611,7 +611,7 @@
                                 <!-- DOCSIS Version Badge -->
                                 <div class="mb-2">
                                     <span class="badge bg-light text-dark py-2 px-3" style="font-size: 0.9rem;">
-                                        <i class="bi bi-cpu me-1"></i>{{ selectedModem.docsis_version || 'DOCSIS 3.1' }}
+                                        <i class="bi bi-cpu me-1"></i>{{ selectedDocsisVersion }}
                                     </span>
                                 </div>
                                 
@@ -621,6 +621,7 @@
                                           :class="{
                                               'bg-success': ofdmStatus === 'green',
                                               'bg-warning text-dark': ofdmStatus === 'orange',
+                                              'bg-secondary': ofdmStatus === 'gray',
                                               'bg-danger': ofdmStatus === 'red'
                                           }" 
                                           style="font-size: 0.85rem;"
@@ -631,6 +632,7 @@
                                           :class="{
                                               'bg-success': ofdmaStatus === 'green',
                                               'bg-warning text-dark': ofdmaStatus === 'orange',
+                                              'bg-secondary': ofdmaStatus === 'gray',
                                               'bg-danger': ofdmaStatus === 'red'
                                           }" 
                                           style="font-size: 0.85rem;"
@@ -855,7 +857,7 @@
                                             </tr>
                                             <tr>
                                                 <td class="text-muted">DOCSIS Version</td>
-                                                <td><span class="badge bg-info">{{ selectedModem.docsis_version || '3.1' }}</span></td>
+                                                <td><span class="badge bg-info">{{ selectedDocsisVersion }}</span></td>
                                             </tr>
                                             <tr>
                                                 <td class="text-muted">Firmware</td>
@@ -2513,7 +2515,7 @@
                 <span class="spinner-border spinner-border-sm me-2"></span>{{ fnScanPreparingMessage || 'Preparing FiberNode scan context…' }}
             </div>
             <div class="alert alert-warning py-2 mb-3"
-                 v-if="(fnScanCmtsIp || selectedModem?.cmts_ip || selectedCmts) && selectedModem && selectedModem.docsis_version && selectedModem.docsis_version.includes('3.0') && !selectedModem.docsis_version.includes('3.1') && !selectedModem.docsis_version.includes('4.0')">
+                 v-if="(fnScanCmtsIp || selectedModem?.cmts_ip || selectedCmts) && selectedModem && docsisVersionRank(selectedDocsisVersion) === 30">
                 <i class="bi bi-exclamation-triangle me-1"></i>
                 Selected modem is <strong>DOCSIS 3.0</strong>. In FiberNode mode, <strong>US OFDMA RxMER tests may not be available</strong> for this modem.
                 DS Suckout and Fullband scans remain available, and this selected DOCSIS 3.0 modem is still taken into account for the applicable measurements.
@@ -2954,24 +2956,24 @@
                                         <td class="small">{{ m.vendor || '—' }}</td>
                                         <td class="fn-docsis-cell">
                                             <span class="badge fn-docsis-slot" :class="{
-                                                'bg-info': hasKnownDocsisVersion(m.docsis_version) && (m.docsis_version.includes('3.1') || m.docsis_version.includes('4.0')),
-                                                'bg-warning text-dark': hasKnownDocsisVersion(m.docsis_version) && m.docsis_version.includes('3.0') && !m.docsis_version.includes('3.1'),
-                                                'bg-secondary': !hasKnownDocsisVersion(m.docsis_version)
-                                            }" :title="hasKnownDocsisVersion(m.docsis_version) ? m.docsis_version : 'DOCSIS unknown'">
-                                                <span v-if="hasKnownDocsisVersion(m.docsis_version)">{{ fnDocsisShortLabel(m.docsis_version) }}</span>
+                                                'bg-info': docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) >= 31,
+                                                'bg-warning text-dark': docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) === 30,
+                                                'bg-secondary': docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) < 30
+                                            }" :title="resolveDocsisVersion(m, 'Unknown')">
+                                                <span v-if="hasKnownDocsisVersion(resolveDocsisVersion(m, 'Unknown'))">{{ fnDocsisShortLabel(resolveDocsisVersion(m, 'Unknown')) }}</span>
                                                 <i v-else class="bi bi-question-circle" aria-label="Unknown DOCSIS"></i>
                                             </span>
-                                            <span v-if="!m.docsis_version?.includes('3.0')" class="badge ms-1" :class="{
-                                                'bg-secondary': m.ofdm_enabled == null,
-                                                'bg-success': m.ofdm_enabled === true && !isDirectionalPartialService(m, 'downstream'),
-                                                'bg-warning text-dark': m.ofdm_enabled === true && isDirectionalPartialService(m, 'downstream'),
-                                                'bg-danger': m.ofdm_enabled === false
+                                            <span v-if="docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) >= 31" class="badge ms-1" :class="{
+                                                'bg-success': capabilityStatus(m, 'downstream') === 'green',
+                                                'bg-warning text-dark': capabilityStatus(m, 'downstream') === 'orange',
+                                                'bg-secondary': capabilityStatus(m, 'downstream') === 'gray',
+                                                'bg-danger': capabilityStatus(m, 'downstream') === 'red'
                                             }" :title="isDirectionalPartialService(m, 'downstream') ? 'DS OFDM partial service' : 'DS OFDM status'"><i class="bi bi-arrow-down"></i></span>
-                                            <span v-if="!m.docsis_version?.includes('3.0')" class="badge ms-1" :class="{
-                                                'bg-secondary': m.ofdma_enabled == null,
-                                                'bg-success': m.ofdma_enabled === true && !isDirectionalPartialService(m, 'upstream'),
-                                                'bg-warning text-dark': m.ofdma_enabled === true && isDirectionalPartialService(m, 'upstream'),
-                                                'bg-danger': m.ofdma_enabled === false
+                                            <span v-if="docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) >= 31" class="badge ms-1" :class="{
+                                                'bg-success': capabilityStatus(m, 'upstream') === 'green',
+                                                'bg-warning text-dark': capabilityStatus(m, 'upstream') === 'orange',
+                                                'bg-secondary': capabilityStatus(m, 'upstream') === 'gray',
+                                                'bg-danger': capabilityStatus(m, 'upstream') === 'red'
                                             }" :title="isDirectionalPartialService(m, 'upstream') ? 'US OFDMA partial service' : 'US OFDMA status'"><i class="bi bi-arrow-up"></i></span>
                                             <span v-if="isUndirectedPartialService(m)" class="badge bg-warning text-dark ms-1"
                                                   title="CMTS reports modem partial service; downstream/upstream direction is unavailable">PS</span>
