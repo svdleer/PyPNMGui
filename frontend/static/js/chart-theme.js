@@ -34,12 +34,15 @@
     };
     const attachButton = chart => {
         const canvas = chart.canvas; if (!canvas?.parentElement || chart.$pypnmDownload) return;
-        const toolbar = document.createElement('div'); toolbar.className = 'd-flex justify-content-end mb-1 pypnm-chart-actions';
+        const parent = canvas.parentElement;
+        if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+        const toolbar = document.createElement('div'); toolbar.className = 'pypnm-chart-actions';
+        toolbar.style.cssText = 'position:absolute;top:.25rem;right:.35rem;z-index:5';
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-sm btn-outline-secondary';
         button.style.cssText = 'padding:.12rem .4rem;font-size:.72rem;line-height:1.25;background:#fff;color:#6c757d;border:1px solid #6c757d';
         button.innerHTML = '<i class="bi bi-download me-1"></i>PNG'; button.title = 'Download chart as PNG';
         button.addEventListener('click', () => downloadPng(canvas, canvas.id || chart.options.plugins?.title?.text));
-        toolbar.appendChild(button); canvas.parentElement.insertBefore(toolbar, canvas); chart.$pypnmDownload = toolbar;
+        toolbar.appendChild(button); parent.appendChild(toolbar); chart.$pypnmDownload = toolbar;
     };
     Chart.defaults.color = colors.text; Chart.defaults.font.family = 'system-ui,-apple-system,"Segoe UI",sans-serif'; Chart.defaults.font.size = 12;
     Chart.defaults.animation = false; Chart.defaults.elements.line.borderWidth = 1; Chart.defaults.elements.point.radius = 0;
