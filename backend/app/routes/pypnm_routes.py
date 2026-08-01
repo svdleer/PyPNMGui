@@ -4737,7 +4737,7 @@ def list_impulse_response_files(mac_address):
 
 @pypnm_bp.route('/impulse-response/<mac_address>/analyze', methods=['POST'])
 def analyze_impulse_response(mac_address):
-    """Analyze existing files by default; fresh capture requires explicit confirmation."""
+    """Analyze existing PNN files or capture and analyze fresh PNN data."""
     from app.core.pypnm_client import PyPNMClient
 
     data = request.get_json(silent=True) or {}
@@ -4755,12 +4755,6 @@ def analyze_impulse_response(mac_address):
             file_id=data.get('file_id') or None,
         )
     else:
-        if data.get('confirm_fresh_capture') is not True:
-            return jsonify({
-                'success': False,
-                'status': 1,
-                'error': 'Fresh capture requires explicit confirmation',
-            }), 409
         modem_ip = str(data.get('modem_ip') or '').strip()
         if not modem_ip:
             return jsonify({'success': False, 'status': 1, 'error': 'modem_ip required for fresh capture'}), 400
@@ -4788,8 +4782,6 @@ def start_fibernode_impulse_job():
     direction = data.get('direction', 'both')
     if source not in {'existing', 'fresh'} or direction not in {'downstream', 'upstream', 'both'}:
         return jsonify({'success': False, 'error': 'Invalid source or direction'}), 400
-    if source == 'fresh' and data.get('confirm_fresh_capture') is not True:
-        return jsonify({'success': False, 'error': 'Bulk fresh capture requires explicit confirmation'}), 409
 
     raw_targets = data.get('targets') or []
     targets: list[dict] = []

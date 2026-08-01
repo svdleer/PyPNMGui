@@ -5020,7 +5020,6 @@ createApp({
                 concurrency: 3,
             };
             if (source === 'fresh') {
-                jobPayload.confirm_fresh_capture = true;
                 jobPayload.community = this.fnScanWriteCommunity || this.snmpCommunityModem;
             }
 
@@ -5127,8 +5126,8 @@ createApp({
             return {
                 ...baseResult,
                 success: successCount > 0,
-                retrieval_mode: 'fresh_agent_catalog_with_confirmed_missing_capture',
-                confirmed_missing_capture: { ...captureCounts },
+                retrieval_mode: 'fresh_agent_catalog_with_missing_capture',
+                missing_capture: { ...captureCounts },
                 success_count: successCount,
                 failure_count: Math.max(0, completed - successCount),
                 modems,
@@ -5155,13 +5154,6 @@ createApp({
                 this.$toast?.warning(`Skipped ${skipped} modem${skipped === 1 ? '' : 's'} without a valid current IP address`);
             }
 
-            const downstreamCount = this.fnImpulseDirection === 'upstream' ? 0 : targets.length;
-            const upstreamCount = this.fnImpulseDirection === 'downstream' ? 0 : targets.length;
-            const operationCount = downstreamCount + upstreamCount;
-            const confirmed = window.confirm(
-                `Capture new PNN data for this bulk analysis?\n\nDownstream PNN2 captures: ${downstreamCount}\nUpstream PNN6/7 captures: ${upstreamCount}\n\nThis performs ${operationCount} SNMP SET/TFTP capture operation${operationCount === 1 ? '' : 's'}. Existing PNN files will not be used. Up to 3 modems run in parallel.`
-            );
-            if (!confirmed) return;
             if (!(await this.prepareUiTask('Fiber Node Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('Fiber Node Impulse Response');
             this.fnImpulseRunning = true;
@@ -5227,10 +5219,6 @@ createApp({
             if (skipped) {
                 this.$toast?.warning(`Skipped ${skipped} missing-file operation${skipped === 1 ? '' : 's'} without a current valid modem IP address`);
             }
-            const confirmed = window.confirm(
-                `Capture only genuinely missing PNN files?\n\nDownstream PNN2 operations: ${counts.downstream}\nUpstream PNN6/7 operations: ${counts.upstream}\n\nThis performs ${operationCount} confirmed SNMP SET/TFTP operation${operationCount === 1 ? '' : 's'}. Downstream and upstream jobs run sequentially with concurrency capped at 3.`
-            );
-            if (!confirmed) return;
             if (!(await this.prepareUiTask('Capture Missing PNN Files'))) return;
 
             const { token, signal } = this._beginUiTask('Capture Missing PNN Files');
@@ -5258,8 +5246,8 @@ createApp({
                     this.renderFiberNodeImpulseCharts();
                 }
                 const captured = captureResults.reduce((total, result) => total + Number(result.success_count || 0), 0);
-                if (captured) this.$toast?.success(`Confirmed missing-file capture analyzed ${captured}/${operationCount} operations`);
-                else this.$toast?.warning('Confirmed missing-file capture completed without analyzable data');
+                if (captured) this.$toast?.success(`Missing-file capture analyzed ${captured}/${operationCount} operations`);
+                else this.$toast?.warning('Missing-file capture completed without analyzable data');
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 this.$toast?.error(error.message || 'Missing-file capture failed');
@@ -6144,12 +6132,6 @@ createApp({
         async runImpulseResponse() {
             if (!this.selectedModem) return;
             const fresh = this.impulseSource === 'fresh';
-            if (fresh) {
-                const confirmed = window.confirm(
-                    'Capture fresh PNN data? This performs SNMP SET/TFTP operations on the modem. Existing-file analysis has no device side effects.'
-                );
-                if (!confirmed) return;
-            }
             if (!(await this.prepareUiTask('OFDM/OFDMA Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('OFDM/OFDMA Impulse Response', 'impulse_response');
             this.showRawData = false;
@@ -6160,7 +6142,6 @@ createApp({
                     file_id: this.impulseSource === 'existing' ? (this.impulseFileId || null) : null,
                     modem_ip: this.selectedModem.ip_address,
                     community: this.snmpCommunityModem,
-                    confirm_fresh_capture: fresh,
                 };
                 const response = await fetch(
                     `${API_BASE}/pypnm/impulse-response/${encodeURIComponent(this.selectedModem.mac_address)}/analyze`,
