@@ -3706,6 +3706,7 @@ createApp({
             const _needsEnrich = this.selectedModem && this.selectedModem.mac_address &&
                 (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip ||
                  !this.selectedModem.vendor || !this.selectedModem.software_version ||
+                 !(this.selectedModem.fiber_node || this.selectedModem.fibernode) ||
                  this.selectedModem.ofdm_enabled == null || this.selectedModem.ofdma_enabled == null);
             if (_needsEnrich) {
                 this.modemDetailLoading = true;

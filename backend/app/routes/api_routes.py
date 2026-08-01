@@ -970,6 +970,13 @@ def get_modem(mac_address):
     def _bare(mac):
         return re.sub(r'[^a-f0-9]', '', (mac or '').lower())
 
+    def _backfill_topology(modem: dict) -> None:
+        """Fill missing topology fields without replacing CMTS/inventory data."""
+        _augment_modems_with_topology_fields(
+            [modem],
+            cmts_name=str(modem.get('cmts') or ''),
+        )
+
     mac_bare = _bare(mac_address)
 
     # Try to find in Redis cache first
@@ -989,6 +996,7 @@ def get_modem(mac_address):
                             inv_m = None
                             if (not modem.get('vendor') or not modem.get('model')
                                     or not modem.get('software_version')
+                                    or not modem.get('fiber_node')
                                     or modem.get('ofdm_enabled') is None
                                     or modem.get('ofdma_enabled') is None
                                     or _docsis_version_rank(modem.get('docsis_version')) < 31):
@@ -1021,6 +1029,7 @@ def get_modem(mac_address):
                                 except Exception:
                                     pass
                             _normalize_modem_capability(modem, inv_m)
+                            _backfill_topology(modem)
                             return jsonify({
                                 "status": "success",
                                 "modem": modem
@@ -1034,6 +1043,7 @@ def get_modem(mac_address):
         modem = modem_resp.get('modem')
         if modem:
             _normalize_modem_capability(modem)
+            _backfill_topology(modem)
             return jsonify({
                 "status": "success",
                 "modem": modem,
