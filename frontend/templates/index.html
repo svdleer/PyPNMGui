@@ -2737,18 +2737,18 @@
                                 </div>
                             </div>
 
-                            <!-- Bulk impulse response: independent latest-file retrieval workflow -->
+                            <!-- Bulk impulse response: always-new confirmed capture workflow -->
                             <div class="border border-success rounded p-2 mt-2" style="background:#f6fff9;">
                                 <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
                                     <div class="form-label small fw-bold mb-0 text-success">
                                         <i class="bi bi-bezier2 me-1"></i>Bulk impulse response
                                     </div>
-                                    <span class="badge bg-success">Fresh PNN retrieval every run</span>
+                                    <span class="badge bg-warning text-dark">New PNN capture every run</span>
                                 </div>
                                 <div class="row g-2 align-items-center">
                                     <div class="col-7">
                                         <small class="text-muted">
-                                            Requests a new agent catalog and downloads a fresh copy of each latest available PNN file. Cached file IDs and file bodies are never reused.
+                                            Every run captures new PNN data from the selected modems and analyzes that new capture. Previous PNN files are not used.
                                         </small>
                                     </div>
                                     <div class="col-5">
@@ -2759,8 +2759,8 @@
                                         </select>
                                     </div>
                                 </div>
-                                <small class="text-muted d-block mt-1">
-                                    Fresh retrieval does not create a new modem capture. If cleanup deleted a file, capture is offered separately and requires explicit SNMP SET/TFTP confirmation.
+                                <small class="text-warning d-block mt-1">
+                                    Requires confirmation because capture uses SNMP SET and TFTP. Up to 3 modems run in parallel.
                                 </small>
                                 <div class="d-flex gap-2 mt-2">
                                     <button type="button" @click="runFiberNodeImpulse"
@@ -2768,7 +2768,7 @@
                                             class="btn btn-success flex-fill">
                                         <span v-if="fnImpulseRunning" class="spinner-border spinner-border-sm me-1"></span>
                                         <i v-else class="bi bi-bezier2 me-1"></i>
-                                        {{ fnImpulseRunning ? 'Retrieving and analyzing…' : 'Run Bulk Impulse Response' }}
+                                        {{ fnImpulseRunning ? 'Capturing and analyzing…' : 'Capture New PNN + Analyze' }}
                                     </button>
                                     <button v-if="fnImpulseRunning" type="button" @click="abortFiberNodeImpulse" class="btn btn-outline-danger">
                                         <i class="bi bi-x-circle me-1"></i>Cancel
@@ -3023,6 +3023,10 @@
                             A new agent catalog was requested for this job and each selected PNN file was retrieved immediately before analysis. No cached file ID was reused. Deleted files cannot be retrieved.
                             <span v-if="fnImpulseResult.retrieval_mode === 'fresh_agent_catalog'">No capture or SNMP SET was used.</span>
                             <span v-else class="text-warning">Only directions reported exactly as missing were captured after explicit confirmation.</span>
+                        </div>
+                        <div v-if="!fnImpulseResult.error && fnImpulseResult.retrieval_mode === 'fresh_capture'" class="card-body py-2 border-bottom small text-warning">
+                            <i class="bi bi-record-circle me-1"></i>
+                            This analysis used newly captured PNN data from this run. Previous PNN files were not used.
                         </div>
                         <div v-if="!fnImpulseResult.error" class="card-body border-bottom">
                             <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">

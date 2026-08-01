@@ -4911,7 +4911,7 @@ createApp({
             return 'bg-secondary';
         },
 
-        _fiberNodeImpulseScopeTargets() {
+        _fiberNodeImpulseScopeTargets(includeIp = false) {
             const selected = new Set(
                 (this.fnScanSelectedModemMacs || []).map(mac => this.normalizeMacForMatch(mac)).filter(Boolean)
             );
@@ -4919,7 +4919,10 @@ createApp({
                 .filter(modem => !this.fnScanUseModemSelector || selected.has(this.normalizeMacForMatch(modem.mac_address)))
                 .slice(0, Math.max(1, parseInt(this.fnScanMaxModems) || 20))
                 .filter(modem => modem.mac_address)
-                .map(modem => ({ mac_address: modem.mac_address }));
+                .map(modem => ({
+                    mac_address: modem.mac_address,
+                    ...(includeIp ? { ip_address: String(modem.ip_address || '').trim() } : {}),
+                }));
         },
 
         _destroyFiberNodeImpulseCharts() {
@@ -5133,11 +5136,32 @@ createApp({
         },
 
         async runFiberNodeImpulse() {
-            const targets = this._fiberNodeImpulseScopeTargets();
-            if (!targets.length) {
+            const scopedTargets = this._fiberNodeImpulseScopeTargets(true);
+            if (!scopedTargets.length) {
                 this.$toast?.warning('No modems are available in the current fiber-node scope');
                 return;
             }
+            const targets = scopedTargets.filter(target => (
+                target.ip_address
+                && target.ip_address.length <= 64
+                && /^[0-9a-f:.]+$/i.test(target.ip_address)
+            ));
+            const skipped = scopedTargets.length - targets.length;
+            if (!targets.length) {
+                this.$toast?.warning('No selected modem has a valid current IP address for a new PNN capture');
+                return;
+            }
+            if (skipped) {
+                this.$toast?.warning(`Skipped ${skipped} modem${skipped === 1 ? '' : 's'} without a valid current IP address`);
+            }
+
+            const downstreamCount = this.fnImpulseDirection === 'upstream' ? 0 : targets.length;
+            const upstreamCount = this.fnImpulseDirection === 'downstream' ? 0 : targets.length;
+            const operationCount = downstreamCount + upstreamCount;
+            const confirmed = window.confirm(
+                `Capture new PNN data for this bulk analysis?\n\nDownstream PNN2 captures: ${downstreamCount}\nUpstream PNN6/7 captures: ${upstreamCount}\n\nThis performs ${operationCount} SNMP SET/TFTP capture operation${operationCount === 1 ? '' : 's'}. Existing PNN files will not be used. Up to 3 modems run in parallel.`
+            );
+            if (!confirmed) return;
             if (!(await this.prepareUiTask('Fiber Node Impulse Response'))) return;
             const { token, signal } = this._beginUiTask('Fiber Node Impulse Response');
             this.fnImpulseRunning = true;
@@ -5147,7 +5171,7 @@ createApp({
             try {
                 const result = await this._runFiberNodeImpulseJob({
                     targets,
-                    source: 'existing',
+                    source: 'fresh',
                     direction: this.fnImpulseDirection,
                     token,
                     signal,
@@ -5157,12 +5181,12 @@ createApp({
                 await this.$nextTick();
                 this.renderFiberNodeImpulseCharts();
                 const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems analyzed`;
-                if (result.success) this.$toast?.success(`Fiber-node impulse response (fresh agent catalog/retrieval): ${summary}`);
-                else this.$toast?.warning(`Fiber-node impulse response completed with no usable freshly retrieved PNN data: ${summary}`);
+                if (result.success) this.$toast?.success(`New PNN capture and impulse analysis complete: ${summary}`);
+                else this.$toast?.warning(`New PNN capture completed with no usable analysis data: ${summary}`);
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 this.fnImpulseResult = { success: false, error: error.message, modems: [] };
-                this.$toast?.error(error.message || 'Bulk impulse-response analysis failed');
+                this.$toast?.error(error.message || 'Bulk impulse-response capture failed');
             } finally {
                 if (this._isTaskActive(token)) {
                     this.fnImpulseRunning = false;
