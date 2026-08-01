@@ -215,6 +215,15 @@ createApp({
             fnScanTopologyBridgeNodeId: '',
             fnScanExpectedServingGroup: '',
             fnSelectedMapVisible: false,
+            fnSelectedMapPathStatus: {
+                loading: false,
+                error: '',
+                snapshotDate: '',
+                pathCount: 0,
+                segmentCount: 0,
+                missingCoordinateCount: 0,
+                unresolvedCount: 0,
+            },
 
             // Live Spectrum Analyzer with Buffering
             liveSpectrumEnabled: false,
@@ -1048,6 +1057,14 @@ createApp({
                     return;
                 }
                 this.$nextTick(() => this._scheduleFnSelectedMapRender());
+            },
+        },
+        fnImpulseResult: {
+            deep: true,
+            handler() {
+                if (this.fnSelectedMapVisible) {
+                    this.$nextTick(() => this._scheduleFnSelectedMapRender());
+                }
             },
         },
         fnScanUseModemSelector(newVal) {
@@ -2075,10 +2092,19 @@ createApp({
                 clearTimeout(this._fnSelectedMapRenderTimer);
                 this._fnSelectedMapRenderTimer = null;
             }
+            if (this._fnSelectedMapRequestController) {
+                this._fnSelectedMapRequestController.abort();
+                this._fnSelectedMapRequestController = null;
+            }
+            this._fnSelectedMapRenderGeneration = (this._fnSelectedMapRenderGeneration || 0) + 1;
             if (this._fnSelectedMapInstance) {
                 try { this._fnSelectedMapInstance.remove(); } catch (_) {}
                 this._fnSelectedMapInstance = null;
             }
+            this.fnSelectedMapPathStatus = {
+                ...this.fnSelectedMapPathStatus,
+                loading: false,
+            };
         },
 
         _scheduleFnSelectedMapRender() {
@@ -2099,7 +2125,223 @@ createApp({
             this.$nextTick(() => this._scheduleFnSelectedMapRender());
         },
 
-        renderFnSelectedMap() {
+        _fnMapCoordinates(latValue, lonValue) {
+            const lat = Number(latValue);
+            const lon = Number(lonValue);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+            if (lat === 0 && lon === 0) return null;
+            return { lat, lon };
+        },
+
+        _fnImpulseEchoesForMac(macAddress) {
+            const target = this.normalizeMacForMatch(macAddress);
+            if (!target) return [];
+            const modem = (this.fnImpulseResult?.modems || []).find(
+                item => this.normalizeMacForMatch(item?.mac_address) === target
+            );
+            const echoes = [];
+            for (const result of (modem?.results || [])) {
+                const report = result?.analysis?.echo?.report || {};
+                for (const echo of (report.echoes || [])) {
+                    const distanceFt = Number(echo?.distance_ft);
+                    const distanceM = Number(echo?.distance_m);
+                    if (!Number.isFinite(distanceFt) && !Number.isFinite(distanceM)) continue;
+                    echoes.push({
+                        direction: result?.direction === 'upstream' ? 'US' : 'DS',
+                        distanceFt,
+                        distanceM,
+                        cableType: report?.cable_type || '',
+                        velocityFactor: Number(report?.velocity_factor),
+                    });
+                }
+            }
+            return echoes.slice(0, 6);
+        },
+
+        _appendFnMapPopupLine(parent, text, className = '') {
+            if (!text) return;
+            const line = document.createElement('div');
+            if (className) line.className = className;
+            line.textContent = text;
+            parent.appendChild(line);
+        },
+
+        _drawFnSelectedMap(points, pathPayload, pathError = '') {
+            if (!this.fnSelectedMapVisible) return;
+            const mapElement = this.$refs.fnSelectedModemMap;
+            if (!mapElement || !points.length || !window.L) return;
+            if (this._fnSelectedMapInstance) {
+                try { this._fnSelectedMapInstance.remove(); } catch (_) {}
+            }
+
+            const map = window.L.map(mapElement, { scrollWheelZoom: true });
+            this._fnSelectedMapInstance = map;
+            window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+            }).addTo(map);
+
+            const snapshotDate = String(pathPayload?.snapshot_date || 'latest');
+            const pointByMac = new Map(points.map(point => [
+                this.normalizeMacForMatch(point?.mac_address),
+                point,
+            ]));
+            const graphNodes = new Map();
+            const graphEdges = new Map();
+            const missingCoordinateKeys = new Set();
+            let resolvedPathCount = 0;
+            let unresolvedCount = 0;
+
+            for (const point of points) {
+                const bareMac = this.normalizeMacForMatch(point?.mac_address);
+                if (!bareMac) continue;
+                graphNodes.set(`${snapshotDate}:cm:${bareMac}`, {
+                    key: `${snapshotDate}:cm:${bareMac}`,
+                    role: 'modem',
+                    id: point.mac_address || bareMac,
+                    coordinates: point.coordinates,
+                    modem: point,
+                });
+            }
+
+            for (const path of (pathPayload?.paths || [])) {
+                const bareMac = this.normalizeMacForMatch(path?.mac);
+                const point = pointByMac.get(bareMac);
+                if (!point || !path?.found) {
+                    unresolvedCount += 1;
+                    continue;
+                }
+                resolvedPathCount += 1;
+                if (!path.complete) unresolvedCount += 1;
+                const cmNode = graphNodes.get(`${snapshotDate}:cm:${bareMac}`);
+                const roleNodes = {};
+                for (const node of (path.nodes || [])) {
+                    if (!['end_amp', 'group_amp', 'fiber_node'].includes(node?.role)) continue;
+                    const key = `${snapshotDate}:${node.id}`;
+                    const coordinates = this._fnMapCoordinates(node.lat, node.lon);
+                    if (!coordinates) missingCoordinateKeys.add(key);
+                    if (!graphNodes.has(key)) {
+                        graphNodes.set(key, {
+                            key,
+                            role: node.role,
+                            id: node.id,
+                            coordinates,
+                            node,
+                        });
+                    }
+                    roleNodes[node.role] = graphNodes.get(key);
+                }
+
+                const ordered = [cmNode, roleNodes.end_amp, roleNodes.group_amp, roleNodes.fiber_node];
+                for (let index = 0; index < ordered.length - 1; index += 1) {
+                    const from = ordered[index];
+                    const to = ordered[index + 1];
+                    if (!from || !to || !from.coordinates || !to.coordinates) continue;
+                    const edgeKey = `${from.key}->${to.key}`;
+                    if (!graphEdges.has(edgeKey)) {
+                        graphEdges.set(edgeKey, { key: edgeKey, from, to, modems: new Set() });
+                    }
+                    graphEdges.get(edgeKey).modems.add(bareMac);
+                }
+            }
+
+            for (const edge of graphEdges.values()) {
+                const modemSpecific = edge.from.role === 'modem';
+                const line = window.L.polyline([
+                    [edge.from.coordinates.lat, edge.from.coordinates.lon],
+                    [edge.to.coordinates.lat, edge.to.coordinates.lon],
+                ], {
+                    color: modemSpecific ? '#6c757d' : '#0d6efd',
+                    weight: modemSpecific ? 2 : 4,
+                    opacity: 0.8,
+                    dashArray: modemSpecific ? '6 5' : null,
+                }).addTo(map);
+                const popup = document.createElement('div');
+                const title = document.createElement('strong');
+                title.textContent = 'Logical topology segment';
+                popup.appendChild(title);
+                this._appendFnMapPopupLine(popup, `${edge.from.id} → ${edge.to.id}`);
+                this._appendFnMapPopupLine(
+                    popup,
+                    `${edge.modems.size} selected modem${edge.modems.size === 1 ? '' : 's'} use this segment`,
+                    'text-muted small'
+                );
+                line.bindPopup(popup);
+            }
+
+            const bounds = [];
+            const roleStyles = {
+                modem: { color: '#dc3545', fillColor: '#dc3545', radius: 6, label: 'Cable modem' },
+                end_amp: { color: '#fd7e14', fillColor: '#fd7e14', radius: 7, label: 'End amplifier' },
+                group_amp: { color: '#0d6efd', fillColor: '#0d6efd', radius: 8, label: 'Group amplifier' },
+                fiber_node: { color: '#198754', fillColor: '#198754', radius: 10, label: 'Fiber Node' },
+            };
+            for (const graphNode of graphNodes.values()) {
+                if (!graphNode.coordinates) continue;
+                const style = roleStyles[graphNode.role] || roleStyles.modem;
+                const marker = window.L.circleMarker(
+                    [graphNode.coordinates.lat, graphNode.coordinates.lon],
+                    { ...style, fillOpacity: 0.9, weight: 2 }
+                ).addTo(map);
+                const popup = document.createElement('div');
+                const title = document.createElement('strong');
+                title.textContent = `${style.label}: ${graphNode.id}`;
+                popup.appendChild(title);
+                if (graphNode.role === 'modem') {
+                    const modem = graphNode.modem || {};
+                    for (const value of [modem.ip_address, modem.fiber_node, modem.address]) {
+                        this._appendFnMapPopupLine(popup, value);
+                    }
+                    const echoes = this._fnImpulseEchoesForMac(modem.mac_address);
+                    if (echoes.length) {
+                        this._appendFnMapPopupLine(popup, 'Electrical reflection distances', 'fw-semibold mt-1');
+                        for (const echo of echoes) {
+                            const distance = Number.isFinite(echo.distanceFt)
+                                ? `${echo.distanceFt.toFixed(1)} ft`
+                                : `${echo.distanceM.toFixed(1)} m`;
+                            const vf = Number.isFinite(echo.velocityFactor) ? `, VF ${echo.velocityFactor.toFixed(2)}` : '';
+                            this._appendFnMapPopupLine(
+                                popup,
+                                `${echo.direction}: ${distance}${echo.cableType ? `, ${echo.cableType}` : ''}${vf}`,
+                                'small'
+                            );
+                        }
+                        this._appendFnMapPopupLine(
+                            popup,
+                            'No fault pin is projected: direction and routed cable lengths are not verified.',
+                            'text-warning small'
+                        );
+                    }
+                } else {
+                    this._appendFnMapPopupLine(popup, graphNode.node?.node_type || '');
+                    const basis = graphNode.node?.role_basis;
+                    if (basis) this._appendFnMapPopupLine(popup, `Role evidence: ${basis}`, 'text-muted small');
+                }
+                this._appendFnMapPopupLine(
+                    popup,
+                    `${graphNode.coordinates.lat.toFixed(6)}, ${graphNode.coordinates.lon.toFixed(6)}`,
+                    'text-muted small'
+                );
+                marker.bindPopup(popup);
+                bounds.push([graphNode.coordinates.lat, graphNode.coordinates.lon]);
+            }
+
+            this.fnSelectedMapPathStatus = {
+                loading: false,
+                error: pathError,
+                snapshotDate,
+                pathCount: resolvedPathCount,
+                segmentCount: graphEdges.size,
+                missingCoordinateCount: missingCoordinateKeys.size,
+                unresolvedCount,
+            };
+            if (bounds.length === 1) map.setView(bounds[0], 17);
+            else if (bounds.length > 1) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
+            setTimeout(() => map.invalidateSize(), 0);
+        },
+
+        async renderFnSelectedMap() {
             if (!this.fnSelectedMapVisible) return;
             const mapElement = this.$refs.fnSelectedModemMap;
             const points = this.fnScanSelectedMappableModems;
@@ -2113,39 +2355,48 @@ createApp({
                 return;
             }
 
-            this._destroyFnSelectedMap();
-            const map = window.L.map(mapElement, { scrollWheelZoom: true });
-            this._fnSelectedMapInstance = map;
-            window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
-            }).addTo(map);
+            if (this._fnSelectedMapRequestController) this._fnSelectedMapRequestController.abort();
+            const generation = (this._fnSelectedMapRenderGeneration || 0) + 1;
+            this._fnSelectedMapRenderGeneration = generation;
+            const controller = new AbortController();
+            this._fnSelectedMapRequestController = controller;
+            this.fnSelectedMapPathStatus = {
+                loading: true,
+                error: '',
+                snapshotDate: '',
+                pathCount: 0,
+                segmentCount: 0,
+                missingCoordinateCount: 0,
+                unresolvedCount: 0,
+            };
 
-            const bounds = [];
-            for (const modem of points) {
-                const { lat, lon } = modem.coordinates;
-                const marker = window.L.marker([lat, lon]).addTo(map);
-                const popup = document.createElement('div');
-                const title = document.createElement('strong');
-                title.textContent = modem.mac_address || 'Cable modem';
-                popup.appendChild(title);
-                for (const value of [modem.ip_address, modem.fiber_node, modem.address]) {
-                    if (!value) continue;
-                    const line = document.createElement('div');
-                    line.textContent = value;
-                    popup.appendChild(line);
+            let pathPayload = { snapshot_date: '', paths: [] };
+            let pathError = '';
+            try {
+                const response = await fetch(`${API_BASE}/topology/paths/by-modems`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mac_addresses: points.map(point => point.mac_address),
+                        max_hops: 32,
+                    }),
+                    signal: controller.signal,
+                });
+                const data = await response.json();
+                if (!response.ok || data?.status !== 'success') {
+                    throw new Error(data?.message || data?.detail || `Topology path request failed (${response.status})`);
                 }
-                const coordinateLine = document.createElement('div');
-                coordinateLine.className = 'text-muted small';
-                coordinateLine.textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-                popup.appendChild(coordinateLine);
-                marker.bindPopup(popup);
-                bounds.push([lat, lon]);
+                pathPayload = data;
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                pathError = error?.message || 'Topology paths could not be resolved.';
+            } finally {
+                if (this._fnSelectedMapRequestController === controller) {
+                    this._fnSelectedMapRequestController = null;
+                }
             }
-
-            if (bounds.length === 1) map.setView(bounds[0], 17);
-            else map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
-            setTimeout(() => map.invalidateSize(), 0);
+            if (!this.fnSelectedMapVisible || generation !== this._fnSelectedMapRenderGeneration) return;
+            this._drawFnSelectedMap(points, pathPayload, pathError);
         },
 
         hasActiveUiTask() {

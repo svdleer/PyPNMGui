@@ -228,6 +228,48 @@ def topology_search_modems_api():
         return jsonify({'status': 'error', 'message': str(exc), 'modems': []}), 502
 
 
+@topology_bp.route('/api/topology/paths/by-modems', methods=['POST'])
+def topology_paths_by_modems_api():
+    """Resolve read-only physical topology paths for a bounded modem batch."""
+    payload = request.get_json(silent=True) or {}
+    mac_addresses = payload.get('mac_addresses')
+    if not isinstance(mac_addresses, list) or not mac_addresses:
+        return jsonify({'status': 'error', 'message': 'mac_addresses must be a non-empty list'}), 400
+    if len(mac_addresses) > 100:
+        return jsonify({'status': 'error', 'message': 'at most 100 modem MAC addresses are allowed'}), 400
+
+    try:
+        max_hops = min(64, max(1, int(payload.get('max_hops') or 32)))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'max_hops must be an integer from 1 to 64', 'paths': []}), 400
+
+    forwarded = {
+        'mac_addresses': mac_addresses,
+        'date': (str(payload.get('date') or '')).strip() or None,
+        'max_hops': max_hops,
+    }
+    try:
+        base_url = _pypnm_base_url()
+        connect_timeout = int(os.environ.get('PYPNM_API_CONNECT_TIMEOUT', '5'))
+        read_timeout = int(os.environ.get('PYPNM_API_TIMEOUT', '30'))
+        response = requests.post(
+            f"{base_url}/api/topology/paths/by-modems",
+            json=forwarded,
+            timeout=(connect_timeout, read_timeout),
+        )
+        response_payload = response.json() if response.content else {}
+        if response.status_code >= 400:
+            detail = response_payload.get('detail') if isinstance(response_payload, dict) else None
+            return jsonify({
+                'status': 'error',
+                'message': detail or 'topology path lookup failed',
+                'paths': [],
+            }), response.status_code
+        return jsonify(response_payload or {'status': 'success', 'paths': []})
+    except Exception as exc:
+        return jsonify({'status': 'error', 'message': str(exc), 'paths': []}), 502
+
+
 @topology_bp.route('/api/topology/path')
 def topology_path_api():
     """Lookup topology hierarchy path for a given node id (typically fibernode)."""

@@ -3004,12 +3004,24 @@
                         </div>
                         <div v-if="fnSelectedMapVisible" class="border rounded mx-2 mt-2 overflow-hidden">
                             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 bg-light border-bottom px-2 py-1 small">
-                                <span class="fw-semibold"><i class="bi bi-map me-1 text-success"></i>Selected cable modem locations</span>
+                                <span class="fw-semibold"><i class="bi bi-map me-1 text-success"></i>Logical CM-to-Fiber topology</span>
                                 <span class="text-muted">
-                                    {{ fnScanSelectedMappableModems.length }}/{{ fnScanSelectedModemCount }} plotted
-                                    <span v-if="fnScanSelectedMissingCoordinatesCount" class="text-warning ms-1">· {{ fnScanSelectedMissingCoordinatesCount }} without coordinates</span>
+                                    {{ fnScanSelectedMappableModems.length }}/{{ fnScanSelectedModemCount }} modem locations
+                                    <span v-if="fnSelectedMapPathStatus.loading" class="ms-1"><span class="spinner-border spinner-border-sm me-1"></span>resolving paths</span>
+                                    <span v-else-if="fnSelectedMapPathStatus.error" class="text-warning ms-1">· paths unavailable</span>
+                                    <span v-else class="ms-1">· {{ fnSelectedMapPathStatus.pathCount }} paths · {{ fnSelectedMapPathStatus.segmentCount }} unique segments</span>
+                                    <span v-if="fnSelectedMapPathStatus.unresolvedCount" class="text-warning ms-1">· {{ fnSelectedMapPathStatus.unresolvedCount }} incomplete</span>
+                                    <span v-if="fnScanSelectedMissingCoordinatesCount || fnSelectedMapPathStatus.missingCoordinateCount" class="text-warning ms-1">· {{ fnScanSelectedMissingCoordinatesCount + fnSelectedMapPathStatus.missingCoordinateCount }} missing coordinates</span>
                                 </span>
                             </div>
+                            <div class="d-flex align-items-center flex-wrap gap-3 border-bottom px-2 py-1 small bg-white">
+                                <span><span class="badge rounded-pill me-1" style="background:#dc3545">CM</span>Cable modem</span>
+                                <span><span class="badge rounded-pill me-1" style="background:#fd7e14">E</span>End amplifier</span>
+                                <span><span class="badge rounded-pill me-1" style="background:#0d6efd">G</span>Group amplifier</span>
+                                <span><span class="badge rounded-pill me-1" style="background:#198754">FN</span>Fiber Node</span>
+                                <span class="text-muted">Straight lines show logical connections, not surveyed cable routes.</span>
+                            </div>
+                            <div v-if="fnSelectedMapPathStatus.error" class="alert alert-warning rounded-0 border-0 border-bottom mb-0 py-1 px-2 small">{{ fnSelectedMapPathStatus.error }} Modem locations are still shown.</div>
                             <div ref="fnSelectedModemMap" style="height:360px;min-height:280px;background:#e9ecef;"></div>
                         </div>
                         <div class="card-body p-0 flex-grow-1" style="overflow-y:auto;">
