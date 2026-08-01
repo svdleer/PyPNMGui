@@ -5126,6 +5126,7 @@ createApp({
                 missing: 'No current match',
                 retrieval_failed: 'Retrieval failed',
                 analysis_failed: 'Analysis failed',
+                timeout: 'Timed out',
                 agent_unavailable: 'Agent unavailable',
                 capture_failed: 'Capture failed',
                 unavailable: 'Unavailable',
@@ -5134,7 +5135,7 @@ createApp({
 
         impulseDirectionStatusClass(status) {
             if (['analyzed', 'captured_analyzed'].includes(status)) return 'bg-success';
-            if (['retrieval_failed', 'analysis_failed', 'capture_failed'].includes(status)) return 'bg-danger';
+            if (['retrieval_failed', 'analysis_failed', 'capture_failed', 'timeout'].includes(status)) return 'bg-danger';
             if (status === 'agent_unavailable') return 'bg-warning text-dark';
             return 'bg-secondary';
         },
@@ -5230,6 +5231,13 @@ createApp({
                 completed: 0,
                 success_count: 0,
                 failure_count: 0,
+                direction_attempt_count: 0,
+                analyzed_direction_count: 0,
+                timeout_count: 0,
+                capture_failed_count: 0,
+                analysis_failed_count: 0,
+                agent_unavailable_count: 0,
+                other_failure_count: 0,
                 running_count: 0,
                 queued_count: targets.length,
                 pct: 0,
@@ -5247,9 +5255,6 @@ createApp({
                 fiber_node: this.fnScanFiberNode || null,
                 concurrency: 3,
             };
-            if (source === 'fresh') {
-                jobPayload.community = this.fnScanWriteCommunity || this.snmpCommunityModem;
-            }
 
             const startResponse = await fetch(`${API_BASE}/pypnm/impulse-response/fibernode/jobs`, {
                 method: 'POST',
@@ -5270,7 +5275,8 @@ createApp({
                 action: `${acceptedTargets} target${acceptedTargets === 1 ? '' : 's'} accepted · up to ${acceptedConcurrency} in parallel`,
             };
 
-            const deadline = Date.now() + 15 * 60 * 1000;
+            const timeoutBudgetSeconds = Math.max(60, Number(started.timeout_budget_s || 15 * 60));
+            const deadline = Date.now() + timeoutBudgetSeconds * 1000;
             let done = false;
             let firstPoll = true;
             while (!done && Date.now() < deadline && this._isTaskActive(token)) {
@@ -5305,12 +5311,19 @@ createApp({
                 completed: resultCompleted,
                 success_count: resultSuccess,
                 failure_count: resultFailure,
+                direction_attempt_count: Number(result.direction_attempt_count || 0),
+                analyzed_direction_count: Number(result.analyzed_direction_count || 0),
+                timeout_count: Number(result.timeout_count || 0),
+                capture_failed_count: Number(result.capture_failed_count || 0),
+                analysis_failed_count: Number(result.analysis_failed_count || 0),
+                agent_unavailable_count: Number(result.agent_unavailable_count || 0),
+                other_failure_count: Number(result.other_failure_count || 0),
                 running_count: 0,
                 queued_count: Math.max(0, resultTotal - resultCompleted),
                 state: result.aborted ? 'aborted' : 'completed',
                 action: result.aborted
                     ? 'Aborted'
-                    : `Complete: ${resultSuccess} analyzed, ${resultFailure} unavailable`,
+                    : `Complete: ${resultSuccess} modems with analysis`,
                 elapsed_s: Number(result.elapsed_s || this.fnImpulseProgress?.elapsed_s || 0),
                 pct: resultTotal ? (resultCompleted * 100 / resultTotal) : 0,
                 done: true,
@@ -5400,7 +5413,7 @@ createApp({
                 this.fnImpulseResult = result;
                 await this.$nextTick();
                 this.renderFiberNodeImpulseCharts();
-                const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems analyzed`;
+                const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems with analysis`;
                 if (result.success) this.$toast?.success(`New PNN capture and impulse analysis complete: ${summary}`);
                 else this.$toast?.warning(`New PNN capture completed with no usable analysis data: ${summary}`);
             } catch (error) {

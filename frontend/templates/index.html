@@ -2771,7 +2771,7 @@
                                 </small>
                                 <div class="d-flex gap-2 mt-2">
                                     <button type="button" @click="runFiberNodeImpulse"
-                                            :disabled="fnImpulseRunning || fnScanRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                            :disabled="fnImpulseRunning || fnScanRunning || dsScanRunning || fbScanRunning || !hasCmAgent || fnScanSelectorRefreshInFlight || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
                                             class="btn btn-success flex-fill">
                                         <span v-if="fnImpulseRunning" class="spinner-border spinner-border-sm me-1"></span>
                                         <i v-else class="bi bi-bezier2 me-1"></i>
@@ -2789,9 +2789,13 @@
                                             <span v-if="!fnImpulseProgress.done && fnImpulseProgress.queued_count"> · {{ fnImpulseProgress.queued_count }} queued</span>
                                         </span>
                                         <span>
-                                            {{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} attempts finished
-                                            · {{ fnImpulseProgress.success_count || 0 }} analyzed
-                                            <span v-if="fnImpulseProgress.failure_count"> · {{ fnImpulseProgress.failure_count }} unavailable</span>
+                                            {{ fnImpulseProgress.completed }}/{{ fnImpulseProgress.total }} modems finished
+                                            · {{ fnImpulseProgress.analyzed_direction_count || 0 }} directions analyzed
+                                            <span v-if="fnImpulseProgress.timeout_count"> · {{ fnImpulseProgress.timeout_count }} timed out</span>
+                                            <span v-if="fnImpulseProgress.capture_failed_count"> · {{ fnImpulseProgress.capture_failed_count }} capture failed</span>
+                                            <span v-if="fnImpulseProgress.analysis_failed_count"> · {{ fnImpulseProgress.analysis_failed_count }} analysis failed</span>
+                                            <span v-if="fnImpulseProgress.agent_unavailable_count"> · {{ fnImpulseProgress.agent_unavailable_count }} agent unavailable</span>
+                                            <span v-if="fnImpulseProgress.other_failure_count"> · {{ fnImpulseProgress.other_failure_count }} other failure</span>
                                             <span v-if="fnImpulseProgress.elapsed_s !== undefined"> · {{ Number(fnImpulseProgress.elapsed_s || 0).toFixed(1) }}s</span>
                                         </span>
                                     </div>
@@ -3023,7 +3027,7 @@
                                     Capture Missing PNN Files
                                     (DS {{ fnImpulseMissingCounts.downstream }} / US {{ fnImpulseMissingCounts.upstream }})
                                 </button>
-                                <span class="badge bg-success">{{ fnImpulseResult.success_count || 0 }}/{{ fnImpulseResult.completed || fnImpulseResult.total || 0 }} modems</span>
+                                <span class="badge bg-success">{{ fnImpulseResult.success_count || 0 }}/{{ fnImpulseResult.completed || fnImpulseResult.total || 0 }} modems with analysis</span>
                             </div>
                         </div>
                         <div v-if="fnImpulseResult.error" class="card-body text-danger">{{ fnImpulseResult.error }}</div>

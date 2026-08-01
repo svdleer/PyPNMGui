@@ -211,6 +211,7 @@ class PyPNMClient:
             logger.error(f"Cannot connect to PyPNM at {self.config.base_url}")
             return {
                 "status": "error",
+                "failure_status": "service_unavailable",
                 "message": f"PyPNM server not reachable at {self.config.base_url}. "
                           "Please ensure PyPNM is installed and running."
             }
@@ -219,21 +220,40 @@ class PyPNMClient:
             logger.error(f"Timeout connecting to PyPNM")
             return {
                 "status": "error",
+                "failure_status": "timeout",
                 "message": "Request to PyPNM timed out"
             }
         
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error from PyPNM: {e}")
+            error_response: Dict[str, Any] = {}
+            if e.response is not None:
+                try:
+                    parsed = e.response.json()
+                    if isinstance(parsed, dict):
+                        error_response = parsed
+                except (TypeError, ValueError):
+                    pass
+            error_text = json.dumps(error_response).lower()
+            if 'timed out' in error_text or 'timeout' in error_text:
+                failure_status = 'timeout'
+            elif 'no connected' in error_text or 'agent manager' in error_text or 'agent is not connected' in error_text:
+                failure_status = 'agent_unavailable'
+            else:
+                failure_status = 'capture_failed'
             return {
+                **error_response,
                 "status": "error",
-                "message": f"PyPNM returned error: {e.response.status_code}",
-                "detail": e.response.text if e.response else None
+                "success": False,
+                "failure_status": error_response.get("failure_status", failure_status),
+                "message": error_response.get("message") or error_response.get("detail") or f"PyPNM returned error: {e.response.status_code}",
             }
         
         except Exception as e:
             logger.exception(f"Unexpected error calling PyPNM")
             return {
                 "status": "error",
+                "failure_status": "capture_failed",
                 "message": f"Unexpected error: {str(e)}"
             }
     

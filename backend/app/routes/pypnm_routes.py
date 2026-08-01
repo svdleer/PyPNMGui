@@ -4628,10 +4628,32 @@ def _compact_bulk_impulse_result(item: dict) -> dict:
     }
 
 
+def _impulse_failure_status(response: dict | None) -> str:
+    """Classify a capture failure without relying on one endpoint's wording."""
+    response = response if isinstance(response, dict) else {}
+    explicit = str(response.get('failure_status') or '').lower()
+    if explicit in {'timeout', 'capture_failed', 'analysis_failed', 'agent_unavailable'}:
+        return explicit
+    text = ' '.join(str(response.get(key) or '') for key in ('error', 'message', 'detail')).lower()
+    if 'timed out' in text or 'timeout' in text:
+        return 'timeout'
+    if any(marker in text for marker in (
+        'no connected agent', 'no agent available', 'agent manager',
+        'agent is not connected', 'pinned agent',
+    )):
+        return 'agent_unavailable'
+    return 'capture_failed'
+
+
 def _bulk_impulse_direction_statuses(response: dict, requested_direction: str, source: str) -> list[dict]:
     """Summarize each requested direction without exposing paths or agent details."""
     directions = [requested_direction] if requested_direction != 'both' else ['downstream', 'upstream']
     results = response.get('results') or []
+    outcomes = {
+        str(item.get('direction')): item
+        for item in (response.get('direction_outcomes') or [])
+        if isinstance(item, dict) and item.get('direction')
+    }
     warnings = [str(item) for item in (response.get('warnings') or [])]
     warning_text = ' '.join(warnings).lower()
     error = str(response.get('error') or response.get('message') or '')
@@ -4639,7 +4661,11 @@ def _bulk_impulse_direction_statuses(response: dict, requested_direction: str, s
     statuses: list[dict] = []
 
     for item_direction in directions:
-        if any(item.get('direction') == item_direction for item in results):
+        outcome = outcomes.get(item_direction)
+        if outcome:
+            status = str(outcome.get('status') or 'capture_failed')
+            message = str(outcome.get('message') or 'Fresh capture failed')
+        elif any(item.get('direction') == item_direction for item in results):
             status = 'analyzed' if source == 'existing' else 'captured_analyzed'
             message = (
                 'Fresh agent catalog entry retrieved and analyzed'
@@ -4647,8 +4673,8 @@ def _bulk_impulse_direction_statuses(response: dict, requested_direction: str, s
                 else 'Fresh capture analyzed'
             )
         elif source == 'fresh':
-            status = 'capture_failed'
-            message = 'Fresh capture did not produce analyzable data'
+            status = _impulse_failure_status(response)
+            message = error or 'Fresh capture did not produce analyzable data'
         elif 'no connected file agent' in error_text or 'agent manager unavailable' in error_text:
             status = 'agent_unavailable'
             message = 'No connected file agent supports PNM retrieval'
@@ -4679,35 +4705,90 @@ def _run_fresh_impulse_capture(
     """Explicit side-effecting path. Existing-file callers never enter here."""
     results: list[dict] = []
     warnings: list[str] = []
+    outcomes: list[dict] = []
     directions = [direction] if direction != 'both' else ['downstream', 'upstream']
     for item_direction in directions:
-        if item_direction == 'downstream':
-            response = client.get_channel_estimation(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6='::1', output_type='json',
-            )
-        else:
-            response = client.get_us_ofdma_pre_equalization(
-                mac_address, modem_ip, tftp_ip, community,
-                tftp_ipv6='::1', output_type='json',
-            )
+        try:
+            if item_direction == 'downstream':
+                response = client.get_channel_estimation(
+                    mac_address, modem_ip, tftp_ip, community,
+                    tftp_ipv6='::1', output_type='json',
+                )
+            else:
+                response = client.get_us_ofdma_pre_equalization(
+                    mac_address, modem_ip, tftp_ip, community,
+                    tftp_ipv6='::1', output_type='json',
+                )
+        except Exception as exc:
+            response = {'success': False, 'error': str(exc)}
+
         if not isinstance(response, dict) or not _capture_response_ok(response):
             message = response.get('message') or response.get('error') if isinstance(response, dict) else 'invalid response'
+            status = _impulse_failure_status(response)
             warnings.append(f'{item_direction} capture failed: {message}')
+            outcomes.append({
+                'direction': item_direction,
+                'status': status,
+                'message': str(message or 'Fresh capture failed'),
+            })
             continue
         items = _capture_analysis_items(response, item_direction)
         if not items:
+            message = 'Fresh capture returned no analyzable data'
             warnings.append(f'{item_direction} capture returned no analysis')
+            outcomes.append({'direction': item_direction, 'status': 'analysis_failed', 'message': message})
+            continue
         results.extend(items)
+        outcomes.append({
+            'direction': item_direction,
+            'status': 'captured_analyzed',
+            'message': 'Fresh capture analyzed',
+        })
     return {
         'success': bool(results),
         'source': 'fresh_capture',
         'mac_address': mac_address,
         'direction': direction,
         'results': results,
+        'direction_outcomes': outcomes,
         'warnings': warnings,
         'error': None if results else 'No fresh capture could be analyzed',
     }
+
+
+def _impulse_job_direction_counts(modem_results: list[dict]) -> dict:
+    """Aggregate direction outcomes independently from modem-level success."""
+    status_counts: dict[str, int] = {}
+    for modem in modem_results:
+        for item in modem.get('direction_statuses') or []:
+            status = str(item.get('status') or 'unavailable')
+            status_counts[status] = status_counts.get(status, 0) + 1
+    analyzed_count = sum(status_counts.get(status, 0) for status in ('analyzed', 'captured_analyzed'))
+    direction_attempt_count = sum(status_counts.values())
+    known_failures = sum(status_counts.get(status, 0) for status in (
+        'timeout', 'capture_failed', 'analysis_failed', 'agent_unavailable',
+    ))
+    return {
+        'direction_attempt_count': direction_attempt_count,
+        'analyzed_direction_count': analyzed_count,
+        'timeout_count': status_counts.get('timeout', 0),
+        'capture_failed_count': status_counts.get('capture_failed', 0),
+        'analysis_failed_count': status_counts.get('analysis_failed', 0),
+        'agent_unavailable_count': status_counts.get('agent_unavailable', 0),
+        'other_failure_count': max(0, direction_attempt_count - analyzed_count - known_failures),
+    }
+
+
+def _impulse_failure_summary(counts: dict) -> str:
+    labels = (
+        ('timeout_count', 'timed out'),
+        ('capture_failed_count', 'capture failed'),
+        ('analysis_failed_count', 'analysis failed'),
+        ('agent_unavailable_count', 'agent unavailable'),
+        ('other_failure_count', 'other failure'),
+    )
+    parts = [f"{int(counts.get(key, 0))} {label}" for key, label in labels if int(counts.get(key, 0))]
+    return ', '.join(parts) if parts else 'no direction failures'
 
 
 @pypnm_bp.route('/impulse-response/<mac_address>/files', methods=['GET'])
@@ -4794,12 +4875,16 @@ def start_fibernode_impulse_job():
         if existing_job and str(existing_job.get('done', False)).lower() != 'true':
             return jsonify({'success': False, 'error': 'A job with this ID is already running'}), 409
     concurrency = max(1, min(int(data.get('concurrency') or 3), 5))
-    # Existing-file mode never needs capture credentials or a TFTP destination.
-    community = (data.get('community') or get_default_write_community()) if source == 'fresh' else ''
+    # Fiber impulse is modem-side PNM. Resolve its configured modem community
+    # server-side; never reuse the CMTS scan/write community from the browser.
+    community = get_default_community() if source == 'fresh' else ''
     tftp_ip = (data.get('tftp_ip') or get_tftp_for_cm()) if source == 'fresh' else ''
     topology_date = data.get('topology_date')
     fiber_node = data.get('fiber_node')
     target_snapshot = [dict(target) for target in targets]
+    operations_per_modem = (2 if direction == 'both' else 1) if source == 'fresh' else 1
+    timeout_budget_s = math.ceil(len(target_snapshot) / concurrency) * operations_per_modem * 180 + 60
+    empty_direction_counts = _impulse_job_direction_counts([])
 
     job_started_monotonic = time.monotonic()
     with _impulse_job_lock:
@@ -4809,6 +4894,7 @@ def start_fibernode_impulse_job():
         total=len(target_snapshot), completed=0, success_count=0, failure_count=0,
         running_count=0, queued_count=len(target_snapshot),
         modem='', action='Queued', state='queued', elapsed_s=0, pct=0, done=False,
+        **empty_direction_counts,
     )
 
     def _worker(target: dict) -> dict:
@@ -4851,6 +4937,7 @@ def start_fibernode_impulse_job():
                 action=f'Analyzing {total} modem attempt{"s" if total != 1 else ""}',
                 state='running', elapsed_s=round(time.monotonic() - job_started_monotonic, 2),
                 pct=0, done=False,
+                **empty_direction_counts,
             )
             with ThreadPoolExecutor(max_workers=concurrency) as pool:
                 future_map = {pool.submit(_worker, target): target for target in target_snapshot}
@@ -4859,10 +4946,18 @@ def start_fibernode_impulse_job():
                     try:
                         modem_result = future.result()
                     except Exception as exc:
+                        failure_response = {
+                            'success': False,
+                            'error': str(exc),
+                            'failure_status': _impulse_failure_status({'error': str(exc)}),
+                        }
                         modem_result = {
                             'mac_address': target['mac_address'],
                             'ip_address': target['ip_address'],
                             'success': False,
+                            'direction_statuses': _bulk_impulse_direction_statuses(
+                                failure_response, direction, source,
+                            ),
                             'results': [],
                             'warnings': [],
                             'error': str(exc),
@@ -4872,6 +4967,7 @@ def start_fibernode_impulse_job():
                     if modem_result.get('success'):
                         success_count += 1
                     failure_count = completed - success_count
+                    direction_counts = _impulse_job_direction_counts(modem_results)
                     remaining = total - completed
                     running_count = min(concurrency, remaining)
                     queued_count = max(0, remaining - running_count)
@@ -4886,6 +4982,7 @@ def start_fibernode_impulse_job():
                         elapsed_s=round(time.monotonic() - job_started_monotonic, 2),
                         pct=round(completed * 100 / total, 1),
                         done=False,
+                        **direction_counts,
                     )
                     if _is_impulse_job_aborted(job_id):
                         for pending in future_map:
@@ -4894,6 +4991,7 @@ def start_fibernode_impulse_job():
 
             aborted = _is_impulse_job_aborted(job_id)
             failure_count = completed - success_count
+            direction_counts = _impulse_job_direction_counts(modem_results)
             elapsed_s = round(time.monotonic() - job_started_monotonic, 2)
             modem_results.sort(key=lambda item: item.get('mac_address', ''))
             result = {
@@ -4912,13 +5010,14 @@ def start_fibernode_impulse_job():
                 'failure_count': failure_count,
                 'elapsed_s': elapsed_s,
                 'modems': modem_results,
+                **direction_counts,
             }
             _store_impulse_job_result(job_id, result)
             terminal_state = 'aborted' if aborted else 'completed'
             terminal_action = (
                 'Aborted'
                 if aborted
-                else f'Complete: {success_count} analyzed, {failure_count} unavailable'
+                else f'Complete: {success_count} modems with analysis; {_impulse_failure_summary(direction_counts)}'
             )
             _set_impulse_job_progress(
                 job_id,
@@ -4928,10 +5027,12 @@ def start_fibernode_impulse_job():
                 modem='', action=terminal_action, state=terminal_state,
                 elapsed_s=elapsed_s,
                 pct=round(completed * 100 / total, 1), done=True,
+                **direction_counts,
             )
         except Exception as exc:
             logger.exception('Fiber-node impulse job %s failed', job_id)
             elapsed_s = round(time.monotonic() - job_started_monotonic, 2)
+            direction_counts = _impulse_job_direction_counts(modem_results)
             _store_impulse_job_result(job_id, {
                 'success': False,
                 'job_id': job_id,
@@ -4941,6 +5042,7 @@ def start_fibernode_impulse_job():
                 'success_count': success_count,
                 'failure_count': completed - success_count,
                 'elapsed_s': elapsed_s,
+                **direction_counts,
             })
             _set_impulse_job_progress(
                 job_id,
@@ -4949,6 +5051,7 @@ def start_fibernode_impulse_job():
                 running_count=0, queued_count=max(0, total - completed),
                 action='Error', state='failed', elapsed_s=elapsed_s,
                 pct=round(completed * 100 / total, 1), done=True,
+                **direction_counts,
             )
 
     _threading.Thread(target=_run_job, daemon=True).start()
@@ -4960,6 +5063,7 @@ def start_fibernode_impulse_job():
         'direction': direction,
         'target_count': len(target_snapshot),
         'concurrency': concurrency,
+        'timeout_budget_s': timeout_budget_s,
     })
 
 
@@ -4985,6 +5089,13 @@ def get_fibernode_impulse_job(job_id):
         'completed': int(progress.get('completed', 0)),
         'success_count': int(progress.get('success_count', 0)),
         'failure_count': int(progress.get('failure_count', 0)),
+        'direction_attempt_count': int(progress.get('direction_attempt_count', 0)),
+        'analyzed_direction_count': int(progress.get('analyzed_direction_count', 0)),
+        'timeout_count': int(progress.get('timeout_count', 0)),
+        'capture_failed_count': int(progress.get('capture_failed_count', 0)),
+        'analysis_failed_count': int(progress.get('analysis_failed_count', 0)),
+        'agent_unavailable_count': int(progress.get('agent_unavailable_count', 0)),
+        'other_failure_count': int(progress.get('other_failure_count', 0)),
         'running_count': int(progress.get('running_count', 0)),
         'queued_count': int(progress.get('queued_count', 0)),
         'modem': progress.get('modem', ''),
