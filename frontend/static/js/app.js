@@ -1261,6 +1261,11 @@ createApp({
             return String(cmtsName || '').trim();
         },
 
+        _isIdentityPlaceholder(value) {
+            const text = String(value ?? '').trim().toLowerCase();
+            return ['', 'unknown', 'n/a', 'na', 'none', 'null', '-', '—'].includes(text);
+        },
+
         _mergeModemPreservingCmts(target, source) {
             if (!target || !source) return target;
 
@@ -1275,6 +1280,13 @@ createApp({
             const saved = {};
             for (const key of preserve) {
                 if (before[key] && (!source[key] || source[key] === 'unknown' || source[key] === 'N/A')) {
+                    saved[key] = before[key];
+                }
+            }
+            // A non-enriched cache row must not replace identity data obtained
+            // by a completed targeted refresh.
+            for (const key of ['vendor', 'model', 'software_version', 'firmware']) {
+                if (!this._isIdentityPlaceholder(before[key]) && this._isIdentityPlaceholder(source[key])) {
                     saved[key] = before[key];
                 }
             }
@@ -1381,13 +1393,10 @@ createApp({
         },
 
         _isMissingVendorFirmware(modem) {
-            const vendor = String(modem?.vendor || '').trim().toLowerCase();
-            const fw = String(modem?.firmware || modem?.software_version || '').trim();
-            const vendorMissing = !vendor || vendor === 'unknown' || vendor === 'n/a';
-            const firmwareMissing = !fw || fw.toLowerCase() === 'unknown' || fw.toLowerCase() === 'n/a';
+            const firmware = modem?.software_version || modem?.firmware;
             // Either missing field needs identity enrichment; requiring both to
             // be absent left vendor-only and firmware-only gaps untouched.
-            return vendorMissing || firmwareMissing;
+            return this._isIdentityPlaceholder(modem?.vendor) || this._isIdentityPlaceholder(firmware);
         },
 
         _isMissingSelectedMetadata(modem) {
@@ -5590,7 +5599,7 @@ createApp({
                         status: m.status || existing.status || '',
                         fiber_node: m.fiber_node || existing.fiber_node || '',
                         cable_mac: m.cable_mac || existing.cable_mac || '',
-                        vendor: m.vendor || existing.vendor || 'Unknown',
+                        vendor: merged.vendor || 'Unknown',
                         partial_service: this.normalizePartialService(m.partial_service ?? existing.partial_service),
                         partial_service_downstream: m.partial_service_downstream ?? existing.partial_service_downstream ?? null,
                         partial_service_upstream: m.partial_service_upstream ?? existing.partial_service_upstream ?? null,

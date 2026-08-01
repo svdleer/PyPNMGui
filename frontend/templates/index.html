@@ -3037,7 +3037,7 @@
                                         <th>MAC Address</th>
                                         <th>IP Address</th>
                                         <th class="text-center">Map</th>
-                                        <th>Vendor</th>
+                                        <th>Identity</th>
                                         <th>DOCSIS</th>
                                         <th class="text-center">CableMac</th>
                                         <th class="text-center">FN</th>
@@ -3071,7 +3071,11 @@
                                             </button>
                                             <span v-else class="text-muted">—</span>
                                         </td>
-                                        <td class="small">{{ m.vendor || '—' }}</td>
+                                        <td class="small">
+                                            <div>{{ m.vendor || '—' }}</div>
+                                            <div v-if="m.model && !['unknown', 'n/a'].includes(String(m.model).trim().toLowerCase())" class="text-muted">{{ m.model }}</div>
+                                            <div v-if="(m.software_version || m.firmware) && !['unknown', 'n/a'].includes(String(m.software_version || m.firmware).trim().toLowerCase())" class="text-muted text-break" :title="m.software_version || m.firmware">{{ m.software_version || m.firmware }}</div>
+                                        </td>
                                         <td class="fn-docsis-cell">
                                             <span class="badge fn-docsis-slot" :class="{
                                                 'bg-info': docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) >= 31,

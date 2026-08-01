@@ -341,6 +341,14 @@ def _inventory_snapshot_is_fresh(modems: list[dict]) -> bool:
 _ENRICH_QUALITY_THRESHOLD = 0.40
 
 
+# Values that mean an identity field has not actually been enriched.
+_IDENTITY_PLACEHOLDERS = {'', 'unknown', 'n/a', 'na', 'none', 'null', '-', '—'}
+
+
+def _identity_value_missing(value) -> bool:
+    return str(value or '').strip().lower() in _IDENTITY_PLACEHOLDERS
+
+
 def _modems_are_enriched(modems: list[dict]) -> bool:
     """Return True only when a meaningful portion of modems have vendor+firmware data."""
     if not modems:
@@ -348,19 +356,19 @@ def _modems_are_enriched(modems: list[dict]) -> bool:
     sample = modems[:200]  # Check up to 200 rows for speed
     enriched_count = sum(
         1 for m in sample
-        if (m.get('vendor') or '').strip().lower() not in ('', 'unknown')
-        and (m.get('software_version') or m.get('firmware') or '').strip()
+        if not _identity_value_missing(m.get('vendor'))
+        and not _identity_value_missing(m.get('software_version') or m.get('firmware'))
     )
     return (enriched_count / len(sample)) >= _ENRICH_QUALITY_THRESHOLD
 
 
 def _modem_missing_enrichment(modem: dict) -> bool:
-    vendor = str(modem.get('vendor') or '').strip().lower()
-    fw = str(modem.get('software_version') or modem.get('firmware') or '').strip().lower()
     cable_mac = str(modem.get('cable_mac') or '').strip()
-    vendor_missing = vendor in ('', 'unknown', 'n/a')
-    fw_missing = fw in ('', 'unknown', 'n/a')
-    return vendor_missing or fw_missing or not cable_mac
+    return (
+        _identity_value_missing(modem.get('vendor'))
+        or _identity_value_missing(modem.get('software_version') or modem.get('firmware'))
+        or not cable_mac
+    )
 
 
 def _docsis_version_rank(value) -> int:
@@ -995,8 +1003,9 @@ def get_modem(mac_address):
                             # cache lacks them (vendor/model/software/ofdm come
                             # from sysDescr refresh, stored in MySQL only).
                             inv_m = None
-                            if (not modem.get('vendor') or not modem.get('model')
-                                    or not modem.get('software_version')
+                            if (_identity_value_missing(modem.get('vendor'))
+                                    or _identity_value_missing(modem.get('model'))
+                                    or _identity_value_missing(modem.get('software_version') or modem.get('firmware'))
                                     or not modem.get('fiber_node')
                                     or not modem.get('cable_mac')
                                     or modem.get('ofdm_enabled') is None
@@ -1006,8 +1015,12 @@ def get_modem(mac_address):
                                     inv = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
                                     inv_m = inv.get('modem') if isinstance(inv, dict) else None
                                     if inv_m:
-                                        for field in ('vendor', 'model', 'software_version',
-                                                      'fiber_node', 'cable_mac'):
+                                        for field in ('vendor', 'model', 'software_version'):
+                                            incoming = inv_m.get(field)
+                                            if (not _identity_value_missing(incoming)
+                                                    and _identity_value_missing(modem.get(field))):
+                                                modem[field] = incoming
+                                        for field in ('fiber_node', 'cable_mac'):
                                             incoming = inv_m.get(field)
                                             if incoming and not modem.get(field):
                                                 modem[field] = incoming
