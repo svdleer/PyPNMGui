@@ -191,6 +191,7 @@ createApp({
             fnScanImage: null,
             fnScanPlantAssessment: null,  // plant vs in-home assessment from /fiberNode/plant-assessment
             fnScanTapPlotImage: null,     // matplotlib PNG from /fiberNode/tap-plot
+            fnScanTapProfile: null,       // chart-ready tap coordinates from existing pre-EQ data
             fnScanModemCount: null,         // Online modem count for selected channel
             fnScanModemCountLoading: false,
             fnScanModemSource: '',          // 'inventory' or 'snmp'
@@ -945,6 +946,12 @@ createApp({
             window.removeEventListener('beforeunload', this._pageLeaveHandler);
         }
         this.cancelActiveUiTasks({ silent: true, stopBackend: false });
+        Object.values(this.charts || {}).forEach(chart => {
+            try { chart?.destroy(); } catch (_) {}
+        });
+        this._dsHeatmapResizeObserver?.disconnect();
+        this._dsHeatmapResizeObserver = null;
+        this.charts = {};
     },
 
     watch: {
@@ -4242,10 +4249,10 @@ createApp({
                 const result = await response.json();
                 if (!this._isTaskActive(taskToken)) return;
                 
-                if (result.success && result.image_data) {
+                if (result.success && (result.rxmer_data || result.image_data)) {
                     const capture = {
                         index: this.usRxmerCaptureIndex + 1,
-                        image_data: result.image_data,
+                        image_data: result.image_data || null,
                         rxmer_data: result.rxmer_data || null,
                         timestamp: new Date().toLocaleTimeString(),
                         status: 'complete'
@@ -4253,6 +4260,7 @@ createApp({
                     this.usRxmerCaptures.push(capture);
                     this.usRxmerSpectrumData = result.image_data;
                     this.usRxmerDisplayIndex = this.usRxmerCaptures.length - 1;
+                    this.$nextTick(() => this.renderUsRxmerChart());
 
                     // Compare mode: after phase 1, kick off phase 2
                     if (this.comparePreEqMode && this.usRxmerComparePhase === 1) {
@@ -4292,10 +4300,12 @@ createApp({
         },
         
         showUsRxmerCapture(idx) {
-            if (idx >= 0 && idx < this.usRxmerCaptures.length && this.usRxmerCaptures[idx].image_data) {
+            const capture = this.usRxmerCaptures[idx];
+            if (idx >= 0 && idx < this.usRxmerCaptures.length && (capture?.rxmer_data || capture?.image_data)) {
                 this.usRxmerDisplayIndex = idx;
-                this.usRxmerSpectrumData = this.usRxmerCaptures[idx].image_data;
+                this.usRxmerSpectrumData = capture.image_data || null;
                 this.showUsRxmerJson = false;
+                this.$nextTick(() => this.renderUsRxmerChart());
             }
         },
 
@@ -4315,6 +4325,7 @@ createApp({
                 if (result.success) {
                     this.usRxmerComparisonImage = result.image_data;
                     this.usRxmerAnalysis        = result.analysis;
+                    this.$nextTick(() => this.renderUsRxmerComparisonChart());
                     this.usRxmerComparePhase = 0;
                     const assessment = result.analysis?.modem_assessments?.[0]?.preeq_assessment || result.analysis?.modem_assessments?.[0]?.assessment || 'N/A';
                     this.$toast?.success(`Comparison done — Assessment: ${assessment}`);
@@ -4344,6 +4355,7 @@ createApp({
                 if (result.success) {
                     this.fiberNodeImage    = result.image_data;
                     this.fiberNodeAnalysis = result.analysis;
+                    this.$nextTick(() => this.renderManualFiberNodeChart());
                     const s = result.analysis?.summary;
                     this.$toast?.success(`Done — ${s?.num_modems} modems, ${s?.pct_network_impaired?.toFixed(1)}% network-impaired`);
                 } else {
@@ -4406,6 +4418,9 @@ createApp({
             this.fnScanImage          = null;
             this.fnScanPlantAssessment = null;
             this.fnScanTapPlotImage   = null;
+            this.fnScanTapProfile     = null;
+            this._destroyChartSurface('surface-bulk-fn-rxmer');
+            this._destroyChartSurface('surface-fn-tap-profile');
             this.fnScanChannels       = [];
             this.fnScanFiberNodes     = [];
             this.fnScanModemSearch    = '';
@@ -4992,6 +5007,7 @@ createApp({
             this.fnScanImage    = null;
             this.fnScanPlantAssessment = null;
             this.fnScanTapPlotImage   = null;
+            this.fnScanTapProfile     = null;
             this.fnScanProgress = { step: 0, total: 0, modem: '', modem_idx: 0, modem_total: 0, action: 'Starting…', pct: 0, done: false };
             this.fnConfigCollapsed = false; // keep panel open so progress stays in-page
 
@@ -5072,6 +5088,8 @@ createApp({
                     if (result.tap_plot_image) {
                         this.fnScanTapPlotImage = result.tap_plot_image;
                     }
+                    this.fnScanTapProfile = result.tap_profile || null;
+                    this.$nextTick(() => this.renderBulkFiberNodeCharts());
                     const s = result.analysis?.summary;
                     this.$toast?.success(`Scanned ${s?.num_modems} modems — ${s?.pct_network_impaired?.toFixed(1)}% network-impaired`);
                 } else {
@@ -5170,7 +5188,10 @@ createApp({
                 if (!this._isTaskActive(token)) return;
                 if (result.success) {
                     this.dsScanResult = result;
-                    this.$nextTick(() => this.renderDsSuckoutHeatmap());
+                    this.$nextTick(() => {
+                        this.renderDsOverlayChart();
+                        this.renderDsSuckoutHeatmap();
+                    });
                 } else {
                     this.$toast?.error(result.error || 'DS suckout scan failed');
                 }
@@ -5232,6 +5253,7 @@ createApp({
                 if (!this._isTaskActive(token)) return;
                 if (result.success) {
                     this.fbScanResult = result;
+                    this.$nextTick(() => this.renderFullbandOverlayChart());
                 } else {
                     this.$toast?.error(result.error || 'Fullband scan failed');
                 }
@@ -5249,71 +5271,125 @@ createApp({
         renderDsSuckoutHeatmap() {
             const canvas = document.getElementById('dsSuckoutHeatmap');
             if (!canvas || !this.dsScanResult) return;
-            const modems = this.dsScanResult.modems.filter(m => m.success && m.channels?.length);
+            const modems = this.dsScanResult.modems.filter(modem => modem.success && modem.channels?.length);
             if (!modems.length) { canvas.style.display = 'none'; return; }
 
-            const allAmps  = modems.map(m => m.channels[0].amplitudes_db);
-            const numCols  = Math.min(...allAmps.map(a => a.length));
-            const step     = Math.max(1, Math.floor(numCols / 600));
-            const cols     = Math.ceil(numCols / step);
+            const allAmps = modems.map(modem => modem.channels[0].amplitudes_db || []);
+            const numCols = Math.min(...allAmps.map(values => values.length));
+            if (!Number.isFinite(numCols) || numCols < 1) return;
+            const step = Math.max(1, Math.floor(numCols / 600));
+            const cols = Math.ceil(numCols / step);
+            const cssWidth = Math.max(320, Math.floor(canvas.parentElement?.clientWidth || 800));
+            const cellW = cssWidth / cols;
+            const cellH = 22;
+            const cssHeight = modems.length * cellH;
+            const dpr = Math.max(1, window.devicePixelRatio || 1);
+            this._dsHeatmapRenderedWidth = cssWidth;
+            if (window.ResizeObserver && canvas.parentElement) {
+                this._dsHeatmapResizeObserver?.disconnect();
+                this._dsHeatmapResizeObserver = new ResizeObserver(entries => {
+                    const width = Math.max(320, Math.floor(entries[0]?.contentRect?.width || 0));
+                    if (Math.abs(width - (this._dsHeatmapRenderedWidth || 0)) > 2) {
+                        requestAnimationFrame(() => this.renderDsSuckoutHeatmap());
+                    }
+                });
+                this._dsHeatmapResizeObserver.observe(canvas.parentElement);
+            }
 
-            // Per-subcarrier-index array (0..numCols-1) used for regression
-            const idxArr = Array.from({length: numCols}, (_, i) => i);
+            canvas.style.display = 'block';
+            canvas.style.width = `${cssWidth}px`;
+            canvas.style.height = `${cssHeight}px`;
+            canvas.width = Math.round(cssWidth * dpr);
+            canvas.height = Math.round(cssHeight * dpr);
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-            let gMin = Infinity, gMax = -Infinity;
-            for (const a of allAmps) for (let i = 0; i < numCols; i += step) { if (a[i] < gMin) gMin = a[i]; if (a[i] > gMax) gMax = a[i]; }
-            const range = gMax - gMin || 1;
-
-            // plasma-ish colour: low=dark-blue, mid=orange, high=yellow
-            const toColor = db => {
-                const t = Math.max(0, Math.min(1, (db - gMin) / range));
+            let globalMin = Infinity;
+            let globalMax = -Infinity;
+            for (const values of allAmps) {
+                for (let index = 0; index < numCols; index += step) {
+                    const value = Number(values[index]);
+                    if (!Number.isFinite(value)) continue;
+                    globalMin = Math.min(globalMin, value);
+                    globalMax = Math.max(globalMax, value);
+                }
+            }
+            if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) return;
+            const range = globalMax - globalMin || 1;
+            const toColor = value => {
+                const t = Math.max(0, Math.min(1, (value - globalMin) / range));
                 const r = Math.round(255 * Math.min(1, t * 2));
                 const g = Math.round(255 * Math.max(0, t * 2 - 0.5));
                 const b = Math.round(255 * Math.max(0, (1 - t) * 1.4));
                 return `rgb(${r},${g},${b})`;
             };
+            const sampledIndices = [];
+            for (let index = 0; index < numCols; index += step) sampledIndices.push(index);
 
-            const cellW = Math.max(1, Math.floor(Math.min((canvas.parentElement?.clientWidth || 800) * 0.85, 960) / cols));
-            const cellH = 22;
-            canvas.width  = cols * cellW;
-            canvas.height = modems.length * cellH;
-            canvas.style.display = 'block';
-            const ctx = canvas.getContext('2d');
-
-            // Draw per-modem rows
             for (let row = 0; row < modems.length; row++) {
-                const amps    = allAmps[row];
-                const sampled = idxArr.filter((_, i) => i % step === 0);
-                const reg     = this._linRegY(sampled, amps.filter((_, i) => i % step === 0));
-                let col = 0;
-                for (let i = 0; i < numCols; i += step) {
-                    const db   = amps[i] ?? gMin;
-                    const dip  = (db - reg[col]) < -this.dsScanThreshold;
-                    ctx.fillStyle = dip ? '#dc3545' : toColor(db);
-                    ctx.fillRect(col * cellW, row * cellH, cellW, cellH);
-                    col++;
-                }
-                ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-                ctx.beginPath(); ctx.moveTo(0, (row + 1) * cellH); ctx.lineTo(canvas.width, (row + 1) * cellH); ctx.stroke();
+                const amplitudes = allAmps[row];
+                const sampledValues = sampledIndices.map(index => Number(amplitudes[index]));
+                const regression = this._linRegY(sampledIndices, sampledValues);
+                sampledIndices.forEach((sourceIndex, column) => {
+                    const value = Number.isFinite(sampledValues[column]) ? sampledValues[column] : globalMin;
+                    const dip = (value - regression[column]) < -this.dsScanThreshold;
+                    ctx.fillStyle = dip ? '#dc3545' : toColor(value);
+                    ctx.fillRect(column * cellW, row * cellH, Math.ceil(cellW) + 0.5, cellH);
+                });
+                ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+                ctx.beginPath();
+                ctx.moveTo(0, (row + 1) * cellH);
+                ctx.lineTo(cssWidth, (row + 1) * cellH);
+                ctx.stroke();
             }
 
-            // X-axis tick labels: use center frequency + subcarrier index
-            // Label every ~10% of the way across
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.font = '9px monospace';
+            const channel = modems[0].channels[0];
+            const centerMhz = Number(channel.center_freq_mhz);
+            const subcarrierCount = Number(channel.subcarrier_count || numCols);
+            const frequencyForIndex = index => Number.isFinite(centerMhz)
+                ? centerMhz + ((index / subcarrierCount) - 0.5) * 192
+                : null;
+            ctx.fillStyle = 'rgba(255,255,255,0.88)';
+            ctx.font = '9px ui-monospace,monospace';
             const tickEvery = Math.max(1, Math.floor(cols / 10));
-            const ch0 = modems[0].channels[0];
-            const centerMhz  = ch0.center_freq_mhz;
-            const nSubcar    = ch0.subcarrier_count;
-            for (let col = 0; col < cols; col += tickEvery) {
-                const x = col * cellW;
-                ctx.fillRect(x, 0, 1, modems.length * cellH);
-                // If we have center freq, approximate subcarrier frequency
-                const label = centerMhz != null
-                    ? Math.round(centerMhz + ((col * step / nSubcar) - 0.5) * 192) + 'M'
-                    : 'sc' + (col * step);
-                ctx.fillText(label, x + 2, 10);
+            for (let column = 0; column < cols; column += tickEvery) {
+                const x = column * cellW;
+                ctx.fillRect(x, 0, 1, cssHeight);
+                const frequency = frequencyForIndex(column * step);
+                ctx.fillText(frequency == null ? `sc${column * step}` : `${frequency.toFixed(0)}M`, x + 2, 10);
             }
+
+            this._dsHeatmapMeta = { modems, allAmps, step, cols, cellW, cellH, cssWidth, cssHeight, frequencyForIndex };
+            canvas.setAttribute('aria-label', this.dsHeatmapAccessibilitySummary());
+            canvas.setAttribute('tabindex', '0');
+            const tooltip = document.getElementById('dsHeatmapTooltip');
+            if (this._dsHeatmapMoveHandler) canvas.removeEventListener('pointermove', this._dsHeatmapMoveHandler);
+            if (this._dsHeatmapLeaveHandler) canvas.removeEventListener('pointerleave', this._dsHeatmapLeaveHandler);
+            this._dsHeatmapMoveHandler = event => {
+                const meta = this._dsHeatmapMeta;
+                if (!meta || !tooltip) return;
+                const rect = canvas.getBoundingClientRect();
+                const column = Math.max(0, Math.min(meta.cols - 1, Math.floor((event.clientX - rect.left) / rect.width * meta.cols)));
+                const row = Math.max(0, Math.min(meta.modems.length - 1, Math.floor((event.clientY - rect.top) / rect.height * meta.modems.length)));
+                const sourceIndex = column * meta.step;
+                const value = Number(meta.allAmps[row][sourceIndex]);
+                const frequency = meta.frequencyForIndex(sourceIndex);
+                tooltip.textContent = `${meta.modems[row].mac_address} · ${frequency == null ? `SC ${sourceIndex}` : `${frequency.toFixed(3)} MHz`} · ${Number.isFinite(value) ? value.toFixed(2) : 'N/A'} dB`;
+                tooltip.style.display = 'block';
+                tooltip.style.left = `${event.clientX - rect.left + 12}px`;
+                tooltip.style.top = `${event.clientY - rect.top + 12}px`;
+            };
+            this._dsHeatmapLeaveHandler = () => { if (tooltip) tooltip.style.display = 'none'; };
+            canvas.addEventListener('pointermove', this._dsHeatmapMoveHandler);
+            canvas.addEventListener('pointerleave', this._dsHeatmapLeaveHandler);
+        },
+
+        dsHeatmapAccessibilitySummary() {
+            const modemCount = this.dsScanResult?.modems?.filter(modem => modem.success && modem.channels?.length).length || 0;
+            const suckouts = this.dsSuckoutSummary();
+            const networkCount = suckouts.filter(item => item.verdict === 'Network').length;
+            return `Amplitude heatmap for ${modemCount} modems. ${suckouts.length} suckout clusters detected, including ${networkCount} network clusters. Red cells are at least ${this.dsScanThreshold} dB below each modem trend.`;
         },
 
         dsSuckoutSummary() {
@@ -5470,10 +5546,6 @@ createApp({
             });
         },
         
-        renderUsRxmerChart() {
-            // US RxMER now displays as img tag in HTML, no canvas rendering needed
-        },
-        
         closeUtscSpectrum() {
             this.utscSpectrumData = null;
             this.closeSpectrumAnalyzerModal();
@@ -5483,6 +5555,7 @@ createApp({
             this.usRxmerSpectrumData = null;
             this.usRxmerCaptures = [];
             this.usRxmerDisplayIndex = 0;
+            this._destroyChartSurface('surface-us-rxmer');
             if (this.usRxmerChartInstance) {
                 this.usRxmerChartInstance.destroy();
                 this.usRxmerChartInstance = null;
@@ -6399,23 +6472,224 @@ createApp({
             });
         },
 
+        _seriesColor(index) {
+            const palette = window.PyPnmCharts?.seriesColors || [
+                '#2563eb', '#dc3545', '#198754', '#f59e0b', '#8b5cf6',
+                '#0891b2', '#d946ef', '#84cc16', '#0f766e', '#9f1239'
+            ];
+            return palette[index % palette.length];
+        },
+
+        _destroyChartSurface(key) {
+            const chart = this.charts?.[key];
+            if (!chart) return;
+            try { chart.destroy(); } catch (_) {}
+            delete this.charts[key];
+        },
+
+        _replaceChartSurface(key, canvasId, config) {
+            this._destroyChartSurface(key);
+            const canvas = document.getElementById(canvasId);
+            if (!canvas || !window.Chart) return null;
+            const chart = new Chart(canvas, config);
+            this.charts[key] = chart;
+            return chart;
+        },
+
         _decimateExtrema(points, maxPoints = 5000) {
-            if (!Array.isArray(points) || points.length <= maxPoints) return points || [];
-            const bucketSize = Math.ceil(points.length / Math.max(1, Math.floor(maxPoints / 2)));
-            const sampled = [];
-            for (let start = 0; start < points.length; start += bucketSize) {
-                const bucket = points.slice(start, start + bucketSize);
-                let minimum = bucket[0];
-                let maximum = bucket[0];
-                bucket.forEach(point => {
+            if (!Array.isArray(points)) return [];
+            if (points.length <= maxPoints) return points;
+            const targetBuckets = Math.max(1, Math.floor((maxPoints - 2) / 2));
+            const bucketSize = Math.ceil((points.length - 2) / targetBuckets);
+            const sampled = [points[0]];
+            for (let start = 1; start < points.length - 1; start += bucketSize) {
+                const end = Math.min(points.length - 1, start + bucketSize);
+                let minimum = points[start];
+                let maximum = points[start];
+                for (let index = start + 1; index < end; index++) {
+                    const point = points[index];
                     if (point.y < minimum.y) minimum = point;
                     if (point.y > maximum.y) maximum = point;
-                });
+                }
                 if (minimum === maximum) sampled.push(minimum);
                 else if (minimum.x <= maximum.x) sampled.push(minimum, maximum);
                 else sampled.push(maximum, minimum);
             }
+            if (sampled[sampled.length - 1] !== points[points.length - 1]) sampled.push(points[points.length - 1]);
             return sampled;
+        },
+
+        _numericPoints(xValues, yValues, xFallback = 0) {
+            const count = Math.min(Array.isArray(xValues) ? xValues.length : 0, Array.isArray(yValues) ? yValues.length : 0);
+            const points = [];
+            if (count) {
+                for (let index = 0; index < count; index++) {
+                    const x = Number(xValues[index]);
+                    const y = Number(yValues[index]);
+                    if (Number.isFinite(x) && Number.isFinite(y)) points.push({ x, y });
+                }
+                return points;
+            }
+            (Array.isArray(yValues) ? yValues : []).forEach((value, index) => {
+                const y = Number(value);
+                if (Number.isFinite(y)) points.push({ x: index + xFallback, y });
+            });
+            return points;
+        },
+
+        _renderQuantitativeChart(key, canvasId, datasets, { title, xTitle, yTitle, maxPoints = 5000 } = {}) {
+            const usable = (datasets || []).filter(dataset => Array.isArray(dataset.data) && dataset.data.length);
+            if (!usable.length) {
+                this._destroyChartSurface(key);
+                return;
+            }
+            const displaySets = usable.map((dataset, index) => ({
+                ...dataset,
+                data: this._decimateExtrema(dataset.data, maxPoints),
+                parsing: false,
+                borderColor: dataset.borderColor || this._seriesColor(index),
+                backgroundColor: dataset.backgroundColor || 'transparent',
+                borderWidth: dataset.borderWidth || 1,
+                pointRadius: dataset.pointRadius ?? 0,
+                tension: 0,
+            }));
+            this._replaceChartSurface(key, canvasId, {
+                type: 'line',
+                data: { datasets: displaySets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    parsing: false,
+                    normalized: true,
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                    plugins: {
+                        title: { display: Boolean(title), text: title || '' },
+                        tooltip: { callbacks: {
+                            title: context => context.length ? `${Number(context[0].parsed.x).toFixed(3)} ${xTitle?.includes('MHz') ? 'MHz' : ''}`.trim() : '',
+                            label: context => `${context.dataset.label}: ${Number(context.parsed.y).toFixed(2)}`,
+                        }},
+                    },
+                    scales: {
+                        x: { type: 'linear', title: { display: Boolean(xTitle), text: xTitle || '' } },
+                        y: { title: { display: Boolean(yTitle), text: yTitle || '' } },
+                    },
+                },
+            });
+        },
+
+        _rxmerCaptureDataset(capture, index = 0) {
+            const values = capture?.values || [];
+            const frequencies = capture?.frequencies_mhz || [];
+            const points = this._numericPoints(frequencies, values, Number(capture?.first_active_subcarrier_index || 0));
+            const mac = capture?.cm_mac_address || capture?.mac_address || this.selectedModem?.mac_address || `Capture ${index + 1}`;
+            const preEq = capture?.preeq_enabled;
+            return {
+                label: `${mac}${preEq === undefined || preEq === null ? '' : ` · Pre-EQ ${preEq ? 'ON' : 'OFF'}`}`,
+                data: points,
+            };
+        },
+
+        renderUsRxmerChart() {
+            const capture = this.usRxmerCaptures[this.usRxmerDisplayIndex]?.rxmer_data;
+            this._renderQuantitativeChart('surface-us-rxmer', 'usRxmerChart', [this._rxmerCaptureDataset(capture)], {
+                title: 'Upstream OFDMA RxMER', xTitle: capture?.frequencies_mhz?.length ? 'Frequency (MHz)' : 'Subcarrier', yTitle: 'RxMER (dB)'
+            });
+        },
+
+        _renderRxmerAnalysisSurface(key, canvasId, analysis, title) {
+            const captures = Array.isArray(analysis?.captures) ? analysis.captures : [];
+            this._renderQuantitativeChart(key, canvasId, captures.map((capture, index) => this._rxmerCaptureDataset(capture, index)), {
+                title, xTitle: captures.some(capture => capture?.frequencies_mhz?.length) ? 'Frequency (MHz)' : 'Subcarrier', yTitle: 'RxMER (dB)'
+            });
+        },
+
+        renderUsRxmerComparisonChart() {
+            this._renderRxmerAnalysisSurface('surface-us-rxmer-comparison', 'usRxmerComparisonChart', this.usRxmerAnalysis, 'Pre-EQ Comparison');
+        },
+
+        renderManualFiberNodeChart() {
+            this._renderRxmerAnalysisSurface('surface-manual-fn-rxmer', 'manualFiberNodeChart', this.fiberNodeAnalysis, 'Fiber Node RxMER Overlay');
+        },
+
+        renderBulkFiberNodeCharts() {
+            this._renderRxmerAnalysisSurface('surface-bulk-fn-rxmer', 'bulkFiberNodeChart', this.fnScanResult, 'Fiber Node RxMER Overlay');
+            const tapSeries = this.fnScanTapProfile?.series || [];
+            const datasets = tapSeries.map(series => ({
+                label: `${series.mac_address}${series.us_ifindex != null ? ` · Ch ${series.us_ifindex}` : ''}`,
+                data: (series.points || []).filter(point => point.magnitude_db_relative != null && Number.isFinite(Number(point.magnitude_db_relative))).map(point => ({
+                    x: Number(point.tap_offset), y: Number(point.magnitude_db_relative)
+                })),
+            }));
+            this._renderQuantitativeChart('surface-fn-tap-profile', 'fnTapProfileChart', datasets, {
+                title: 'Pre-EQ Tap Distance Profile', xTitle: 'Tap offset from main tap', yTitle: 'Magnitude relative to main tap (dB)', maxPoints: 1000
+            });
+        },
+
+        renderDsOverlayChart() {
+            const datasets = [];
+            (this.dsScanResult?.modems || []).filter(modem => modem.success).forEach(modem => {
+                (modem.channels || []).forEach(channel => {
+                    const amplitudes = channel.amplitudes_db || [];
+                    const center = Number(channel.center_freq_mhz);
+                    const count = amplitudes.length;
+                    const frequencies = Number.isFinite(center) && count > 1
+                        ? amplitudes.map((_, index) => center - 96 + (192 * index / (count - 1)))
+                        : [];
+                    datasets.push({
+                        label: `${modem.mac_address}${channel.channel_id != null ? ` · Ch ${channel.channel_id}` : ''}`,
+                        data: this._numericPoints(frequencies, amplitudes),
+                    });
+                });
+            });
+            this._renderQuantitativeChart('surface-ds-overlay', 'dsOverlayChart', datasets, {
+                title: 'DS Channel-Estimation Overlay', xTitle: 'Frequency (MHz)', yTitle: 'Amplitude (dB)'
+            });
+        },
+
+        renderFullbandOverlayChart() {
+            const datasets = (this.fbScanResult?.modems || []).filter(modem => modem.success).map(modem => ({
+                label: modem.mac_address,
+                data: this._numericPoints(modem.frequencies_mhz || [], modem.amplitudes_dbmv || []),
+            }));
+            let yMin = Infinity;
+            let yMax = -Infinity;
+            datasets.forEach(dataset => dataset.data.forEach(point => {
+                yMin = Math.min(yMin, point.y);
+                yMax = Math.max(yMax, point.y);
+            }));
+            if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+                yMin = -60;
+                yMax = 10;
+            }
+            (this.fbScanResult?.detections || []).slice(0, 40).forEach((detection, index) => {
+                if (!['suckout', 'lte_ingress'].includes(detection.type)) return;
+                const color = detection.type === 'suckout' ? '#dc3545' : '#f59e0b';
+                const label = detection.type === 'suckout' ? 'Suckout boundary' : (detection.band || 'LTE boundary');
+                [detection.freq_start_mhz, detection.freq_end_mhz].forEach((frequency, boundaryIndex) => {
+                    const x = Number(frequency);
+                    if (!Number.isFinite(x)) return;
+                    datasets.push({
+                        label: index === 0 && boundaryIndex === 0 ? label : `${label} ${index + 1}`,
+                        data: [{ x, y: yMin }, { x, y: yMax }],
+                        borderColor: color,
+                        borderDash: detection.type === 'suckout' ? [5, 4] : [2, 4],
+                        borderWidth: 1,
+                        pointRadius: 0,
+                    });
+                });
+            });
+            this._renderQuantitativeChart('surface-fullband-overlay', 'fullbandOverlayChart', datasets, {
+                title: 'DS Fullband Spectrum Overlay', xTitle: 'Frequency (MHz)', yTitle: 'Amplitude (dBmV)'
+            });
+        },
+
+        downloadCanvasPng(canvasId, name) {
+            window.PyPnmCharts?.downloadPng(document.getElementById(canvasId), name);
+        },
+
+        downloadArchivePlot(plot) {
+            window.PyPnmCharts?.downloadBase64Png(plot?.data, plot?.filename || 'pypnm-archive-plot');
         },
 
         drawSpectrumCharts(data) {

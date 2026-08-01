@@ -2035,11 +2035,17 @@
                                                             </div>
                                                         </div>
                                                         
-                                                        <!-- Image -->
-                                                        <img v-if="usRxmerSpectrumData" :src="'data:image/png;base64,' + usRxmerSpectrumData" class="img-fluid border rounded shadow-sm" alt="Upstream OFDMA RxMER">
+                                                        <!-- Interactive chart (default) -->
+                                                        <div v-if="usRxmerCaptures[usRxmerDisplayIndex]?.rxmer_data" style="height:380px;position:relative;">
+                                                            <canvas id="usRxmerChart" aria-label="Interactive upstream OFDMA RxMER chart"></canvas>
+                                                        </div>
+                                                        <details v-if="usRxmerSpectrumData" class="mt-2">
+                                                            <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                                            <img :src="'data:image/png;base64,' + usRxmerSpectrumData" class="img-fluid border rounded shadow-sm mt-2" alt="Archived upstream OFDMA RxMER report">
+                                                        </details>
                                                         
                                                         <!-- JSON toggle -->
-                                                        <div v-if="usRxmerSpectrumData" class="mt-2">
+                                                        <div v-if="usRxmerCaptures[usRxmerDisplayIndex]?.rxmer_data" class="mt-2">
                                                             <button @click="showUsRxmerJson = !showUsRxmerJson" class="btn btn-warning w-100">
                                                                 <i class="bi bi-code-square me-1"></i>{{ showUsRxmerJson ? 'Hide JSON Data' : 'View JSON Data' }}
                                                             </button>
@@ -2066,11 +2072,11 @@
                                                                         <td>{{ cap.index }}</td>
                                                                         <td>{{ cap.timestamp }}</td>
                                                                         <td>
-                                                                            <span v-if="cap.image_data" class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>
+                                                                            <span v-if="cap.rxmer_data || cap.image_data" class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>
                                                                             <span v-else class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>{{ cap.status }}</span>
                                                                         </td>
                                                                         <td>
-                                                                            <button v-if="cap.image_data" @click.stop="showUsRxmerCapture(idx)" class="btn btn-sm btn-outline-info py-0 px-1">
+                                                                            <button v-if="cap.rxmer_data || cap.image_data" @click.stop="showUsRxmerCapture(idx)" class="btn btn-sm btn-outline-info py-0 px-1">
                                                                                 <i class="bi bi-eye"></i>
                                                                             </button>
                                                                         </td>
@@ -2098,7 +2104,7 @@
                                         </div>
 
                                         <!-- Pre-EQ Comparison Result -->
-                                        <div v-if="usRxmerComparisonImage" class="mb-3">
+                                        <div v-if="usRxmerAnalysis || usRxmerComparisonImage" class="mb-3">
                                             <div class="card border-warning">
                                                 <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
                                                     <strong><i class="bi bi-arrow-left-right me-1"></i>Pre-EQ Comparison</strong>
@@ -2108,7 +2114,13 @@
                                                     </span>
                                                 </div>
                                                 <div class="card-body p-2">
-                                                    <img :src="'data:image/png;base64,' + usRxmerComparisonImage" class="img-fluid w-100 rounded" style="max-height:400px; object-fit:contain;" />
+                                                    <div v-if="usRxmerAnalysis?.captures?.length" style="height:400px;position:relative;">
+                                                        <canvas id="usRxmerComparisonChart" aria-label="Interactive Pre-EQ RxMER comparison chart"></canvas>
+                                                    </div>
+                                                    <details v-if="usRxmerComparisonImage" class="mt-2">
+                                                        <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                                        <img :src="'data:image/png;base64,' + usRxmerComparisonImage" class="img-fluid w-100 rounded mt-2" style="max-height:400px; object-fit:contain;" alt="Archived Pre-EQ comparison report" />
+                                                    </details>
                                                     <div v-if="usRxmerAnalysis?.modem_assessments?.[0]" class="mt-2 d-flex flex-wrap gap-2 small">
                                                         <span class="text-muted">Pre-EQ ON avg: <strong>{{ usRxmerAnalysis.modem_assessments[0].rxmer_avg_db?.toFixed(1) }} dB</strong></span>
                                                         <span class="text-muted">Δ avg: <strong>{{ usRxmerAnalysis.modem_assessments[0].preeq_delta_avg_db !== null ? (usRxmerAnalysis.modem_assessments[0].preeq_delta_avg_db >= 0 ? '+' : '') + usRxmerAnalysis.modem_assessments[0].preeq_delta_avg_db?.toFixed(1) + ' dB' : 'N/A' }}</strong></span>
@@ -2138,7 +2150,7 @@
                                                             <i v-else class="bi bi-play-fill me-1"></i>
                                                             {{ runningFiberNode ? 'Analyzing...' : 'Run Analysis' }}
                                                         </button>
-                                                        <button @click="fiberNodeCaptures = []; fiberNodeImage = null; fiberNodeAnalysis = null" class="btn btn-outline-danger btn-sm">
+                                                        <button @click="fiberNodeCaptures = []; fiberNodeImage = null; fiberNodeAnalysis = null; _destroyChartSurface('surface-manual-fn-rxmer')" class="btn btn-outline-danger btn-sm">
                                                             <i class="bi bi-trash"></i>
                                                         </button>
                                                     </div>
@@ -2169,8 +2181,14 @@
                                                         <span>In-home modems: <strong>{{ fiberNodeAnalysis.summary.pct_modems_in_home?.toFixed(0) }}%</strong></span>
                                                         <span v-if="fiberNodeAnalysis.summary.worst_modem_mac">Worst modem: <strong class="text-danger">{{ fiberNodeAnalysis.summary.worst_modem_mac }}</strong> ({{ fiberNodeAnalysis.summary.worst_modem_delta_db?.toFixed(1) }} dB vs group)</span>
                                                     </div>
-                                                    <!-- Plot -->
-                                                    <img v-if="fiberNodeImage" :src="'data:image/png;base64,' + fiberNodeImage" class="img-fluid w-100 rounded" style="max-height:500px;object-fit:contain;" />
+                                                    <!-- Interactive plot + report fallback -->
+                                                    <div v-if="fiberNodeAnalysis?.captures?.length" style="height:500px;position:relative;">
+                                                        <canvas id="manualFiberNodeChart" aria-label="Interactive manual fiber node RxMER overlay"></canvas>
+                                                    </div>
+                                                    <details v-if="fiberNodeImage" class="mt-2">
+                                                        <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                                        <img :src="'data:image/png;base64,' + fiberNodeImage" class="img-fluid w-100 rounded mt-2" style="max-height:500px;object-fit:contain;" alt="Archived manual fiber node RxMER report" />
+                                                    </details>
                                                 </div>
                                             </div>
                                         </div>
@@ -2302,29 +2320,37 @@
                                 </div>
                             </div>
 
-                            <!-- Matplotlib Plots from Archive -->
+                            <!-- Archive-only Matplotlib report gallery -->
                             <div class="col-12 mb-4" v-if="pnmOutputType === 'archive' && selectedMeasurementData && selectedMeasurementData.plots && selectedMeasurementData.plots.length">
-                                <div class="card shadow-sm">
-                                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>PNM Plots</h5>
+                                <div class="card shadow-sm border-secondary">
+                                    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                        <div>
+                                            <h5 class="mb-0"><i class="bi bi-archive me-2"></i>Archive Reports</h5>
+                                            <small class="text-muted">Generated Matplotlib PNG artifacts from the requested archive; interactive JSON charts are shown separately.</small>
+                                        </div>
                                         <div class="d-flex gap-2">
                                             <button @click="downloadChartData" class="btn btn-sm btn-outline-secondary">
-                                                <i class="bi bi-download me-1"></i>JSON
+                                                <i class="bi bi-download me-1"></i>Archive JSON
                                             </button>
                                             <a v-if="selectedMeasurementData.download_url" 
                                                :href="selectedMeasurementData.download_url" 
                                                class="btn btn-sm btn-primary" 
                                                download>
-                                                <i class="bi bi-download me-1"></i>Download ZIP
+                                                <i class="bi bi-file-earmark-zip me-1"></i>Download Source Archive
                                             </a>
                                         </div>
                                     </div>
                                     <div class="card-body">
-                                        <div v-for="plot in selectedMeasurementData.plots" :key="plot.filename" class="mb-4">
-                                            <h5 class="text-primary border-bottom pb-2 mb-3">
-                                                <i class="bi bi-graph-up-arrow me-2"></i>{{ formatPlotTitle(plot.filename) }}
-                                            </h5>
-                                            <img :src="'data:image/png;base64,' + plot.data" class="img-fluid border rounded shadow-sm" :alt="plot.filename">
+                                        <div v-for="plot in selectedMeasurementData.plots" :key="plot.filename" class="mb-4 border rounded p-3 bg-light bg-opacity-50">
+                                            <div class="d-flex justify-content-between align-items-center gap-2 border-bottom pb-2 mb-3">
+                                                <h5 class="text-primary mb-0">
+                                                    <i class="bi bi-file-earmark-image me-2"></i>{{ formatPlotTitle(plot.filename) }}
+                                                </h5>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" @click="downloadArchivePlot(plot)">
+                                                    <i class="bi bi-download me-1"></i>PNG
+                                                </button>
+                                            </div>
+                                            <img :src="'data:image/png;base64,' + plot.data" class="img-fluid border rounded shadow-sm" :alt="'Archived report: ' + plot.filename">
                                             <div class="mt-2">
                                                 <button @click="togglePlotJson(plot.filename)" class="btn btn-warning w-100">
                                                     <i class="bi bi-code-square me-1"></i>{{ expandedPlotJson.includes(plot.filename) ? 'Hide JSON Data' : 'View JSON Data' }}
@@ -3172,19 +3198,31 @@
                             </div>
                         </div>
 
-                        <!-- Tap Distance Plot -->
-                        <div v-if="fnScanTapPlotImage" class="card shadow-sm mb-3">
-                            <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-graph-up me-2"></i>Pre-Eq Tap Distance Profile</h6></div>
+                        <!-- Tap Distance Profile -->
+                        <div v-if="fnScanTapProfile?.series?.length || fnScanTapPlotImage" class="card shadow-sm mb-3">
+                            <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-graph-up me-2"></i>Pre-EQ Tap Distance Profile</h6></div>
                             <div class="card-body p-2">
-                                <img :src="'data:image/png;base64,' + fnScanTapPlotImage" class="img-fluid w-100 rounded" />
+                                <div v-if="fnScanTapProfile?.series?.length" style="height:390px;position:relative;">
+                                    <canvas id="fnTapProfileChart" aria-label="Interactive pre-equalization tap profile"></canvas>
+                                </div>
+                                <details v-if="fnScanTapPlotImage" class="mt-2">
+                                    <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                    <img :src="'data:image/png;base64,' + fnScanTapPlotImage" class="img-fluid w-100 rounded mt-2" alt="Archived pre-equalization tap profile report" />
+                                </details>
                             </div>
                         </div>
 
-                        <!-- Overlay plot -->
-                        <div v-if="fnScanImage" class="card shadow-sm">
+                        <!-- RxMER overlay -->
+                        <div v-if="fnScanResult?.captures?.length || fnScanImage" class="card shadow-sm">
                             <div class="card-header bg-white"><h6 class="mb-0">RxMER Overlay</h6></div>
                             <div class="card-body p-2">
-                                <img :src="'data:image/png;base64,' + fnScanImage" class="img-fluid w-100 rounded" />
+                                <div v-if="fnScanResult?.captures?.length" style="height:500px;position:relative;">
+                                    <canvas id="bulkFiberNodeChart" aria-label="Interactive bulk fiber node RxMER overlay"></canvas>
+                                </div>
+                                <details v-if="fnScanImage" class="mt-2">
+                                    <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                    <img :src="'data:image/png;base64,' + fnScanImage" class="img-fluid w-100 rounded mt-2" alt="Archived bulk fiber node RxMER report" />
+                                </details>
                             </div>
                         </div>
                     </div>
@@ -3322,28 +3360,41 @@
                             <i class="bi bi-check-circle me-1"></i>No suckouts ≥{{ dsScanThreshold }}&nbsp;dB found across {{ dsScanResult.success_count }} modems.
                         </div>
 
-                        <!-- Heatmap -->
-                        <!-- Matplotlib overlay plot -->
-                        <div v-if="dsScanResult.plot_png_b64" class="card mb-3">
+                        <!-- Interactive channel-estimation overlay -->
+                        <div v-if="dsScanResult.modems?.some(m => m.success && m.channels?.length)" class="card mb-3">
                             <div class="card-header bg-white">
                                 <h6 class="mb-0"><i class="bi bi-graph-up me-1"></i>Amplitude Overlay
-                                    <small class="text-muted ms-2">all modems + median (blue) · suckout zones (red)</small>
+                                    <small class="text-muted ms-2">interactive per-modem channel-estimation traces</small>
                                 </h6>
                             </div>
-                            <div class="card-body p-2 text-center">
-                                <img :src="'data:image/png;base64,' + dsScanResult.plot_png_b64"
-                                     class="img-fluid" style="max-width:100%;border-radius:4px;" alt="DS suckout overlay plot" />
+                            <div class="card-body p-2">
+                                <div style="height:430px;position:relative;">
+                                    <canvas id="dsOverlayChart" aria-label="Interactive downstream channel-estimation overlay"></canvas>
+                                </div>
+                                <details v-if="dsScanResult.plot_png_b64" class="mt-2">
+                                    <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                    <img :src="'data:image/png;base64,' + dsScanResult.plot_png_b64"
+                                         class="img-fluid mt-2" style="max-width:100%;border-radius:4px;" alt="Archived DS suckout overlay report" />
+                                </details>
                             </div>
                         </div>
 
-                        <!-- Amplitude Heatmap (legacy) -->
+                        <!-- Amplitude Heatmap (custom canvas retained) -->
                         <div class="card mb-3">
-                            <div class="card-header bg-white">
+                            <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <h6 class="mb-0"><i class="bi bi-grid me-1"></i>Amplitude Heatmap
-                                    <small class="text-muted ms-2">red = suckout ≥{{ dsScanThreshold }}&nbsp;dB below trend · low=dark, high=yellow</small>
+                                    <small class="text-muted ms-2">red = suckout ≥{{ dsScanThreshold }}&nbsp;dB below trend</small>
                                 </h6>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @click="downloadCanvasPng('dsSuckoutHeatmap', 'ds-suckout-heatmap')">
+                                    <i class="bi bi-download me-1"></i>PNG
+                                </button>
                             </div>
-                            <div class="card-body p-0" style="overflow-x:auto;">
+                            <div class="card-body p-2">
+                                <div class="d-flex align-items-center gap-3 small text-muted mb-2" aria-label="Heatmap legend">
+                                    <span class="d-inline-flex align-items-center gap-1"><span style="display:inline-block;width:54px;height:10px;border-radius:2px;background:linear-gradient(90deg,#0000ff,#ff8000,#ffff00);"></span>low → high amplitude</span>
+                                    <span class="d-inline-flex align-items-center gap-1"><span style="display:inline-block;width:12px;height:10px;background:#dc3545;"></span>suckout</span>
+                                </div>
+                                <p id="dsHeatmapSummary" class="small text-muted mb-2">{{ dsHeatmapAccessibilitySummary() }}</p>
                                 <div class="d-flex align-items-start">
                                     <div class="flex-shrink-0" style="font-size:0.62rem;font-family:monospace;">
                                         <div v-for="m in dsScanResult.modems.filter(x => x.success && x.channels?.length)"
@@ -3353,7 +3404,10 @@
                                             {{ m.mac_address.slice(-8) }}
                                         </div>
                                     </div>
-                                    <canvas id="dsSuckoutHeatmap" style="display:block;image-rendering:pixelated;max-width:100%;"></canvas>
+                                    <div class="position-relative flex-grow-1" style="min-width:0;overflow:hidden;">
+                                        <canvas id="dsSuckoutHeatmap" aria-describedby="dsHeatmapSummary" style="display:block;image-rendering:pixelated;max-width:100%;"></canvas>
+                                        <div id="dsHeatmapTooltip" role="tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;background:rgba(33,37,41,.94);color:#fff;padding:.3rem .45rem;border-radius:.25rem;font-size:.72rem;white-space:nowrap;"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3443,19 +3497,25 @@
                             </div>
                         </div>
 
-                        <!-- Matplotlib plot -->
-                        <div v-if="fbScanResult.plot_png_b64" class="card mb-3">
+                        <!-- Interactive fullband overlay -->
+                        <div v-if="fbScanResult.modems?.some(m => m.success && m.frequencies_mhz?.length)" class="card mb-3">
                             <div class="card-header bg-white">
                                 <h6 class="mb-0"><i class="bi bi-graph-up me-1"></i>Fullband Spectrum Overlay
-                                    <small class="text-muted ms-2">gray = per-modem · blue = median · red = suckout · yellow = LTE band</small>
+                                    <small class="text-muted ms-2">interactive per-modem traces; detections remain summarized below</small>
                                 </h6>
                             </div>
-                            <div class="card-body p-2 text-center">
-                                <img :src="'data:image/png;base64,' + fbScanResult.plot_png_b64"
-                                     class="img-fluid" style="max-width:100%;border-radius:4px;" alt="Fullband spectrum plot" />
+                            <div class="card-body p-2">
+                                <div style="height:500px;position:relative;">
+                                    <canvas id="fullbandOverlayChart" aria-label="Interactive downstream fullband spectrum overlay"></canvas>
+                                </div>
                                 <div v-if="fullbandFreqRangeText" class="small text-muted mt-2">
                                     <i class="bi bi-broadcast-pin me-1"></i>{{ fullbandFreqRangeText }}
                                 </div>
+                                <details v-if="fbScanResult.plot_png_b64" class="mt-2">
+                                    <summary class="small text-muted" style="cursor:pointer"><i class="bi bi-image me-1"></i>Report / Archive fallback (Matplotlib PNG)</summary>
+                                    <img :src="'data:image/png;base64,' + fbScanResult.plot_png_b64"
+                                         class="img-fluid mt-2" style="max-width:100%;border-radius:4px;" alt="Archived fullband spectrum report" />
+                                </details>
                             </div>
                         </div>
 
@@ -3578,7 +3638,7 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <!-- Shared engineering chart theme and PNG export -->
-    <script src="[[ base_path ]]/static/js/chart-theme.js?v=2"></script>
+    <script src="[[ base_path ]]/static/js/chart-theme.js?v=3"></script>
     <!-- Application JS with cache busting -->
     <script>
         // Cache busting: Load app.js with timestamp to always get latest version

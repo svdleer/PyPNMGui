@@ -14,10 +14,13 @@
   main{flex:1;display:flex;flex-direction:column;padding:4px;overflow:hidden;min-height:0}
   #canvasWrap{flex:1;position:relative;display:flex;flex-direction:column;gap:4px;min-height:0}
   canvas{width:100%;display:block;border-radius:4px;background:#071028}
-  #specCanvas{flex:55;min-height:0}
+  #specChartWrap{flex:55;min-height:0;position:relative}
+  #specCanvas{width:100%!important;height:100%!important}
   #waterfallCanvas{flex:45;min-height:0}
   #status{position:absolute;left:10px;top:10px;background:rgba(7,16,40,0.6);padding:6px 8px;border-radius:6px;font-size:12px}
-  #cursor{position:absolute;right:10px;top:10px;background:rgba(7,16,40,0.6);padding:6px 8px;border-radius:6px;font-size:12px;text-align:right;white-space:pre}
+  #cursor{position:absolute;right:10px;top:10px;background:rgba(7,16,40,0.78);padding:6px 8px;border-radius:6px;font-size:12px;text-align:right;white-space:pre;pointer-events:none;z-index:6}
+  #waterfallLegend{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:5px;padding:3px 6px;border-radius:4px;background:rgba(7,16,40,.78);font-size:10px;color:#b8c5e8;pointer-events:none;z-index:5}
+  #waterfallLegend i{display:block;width:70px;height:8px;border-radius:2px;background:linear-gradient(90deg,#0000ff,#00ff00,#ff0000)}
   footer{padding:4px 8px;background:#071028;font-size:12px;color:#9fb0ff}
   .small{font-size:11px;color:#9fb0ff}
   /* Hide bottom controls when embedded in iframe */
@@ -90,6 +93,8 @@
     <button id="freezeA">Freeze A</button>
     <button id="freezeB">Freeze B</button>
     <label class="small"><input id="showFreeze" type="checkbox" checked /> Show A/B</label>
+    <button id="exportTrace" title="Download line trace as PNG">Trace PNG</button>
+    <button id="exportWaterfall" title="Download waterfall as PNG">Waterfall PNG</button>
 
     <label class="small">Impulse:
       <input id="impulse" type="checkbox" checked />
@@ -114,8 +119,9 @@
 
 <main>
   <div id="canvasWrap">
-    <canvas id="specCanvas"></canvas>
-    <canvas id="waterfallCanvas"></canvas>
+    <div id="specChartWrap"><canvas id="specCanvas" data-no-auto-export="true" aria-label="Interactive live return-path spectrum trace"></canvas></div>
+    <canvas id="waterfallCanvas" aria-label="Live return-path spectrum waterfall"></canvas>
+    <div id="waterfallLegend" aria-label="Waterfall color legend"><span>low</span><i></i><span>high</span></div>
     <div id="status">Status: idle</div>
     <div id="cursor">—</div>
   </div>
@@ -136,6 +142,8 @@
   </div>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="./js/chart-theme.js?v=3"></script>
 <script>
 // Detect iframe embedding and add class to hide controls
 if (window.self !== window.top) {
@@ -209,16 +217,42 @@ const infoEl   = document.getElementById('info');
 // ===== Canvas setup =====
 const specCanvas = document.getElementById('specCanvas');
 const wfCanvas   = document.getElementById('waterfallCanvas');
-const sctx = specCanvas.getContext('2d');
 const wctx = wfCanvas.getContext('2d');
 let dpr = window.devicePixelRatio || 1;
-function resize(){
-  for(const c of [specCanvas,wfCanvas]){
-    const r = c.getBoundingClientRect();
-    c.width  = Math.round(r.width  * dpr);
-    c.height = Math.round(r.height * dpr);
-    c.getContext('2d').setTransform(dpr,0,0,dpr,0,0);
+const darkGrid = 'rgba(159,176,255,0.12)';
+const specChart = new Chart(specCanvas, {
+  type: 'line',
+  data: { datasets: [
+    {label:'Live', data:[], parsing:false, borderColor:'#8cc8ff', borderWidth:1.4, pointRadius:0},
+    {label:'Max hold', data:[], parsing:false, borderColor:'#ffc878', borderDash:[6,4], borderWidth:1.2, pointRadius:0},
+    {label:'Freeze A', data:[], parsing:false, borderColor:'#00ffa0', borderWidth:1, pointRadius:0},
+    {label:'Freeze B', data:[], parsing:false, borderColor:'#ff64b4', borderWidth:1, pointRadius:0},
+    {label:'Impulse >6 dB', data:[], parsing:false, showLine:false, pointRadius:3, pointBackgroundColor:'#ff3b30'}
+  ]},
+  options: {
+    responsive:true, maintainAspectRatio:false, animation:false, parsing:false, normalized:true,
+    interaction:{mode:'nearest',axis:'x',intersect:false},
+    plugins:{
+      title:{display:false},
+      legend:{display:true,position:'top',labels:{color:'#dfe7ff'}},
+      tooltip:{callbacks:{
+        title:items=>items.length?`${Number(items[0].parsed.x).toFixed(3)} MHz`:'',
+        label:item=>`${item.dataset.label}: ${Number(item.parsed.y).toFixed(2)} dBmV/MHz`
+      }}
+    },
+    scales:{
+      x:{type:'linear',title:{display:true,text:'Frequency (MHz)',color:'#b8c5e8'},ticks:{color:'#b8c5e8',maxTicksLimit:8},grid:{color:darkGrid},border:{color:'#516184'}},
+      y:{title:{display:true,text:'Level (dBmV/MHz)',color:'#b8c5e8'},ticks:{color:'#b8c5e8'},grid:{color:darkGrid},border:{color:'#516184'}}
+    }
   }
+});
+function resize(){
+  dpr = window.devicePixelRatio || 1;
+  const r = wfCanvas.getBoundingClientRect();
+  wfCanvas.width  = Math.round(r.width * dpr);
+  wfCanvas.height = Math.round(r.height * dpr);
+  wctx.setTransform(dpr,0,0,dpr,0,0);
+  specChart.resize();
   if(bins.length > 0) { draw(); drawWaterfall(); }
 }
 window.addEventListener('resize', resize);
@@ -344,104 +378,54 @@ function handleMessage(msg){
   draw(); drawWaterfall();
 }
 
-// ===== Drawing =====
-function drawGrid(ctx,w,h){
-  ctx.save(); ctx.strokeStyle='rgba(255,255,255,0.06)';
-  for(let i=0;i<=6;i++){ const y=(h/6)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
-  ctx.restore();
-}
-
+// ===== Chart.js line trace (updated in place) =====
 function draw(){
-  const w = specCanvas.width / dpr;
-  const h = specCanvas.height / dpr;
-  const plotLeft = 65;      // space for Y axis labels
-  const plotBottom = 36;   // space for X axis labels
-  const plotTop = 10;
-  const plotRight = 10;
-
-  sctx.clearRect(0,0,w,h);
-  sctx.fillStyle='#071028'; sctx.fillRect(0,0,w,h);
-  drawGrid(sctx,w,h);
   if(!bins.length) return;
-
-  const lo = viewStart, hi = viewEnd;
-  const plotW = w - plotLeft - plotRight;
-  const plotH = h - plotTop - plotBottom;
-  const slice = bins.slice(lo,hi+1);
-  const sliceHold = maxHold.slice(lo,hi+1);
-
-  let minV=Infinity, maxV=-Infinity;
-  for(let v of slice.concat(sliceHold, freezeA||[], freezeB||[])){
-    if(isFinite(v)){ if(v<minV) minV=v; if(v>maxV) maxV=v; }
-  }
-
-  if(scaleMode !== 'auto'){
-    const p = scaleMode.split(','); minV=parseFloat(p[0]); maxV=parseFloat(p[1]);
-  } else {
-    const pad=(maxV-minV)*0.08||1; maxV+=pad; minV-=pad;
-  }
-
-  const valToY = v => (plotTop + plotH) - ((v-minV)/(maxV-minV))*(plotH);
-  const pxStep = plotW / (slice.length-1);
-
-  // draw axes
-  sctx.strokeStyle='rgba(200,200,255,0.4)'; sctx.lineWidth=1;
-  // Y axis
-  sctx.beginPath(); sctx.moveTo(plotLeft,plotTop); sctx.lineTo(plotLeft,plotTop+plotH); sctx.stroke();
-  // X axis
-  sctx.beginPath(); sctx.moveTo(plotLeft,plotTop+plotH); sctx.lineTo(plotLeft+plotW,plotTop+plotH); sctx.stroke();
-
-  // Y ticks + labels
-  sctx.fillStyle='rgba(200,200,255,0.8)'; sctx.font='11px system-ui';
-  sctx.textAlign='right';
-  for(let i=0;i<=5;i++){
-    const v=minV+(maxV-minV)*(i/5);
-    const y=valToY(v);
-    sctx.beginPath(); sctx.moveTo(plotLeft-5,y); sctx.lineTo(plotLeft,y); sctx.stroke();
-    sctx.fillText(v.toFixed(1), plotLeft-8, y+4);
-  }
-  sctx.textAlign='start';
-
-  // X ticks + labels
-  sctx.font='11px system-ui';
-  sctx.textAlign='center';
-  const xTicks=6;
-  for(let i=0;i<=xTicks;i++){
-    const idx=Math.floor(lo+(hi-lo)*(i/xTicks));
-    const x=plotLeft + (idx-lo)/(hi-lo)*plotW;
-    const f=(freqStart+idx*freqStep)/1e6;
-    sctx.beginPath(); sctx.moveTo(x,plotTop+plotH); sctx.lineTo(x,plotTop+plotH+5); sctx.stroke();
-    sctx.fillText(f.toFixed(1), x, plotTop+plotH+18);
-  }
-  sctx.textAlign='start';
-
-  // live trace
-  sctx.beginPath(); sctx.strokeStyle='rgba(140,200,255,0.95)'; sctx.lineWidth=1.4;
-  for(let i=0;i<slice.length;i++){ const x=plotLeft + i*pxStep,y=valToY(slice[i]); i? sctx.lineTo(x,y):sctx.moveTo(x,y); }
-  sctx.stroke();
-
-  // max hold
-  sctx.beginPath(); sctx.setLineDash([6,4]); sctx.strokeStyle='rgba(255,200,120,0.95)';
-  for(let i=0;i<sliceHold.length;i++){ const x=plotLeft + i*pxStep,y=valToY(sliceHold[i]); i? sctx.lineTo(x,y):sctx.moveTo(x,y); }
-  sctx.stroke(); sctx.setLineDash([]);
-
-  // freeze overlays
-  if(document.getElementById('showFreeze').checked){
-    if(freezeA){ sctx.beginPath(); sctx.strokeStyle='rgba(0,255,160,0.9)'; for(let i=lo;i<=hi;i++){ const x=plotLeft + (i-lo)*pxStep,y=valToY(freezeA[i]); i===lo? sctx.moveTo(x,y):sctx.lineTo(x,y);} sctx.stroke(); }
-    if(freezeB){ sctx.beginPath(); sctx.strokeStyle='rgba(255,100,180,0.9)'; for(let i=lo;i<=hi;i++){ const x=plotLeft + (i-lo)*pxStep,y=valToY(freezeB[i]); i===lo? sctx.moveTo(x,y):sctx.lineTo(x,y);} sctx.stroke(); }
-  }
-
-  // impulse detector
+  const lo = Math.max(0, viewStart);
+  const hi = Math.min(bins.length - 1, viewEnd ?? bins.length - 1);
+  const pointsFor = values => {
+    if(!Array.isArray(values)) return [];
+    const points=[];
+    for(let index=lo;index<=hi;index++){
+      const y=Number(values[index]);
+      if(Number.isFinite(y)) points.push({x:(freqStart+index*freqStep)/1e6,y});
+    }
+    return points;
+  };
+  const livePoints=pointsFor(bins);
+  const holdPoints=pointsFor(maxHold);
+  const showFreeze=document.getElementById('showFreeze').checked;
+  const freezeAPoints=showFreeze?pointsFor(freezeA):[];
+  const freezeBPoints=showFreeze?pointsFor(freezeB):[];
+  const impulsePoints=[];
   if(impulseOn){
-    for(let i=1;i<slice.length-1;i++){
-      const v=slice[i];
-      const avg=(slice[i-1]+slice[i+1])/2;
-      if(v-avg > 6){ // >6 dB spike
-        const x=plotLeft + i*pxStep, y=valToY(v);
-        sctx.fillStyle='red'; sctx.beginPath(); sctx.arc(x,y,3,0,Math.PI*2); sctx.fill();
-      }
+    for(let index=Math.max(1,lo);index<Math.min(hi,bins.length-1);index++){
+      const value=Number(bins[index]);
+      const neighborAverage=(Number(bins[index-1])+Number(bins[index+1]))/2;
+      if(value-neighborAverage>6) impulsePoints.push({x:(freqStart+index*freqStep)/1e6,y:value});
     }
   }
+
+  specChart.data.datasets[0].data=livePoints;
+  specChart.data.datasets[1].data=holdPoints;
+  specChart.data.datasets[2].data=freezeAPoints;
+  specChart.data.datasets[3].data=freezeBPoints;
+  specChart.data.datasets[4].data=impulsePoints;
+  const allValues=[...livePoints,...holdPoints,...freezeAPoints,...freezeBPoints].map(point=>point.y);
+  let minV=Math.min(...allValues);
+  let maxV=Math.max(...allValues);
+  if(scaleMode!=='auto'){
+    const preset=scaleMode.split(',').map(Number);
+    minV=preset[0];maxV=preset[1];
+  }else{
+    const pad=(maxV-minV)*0.08||1;
+    minV-=pad;maxV+=pad;
+  }
+  specChart.options.scales.x.min=(freqStart+lo*freqStep)/1e6;
+  specChart.options.scales.x.max=(freqStart+hi*freqStep)/1e6;
+  specChart.options.scales.y.min=minV;
+  specChart.options.scales.y.max=maxV;
+  specChart.update('none');
 }
 
 // ===== Waterfall =====
@@ -457,6 +441,8 @@ function drawWaterfall(){
   const w = wfCanvas.width / dpr;
   const h = wfCanvas.height / dpr;
   wctx.clearRect(0,0,w,h);
+  wctx.fillStyle='#071028';
+  wctx.fillRect(0,0,w,h);
   if(!wfBuffer.length) return;
 
   let minV=Infinity,maxV=-Infinity;
@@ -477,11 +463,23 @@ function drawWaterfall(){
 specCanvas.addEventListener('mousemove', e=>{
   if(!bins.length) return;
   const rect=specCanvas.getBoundingClientRect();
-  const x=(e.clientX-rect.left);
-  const idx=Math.round(viewStart + x/rect.width * (viewEnd-viewStart));
+  const area=specChart.chartArea;
+  const cssX=e.clientX-rect.left;
+  const ratio=Math.max(0,Math.min(1,(cssX-area.left)/Math.max(1,area.right-area.left)));
+  const idx=Math.max(viewStart,Math.min(viewEnd,Math.round(viewStart+ratio*(viewEnd-viewStart))));
   const f=(freqStart+idx*freqStep)/1e6;
-  const v=bins[idx];
+  const v=Number(bins[idx]);
   cursorEl.textContent=`${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV/MHz\nBin ${idx}`;
+});
+
+waterfallCanvas.addEventListener('mousemove', e=>{
+  if(!wfBuffer.length||!bins.length) return;
+  const rect=waterfallCanvas.getBoundingClientRect();
+  const idx=Math.max(0,Math.min(bins.length-1,Math.round((e.clientX-rect.left)/rect.width*(bins.length-1))));
+  const row=Math.max(0,Math.min(wfBuffer.length-1,Math.floor((e.clientY-rect.top)/rect.height*wfRows)));
+  const value=Number(wfBuffer[row]?.[idx]);
+  const frequency=(freqStart+idx*freqStep)/1e6;
+  cursorEl.textContent=`Waterfall ${frequency.toFixed(3)} MHz\n${Number.isFinite(value)?value.toFixed(2):'—'} dBmV/MHz\n${row===0?'latest':`${row} frames ago`}`;
 });
 
 // mouse wheel zoom
@@ -505,8 +503,11 @@ document.getElementById('pauseBtn').onclick =e=>{ paused=!paused; e.target.textC
 document.getElementById('scalePreset').onchange=e=>{ scaleMode=e.target.value; draw(); };
 document.getElementById('holdMode').onchange=e=>{ holdMode=e.target.value; };
 document.getElementById('impulse').onchange=e=>{ impulseOn=e.target.checked; draw(); };
-document.getElementById('freezeA').onclick=()=>{ freezeA=bins.slice(); };
-document.getElementById('freezeB').onclick=()=>{ freezeB=bins.slice(); };
+document.getElementById('showFreeze').onchange=()=>draw();
+document.getElementById('freezeA').onclick=()=>{ freezeA=bins.slice(); draw(); };
+document.getElementById('freezeB').onclick=()=>{ freezeB=bins.slice(); draw(); };
+document.getElementById('exportTrace').onclick=()=>window.PyPnmCharts?.downloadPng(specCanvas,'return-path-spectrum-trace');
+document.getElementById('exportWaterfall').onclick=()=>window.PyPnmCharts?.downloadPng(wfCanvas,'return-path-spectrum-waterfall');
 
 // ===== WebSocket =====
 let ws=null;

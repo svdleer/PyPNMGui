@@ -68,6 +68,50 @@ _ds_progress_store: dict = {}
 _ds_progress_lock = _threading.Lock()
 _scan_abort_store: dict = {}
 
+
+def _build_tap_profile_dto(preeq_full_data: dict) -> dict:
+    """Return display-only tap coordinates without mutating source/DSP data."""
+    series = []
+    for mac, modem in (preeq_full_data or {}).items():
+        for channel in modem.get("channels", []):
+            taps = channel.get("taps") or []
+            magnitudes = []
+            for tap in taps:
+                try:
+                    value = float(tap.get("magnitude"))
+                    magnitudes.append(value if math.isfinite(value) and value >= 0 else 0.0)
+                except (AttributeError, TypeError, ValueError):
+                    magnitudes.append(0.0)
+            if not magnitudes:
+                continue
+            main_index = channel.get("main_tap_location")
+            if not isinstance(main_index, int) or not 0 <= main_index < len(magnitudes):
+                main_index = max(range(len(magnitudes)), key=magnitudes.__getitem__)
+            main_magnitude = magnitudes[main_index]
+            points = []
+            for index, magnitude in enumerate(magnitudes):
+                relative_db = None
+                if magnitude > 0 and main_magnitude > 0:
+                    relative_db = round(20.0 * math.log10(magnitude / main_magnitude), 3)
+                points.append({
+                    "tap_offset": index - main_index,
+                    "magnitude": magnitude,
+                    "magnitude_db_relative": relative_db,
+                })
+            series.append({
+                "mac_address": str(modem.get("mac") or mac),
+                "us_ifindex": channel.get("us_ifindex"),
+                "main_tap_location": main_index,
+                "sample_period_us": (channel.get("group_delay") or {}).get("sample_period_us"),
+                "points": points,
+            })
+    return {
+        "x_axis": "tap_offset",
+        "y_axis": "magnitude_db_relative",
+        "series": series,
+    }
+
+
 def _set_ds_scan_progress(scan_id: str, **fields):
     """Write DS scan progress to Redis (if available) and in-memory dict."""
     if not scan_id:
@@ -2752,6 +2796,11 @@ def get_cmts_us_rxmer_fibernode_scan():
             # Include group delay data if collected
             if group_delay_data:
                 result["group_delay"] = list(group_delay_data.values())
+
+            # Chart-ready tap coordinates derived only from the already-collected
+            # pre-EQ response. The full source channels remain untouched.
+            if preeq_full_data:
+                result["tap_profile"] = _build_tap_profile_dto(preeq_full_data)
 
             # Plant vs in-home assessment — requires pre-eq taps + subcarrier MER stats
             if preeq_full_data and data_resp.status_code == 200:
