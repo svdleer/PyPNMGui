@@ -4862,6 +4862,26 @@ createApp({
             }
         },
 
+        impulseDirectionStatusLabel(status) {
+            return {
+                analyzed: 'Retrieved + analyzed',
+                captured_analyzed: 'Captured + analyzed',
+                missing: 'No current match',
+                retrieval_failed: 'Retrieval failed',
+                analysis_failed: 'Analysis failed',
+                agent_unavailable: 'Agent unavailable',
+                capture_failed: 'Capture failed',
+                unavailable: 'Unavailable',
+            }[status] || status || 'Unavailable';
+        },
+
+        impulseDirectionStatusClass(status) {
+            if (['analyzed', 'captured_analyzed'].includes(status)) return 'bg-success';
+            if (['retrieval_failed', 'analysis_failed', 'capture_failed'].includes(status)) return 'bg-danger';
+            if (status === 'agent_unavailable') return 'bg-warning text-dark';
+            return 'bg-secondary';
+        },
+
         async runFiberNodeImpulse() {
             const selected = new Set(
                 (this.fnScanSelectedModemMacs || []).map(mac => this.normalizeMacForMatch(mac)).filter(Boolean)
@@ -4873,7 +4893,11 @@ createApp({
             rows = rows.slice(0, Math.max(1, parseInt(this.fnScanMaxModems) || 20));
             const targets = rows
                 .filter(modem => modem.mac_address)
-                .map(modem => ({ mac_address: modem.mac_address, ip_address: modem.ip_address || '' }));
+                .map(modem => {
+                    const target = { mac_address: modem.mac_address };
+                    if (this.fnImpulseSource === 'fresh') target.ip_address = modem.ip_address || '';
+                    return target;
+                });
             if (!targets.length) {
                 this.$toast?.warning('No modems are available in the current fiber-node scope');
                 return;
@@ -4895,20 +4919,21 @@ createApp({
             this.fnImpulseProgress = { total: targets.length, completed: 0, success_count: 0, pct: 0, action: 'Starting' };
 
             try {
+                const jobPayload = {
+                    job_id: jobId,
+                    targets,
+                    source: this.fnImpulseSource,
+                    direction: this.fnImpulseDirection,
+                    topology_date: this.fnScanModemLoadedAt || null,
+                    fiber_node: this.fnScanFiberNode || null,
+                    concurrency: 3,
+                    confirm_fresh_capture: fresh,
+                };
+                if (fresh) jobPayload.community = this.fnScanWriteCommunity || this.snmpCommunityModem;
                 const startResponse = await fetch(`${API_BASE}/pypnm/impulse-response/fibernode/jobs`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        job_id: jobId,
-                        targets,
-                        source: this.fnImpulseSource,
-                        direction: this.fnImpulseDirection,
-                        topology_date: this.fnScanModemLoadedAt || null,
-                        fiber_node: this.fnScanFiberNode || null,
-                        concurrency: 3,
-                        community: this.fnScanWriteCommunity || this.snmpCommunityModem,
-                        confirm_fresh_capture: fresh,
-                    }),
+                    body: JSON.stringify(jobPayload),
                     signal,
                 });
                 const started = await startResponse.json();
@@ -4939,8 +4964,11 @@ createApp({
                 if (!resultResponse.ok || !result.found) throw new Error(result.error || 'Bulk result was not found');
                 this.fnImpulseResult = result;
                 const summary = `${result.success_count || 0}/${result.completed || result.total || 0} modems analyzed`;
-                if (result.success) this.$toast?.success(`Fiber-node impulse response: ${summary}`);
-                else this.$toast?.warning(`Fiber-node impulse response completed with no usable data: ${summary}`);
+                const mode = result.retrieval_mode === 'fresh_agent_catalog'
+                    ? 'fresh agent catalog/retrieval'
+                    : 'confirmed fresh capture';
+                if (result.success) this.$toast?.success(`Fiber-node impulse response (${mode}): ${summary}`);
+                else this.$toast?.warning(`Fiber-node impulse response (${mode}) completed with no usable data: ${summary}`);
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 this.fnImpulseResult = { success: false, error: error.message, modems: [] };

@@ -4516,6 +4516,46 @@ def _compact_bulk_impulse_result(item: dict) -> dict:
     }
 
 
+def _bulk_impulse_direction_statuses(response: dict, requested_direction: str, source: str) -> list[dict]:
+    """Summarize each requested direction without exposing paths or agent details."""
+    directions = [requested_direction] if requested_direction != 'both' else ['downstream', 'upstream']
+    results = response.get('results') or []
+    warnings = [str(item) for item in (response.get('warnings') or [])]
+    warning_text = ' '.join(warnings).lower()
+    error = str(response.get('error') or response.get('message') or '')
+    error_text = error.lower()
+    statuses: list[dict] = []
+
+    for item_direction in directions:
+        if any(item.get('direction') == item_direction for item in results):
+            status = 'analyzed' if source == 'existing' else 'captured_analyzed'
+            message = (
+                'Fresh agent catalog entry retrieved and analyzed'
+                if source == 'existing'
+                else 'Fresh capture analyzed'
+            )
+        elif source == 'fresh':
+            status = 'capture_failed'
+            message = 'Fresh capture did not produce analyzable data'
+        elif 'no connected file agent' in error_text or 'agent manager unavailable' in error_text:
+            status = 'agent_unavailable'
+            message = 'No connected file agent supports PNM retrieval'
+        elif f'no existing {item_direction}' in warning_text:
+            status = 'missing'
+            message = 'No matching file in the fresh agent catalog'
+        elif f'fresh retrieval of {item_direction}' in warning_text or f'{item_direction} file unavailable' in warning_text:
+            status = 'retrieval_failed'
+            message = 'Catalog match existed but current file retrieval failed'
+        elif 'analysis failed for' in warning_text or 'no matching existing pnm file could be analyzed' in error_text:
+            status = 'analysis_failed'
+            message = 'Retrieved data could not be parsed or analyzed'
+        else:
+            status = 'unavailable'
+            message = error or 'No current file could be analyzed'
+        statuses.append({'direction': item_direction, 'status': status, 'message': message})
+    return statuses
+
+
 def _run_fresh_impulse_capture(
     client,
     mac_address: str,
@@ -4650,8 +4690,9 @@ def start_fibernode_impulse_job():
         if existing_job and str(existing_job.get('done', False)).lower() != 'true':
             return jsonify({'success': False, 'error': 'A job with this ID is already running'}), 409
     concurrency = max(1, min(int(data.get('concurrency') or 3), 5))
-    community = data.get('community') or get_default_write_community()
-    tftp_ip = data.get('tftp_ip') or get_tftp_for_cm()
+    # Existing-file mode never needs capture credentials or a TFTP destination.
+    community = (data.get('community') or get_default_write_community()) if source == 'fresh' else ''
+    tftp_ip = (data.get('tftp_ip') or get_tftp_for_cm()) if source == 'fresh' else ''
     topology_date = data.get('topology_date')
     fiber_node = data.get('fiber_node')
     target_snapshot = [dict(target) for target in targets]
@@ -4681,8 +4722,10 @@ def start_fibernode_impulse_job():
             )
         return {
             'mac_address': target['mac_address'],
-            'ip_address': target['ip_address'],
+            'ip_address': target['ip_address'] if source == 'fresh' else '',
             'success': bool(response.get('success')),
+            'retrieval_mode': 'fresh_agent_catalog' if source == 'existing' else 'fresh_capture',
+            'direction_statuses': _bulk_impulse_direction_statuses(response, direction, source),
             'results': [_compact_bulk_impulse_result(item) for item in (response.get('results') or [])],
             'warnings': response.get('warnings') or [],
             'error': response.get('error') or response.get('message'),
@@ -4717,7 +4760,13 @@ def start_fibernode_impulse_job():
                         total=len(target_snapshot), completed=completed,
                         success_count=success_count,
                         modem=target['mac_address'],
-                        action='Analyzed' if modem_result.get('success') else 'No data',
+                        action=(
+                            'Fresh file retrieved and analyzed'
+                            if modem_result.get('success') and source == 'existing'
+                            else 'Analyzed' if modem_result.get('success')
+                            else 'No current file' if source == 'existing'
+                            else 'No data'
+                        ),
                         pct=round(completed * 100 / len(target_snapshot), 1),
                         done=False,
                     )
@@ -4733,6 +4782,7 @@ def start_fibernode_impulse_job():
                 'job_id': job_id,
                 'source': source,
                 'direction': direction,
+                'retrieval_mode': 'fresh_agent_catalog' if source == 'existing' else 'fresh_capture',
                 'topology_date': topology_date,
                 'fiber_node': fiber_node,
                 'aborted': aborted,

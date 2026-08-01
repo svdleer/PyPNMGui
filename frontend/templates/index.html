@@ -2984,13 +2984,23 @@
                             <span class="badge bg-success">{{ fnImpulseResult.success_count || 0 }}/{{ fnImpulseResult.completed || fnImpulseResult.total || 0 }} modems</span>
                         </div>
                         <div v-if="fnImpulseResult.error" class="card-body text-danger">{{ fnImpulseResult.error }}</div>
-                        <div v-else class="table-responsive">
+                        <div v-if="!fnImpulseResult.error && fnImpulseResult.retrieval_mode === 'fresh_agent_catalog'" class="card-body py-2 border-bottom small text-muted">
+                            <i class="bi bi-cloud-download me-1"></i>
+                            A new agent catalog was requested for this job and each selected PNN file was retrieved immediately before analysis. No cached file ID, fresh capture, or SNMP SET was used.
+                        </div>
+                        <div v-if="!fnImpulseResult.error" class="table-responsive">
                             <table class="table table-sm table-bordered align-middle mb-0">
-                                <thead><tr><th>Modem</th><th>Status</th><th>Channel responses / echoes</th><th>Warnings</th></tr></thead>
+                                <thead><tr><th>Modem</th><th>Per-direction retrieval</th><th>Channel responses / echoes</th><th>Warnings</th></tr></thead>
                                 <tbody>
                                     <tr v-for="modem in (fnImpulseResult.modems || [])" :key="modem.mac_address">
                                         <td class="font-monospace small">{{ modem.mac_address }}</td>
-                                        <td><span class="badge" :class="modem.success ? 'bg-success' : 'bg-secondary'">{{ modem.success ? 'Analyzed' : 'No data' }}</span></td>
+                                        <td>
+                                            <div v-for="state in (modem.direction_statuses || [])" :key="state.direction" class="mb-1" :title="state.message">
+                                                <span class="badge me-1" :class="impulseDirectionStatusClass(state.status)">{{ state.direction === 'downstream' ? 'DS' : 'US' }}</span>
+                                                <span class="small">{{ impulseDirectionStatusLabel(state.status) }}</span>
+                                            </div>
+                                            <span v-if="!(modem.direction_statuses || []).length" class="badge" :class="modem.success ? 'bg-success' : 'bg-secondary'">{{ modem.success ? 'Analyzed' : 'No current data' }}</span>
+                                        </td>
                                         <td>
                                             <div v-for="result in (modem.results || [])" :key="result.file_id || result.direction + '-' + result.analysis?.channel_id" class="mb-1">
                                                 <strong>{{ result.direction === 'downstream' ? 'DS' : 'US' }} ch {{ result.analysis?.channel_id }}</strong>
