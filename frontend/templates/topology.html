@@ -212,7 +212,7 @@
                 <div class="card-body p-0">
                     <div class="table-responsive" style="max-height: 460px; overflow:auto;">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>MAC</th><th>FiberNode</th><th>TopologyLinkID</th><th>Address</th><th>HouseNr</th><th>Ext</th><th>PostalCode</th><th>LinkedNode</th><th>Match</th></tr></thead>
+                            <thead><tr><th>MAC</th><th>FiberNode</th><th>TopologyLinkID</th><th>Address</th><th>HouseNr</th><th>Ext</th><th>PostalCode</th><th>LinkedNode</th><th>Map</th><th>Match</th></tr></thead>
                             <tbody>
                             {% if joined_modems and joined_modems|length > 0 %}
                             {% for m in joined_modems[:100] %}
@@ -225,12 +225,21 @@
                                     <td>[[ m.house_number_extension or '—' ]]</td>
                                     <td>[[ m.postalcode or '—' ]]</td>
                                     <td>[[ m.linked_node_id or '—' ]]</td>
+                                    <td>
+                                        {% if m.lat is not none and m.lon is not none %}
+                                        <a class="btn btn-sm btn-outline-primary py-0 px-2"
+                                           href="https://www.openstreetmap.org/?mlat=[[ m.lat ]]&amp;mlon=[[ m.lon ]]#map=18/[[ m.lat ]]/[[ m.lon ]]"
+                                           target="_blank" rel="noopener noreferrer">
+                                            <i class="bi bi-geo-alt me-1"></i>Show map
+                                        </a>
+                                        {% else %}—{% endif %}
+                                    </td>
                                     <td>yes</td>
                                 </tr>
                             {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="9" class="text-center text-muted py-4">
+                                    <td colspan="10" class="text-center text-muted py-4">
                                         No joined modem rows found for selected date.
                                     </td>
                                 </tr>

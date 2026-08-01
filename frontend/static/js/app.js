@@ -1820,6 +1820,34 @@ createApp({
             return '';
         },
 
+        modemCoordinates(modem) {
+            const rawLat = modem?.lat;
+            const rawLon = modem?.lon;
+            if (rawLat === null || rawLat === undefined || rawLat === '' ||
+                rawLon === null || rawLon === undefined || rawLon === '') return null;
+            const lat = Number(rawLat);
+            const lon = Number(rawLon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+            return { lat, lon };
+        },
+
+        hasModemCoordinates(modem) {
+            return this.modemCoordinates(modem) !== null;
+        },
+
+        openModemMap(modem) {
+            const coordinates = this.modemCoordinates(modem);
+            if (!coordinates) {
+                this.$toast?.warning('No valid latitude/longitude is available for this modem');
+                return;
+            }
+            const { lat, lon } = coordinates;
+            const url = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`;
+            const mapWindow = window.open(url, '_blank', 'noopener,noreferrer');
+            if (mapWindow) mapWindow.opener = null;
+        },
+
         hasActiveUiTask() {
             return !!(
                 this.runningTest ||
@@ -1827,6 +1855,7 @@ createApp({
                 this.runningUsRxmer ||
                 this.runningFiberNode ||
                 this.fnScanRunning ||
+                this.fnImpulseRunning ||
                 this.dsScanRunning ||
                 this.fbScanRunning ||
                 this.liveSpectrumEnabled
@@ -1876,6 +1905,7 @@ createApp({
         },
 
         async cancelActiveUiTasks({ silent = false, stopBackend = true } = {}) {
+            const impulseJobIdToCancel = stopBackend && this.fnImpulseRunning ? this.fnImpulseJobId : null;
             this._taskGeneration += 1;
             if (this._currentFetchController) {
                 try { this._currentFetchController.abort(); } catch (_) {}
@@ -1892,10 +1922,31 @@ createApp({
             this.runningUsRxmer = false;
             this.runningFiberNode = false;
             this.fnScanRunning = false;
+            this.fnImpulseRunning = false;
+            this.fnImpulseJobId = null;
+            if (this.fnImpulseProgress && !this.fnImpulseProgress.done) {
+                this.fnImpulseProgress = {
+                    ...this.fnImpulseProgress,
+                    state: 'aborted',
+                    action: 'Cancelled',
+                    running_count: 0,
+                    queued_count: 0,
+                    done: true,
+                };
+            }
             this.dsScanRunning = false;
             this.fbScanRunning = false;
             this.liveSpectrumEnabled = false;
             this.liveSpectrumPolling = false;
+
+            if (impulseJobIdToCancel) {
+                try {
+                    await fetch(
+                        `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(impulseJobIdToCancel)}`,
+                        { method: 'DELETE' }
+                    );
+                } catch (_) {}
+            }
 
             if (shouldStopUtsc) {
                 try { await this.stopUtsc(); } catch (_) {}
@@ -2234,6 +2285,8 @@ createApp({
                             postalcode: m.postalcode || '',
                             house_number: m.house_number || '',
                             house_number_extension: m.house_number_extension || '',
+                            lat: m.lat ?? null,
+                            lon: m.lon ?? null,
                             topology_path: m.hierarchy_path || '',
                             topology_link_id: m.topology_link_id || '',
                             linked_node_id: m.linked_node_id || '',
@@ -5423,6 +5476,7 @@ createApp({
             } finally {
                 if (this._isTaskActive(token)) {
                     this.fnImpulseRunning = false;
+                    this.fnImpulseJobId = null;
                     this._activeTaskLabel = null;
                 }
             }
@@ -5495,6 +5549,7 @@ createApp({
             } finally {
                 if (this._isTaskActive(token)) {
                     this.fnImpulseRunning = false;
+                    this.fnImpulseJobId = null;
                     this._activeTaskLabel = null;
                 }
             }
@@ -5502,12 +5557,31 @@ createApp({
 
         async abortFiberNodeImpulse() {
             if (!this.fnImpulseJobId || !this.fnImpulseRunning) return;
+            const jobId = this.fnImpulseJobId;
             try {
-                await fetch(
-                    `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(this.fnImpulseJobId)}`,
+                const response = await fetch(
+                    `${API_BASE}/pypnm/impulse-response/fibernode/jobs/${encodeURIComponent(jobId)}`,
                     { method: 'DELETE' }
                 );
-                if (this.fnImpulseProgress) this.fnImpulseProgress.action = 'Cancellation requested';
+                if (!response.ok) throw new Error('Cancellation request failed');
+                this._taskGeneration += 1;
+                if (this._currentFetchController) {
+                    try { this._currentFetchController.abort(); } catch (_) {}
+                    this._currentFetchController = null;
+                }
+                this.fnImpulseRunning = false;
+                this.fnImpulseJobId = null;
+                this._activeTaskLabel = null;
+                if (this.fnImpulseProgress) {
+                    this.fnImpulseProgress = {
+                        ...this.fnImpulseProgress,
+                        state: 'aborted',
+                        action: 'Cancellation requested',
+                        running_count: 0,
+                        queued_count: 0,
+                        done: true,
+                    };
+                }
             } catch (_) {
                 this.$toast?.error('Could not request bulk impulse cancellation');
             }

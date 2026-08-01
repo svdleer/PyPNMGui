@@ -2811,28 +2811,109 @@
                                 <i class="bi bi-exclamation-triangle me-1"></i>
                                 Selected channel has <strong>0 modems</strong>. Try a different channel or fiber node.
                             </div>
-                            <div class="d-flex gap-2 mt-2">
-                                <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || fnImpulseRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
-                                        class="btn btn-primary flex-fill">
-                                    <span v-if="fnScanRunning" class="spinner-border spinner-border-sm me-1"></span>
-                                    <i v-else class="bi bi-play-fill me-1"></i>
-                                    {{ fnScanRunning ? 'Scanning…' : (fnScanFN2Name ? 'US RxMER (FN1 vs FN2)' : fnScanExtraIfindices.length ? 'US RxMER (' + (fnScanExtraIfindices.length + 1) + ' ch)' : 'US RxMER Scan') }}
-                                </button>
-                                <button type="button" @click="runDsSuckoutScan" :disabled="dsScanRunning || fnScanRunning || fnImpulseRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
-                                        class="btn btn-danger flex-fill">
-                                    <span v-if="dsScanRunning" class="spinner-border spinner-border-sm me-1"></span>
-                                    <i v-else class="bi bi-reception-4 me-1"></i>
-                                    {{ dsScanRunning ? 'DS Scanning…' : 'DS Suckout Scan' }}
-                                </button>
-                                <button type="button" @click="runFullbandScan" :disabled="fbScanRunning || fnScanRunning || fnImpulseRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
-                                        class="btn btn-warning flex-fill">
-                                    <span v-if="fbScanRunning" class="spinner-border spinner-border-sm me-1"></span>
-                                    <i v-else class="bi bi-broadcast me-1"></i>
-                                    {{ fbScanRunning ? 'Fullband…' : 'Fullband Scan' }}
-                                </button>
-                            </div>
-                            <div v-if="fnScanPreEtaText" class="small text-muted mt-2">
-                                <i class="bi bi-hourglass-split me-1"></i>{{ fnScanPreEtaText }}
+                            <div class="row g-2 mt-2 align-items-start">
+                                <div class="col-12">
+                                    <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || fnImpulseRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                            class="btn btn-primary w-100">
+                                        <span v-if="fnScanRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-play-fill me-1"></i>
+                                        {{ fnScanRunning ? 'Scanning…' : (fnScanFN2Name ? 'US RxMER (FN1 vs FN2)' : fnScanExtraIfindices.length ? 'US RxMER (' + (fnScanExtraIfindices.length + 1) + ' ch)' : 'US RxMER Scan') }}
+                                    </button>
+                                    <div v-if="fnScanPreEtaText" class="small text-muted mt-2">
+                                        <i class="bi bi-hourglass-split me-1"></i>{{ fnScanPreEtaText }}
+                                    </div>
+                                    <div v-if="fnScanRunning" class="card border-primary mt-2">
+                                        <div class="card-body py-2 px-3">
+                                            <div class="d-flex align-items-center gap-2 mb-2">
+                                                <div class="spinner-border spinner-border-sm text-primary" style="width: 1rem; height: 1rem;"></div>
+                                                <strong class="text-truncate">US RxMER Fiber Node Scan</strong>
+                                                <span v-if="fnScanProgress?.modem_total" class="text-muted small ms-auto text-nowrap">
+                                                    {{ fnScanProgress.modem_idx }}/{{ fnScanProgress.modem_total }}
+                                                </span>
+                                                <button type="button" class="btn btn-sm btn-outline-danger ms-2 py-0 px-2"
+                                                        style="font-size: 0.78rem;" :disabled="fnScanAbortRequested" @click="abortFnScan">
+                                                    <i class="bi bi-stop-circle me-1"></i>{{ fnScanAbortRequested ? 'Aborting…' : 'Abort' }}
+                                                </button>
+                                            </div>
+                                            <div class="progress mb-2" style="height: 14px;">
+                                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                                     role="progressbar" :style="{ width: (fnScanProgress?.pct || 0) + '%' }"
+                                                     :aria-valuenow="fnScanProgress?.pct || 0" aria-valuemin="0" aria-valuemax="100">
+                                                    {{ (fnScanProgress?.pct || 0).toFixed(0) }}%
+                                                </div>
+                                            </div>
+                                            <div v-if="fnScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
+                                                <span v-if="fnScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fnScanProgress.modem }}</span>
+                                                <span v-if="fnScanProgress.channel"><i class="bi bi-arrow-up-circle me-1"></i>ch {{ fnScanProgress.channel }}</span>
+                                                <span v-if="fnScanProgress.action"><i class="bi bi-activity me-1"></i>{{ fnScanProgress.action }}</span>
+                                                <span v-if="fnScanProgress.total"><i class="bi bi-check2-all me-1"></i>{{ fnScanProgress.step }}/{{ fnScanProgress.total }}</span>
+                                                <span v-if="fnScanEtaText"><i class="bi bi-hourglass-split me-1"></i>{{ fnScanEtaText }}</span>
+                                            </div>
+                                            <div v-else class="small text-muted">Starting scan, please wait…</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <button type="button" @click="runDsSuckoutScan" :disabled="dsScanRunning || fnScanRunning || fnImpulseRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
+                                            class="btn btn-danger w-100">
+                                        <span v-if="dsScanRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-reception-4 me-1"></i>
+                                        {{ dsScanRunning ? 'DS Scanning…' : 'DS Suckout Scan' }}
+                                    </button>
+                                    <div v-if="dsScanRunning" class="card border-danger mt-2">
+                                        <div class="card-body py-2 px-3">
+                                            <div class="d-flex align-items-center gap-2 mb-2">
+                                                <div class="spinner-border spinner-border-sm text-danger" style="width: 1rem; height: 1rem;"></div>
+                                                <strong class="text-truncate">DS Suckout Scan</strong>
+                                                <span v-if="dsScanProgress?.total" class="text-muted small ms-auto text-nowrap">
+                                                    <span v-if="dsScanProgress.completed < dsScanProgress.total">{{ dsScanProgress.completed || 0 }}/{{ dsScanProgress.total }}</span>
+                                                    <span v-else>{{ dsScanProgress.total }}/{{ dsScanProgress.total }} done</span>
+                                                </span>
+                                            </div>
+                                            <div class="progress mb-2" style="height: 14px;">
+                                                <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
+                                                     role="progressbar" :style="{ width: (dsScanProgress?.pct || 0) + '%' }"
+                                                     :aria-valuenow="dsScanProgress?.pct || 0" aria-valuemin="0" aria-valuemax="100">
+                                                    {{ (dsScanProgress?.pct || 0).toFixed(0) }}%
+                                                </div>
+                                            </div>
+                                            <div v-if="dsScanProgress?.modem" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
+                                                <span><i class="bi bi-router me-1"></i>{{ dsScanProgress.modem }}</span>
+                                                <span v-if="dsScanProgress?.action">· {{ dsScanProgress.action }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <button type="button" @click="runFullbandScan" :disabled="fbScanRunning || fnScanRunning || fnImpulseRunning || dsScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp"
+                                            class="btn btn-warning w-100">
+                                        <span v-if="fbScanRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-broadcast me-1"></i>
+                                        {{ fbScanRunning ? 'Fullband…' : 'Fullband Scan' }}
+                                    </button>
+                                    <div v-if="fbScanRunning" class="card border-warning mt-2">
+                                        <div class="card-body py-2 px-3">
+                                            <div class="d-flex align-items-center gap-2 mb-2">
+                                                <div class="spinner-border spinner-border-sm text-warning" style="width: 1rem; height: 1rem;"></div>
+                                                <strong class="text-truncate">DS Fullband Spectrum Scan</strong>
+                                                <span v-if="fbScanProgress" class="text-muted small ms-auto text-nowrap">
+                                                    {{ fbScanProgress.completed || 0 }}/{{ fbScanProgress.total || '?' }}
+                                                </span>
+                                            </div>
+                                            <div class="progress mb-2" style="height: 14px;">
+                                                <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
+                                                     role="progressbar" :style="{ width: (fbScanProgress?.pct || 0) + '%' }"
+                                                     :aria-valuenow="fbScanProgress?.pct || 0" aria-valuemin="0" aria-valuemax="100">
+                                                    {{ (fbScanProgress?.pct || 0).toFixed(0) }}%
+                                                </div>
+                                            </div>
+                                            <div v-if="fbScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
+                                                <span v-if="fbScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fbScanProgress.modem }}</span>
+                                                <span v-if="fbScanProgress.action">· {{ fbScanProgress.action }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2915,6 +2996,7 @@
                                         <th>Status</th>
                                         <th>MAC Address</th>
                                         <th>IP Address</th>
+                                        <th class="text-center">Map</th>
                                         <th>Vendor</th>
                                         <th>DOCSIS</th>
                                         <th class="text-center">CableMac</th>
@@ -2940,6 +3022,15 @@
                                         <td><span class="badge bg-success">{{ m.status }}</span></td>
                                         <td><code class="small">{{ m.mac_address }}</code></td>
                                         <td class="small">{{ m.ip_address }}</td>
+                                        <td class="text-center" @click.stop>
+                                            <button v-if="hasModemCoordinates(m)" type="button"
+                                                    class="btn btn-outline-primary btn-sm py-0 px-2"
+                                                    title="Open this modem location in OpenStreetMap"
+                                                    @click="openModemMap(m)">
+                                                <i class="bi bi-geo-alt me-1"></i>Show map
+                                            </button>
+                                            <span v-else class="text-muted">—</span>
+                                        </td>
                                         <td class="small">{{ m.vendor || '—' }}</td>
                                         <td class="fn-docsis-cell">
                                             <span class="badge fn-docsis-slot" :class="{
@@ -2973,7 +3064,7 @@
                                         <td class="small text-muted">{{ (m.upstream_interface || '').replace(/^cable-upstream\s*/i,'') || '—' }}</td>
                                     </tr>
                                     <tr v-if="!fnScanCandidateModems.length">
-                                        <td colspan="12" class="text-muted text-center py-4">
+                                        <td colspan="13" class="text-muted text-center py-4">
                                             <i class="bi bi-info-circle me-1"></i>No eligible modems for current filters.
                                             <button type="button" class="btn btn-outline-primary btn-sm ms-3"
                                                     :disabled="fnScanSelectorRefreshInFlight"
@@ -3302,77 +3393,7 @@
 
         </div>
 
-        <!-- US RxMER Fiber Node Scan progress — fixed overlay at top of viewport -->
-        <div v-if="fnScanRunning" class="position-fixed start-50 translate-middle-x shadow-lg"
-             style="top: 12px; z-index: 1080; width: 520px; max-width: 92vw;">
-            <div class="card border-primary">
-                <div class="card-body py-2 px-3">
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="spinner-border spinner-border-sm text-primary" style="width: 1rem; height: 1rem;"></div>
-                        <strong class="text-truncate">US RxMER Fiber Node Scan</strong>
-                        <span v-if="fnScanProgress?.modem_total" class="text-muted small ms-auto text-nowrap">
-                            {{ fnScanProgress.modem_idx }}/{{ fnScanProgress.modem_total }}
-                        </span>
-                        <button type="button"
-                                class="btn btn-sm btn-outline-danger ms-2 py-0 px-2"
-                                style="font-size: 0.78rem;"
-                                :disabled="fnScanAbortRequested"
-                                @click="abortFnScan">
-                            <i class="bi bi-stop-circle me-1"></i>{{ fnScanAbortRequested ? 'Aborting…' : 'Abort' }}
-                        </button>
-                    </div>
-                    <div class="progress mb-2" style="height: 14px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated"
-                             role="progressbar"
-                             :style="{ width: (fnScanProgress?.pct || 0) + '%' }"
-                             :aria-valuenow="fnScanProgress?.pct || 0"
-                             aria-valuemin="0" aria-valuemax="100">
-                            {{ (fnScanProgress?.pct || 0).toFixed(0) }}%
-                        </div>
-                    </div>
-                    <div v-if="fnScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
-                        <span v-if="fnScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fnScanProgress.modem }}</span>
-                        <span v-if="fnScanProgress.channel"><i class="bi bi-arrow-up-circle me-1"></i>ch {{ fnScanProgress.channel }}</span>
-                        <span v-if="fnScanProgress.action"><i class="bi bi-activity me-1"></i>{{ fnScanProgress.action }}</span>
-                        <span v-if="fnScanProgress.total"><i class="bi bi-check2-all me-1"></i>{{ fnScanProgress.step }}/{{ fnScanProgress.total }}</span>
-                        <span v-if="fnScanEtaText"><i class="bi bi-hourglass-split me-1"></i>{{ fnScanEtaText }}</span>
-                    </div>
-                    <div v-else style="font-size: 0.78rem; color: #6c757d;">Starting scan, please wait…</div>
-                </div>
-            </div>
-        </div>
 
-        <!-- DS Suckout Scan — fixed overlay progress at top of viewport -->
-        <div v-if="dsScanRunning" class="position-fixed start-50 translate-middle-x shadow-lg"
-             style="top: 12px; z-index: 1080; width: 520px; max-width: 92vw;">
-            <div class="card border-danger">
-                <div class="card-body py-2 px-3">
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="spinner-border spinner-border-sm text-danger" style="width: 1rem; height: 1rem;"></div>
-                        <strong class="text-truncate">DS Suckout Scan</strong>
-                        <span v-if="dsScanProgress?.total" class="text-muted small ms-auto text-nowrap">
-                            <span v-if="dsScanProgress.completed < dsScanProgress.total">
-                                {{ dsScanProgress.completed || 0 }}/{{ dsScanProgress.total }}
-                            </span>
-                            <span v-else>{{ dsScanProgress.total }}/{{ dsScanProgress.total }} done</span>
-                        </span>
-                    </div>
-                    <div class="progress mb-2" style="height: 14px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
-                             role="progressbar"
-                             :style="{ width: (dsScanProgress?.pct || 0) + '%' }"
-                             :aria-valuenow="dsScanProgress?.pct || 0"
-                             aria-valuemin="0" aria-valuemax="100">
-                            {{ (dsScanProgress?.pct || 0).toFixed(0) }}%
-                        </div>
-                    </div>
-                    <div v-if="dsScanProgress?.modem" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
-                        <span><i class="bi bi-router me-1"></i>{{ dsScanProgress.modem }}</span>
-                        <span v-if="dsScanProgress?.action">· {{ dsScanProgress.action }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <!-- DS OFDM Suckout Scan Results -->
         <div v-if="dsScanResult" class="row mt-3">
@@ -3506,34 +3527,6 @@
             </div>
         </div>
 
-        <!-- DS Fullband Scan — fixed overlay progress at top of viewport -->
-        <div v-if="fbScanRunning" class="position-fixed start-50 translate-middle-x shadow-lg"
-             style="top: 12px; z-index: 1080; width: 520px; max-width: 92vw;">
-            <div class="card border-warning">
-                <div class="card-body py-2 px-3">
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="spinner-border spinner-border-sm text-warning" style="width: 1rem; height: 1rem;"></div>
-                        <strong class="text-truncate">DS Fullband Spectrum Scan</strong>
-                        <span v-if="fbScanProgress" class="text-muted small ms-auto text-nowrap">
-                            {{ fbScanProgress.completed || 0 }}/{{ fbScanProgress.total || '?' }}
-                        </span>
-                    </div>
-                    <div class="progress mb-2" style="height: 14px;">
-                        <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
-                             role="progressbar"
-                             :style="{ width: (fbScanProgress?.pct || 0) + '%' }"
-                             :aria-valuenow="fbScanProgress?.pct || 0"
-                             aria-valuemin="0" aria-valuemax="100">
-                            {{ (fbScanProgress?.pct || 0).toFixed(0) }}%
-                        </div>
-                    </div>
-                    <div v-if="fbScanProgress" class="d-flex flex-wrap gap-2" style="font-size: 0.78rem; color: #6c757d;">
-                        <span v-if="fbScanProgress.modem"><i class="bi bi-router me-1"></i>{{ fbScanProgress.modem }}</span>
-                        <span v-if="fbScanProgress.action">· {{ fbScanProgress.action }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <!-- DS Fullband Spectrum Scan Results -->
         <div v-if="fbScanResult" class="mt-3">
