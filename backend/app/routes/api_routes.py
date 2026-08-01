@@ -357,9 +357,10 @@ def _modems_are_enriched(modems: list[dict]) -> bool:
 def _modem_missing_enrichment(modem: dict) -> bool:
     vendor = str(modem.get('vendor') or '').strip().lower()
     fw = str(modem.get('software_version') or modem.get('firmware') or '').strip().lower()
+    cable_mac = str(modem.get('cable_mac') or '').strip()
     vendor_missing = vendor in ('', 'unknown', 'n/a')
     fw_missing = fw in ('', 'unknown', 'n/a')
-    return vendor_missing or fw_missing
+    return vendor_missing or fw_missing or not cable_mac
 
 
 def _docsis_version_rank(value) -> int:
@@ -997,6 +998,7 @@ def get_modem(mac_address):
                             if (not modem.get('vendor') or not modem.get('model')
                                     or not modem.get('software_version')
                                     or not modem.get('fiber_node')
+                                    or not modem.get('cable_mac')
                                     or modem.get('ofdm_enabled') is None
                                     or modem.get('ofdma_enabled') is None
                                     or _docsis_version_rank(modem.get('docsis_version')) < 31):

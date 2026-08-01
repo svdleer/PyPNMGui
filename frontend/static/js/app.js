@@ -1373,6 +1373,11 @@ createApp({
             return vendorMissing || firmwareMissing;
         },
 
+        _isMissingSelectedMetadata(modem) {
+            const cableMacMissing = !String(modem?.cable_mac || '').trim();
+            return this._isMissingVendorFirmware(modem) || cableMacMissing;
+        },
+
         _shouldRefreshCacheForMetadata(modems) {
             const rows = Array.isArray(modems) ? modems : [];
             if (rows.length < 30) return { refresh: false, ratio: 0 };
@@ -1408,7 +1413,7 @@ createApp({
 
             let added = 0;
             for (const modem of (Array.isArray(rows) ? rows : [])) {
-                if (added >= maxBatch || !this._isMissingVendorFirmware(modem)) continue;
+                if (added >= maxBatch || !this._isMissingSelectedMetadata(modem)) continue;
                 const rawMac = modem?.mac_address || modem?.cm_mac_address || modem?.mac || '';
                 const normalizedMac = this.normalizeMacForMatch(rawMac);
                 if (!normalizedMac || this._targetedEnrichmentKnown.has(normalizedMac)) continue;
@@ -1455,7 +1460,7 @@ createApp({
                     const target = this._targetedEnrichmentQueue.shift();
                     this.targetedEnrichmentProgress = {
                         ...this.targetedEnrichmentProgress,
-                        action: `Reading vendor and firmware for ${target.mac}…`,
+                        action: `Reading modem metadata for ${target.mac}…`,
                     };
                     const outcome = await this._refreshTargetedModemIdentity(target);
                     this.targetedEnrichmentProgress = {
@@ -1472,7 +1477,7 @@ createApp({
             const issues = Number(this.targetedEnrichmentProgress.failed || 0) + Number(this.targetedEnrichmentProgress.unresolved || 0);
             this.targetedEnrichmentProgress = {
                 ...this.targetedEnrichmentProgress,
-                action: issues ? `Completed with ${issues} unresolved modem(s)` : 'Vendor and firmware enrichment complete',
+                action: issues ? `Completed with ${issues} unresolved modem(s)` : 'Selected modem enrichment complete',
                 status: issues ? 'warning' : 'completed',
             };
             this._targetedEnrichmentKnown?.clear();
@@ -1526,7 +1531,7 @@ createApp({
                         mergedTarget = this.selectedModem;
                     }
                     this.modems = this.modems.slice();
-                    return this._isMissingVendorFirmware(mergedTarget) ? 'unresolved' : 'completed';
+                    return this._isMissingSelectedMetadata(mergedTarget) ? 'unresolved' : 'completed';
                 }
             } catch (error) {
                 console.warn(`Targeted enrichment failed for ${target.mac}:`, error?.message || error);
@@ -3707,6 +3712,7 @@ createApp({
                 (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip ||
                  !this.selectedModem.vendor || !this.selectedModem.software_version ||
                  !(this.selectedModem.fiber_node || this.selectedModem.fibernode) ||
+                 !this.selectedModem.cable_mac ||
                  this.selectedModem.ofdm_enabled == null || this.selectedModem.ofdma_enabled == null);
             if (_needsEnrich) {
                 this.modemDetailLoading = true;
