@@ -5898,10 +5898,24 @@ createApp({
                 usFrequency: datasets.upstream.frequency.length > 0,
                 usImpulse: datasets.upstream.impulse.length > 0,
             };
+            const downstreamFrequencyAxis = this._frequencyAxisPolicy(
+                'downstream',
+                datasets.downstream.frequency.map(dataset => dataset.data),
+            );
+            const upstreamFrequencyAxis = this._frequencyAxisPolicy(
+                'upstream',
+                datasets.upstream.frequency.map(dataset => dataset.data),
+            );
             this.$nextTick(() => {
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-ds-frequency', 'fnImpulseDsFrequencyChart', datasets.downstream.frequency,
-                    { title: 'Downstream Frequency-response Comparison', xTitle: 'Frequency (MHz)', yTitle: 'Magnitude (dB)', maxPoints: 2000 }
+                    {
+                        title: 'Downstream Frequency-response Comparison',
+                        xTitle: downstreamFrequencyAxis.title,
+                        yTitle: 'Magnitude (dB)',
+                        maxPoints: 2000,
+                        xScale: downstreamFrequencyAxis.xScale,
+                    }
                 );
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-ds-time', 'fnImpulseDsTimeChart', datasets.downstream.impulse,
@@ -5909,7 +5923,13 @@ createApp({
                 );
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-us-frequency', 'fnImpulseUsFrequencyChart', datasets.upstream.frequency,
-                    { title: 'Upstream Frequency-response Comparison', xTitle: 'Frequency (MHz)', yTitle: 'Magnitude (dB)', maxPoints: 2000 }
+                    {
+                        title: 'Upstream Frequency-response Comparison',
+                        xTitle: upstreamFrequencyAxis.title,
+                        yTitle: 'Magnitude (dB)',
+                        maxPoints: 2000,
+                        xScale: upstreamFrequencyAxis.xScale,
+                    }
                 );
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-us-time', 'fnImpulseUsTimeChart', datasets.upstream.impulse,
@@ -7692,6 +7712,7 @@ createApp({
                 for (let i = 0; i < Math.min(frequencies.length, magnitudes.length); i += freqStep) {
                     freqPoints.push({ x: Number(frequencies[i]) / 1e6, y: Number(magnitudes[i]) });
                 }
+                const frequencyAxis = this._frequencyAxisPolicy(item.direction, [freqPoints]);
 
                 const channelId = analysis.channel_id ?? report.channel_id ?? '?';
                 const directionLabel = item.direction === 'upstream'
@@ -7738,7 +7759,11 @@ createApp({
                         options: {
                             ...commonOptions,
                             scales: {
-                                x: { type: 'linear', title: { display: true, text: 'Frequency (MHz)' } },
+                                x: {
+                                    type: 'linear',
+                                    ...frequencyAxis.xScale,
+                                    title: { display: true, text: frequencyAxis.title },
+                                },
                                 y: { title: { display: true, text: 'Magnitude (dB)' } },
                             },
                             plugins: { title: { display: true, text: 'Frequency Response' }, legend: { display: false } },
@@ -7831,7 +7856,35 @@ createApp({
             return points;
         },
 
-        _renderQuantitativeChart(key, canvasId, datasets, { title, xTitle, yTitle, maxPoints = 5000 } = {}) {
+        _frequencyAxisPolicy(direction, pointSets) {
+            // Keep comparable views stable across separate captures and page renders.
+            const mhzPerDivision = direction === 'upstream' ? 10 : 20;
+            let minimum = Number.POSITIVE_INFINITY;
+            let maximum = Number.NEGATIVE_INFINITY;
+            for (const points of (pointSets || [])) {
+                for (const point of (points || [])) {
+                    const x = Number(point?.x);
+                    if (!Number.isFinite(x)) continue;
+                    minimum = Math.min(minimum, x);
+                    maximum = Math.max(maximum, x);
+                }
+            }
+            const xScale = {
+                ticks: { stepSize: mhzPerDivision, autoSkip: false },
+            };
+            if (Number.isFinite(minimum) && Number.isFinite(maximum)) {
+                xScale.min = Math.floor(minimum / mhzPerDivision) * mhzPerDivision;
+                xScale.max = Math.ceil(maximum / mhzPerDivision) * mhzPerDivision;
+                if (xScale.max <= xScale.min) xScale.max = xScale.min + mhzPerDivision;
+            }
+            return {
+                mhzPerDivision,
+                xScale,
+                title: `Frequency (MHz · ${mhzPerDivision} MHz/div)`,
+            };
+        },
+
+        _renderQuantitativeChart(key, canvasId, datasets, { title, xTitle, yTitle, maxPoints = 5000, xScale = null } = {}) {
             const usable = (datasets || []).filter(dataset => Array.isArray(dataset.data) && dataset.data.length);
             if (!usable.length) {
                 this._destroyChartSurface(key);
@@ -7865,7 +7918,7 @@ createApp({
                         }},
                     },
                     scales: {
-                        x: { type: 'linear', title: { display: Boolean(xTitle), text: xTitle || '' } },
+                        x: { type: 'linear', ...(xScale || {}), title: { display: Boolean(xTitle), text: xTitle || '' } },
                         y: { title: { display: Boolean(yTitle), text: yTitle || '' } },
                     },
                 },
