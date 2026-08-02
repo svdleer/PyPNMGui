@@ -1498,7 +1498,11 @@ def get_cmts_modems(cmts_name):
                 "enrichment_progress": result.get('enrichment_progress') or result.get('enrich_progress'),
             })
         else:
-            error_msg = result.get('error', 'Unknown error from PyPNM API')
+            error_value = result.get('error') or result.get('message') or result.get('detail')
+            if isinstance(error_value, (dict, list)):
+                error_msg = json.dumps(error_value, default=str)
+            else:
+                error_msg = str(error_value or 'Unknown error from PyPNM API')
             logger.error(f"PyPNM API error for {cmts_name}: {error_msg}")
             return jsonify({
                 "status": "error",
