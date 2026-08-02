@@ -4563,6 +4563,21 @@ def _capture_response_ok(result: dict) -> bool:
     return result.get('success') is True
 
 
+def _analysis_pnm_file_type(analysis: dict, direction: str) -> str:
+    """Return the decoded PNM type without inventing a channel identity."""
+    fallback = 'PNN2' if direction == 'downstream' else 'PNN6'
+    header = analysis.get('pnm_header')
+    if not isinstance(header, dict):
+        return fallback
+
+    file_type = str(header.get('file_type') or '').strip().upper()
+    version = str(header.get('file_type_version') or '').strip()
+    decoded_type = f'{file_type}{version}'
+    if decoded_type in {'PNN2', 'PNN6', 'PNN7'}:
+        return decoded_type
+    return fallback
+
+
 def _capture_analysis_items(result: dict, direction: str) -> list[dict]:
     data = result.get('data')
     if isinstance(data, dict):
@@ -4573,18 +4588,45 @@ def _capture_analysis_items(result: dict, direction: str) -> list[dict]:
         analyses = [analyses]
     if not isinstance(analyses, list):
         return []
-    pnm_type = 'PNN2' if direction == 'downstream' else 'PNN6'
+
     return [
         {
             'file_id': '',
             'filename': '',
-            'pnm_file_type': pnm_type,
+            'pnm_file_type': _analysis_pnm_file_type(analysis, direction),
             'direction': direction,
             'analysis': analysis,
         }
         for analysis in analyses
         if isinstance(analysis, dict)
     ]
+
+
+def _select_primary_impulse_items(items: list[dict], direction: str) -> list[dict]:
+    """Keep one current measurement per decoded channel for impulse display."""
+    selected = items
+    if direction == 'upstream':
+        current_pre_equalizer = [
+            item for item in items
+            if item.get('pnm_file_type') == 'PNN6'
+        ]
+        if current_pre_equalizer:
+            selected = current_pre_equalizer
+
+    unique_items: list[dict] = []
+    seen_channels: set[str] = set()
+    for item in selected:
+        analysis = item.get('analysis')
+        channel_id = analysis.get('channel_id') if isinstance(analysis, dict) else None
+        if channel_id is None:
+            unique_items.append(item)
+            continue
+        channel_key = str(channel_id)
+        if channel_key in seen_channels:
+            continue
+        seen_channels.add(channel_key)
+        unique_items.append(item)
+    return unique_items
 
 
 _BULK_IMPULSE_CHART_MAX_POINTS = 1024
@@ -4842,7 +4884,10 @@ def _run_fresh_impulse_capture(
                 'message': str(message or 'Fresh capture failed'),
             })
             continue
-        items = _capture_analysis_items(response, item_direction)
+        items = _select_primary_impulse_items(
+            _capture_analysis_items(response, item_direction),
+            item_direction,
+        )
         if not items:
             message = 'Fresh capture returned no analyzable data'
             warnings.append(f'{item_direction} capture returned no analysis')
