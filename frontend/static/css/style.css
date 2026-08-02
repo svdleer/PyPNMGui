@@ -236,12 +236,38 @@ body {
     border-bottom: 1px solid #cfe2ff;
 }
 
-/* FiberNode modem selector: keep DS/US badges aligned even with unknown DOCSIS */
+/* FiberNode modem selector: keep map and DOCSIS controls aligned without
+   changing table-cell display semantics (which shifts row borders). */
+.fn-map-cell,
 .fn-docsis-cell {
-    display: flex;
+    vertical-align: middle;
+}
+
+.fn-map-button {
+    width: 2rem;
+    height: 1.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.fn-map-button .bi {
+    display: block;
+    line-height: 1;
+}
+
+.fn-docsis-cell {
+    white-space: nowrap;
+}
+
+.fn-docsis-badges {
+    min-height: 1.35rem;
+    display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    white-space: nowrap;
+    vertical-align: middle;
 }
 
 .fn-docsis-slot {

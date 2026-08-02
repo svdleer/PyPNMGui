@@ -3101,9 +3101,9 @@
                                         <td><span class="badge bg-success">{{ m.status }}</span></td>
                                         <td><code class="small">{{ m.mac_address }}</code></td>
                                         <td class="small">{{ m.ip_address }}</td>
-                                        <td class="text-center" @click.stop>
+                                        <td class="text-center align-middle fn-map-cell" @click.stop>
                                             <button v-if="hasModemCoordinates(m)" type="button"
-                                                    class="btn btn-outline-primary btn-sm py-0 px-2"
+                                                    class="btn btn-outline-primary btn-sm p-0 fn-map-button"
                                                     title="Open this modem location in OpenStreetMap"
                                                     aria-label="Show map"
                                                     @click="openModemMap(m)">
@@ -3113,7 +3113,8 @@
                                             <span v-else class="text-muted">—</span>
                                         </td>
                                         <td class="small">{{ m.vendor || '—' }}</td>
-                                        <td class="fn-docsis-cell">
+                                        <td class="fn-docsis-cell align-middle">
+                                            <div class="fn-docsis-badges">
                                             <span class="badge fn-docsis-slot" :class="{
                                                 'bg-info': docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) >= 31,
                                                 'bg-warning text-dark': docsisVersionRank(resolveDocsisVersion(m, 'Unknown')) === 30,
@@ -3136,6 +3137,7 @@
                                             }" :title="isDirectionalPartialService(m, 'upstream') ? 'US OFDMA partial service' : 'US OFDMA status'"><i class="bi bi-arrow-up"></i></span>
                                             <span v-if="isUndirectedPartialService(m)" class="badge bg-warning text-dark ms-1"
                                                   title="CMTS reports modem partial service; downstream/upstream direction is unavailable">PS</span>
+                                            </div>
                                         </td>
                                         <td class="small text-muted text-center">{{ (m.cable_mac || '').replace(/^cable-mac\s*/i,'') }}</td>
                                         <td class="small text-muted text-center">{{ m.fiber_node }}</td>
