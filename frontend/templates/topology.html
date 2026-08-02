@@ -229,8 +229,11 @@
                                         {% if m.lat is not none and m.lon is not none %}
                                         <a class="btn btn-sm btn-outline-primary py-0 px-2"
                                            href="https://www.openstreetmap.org/?mlat=[[ m.lat ]]&amp;mlon=[[ m.lon ]]#map=18/[[ m.lat ]]/[[ m.lon ]]"
-                                           target="_blank" rel="noopener noreferrer">
-                                            <i class="bi bi-geo-alt me-1"></i>Show map
+                                           target="_blank" rel="noopener noreferrer"
+                                           title="Open this modem location in OpenStreetMap"
+                                           aria-label="Show map">
+                                            <i class="bi bi-map" aria-hidden="true"></i>
+                                            <span class="visually-hidden">Show map</span>
                                         </a>
                                         {% else %}—{% endif %}
                                     </td>

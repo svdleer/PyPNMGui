@@ -274,6 +274,8 @@ createApp({
             channelStatsProgress: {
                 pct: 0,
                 eta: '',
+                elapsedSeconds: 0,
+                indeterminate: false,
                 steps: [],
             },
             _csProgressTimer: null,
@@ -4345,13 +4347,18 @@ createApp({
                         cm_index: this.selectedModem.cm_index || null,
                     })
                 });
-                
+
+                this._setChannelStatsProgressPhase('decode');
                 if (!response.ok) {
-                    console.warn('Channel stats endpoint not available');
-                    return;
+                    const errorPayload = await response.json().catch(() => ({}));
+                    throw new Error(
+                        errorPayload.error || errorPayload.message ||
+                        `Channel statistics request failed (HTTP ${response.status})`
+                    );
                 }
-                
+
                 const data = await response.json();
+                this._setChannelStatsProgressPhase('apply');
 
                 // Explicit failure with no usable data — show error and stop.
                 if (data.success === false && !data.downstream && !data.upstream && !data.ofdm_stats) {
@@ -4506,11 +4513,11 @@ createApp({
                     }
                 }
                 
-                // Render charts after data is loaded
-                this.$nextTick(() => {
-                    this.drawDsChannelChart();
-                    this.drawUsChannelChart();
-                });
+                // Render charts only after Vue has applied the returned channel data.
+                this._setChannelStatsProgressPhase('render');
+                await this.$nextTick();
+                this.drawDsChannelChart();
+                this.drawUsChannelChart();
                 
             } catch (error) {
                 console.warn('Failed to load channel stats:', error);
@@ -4538,69 +4545,56 @@ createApp({
         },
         
         _startChannelStatsProgress() {
-            this._csProgressStartedAt = Date.now();
-            const hasCmIndex = !!(this.selectedModem?.cm_index);
-            const hasCmts = !!(this.selectedModem?.cmts_ip);
-            // Phase definitions: id, label, duration (seconds), cumulative start
-            const phases = [
-                { id: 'connect', label: 'Connecting to modem...', dur: 1 },
-                { id: 'walk',    label: 'Walking modem channels (13 OIDs)...', dur: hasCmIndex ? 16 : 16 },
-                { id: 'cmts',    label: 'CMTS enrichment (RxMER, profiles)...', dur: hasCmts ? (hasCmIndex ? 2 : 5) : 0 },
-                { id: 'fiber',   label: 'Resolving fiber node...', dur: hasCmts ? 1 : 0 },
-                { id: 'parse',   label: 'Parsing results...', dur: 1 },
-            ].filter(p => p.dur > 0);
-
-            const totalDur = phases.reduce((s, p) => s + p.dur, 0);
-            let cumulative = 0;
-            for (const p of phases) {
-                p.startPct = (cumulative / totalDur) * 100;
-                cumulative += p.dur;
-                p.endPct = (cumulative / totalDur) * 100;
+            if (this._csProgressTimer) {
+                clearInterval(this._csProgressTimer);
             }
-
+            this._csProgressStartedAt = Date.now();
             this.channelStatsProgress = {
                 pct: 0,
-                eta: `~${totalDur}s remaining`,
-                steps: phases.map(p => ({ id: p.id, label: p.label, status: 'pending' })),
+                eta: '0s elapsed',
+                elapsedSeconds: 0,
+                indeterminate: true,
+                steps: [
+                    { id: 'request', label: 'Collecting modem and CMTS channel data', status: 'active' },
+                    { id: 'decode', label: 'Receiving response', status: 'pending' },
+                    { id: 'apply', label: 'Applying channel information', status: 'pending' },
+                    { id: 'render', label: 'Updating charts', status: 'pending' },
+                ],
             };
 
-            const startTime = Date.now();
             this._csProgressTimer = setInterval(() => {
-                const elapsed = (Date.now() - startTime) / 1000;
-                const remaining = Math.max(0, Math.round(totalDur - elapsed));
-
-                // Find current phase
-                let accum = 0;
-                let activeIdx = 0;
-                for (let i = 0; i < phases.length; i++) {
-                    accum += phases[i].dur;
-                    if (elapsed < accum) { activeIdx = i; break; }
-                    if (i === phases.length - 1) activeIdx = i;
-                }
-
-                // Update step statuses
-                const steps = phases.map((p, i) => ({
-                    id: p.id,
-                    label: i < activeIdx ? p.label.replace('...', '') : p.label,
-                    status: i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'pending',
-                }));
-
-                // Smooth progress within current phase
-                let phaseProg = 0;
-                const phaseStart = phases.slice(0, activeIdx).reduce((s, p) => s + p.dur, 0);
-                if (phases[activeIdx]) {
-                    phaseProg = Math.min(1, (elapsed - phaseStart) / phases[activeIdx].dur);
-                }
-                const pct = Math.min(95, phases[activeIdx]
-                    ? phases[activeIdx].startPct + phaseProg * (phases[activeIdx].endPct - phases[activeIdx].startPct)
-                    : 95);
-
+                const elapsedSeconds = Math.max(
+                    0,
+                    Math.floor((Date.now() - this._csProgressStartedAt) / 1000)
+                );
                 this.channelStatsProgress = {
-                    pct: Math.round(pct),
-                    eta: remaining > 0 ? `~${remaining}s remaining` : 'Finishing up...',
-                    steps,
+                    ...this.channelStatsProgress,
+                    elapsedSeconds,
+                    eta: `${elapsedSeconds}s elapsed`,
                 };
-            }, 300);
+            }, 1000);
+        },
+
+        _setChannelStatsProgressPhase(phaseId) {
+            const activeIndex = (this.channelStatsProgress.steps || [])
+                .findIndex(step => step.id === phaseId);
+            if (activeIndex < 0) return;
+
+            const elapsedSeconds = Math.max(
+                0,
+                Math.floor((Date.now() - (this._csProgressStartedAt || Date.now())) / 1000)
+            );
+            this.channelStatsProgress = {
+                ...this.channelStatsProgress,
+                pct: 0,
+                eta: `${elapsedSeconds}s elapsed`,
+                elapsedSeconds,
+                indeterminate: true,
+                steps: this.channelStatsProgress.steps.map((step, index) => ({
+                    ...step,
+                    status: index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'pending',
+                })),
+            };
         },
 
         _stopChannelStatsProgress(data, failed = false) {
@@ -4680,9 +4674,20 @@ createApp({
 
             const anyError = steps.some(s => s.status === 'error');
             const anyWarn  = steps.some(s => s.status === 'warn');
+            const elapsedSeconds = Math.max(
+                0,
+                Math.round((Date.now() - (this._csProgressStartedAt || Date.now())) / 1000)
+            );
+            const outcome = anyError
+                ? 'Completed with errors'
+                : anyWarn
+                    ? 'Completed with warnings'
+                    : 'Done';
             this.channelStatsProgress = {
                 pct: 100,
-                eta: anyError ? 'Completed with errors' : anyWarn ? 'Completed with warnings' : 'Done',
+                eta: `${outcome} · ${elapsedSeconds}s elapsed`,
+                elapsedSeconds,
+                indeterminate: false,
                 steps,
             };
         },
