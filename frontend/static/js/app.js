@@ -2059,6 +2059,13 @@ createApp({
             return labels[rank] || fallback;
         },
 
+        fnVendorShortLabel(vendor) {
+            const raw = String(vendor || '').trim();
+            if (!raw) return '—';
+            if (/compal/i.test(raw)) return 'Compal';
+            return raw;
+        },
+
         fnDocsisShortLabel(version) {
             const raw = (version || '').toString().trim();
             if (!this.hasKnownDocsisVersion(raw)) return '';
@@ -2360,6 +2367,10 @@ createApp({
                     }
                 } else {
                     this._appendFnMapPopupLine(popup, graphNode.node?.node_type || '');
+                    const address = String(graphNode.node?.address || '').trim();
+                    const room = String(graphNode.node?.room || '').trim();
+                    if (address) this._appendFnMapPopupLine(popup, `Address: ${address}`);
+                    if (room) this._appendFnMapPopupLine(popup, `Room: ${room}`);
                     const basis = graphNode.node?.role_basis;
                     if (basis) this._appendFnMapPopupLine(popup, `Role evidence: ${basis}`, 'text-muted small');
                 }
