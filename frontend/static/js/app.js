@@ -5898,6 +5898,18 @@ createApp({
                 usFrequency: datasets.upstream.frequency.length > 0,
                 usImpulse: datasets.upstream.impulse.length > 0,
             };
+            const allFrequencyPointSets = [
+                ...datasets.downstream.frequency.map(dataset => dataset.data),
+                ...datasets.upstream.frequency.map(dataset => dataset.data),
+            ];
+            const frequencyDbAxis = this._dbAxisPolicy(allFrequencyPointSets);
+            const impulseDbAxis = this._dbAxisPolicy([], {
+                minimum: -70,
+                maximum: 0,
+                stepSize: 10,
+            });
+            const frequencyYTitle = `Magnitude (dB · ${frequencyDbAxis.dbPerDivision} dB/div)`;
+            const impulseYTitle = `Relative magnitude (dB · ${impulseDbAxis.dbPerDivision} dB/div)`;
             const downstreamFrequencyAxis = this._frequencyAxisPolicy(
                 'downstream',
                 datasets.downstream.frequency.map(dataset => dataset.data),
@@ -5912,28 +5924,42 @@ createApp({
                     {
                         title: 'Downstream Frequency-response Comparison',
                         xTitle: downstreamFrequencyAxis.title,
-                        yTitle: 'Magnitude (dB)',
+                        yTitle: frequencyYTitle,
                         maxPoints: 2000,
                         xScale: downstreamFrequencyAxis.xScale,
+                        yScale: frequencyDbAxis.yScale,
                     }
                 );
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-ds-time', 'fnImpulseDsTimeChart', datasets.downstream.impulse,
-                    { title: 'Downstream Detector-windowed Impulse Response', xTitle: 'Delay after main tap (µs)', yTitle: 'Relative magnitude (dB)', maxPoints: 2000 }
+                    {
+                        title: 'Downstream Detector-windowed Impulse Response',
+                        xTitle: 'Delay after main tap (µs)',
+                        yTitle: impulseYTitle,
+                        maxPoints: 2000,
+                        yScale: impulseDbAxis.yScale,
+                    }
                 );
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-us-frequency', 'fnImpulseUsFrequencyChart', datasets.upstream.frequency,
                     {
                         title: 'Upstream Frequency-response Comparison',
                         xTitle: upstreamFrequencyAxis.title,
-                        yTitle: 'Magnitude (dB)',
+                        yTitle: frequencyYTitle,
                         maxPoints: 2000,
                         xScale: upstreamFrequencyAxis.xScale,
+                        yScale: frequencyDbAxis.yScale,
                     }
                 );
                 this._renderQuantitativeChart(
                     'surface-fn-impulse-us-time', 'fnImpulseUsTimeChart', datasets.upstream.impulse,
-                    { title: 'Upstream Detector-windowed Impulse Response', xTitle: 'Delay after main tap (µs)', yTitle: 'Relative magnitude (dB)', maxPoints: 2000 }
+                    {
+                        title: 'Upstream Detector-windowed Impulse Response',
+                        xTitle: 'Delay after main tap (µs)',
+                        yTitle: impulseYTitle,
+                        maxPoints: 2000,
+                        yScale: impulseDbAxis.yScale,
+                    }
                 );
             });
         },
@@ -7684,6 +7710,23 @@ createApp({
                 return;
             }
 
+            // Frequency response is comparable across the returned OFDM/OFDMA
+            // channels. Use one shared dB scale so a quiet channel is not
+            // visually magnified relative to a channel with a large excursion.
+            const frequencyValueSets = [];
+            for (const item of results) {
+                const magnitudes = item?.analysis?.carrier_values?.magnitudes;
+                if (Array.isArray(magnitudes) && magnitudes.length) frequencyValueSets.push(magnitudes);
+            }
+            const frequencyDbAxis = this._dbAxisPolicy(frequencyValueSets);
+            const impulseDbAxis = this._dbAxisPolicy([], {
+                minimum: -70,
+                maximum: 0,
+                stepSize: 10,
+            });
+            const frequencyYTitle = `Magnitude (dB · ${frequencyDbAxis.dbPerDivision} dB/div)`;
+            const impulseYTitle = `Relative magnitude (dB · ${impulseDbAxis.dbPerDivision} dB/div)`;
+
             results.forEach((item, resultIndex) => {
                 const analysis = item.analysis || {};
                 const report = analysis.echo?.report || {};
@@ -7764,7 +7807,10 @@ createApp({
                                     ...frequencyAxis.xScale,
                                     title: { display: true, text: frequencyAxis.title },
                                 },
-                                y: { title: { display: true, text: 'Magnitude (dB)' } },
+                                y: {
+                                    ...frequencyDbAxis.yScale,
+                                    title: { display: true, text: frequencyYTitle },
+                                },
                             },
                             plugins: { title: { display: true, text: 'Frequency Response' }, legend: { display: false } },
                         },
@@ -7782,7 +7828,10 @@ createApp({
                             ...commonOptions,
                             scales: {
                                 x: { type: 'linear', title: { display: true, text: 'Delay after main tap (µs)' } },
-                                y: { suggestedMin: -70, suggestedMax: 2, title: { display: true, text: 'Relative magnitude (dB)' } },
+                                y: {
+                                    ...impulseDbAxis.yScale,
+                                    title: { display: true, text: impulseYTitle },
+                                },
                             },
                             plugins: { title: { display: true, text: 'Detector-windowed Impulse Response' } },
                         },
@@ -7856,6 +7905,64 @@ createApp({
             return points;
         },
 
+        _dbAxisPolicy(valueSets, { minimum = null, maximum = null, stepSize = null, targetDivisions = 8 } = {}) {
+            // Choose one readable, snapped scale for every comparable series.
+            // Inputs may be raw numeric arrays or Chart.js {x, y} point arrays;
+            // only extrema are retained, so auxiliary memory remains constant.
+            let observedMinimum = Number.POSITIVE_INFINITY;
+            let observedMaximum = Number.NEGATIVE_INFINITY;
+            for (const values of (valueSets || [])) {
+                for (const value of (values || [])) {
+                    const y = Number(value && typeof value === 'object' ? value.y : value);
+                    if (!Number.isFinite(y)) continue;
+                    observedMinimum = Math.min(observedMinimum, y);
+                    observedMaximum = Math.max(observedMaximum, y);
+                }
+            }
+
+            const fixedMinimum = minimum !== null && minimum !== undefined && Number.isFinite(Number(minimum))
+                ? Number(minimum)
+                : null;
+            const fixedMaximum = maximum !== null && maximum !== undefined && Number.isFinite(Number(maximum))
+                ? Number(maximum)
+                : null;
+            const fixedStep = stepSize !== null && stepSize !== undefined && Number(stepSize) > 0
+                ? Number(stepSize)
+                : null;
+            let lower = fixedMinimum ?? observedMinimum;
+            let upper = fixedMaximum ?? observedMaximum;
+            if (!Number.isFinite(lower) || !Number.isFinite(upper)) {
+                lower = -1;
+                upper = 1;
+            }
+            if (upper < lower) [lower, upper] = [upper, lower];
+
+            let resolvedStep = fixedStep;
+            if (!resolvedStep) {
+                const span = upper - lower;
+                const rawStep = span > 0
+                    ? span / Math.max(1, Number(targetDivisions) || 8)
+                    : Math.max(Math.abs(lower), 1) / Math.max(1, Number(targetDivisions) || 8);
+                const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+                const normalized = rawStep / magnitude;
+                const niceMultiplier = normalized <= 1 ? 1 : (normalized <= 2 ? 2 : (normalized <= 5 ? 5 : 10));
+                resolvedStep = niceMultiplier * magnitude;
+            }
+
+            const axisMinimum = fixedMinimum ?? Math.floor(lower / resolvedStep) * resolvedStep;
+            let axisMaximum = fixedMaximum ?? Math.ceil(upper / resolvedStep) * resolvedStep;
+            if (axisMaximum <= axisMinimum) axisMaximum = axisMinimum + resolvedStep;
+            const dbPerDivision = Number(resolvedStep.toPrecision(12));
+            return {
+                dbPerDivision,
+                yScale: {
+                    min: Object.is(axisMinimum, -0) ? 0 : axisMinimum,
+                    max: axisMaximum,
+                    ticks: { stepSize: dbPerDivision, autoSkip: false },
+                },
+            };
+        },
+
         _frequencyAxisPolicy(direction, pointSets) {
             // Keep comparable views stable across separate captures and page renders.
             const mhzPerDivision = direction === 'upstream' ? 10 : 20;
@@ -7884,7 +7991,7 @@ createApp({
             };
         },
 
-        _renderQuantitativeChart(key, canvasId, datasets, { title, xTitle, yTitle, maxPoints = 5000, xScale = null } = {}) {
+        _renderQuantitativeChart(key, canvasId, datasets, { title, xTitle, yTitle, maxPoints = 5000, xScale = null, yScale = null } = {}) {
             const usable = (datasets || []).filter(dataset => Array.isArray(dataset.data) && dataset.data.length);
             if (!usable.length) {
                 this._destroyChartSurface(key);
@@ -7919,7 +8026,7 @@ createApp({
                     },
                     scales: {
                         x: { type: 'linear', ...(xScale || {}), title: { display: Boolean(xTitle), text: xTitle || '' } },
-                        y: { title: { display: Boolean(yTitle), text: yTitle || '' } },
+                        y: { ...(yScale || {}), title: { display: Boolean(yTitle), text: yTitle || '' } },
                     },
                 },
             });
