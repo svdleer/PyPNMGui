@@ -452,14 +452,21 @@
                                 <div class="small text-muted mb-2">Times are shown in 24h format.</div>
                                 <div class="table-responsive">
                                     <table class="table table-sm mb-0 align-middle">
-                                        <thead><tr><th>ID</th><th>Name</th><th>Enabled</th><th>Interval</th><th>Run Window</th><th>Heavy Window</th><th>Collects</th><th>Action</th></tr></thead>
+                                        <thead><tr><th>ID</th><th>Name</th><th>Enabled</th><th>Schedule</th><th>Window / Timezone</th><th>Heavy Window</th><th>Collects</th><th>Action</th></tr></thead>
                                         <tbody>
                                             {% for p in poller_settings %}
                                             <tr>
                                                 <td>[[ p.id ]]</td>
                                                 <td><strong>[[ p.name ]]</strong></td>
                                                 <td>[[ 'yes' if p.enabled else 'no' ]]</td>
-                                                <td>[[ p.interval_minutes ]] min</td>
+                                                {% set is_cpe_task = p.task_type == 'cpe_address_refresh' %}
+                                                {% if is_cpe_task %}
+                                                <td><strong>00:00, 12:00</strong></td>
+                                                <td class="small">Europe/Amsterdam</td>
+                                                <td class="small">—</td>
+                                                <td class="small"><span class="badge text-bg-info">CPE addresses</span></td>
+                                                {% else %}
+                                                <td>every [[ p.interval_minutes ]] min</td>
                                                 <td class="small">[[ p.run_window_start or '—' ]]-[[ p.run_window_end or '—' ]]</td>
                                                 <td class="small">[[ p.heavy_window_start or '00:30' ]]-[[ p.heavy_window_end or '05:30' ]]</td>
                                                 <td class="small">
@@ -469,7 +476,16 @@
                                                     {% if p.collect_rxmer %}{% set _ = collects.append('RxMER') %}{% endif %}
                                                     [[ collects|join(', ') if collects else '—' ]]
                                                 </td>
+                                                {% endif %}
                                                 <td class="d-flex gap-1">
+                                                    {% if is_cpe_task %}
+                                                    <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/enabled" class="m-0">
+                                                        <input type="hidden" name="enabled" value="[[ 'false' if p.enabled else 'true' ]]">
+                                                        <button class="btn btn-outline-secondary btn-sm icon-btn" type="submit" title="[[ 'Disable' if p.enabled else 'Enable' ]] task">
+                                                            <i class="bi [[ 'bi-pause-circle' if p.enabled else 'bi-play-circle' ]]"></i>
+                                                        </button>
+                                                    </form>
+                                                    {% else %}
                                                     <button
                                                         class="btn btn-outline-primary btn-sm icon-btn poller-edit-btn"
                                                         type="button"
@@ -496,12 +512,15 @@
                                                         data-heavy-delay="[[ p.heavy_delay_ms or 0 ]]"
                                                         data-max-runtime="[[ p.max_runtime_sec or 3600 ]]"
                                                     ><i class="bi bi-pencil"></i></button>
+                                                    {% endif %}
                                                     <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/run" class="m-0">
-                                                        <button class="btn btn-outline-success btn-sm icon-btn" type="submit" title="Run"><i class="bi bi-play"></i></button>
+                                                        <button class="btn btn-outline-success btn-sm icon-btn" type="submit" title="[[ 'Run now' if p.enabled else 'Enable task before running' ]]" [[ 'disabled' if not p.enabled else '' ]]><i class="bi bi-play"></i></button>
                                                     </form>
+                                                    {% if not is_cpe_task %}
                                                     <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/delete" class="m-0" onsubmit="return confirm('Delete poller setting [[ p.id ]]?');">
                                                         <button class="btn btn-outline-danger btn-sm icon-btn" type="submit" title="Delete"><i class="bi bi-trash"></i></button>
                                                     </form>
+                                                    {% endif %}
                                                 </td>
                                             </tr>
                                             {% endfor %}
@@ -539,9 +558,9 @@
                                             {% for j in poller_jobs %}
                                             <tr class="job-row" data-job-id="[[ j.id ]]" data-job-poller-id="[[ j.poller_id ]]" data-job-status="[[ j.status or '' ]]" data-job-created="[[ j.created_at or '' ]]" data-job-log="[[ (j.error_text or '')|e ]]">
                                                 <td>[[ j.id ]]</td>
-                                                <td>[[ j.poller_id ]]</td>
+                                                <td>[[ j.poller_name or j.poller_id ]]</td>
                                                 <td>
-                                                    {% if j.status == 'completed' %}<span class="chip" style="background:#dcfce7;color:#166534">completed</span>
+                                                    {% if j.status in ['done', 'completed'] %}<span class="chip" style="background:#dcfce7;color:#166534">done</span>
                                                     {% elif j.status == 'timed_out' %}<span class="chip" style="background:#fef3c7;color:#92400e">timed_out</span>
                                                     {% elif j.status == 'failed' %}<span class="chip" style="background:#fee2e2;color:#991b1b">failed</span>
                                                     {% elif j.status == 'running' %}<span class="chip" style="background:#dbeafe;color:#1e40af">running</span>
@@ -591,13 +610,13 @@
                                                     <div class="small fw-semibold mb-1">CMTS Breakdown</div>
                                                     <div class="table-responsive">
                                                         <table class="table table-sm mb-0">
-                                                            <thead><tr><th>CMTS</th><th>Rows</th><th>RF Snapshots</th><th>Error</th></tr></thead>
+                                                            <thead><tr><th>CMTS</th><th>Rows</th><th>Complete</th><th>Error</th></tr></thead>
                                                             <tbody>
                                                                 {% for cmts_name, stats in j.cmts_breakdown_obj.items() %}
                                                                 <tr>
                                                                     <td>[[ cmts_name ]]</td>
                                                                     <td>[[ stats.rows or 0 ]]</td>
-                                                                    <td>[[ stats.rf_snapshots or 0 ]]</td>
+                                                                    <td>[[ 'yes' if stats.complete else 'no' ]]</td>
                                                                     <td class="text-danger">[[ stats.error or '—' ]]</td>
                                                                 </tr>
                                                                 {% endfor %}

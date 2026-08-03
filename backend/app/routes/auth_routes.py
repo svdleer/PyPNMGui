@@ -1,4 +1,5 @@
 from functools import wraps
+import json
 import os
 from datetime import datetime
 import re
@@ -288,6 +289,33 @@ def admin_page():
         jobs_resp = _poller_api_request("GET", "/poller-jobs", params={"limit": 30})
         poller_jobs = jobs_resp.get("jobs") or []
         for j in poller_jobs:
+            raw_breakdown = j.get("cmts_breakdown")
+            try:
+                parsed_breakdown = (
+                    json.loads(raw_breakdown)
+                    if isinstance(raw_breakdown, str)
+                    else raw_breakdown
+                )
+            except (TypeError, ValueError):
+                parsed_breakdown = []
+            breakdown_obj = {}
+            if isinstance(parsed_breakdown, list):
+                for entry in parsed_breakdown:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = str(entry.get("cmts") or entry.get("cmts_ip") or "unknown")
+                    oid_errors = entry.get("cpe_oid_errors") or entry.get("critical_oid_errors") or {}
+                    error = entry.get("validation_error")
+                    if not error and oid_errors:
+                        error = "; ".join(str(value) for value in oid_errors.values())
+                    breakdown_obj[name] = {
+                        "rows": entry.get("cpe_row_count", entry.get("row_count", 0)),
+                        "complete": entry.get("cpe_complete", entry.get("complete")),
+                        "error": error,
+                    }
+            elif isinstance(parsed_breakdown, dict):
+                breakdown_obj = parsed_breakdown
+            j["cmts_breakdown_obj"] = breakdown_obj
             j["created_at"] = _normalize_datetime_24h(j.get("created_at"))
             j["started_at"] = _normalize_datetime_24h(j.get("started_at"))
             j["finished_at"] = _normalize_datetime_24h(j.get("finished_at"))
@@ -367,13 +395,38 @@ def admin_upsert_poller_setting():
     return redirect(_prefixed(url_for("auth.admin_page")))
 
 
+@auth_bp.route("/admin/poller-settings/<int:poller_id>/enabled", methods=["POST"])
+@admin_required
+def admin_set_poller_enabled(poller_id):
+    try:
+        enabled = request.form.get("enabled") == "true"
+        _poller_api_request(
+            "POST",
+            f"/poller-settings/{int(poller_id)}/enabled",
+            payload={"enabled": enabled},
+        )
+        flash(
+            f"Task {poller_id} {'enabled' if enabled else 'disabled'}",
+            "success",
+        )
+    except Exception as exc:
+        flash(f"Task toggle failed: {exc}", "danger")
+    return redirect(_prefixed(url_for("auth.admin_page")))
+
+
 @auth_bp.route("/admin/poller-settings/<int:poller_id>/run", methods=["POST"])
 @admin_required
 def admin_run_poller_setting(poller_id):
     try:
         run_resp = _poller_api_request("POST", f"/poller-settings/{int(poller_id)}/run", payload={"source": "admin-ui"})
         job_id = run_resp.get("job_id") or "?"
-        flash(f"Run queued for poller {poller_id} (job {job_id})", "success")
+        if run_resp.get("state") == "already_active":
+            flash(
+                f"Poller {poller_id} already has active job {job_id}",
+                "warning",
+            )
+        else:
+            flash(f"Run queued for poller {poller_id} (job {job_id})", "success")
     except Exception as exc:
         flash(f"Queue run failed: {exc}", "danger")
     return redirect(_prefixed(url_for("auth.admin_page")))

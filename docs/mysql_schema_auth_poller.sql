@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS modem_cpe_ip_current (
 CREATE TABLE IF NOT EXISTS poller_setting (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(64) NOT NULL,
+  task_type VARCHAR(32) NOT NULL DEFAULT 'inventory',
+  system_key VARCHAR(64) NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   scope_type VARCHAR(16) NOT NULL DEFAULT 'all_cmts',
   scope_json JSON NULL,
@@ -99,9 +101,11 @@ CREATE TABLE IF NOT EXISTS poller_setting (
   heavy_delay_ms INT NOT NULL DEFAULT 0,
   max_runtime_sec INT NOT NULL DEFAULT 3600,
   last_target_offset INT NOT NULL DEFAULT 0,
+  last_scheduled_slot_utc DATETIME NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  UNIQUE KEY uk_poller_setting_name (name)
+  UNIQUE KEY uk_poller_setting_name (name),
+  UNIQUE KEY uk_poller_setting_system_key (system_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS poller_job (
@@ -119,8 +123,10 @@ CREATE TABLE IF NOT EXISTS poller_job (
   finished_at DATETIME NULL,
   error_text TEXT NULL,
   cmts_breakdown JSON NULL,
+  scheduled_slot_utc DATETIME NULL,
   created_at DATETIME NOT NULL,
-  INDEX idx_job_status_created (status, created_at)
+  INDEX idx_job_status_created (status, created_at),
+  UNIQUE KEY uk_job_scheduled_slot (poller_id, scheduled_slot_utc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS scheduler_decision_log (
