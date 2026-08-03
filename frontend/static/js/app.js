@@ -2186,6 +2186,12 @@ createApp({
             return { lat, lon };
         },
 
+        feetToMeters(value) {
+            if (value === null || value === undefined || value === '') return null;
+            const feet = Number(value);
+            return Number.isFinite(feet) ? feet * 0.3048 : null;
+        },
+
         _fnImpulseEchoesForMac(macAddress) {
             const target = this.normalizeMacForMatch(macAddress);
             if (!target) return [];
@@ -2197,11 +2203,13 @@ createApp({
                 const report = result?.analysis?.echo?.report || {};
                 for (const echo of (report.echoes || [])) {
                     const distanceFt = Number(echo?.distance_ft);
-                    const distanceM = Number(echo?.distance_m);
-                    if (!Number.isFinite(distanceFt) && !Number.isFinite(distanceM)) continue;
+                    const reportedDistanceM = Number(echo?.distance_m);
+                    const distanceM = Number.isFinite(reportedDistanceM)
+                        ? reportedDistanceM
+                        : this.feetToMeters(distanceFt);
+                    if (!Number.isFinite(distanceM)) continue;
                     echoes.push({
                         direction: result?.direction === 'upstream' ? 'US' : 'DS',
-                        distanceFt,
                         distanceM,
                         cableType: report?.cable_type || '',
                         velocityFactor: Number(report?.velocity_factor),
@@ -2349,9 +2357,7 @@ createApp({
                     if (echoes.length) {
                         this._appendFnMapPopupLine(popup, 'Electrical reflection distances', 'fw-semibold mt-1');
                         for (const echo of echoes) {
-                            const distance = Number.isFinite(echo.distanceFt)
-                                ? `${echo.distanceFt.toFixed(1)} ft`
-                                : `${echo.distanceM.toFixed(1)} m`;
+                            const distance = `${echo.distanceM.toFixed(1)} m`;
                             const vf = Number.isFinite(echo.velocityFactor) ? `, VF ${echo.velocityFactor.toFixed(2)}` : '';
                             this._appendFnMapPopupLine(
                                 popup,
@@ -7777,10 +7783,15 @@ createApp({
                     </div>
                     <div class="table-responsive mt-3">
                         <table class="table table-sm table-bordered mb-0">
-                            <thead><tr><th>Echo</th><th>Delay (µs)</th><th>Distance (ft)</th><th>Relative level (dB)</th><th>Bin</th></tr></thead>
-                            <tbody>${echoes.length ? echoes.map((echo, index) => `
-                                <tr><td>${index + 1}</td><td>${(Number(echo.time_s) * 1e6).toFixed(3)}</td><td>${Number(echo.distance_ft).toFixed(1)}</td><td>${(20 * Math.log10(Math.max(Number(echo.amplitude), 1e-12))).toFixed(1)}</td><td>${echo.bin_index}</td></tr>
-                            `).join('') : '<tr><td colspan="5" class="text-muted">No prominent post-main-tap peaks detected</td></tr>'}</tbody>
+                            <thead><tr><th>Echo</th><th>Delay (µs)</th><th>Distance (m)</th><th>Relative level (dB)</th><th>Bin</th></tr></thead>
+                            <tbody>${echoes.length ? echoes.map((echo, index) => {
+                                const reportedDistanceM = Number(echo.distance_m);
+                                const distanceM = Number.isFinite(reportedDistanceM)
+                                    ? reportedDistanceM
+                                    : this.feetToMeters(echo.distance_ft);
+                                const distanceLabel = Number.isFinite(distanceM) ? distanceM.toFixed(1) : '—';
+                                return `<tr><td>${index + 1}</td><td>${(Number(echo.time_s) * 1e6).toFixed(3)}</td><td>${distanceLabel}</td><td>${(20 * Math.log10(Math.max(Number(echo.amplitude), 1e-12))).toFixed(1)}</td><td>${echo.bin_index}</td></tr>`;
+                            }).join('') : '<tr><td colspan="5" class="text-muted">No prominent post-main-tap peaks detected</td></tr>'}</tbody>
                         </table>
                     </div>
                     <small class="text-muted d-block mt-2">Guard: ${report.guard_bins ?? '-'} bins · prominence: ${report.min_prominence_db ?? '-'} dB · sample rate: ${report.dataset?.sample_rate_hz ? (report.dataset.sample_rate_hz / 1e6).toFixed(1) + ' MHz' : '-'}</small>

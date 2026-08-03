@@ -3674,9 +3674,8 @@ def ds_fullband_scan():
                 noise_floor = np.median(rs_sorted)
                 if peak_val > noise_floor * 3:
                     peak_period = freq_range / (np.where(ripple_period[valid] > 0)[0][sort_idx[peak_idx]] + 1)
-                    dist_ft = peak_dist * 3.281
                     ax_ripple.annotate(
-                        f'≈{peak_dist:.0f} m ({dist_ft:.0f} ft)',
+                        f'≈{peak_dist:.0f} m',
                         xy=(peak_dist, peak_val), fontsize=8,
                         xytext=(peak_dist + peak_dist * 0.1, peak_val),
                         arrowprops=dict(arrowstyle='->', color='#6d28d9'),

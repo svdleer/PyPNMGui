@@ -3241,7 +3241,7 @@
                                                 <strong>{{ result.direction === 'downstream' ? 'DS' : 'US' }} ch {{ result.analysis?.channel_id }}</strong>
                                                 <span class="text-muted"> · {{ result.pnm_file_type }}</span>
                                                 <span v-if="result.analysis?.echo?.report?.echoes?.length">
-                                                    · {{ result.analysis.echo.report.echoes.map(e => Number(e.distance_ft).toFixed(1) + ' ft / ' + (20 * Math.log10(Math.max(Number(e.amplitude), 1e-12))).toFixed(1) + ' dB').join(', ') }}
+                                                    · {{ result.analysis.echo.report.echoes.map(e => (feetToMeters(e.distance_ft)?.toFixed(1) ?? '—') + ' m / ' + (20 * Math.log10(Math.max(Number(e.amplitude), 1e-12))).toFixed(1) + ' dB').join(', ') }}
                                                 </span>
                                                 <span v-else class="text-muted"> · no prominent echoes</span>
                                             </div>
@@ -3316,7 +3316,7 @@
                             <div class="card-body p-0">
                                 <table class="table table-sm table-hover table-striped mb-0">
                                     <thead><tr>
-                                        <th>MAC</th><th>MTC (dB)</th><th>NMTER (dB)</th><th>GD P-P (µs)</th><th>Pre-main (ft)</th><th>Post-main (ft)</th>
+                                        <th>MAC</th><th>MTC (dB)</th><th>NMTER (dB)</th><th>GD P-P (µs)</th><th>Pre-main (m)</th><th>Post-main (m)</th>
                                     </tr></thead>
                                     <tbody>
                                         <tr v-for="gd in fnScanResult.group_delay" :key="gd.cm_mac_address">
@@ -3329,8 +3329,8 @@
                                             <td :class="(gd.channels?.[0]?.delay_pp_us || 0) > 0.5 ? 'text-warning fw-bold' : ''">
                                                 {{ gd.channels?.[0]?.delay_pp_us?.toFixed(3) ?? '—' }}
                                             </td>
-                                            <td>{{ gd.channels?.[0]?.pre_main_cable_ft?.toFixed(0) ?? '—' }}</td>
-                                            <td>{{ gd.channels?.[0]?.post_main_cable_ft?.toFixed(0) ?? '—' }}</td>
+                                            <td>{{ feetToMeters(gd.channels?.[0]?.pre_main_cable_ft)?.toFixed(0) ?? '—' }}</td>
+                                            <td>{{ feetToMeters(gd.channels?.[0]?.post_main_cable_ft)?.toFixed(0) ?? '—' }}</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -3338,7 +3338,7 @@
                                     <strong>MTC:</strong> Main Tap to Composite (higher = cleaner).
                                     <strong>NMTER:</strong> Non Main Tap Energy Ratio (>25 dB good).
                                     <strong>GD P-P:</strong> Group delay peak-to-peak (<0.5 µs good).
-                                    <strong>Cable ft:</strong> Estimated reflection distance.
+                                    <strong>Cable distance:</strong> Estimated reflection distance in meters.
                                 </div>
                             </div>
                         </div>
@@ -3689,7 +3689,7 @@
                                             <td class="small">
                                                 <span v-if="d.type === 'suckout'">{{ d.depth_db }} dB depth</span>
                                                 <span v-else-if="d.type === 'lte_ingress'">{{ d.band }} · +{{ d.elevation_db }} dB above neighbors</span>
-                                                <span v-else-if="d.type === 'ripple'">≈{{ d.estimated_distance_m }} m ({{ d.estimated_distance_ft }} ft) · {{ d.strength_ratio }}× noise</span>
+                                                <span v-else-if="d.type === 'ripple'">≈{{ d.estimated_distance_m }} m · {{ d.strength_ratio }}× noise</span>
                                             </td>
                                         </tr>
                                     </tbody>
