@@ -345,7 +345,7 @@
                                     <div class="row g-2 mb-1 align-items-end">
                                         <div class="col-md-2">
                                             <label class="form-label form-label-sm mb-1" for="poller-interval" title="How often the scheduler re-runs this poller">Interval (min)</label>
-                                            <input class="form-control form-control-sm" id="poller-interval" type="number" name="interval_minutes" value="1440" min="1">
+                                            <input class="form-control form-control-sm" id="poller-interval" type="number" name="interval_minutes" value="360" min="1">
                                         </div>
                                         <div class="col-md-2">
                                             <label class="form-label form-label-sm mb-1" for="poller-run-start" title="Only start a run after this time (24h, local). Leave blank for anytime.">Run from</label>
@@ -484,7 +484,7 @@
                                                         data-collect-identity="[[ 1 if p.collect_identity else 0 ]]"
                                                         data-collect-scqam="[[ 1 if p.collect_scqam else 0 ]]"
                                                         data-collect-rxmer="[[ 1 if p.collect_rxmer else 0 ]]"
-                                                        data-interval="[[ p.interval_minutes or 1440 ]]"
+                                                        data-interval="[[ p.interval_minutes or 360 ]]"
                                                         data-run-start="[[ p.run_window_start or '' ]]"
                                                         data-run-end="[[ p.run_window_end or '' ]]"
                                                         data-max-concurrency="[[ p.max_concurrency or 1 ]]"
@@ -1209,7 +1209,7 @@
         fields.name.value = '';
         fields.scopeType.value = 'all_cmts';
         fields.scopeJson.value = '';
-        fields.interval.value = 1440;
+        fields.interval.value = 360;
         fields.runStart.value = '';
         fields.runEnd.value = '';
         fields.maxConcurrency.value = 1;
@@ -1236,7 +1236,7 @@
             modalFields.name.value = btn.dataset.name || '';
             modalFields.scopeType.value = btn.dataset.scopeType || 'all_cmts';
             modalFields.scopeJson.value = btn.dataset.scopeJson || '';
-            modalFields.interval.value = btn.dataset.interval || 1440;
+            modalFields.interval.value = btn.dataset.interval || 360;
             modalFields.runStart.value = (btn.dataset.runStart || '').slice(0, 5);
             modalFields.runEnd.value = (btn.dataset.runEnd || '').slice(0, 5);
             modalFields.maxConcurrency.value = btn.dataset.maxConcurrency || 1;

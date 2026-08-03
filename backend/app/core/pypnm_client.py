@@ -314,6 +314,19 @@ class PyPNMClient:
     def get_inventory_modem_by_mac(self, mac_address: str, request_timeout: int | None = None) -> Dict[str, Any]:
         return self._get(f"/api/admin/inventory/modems/{mac_address}", request_timeout=request_timeout)
 
+    def get_inventory_cpe_index(self, request_timeout: int | None = None) -> Dict[str, Any]:
+        return self._get(
+            "/api/admin/inventory/cpe/index",
+            params={"limit": 500000},
+            request_timeout=request_timeout,
+        )
+
+    def get_inventory_cpe_suggestions(self, query: str, limit: int = 10) -> Dict[str, Any]:
+        return self._get(
+            "/api/admin/inventory/cpe/suggestions",
+            params={"q": query, "limit": limit},
+        )
+
     def get_inventory_snapshots(self, request_timeout: int | None = None) -> Dict[str, Any]:
         """Return current inventory cache revisions without transferring modem rows."""
         return self._get(

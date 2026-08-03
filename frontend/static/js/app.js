@@ -57,6 +57,8 @@ createApp({
             searchSeedMacs: [],
             searchSeedIps: [],
             searchSeedFiberNodes: [],
+            cpeSearchSuggestions: [],
+            _cpeSuggestTimer: null,
             useTopologySearch: false,
             topologyEnabled: TOPOLOGY_ENABLED,
             searchHouseNumber: '',
@@ -315,6 +317,7 @@ createApp({
         searchPlaceholder() {
             const placeholders = {
                 'ip': this.t('placeholder.ip'),
+                'cpe_ip': 'IPv4 prefix or complete IPv6 address',
                 'mac': this.t('placeholder.mac'),
                 'name': this.t('placeholder.name'),
                 'fiber_node': 'e.g. FN55',
@@ -326,6 +329,9 @@ createApp({
         },
 
         searchSuggestions() {
+            if (this.searchType === 'cpe_ip') {
+                return (this.cpeSearchSuggestions || []).slice(0, 10);
+            }
             if (this.useTopologySearch) {
                 return (this.topologySuggestions || []).slice(0, 10);
             }
@@ -1854,6 +1860,26 @@ createApp({
 
         async onSearchInput() {
             this.showSearchSuggestions = true;
+            if (this.searchType === 'cpe_ip') {
+                if (this._cpeSuggestTimer) clearTimeout(this._cpeSuggestTimer);
+                const q = (this.searchValue || '').trim();
+                if (!q) {
+                    this.cpeSearchSuggestions = [];
+                    return;
+                }
+                this._cpeSuggestTimer = setTimeout(async () => {
+                    try {
+                        const params = new URLSearchParams({ q, limit: '10' });
+                        const response = await fetch(`${API_BASE}/modems/cpe-suggestions?${params.toString()}`);
+                        const data = await response.json();
+                        this.cpeSearchSuggestions = data?.status === 'success' && Array.isArray(data.suggestions)
+                            ? data.suggestions : [];
+                    } catch (_) {
+                        this.cpeSearchSuggestions = [];
+                    }
+                }, 250);
+                return;
+            }
             if (!this.useTopologySearch) return;
 
             // Only fetch topology suggestions for topology-specific search types;
@@ -2918,7 +2944,12 @@ createApp({
                     return;
                 }
 
-                // MAC / IP / name searches always hit inventory first (Redis/MySQL = freshest cached data)
+                if (this.searchType === 'cpe_ip' && !(this.searchValue || '').trim()) {
+                    this.showError('Search failed', 'Enter an IPv4 prefix or a complete IPv6 address');
+                    return;
+                }
+
+                // MAC / IP / name / CPE searches always hit inventory first (Redis/MySQL = freshest cached data)
                 // When topology toggle is on, we also enrich with topology fields afterwards
                 let url = `${API_BASE}/modems?`;
                 
@@ -4026,7 +4057,8 @@ createApp({
                  !this.selectedModem.vendor || !this.selectedModem.software_version ||
                  !(this.selectedModem.fiber_node || this.selectedModem.fibernode) ||
                  !this.selectedModem.cable_mac ||
-                 this.selectedModem.ofdm_enabled == null || this.selectedModem.ofdma_enabled == null);
+                 this.selectedModem.ofdm_enabled == null || this.selectedModem.ofdma_enabled == null ||
+                 this.selectedModem.cpe_ipv4 === undefined || this.selectedModem.cpe_ipv6 === undefined);
             if (_needsEnrich) {
                 this.modemDetailLoading = true;
                 try {

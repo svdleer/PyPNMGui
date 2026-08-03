@@ -347,7 +347,7 @@ def admin_upsert_poller_setting():
             "collect_identity": request.form.get("collect_identity") == "on",
             "collect_scqam": request.form.get("collect_scqam") == "on",
             "collect_rxmer": request.form.get("collect_rxmer") == "on",
-            "interval_minutes": int(request.form.get("interval_minutes") or 1440),
+            "interval_minutes": int(request.form.get("interval_minutes") or 360),
             "run_window_start": (request.form.get("run_window_start") or "").strip() or None,
             "run_window_end": (request.form.get("run_window_end") or "").strip() or None,
             "max_concurrency": int(request.form.get("max_concurrency") or 4),

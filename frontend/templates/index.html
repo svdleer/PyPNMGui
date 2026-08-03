@@ -172,6 +172,7 @@
                                         <label class="form-label">{{ t('search.search_by') }}</label>
                                         <select v-model="searchType" class="form-select">
                                             <option value="ip">{{ t('search.ip') }}</option>
+                                            <option value="cpe_ip">CPE Address</option>
                                             <option value="mac">{{ t('search.mac') }}</option>
                                             <option value="name">{{ t('search.name') }}</option>
                                             <option value="fiber_node">FiberNode</option>
@@ -871,6 +872,24 @@
                                             <tr>
                                                 <td class="text-muted">IP Address</td>
                                                 <td>{{ selectedModem.ip_address }}</td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">CPE IPv4</td>
+                                                <td>
+                                                    <div v-for="entry in (selectedModem.cpe_ipv4 || [])" :key="entry.address + '/' + entry.prefix_length">
+                                                        <code>{{ entry.address }}<span v-if="entry.prefix_length !== 32">/{{ entry.prefix_length }}</span></code>
+                                                    </div>
+                                                    <span v-if="!(selectedModem.cpe_ipv4 || []).length" class="text-muted">None</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="text-muted">CPE IPv6</td>
+                                                <td>
+                                                    <div v-for="entry in (selectedModem.cpe_ipv6 || [])" :key="entry.address + '/' + entry.prefix_length">
+                                                        <code>{{ entry.address }}<span v-if="entry.prefix_length !== 128">/{{ entry.prefix_length }}</span></code>
+                                                    </div>
+                                                    <span v-if="!(selectedModem.cpe_ipv6 || []).length" class="text-muted">None</span>
+                                                </td>
                                             </tr>
                                             <tr>
                                                 <td class="text-muted">Vendor</td>

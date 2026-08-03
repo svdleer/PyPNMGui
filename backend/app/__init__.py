@@ -131,6 +131,24 @@ def create_app():
     else:
         app.logger.info('Topology module disabled')
 
+    # Warm the separate CPE search index without delaying application startup.
+    def _warm_cpe_cache_on_startup():
+        import time
+        time.sleep(2)
+        try:
+            with app.app_context():
+                from app.routes.api_routes import warm_cpe_search_cache
+                warm_cpe_search_cache()
+        except Exception as exc:
+            app.logger.warning('Initial CPE Redis warm-up deferred: %s', exc)
+
+    import threading
+    threading.Thread(
+        target=_warm_cpe_cache_on_startup,
+        name='cpe-cache-warmup',
+        daemon=True,
+    ).start()
+
     @app.context_processor
     def inject_feature_flags():
         locale = session.get('locale') or DEFAULT_LOCALE

@@ -61,6 +61,23 @@ CREATE TABLE IF NOT EXISTS modem_inventory_current (
   PRIMARY KEY (mac)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS modem_cpe_ip_current (
+  cmts_ip VARCHAR(45) NOT NULL,
+  docsif3_index VARCHAR(128) NOT NULL,
+  cpe_id VARCHAR(32) NOT NULL,
+  modem_mac VARCHAR(17) NOT NULL,
+  address_family VARCHAR(4) NOT NULL,
+  ip_address VARCHAR(45) NOT NULL,
+  prefix_length SMALLINT UNSIGNED NOT NULL,
+  snapshot_id CHAR(36) NULL,
+  first_seen_at DATETIME NOT NULL,
+  last_seen_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (cmts_ip, docsif3_index, cpe_id),
+  INDEX idx_cpe_address (address_family, ip_address, modem_mac),
+  INDEX idx_cpe_modem (modem_mac, address_family, ip_address)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS poller_setting (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(64) NOT NULL,
@@ -70,7 +87,7 @@ CREATE TABLE IF NOT EXISTS poller_setting (
   collect_identity BOOLEAN NOT NULL DEFAULT TRUE,
   collect_scqam BOOLEAN NOT NULL DEFAULT FALSE,
   collect_rxmer BOOLEAN NOT NULL DEFAULT FALSE,
-  interval_minutes INT NOT NULL DEFAULT 1440,
+  interval_minutes INT NOT NULL DEFAULT 360,
   run_window_start TIME NULL,
   run_window_end TIME NULL,
   max_concurrency INT NOT NULL DEFAULT 1,
