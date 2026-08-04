@@ -838,7 +838,13 @@
                                             <div>
                                                 <h6 class="text-muted mb-2">Fiber Node</h6>
                                                 <h5 class="mb-0 overview-stat-value text-truncate" style="max-width: 150px;" :title="selectedModem.fiber_node">
-                                                    {{ selectedModem.fiber_node || 'N/A' }}
+                                                    <a v-if="selectedModem.fiber_node" href="#"
+                                                       class="text-decoration-none"
+                                                       :title="`Open Fiber Node Scan for ${selectedModem.fiber_node}`"
+                                                       @click.prevent="fnScanFiberNode = selectedModem.fiber_node; currentView = 'fibernode'">
+                                                        {{ selectedModem.fiber_node }}
+                                                    </a>
+                                                    <span v-else>N/A</span>
                                                 </h5>
                                             </div>
                                             <i class="bi bi-diagram-3 stat-icon"></i>
@@ -913,7 +919,13 @@
                                             </tr>
                                             <tr v-if="selectedModem.fiber_node">
                                                 <td class="text-muted">Fiber Node</td>
-                                                <td><span class="badge bg-info">{{ selectedModem.fiber_node }}</span></td>
+                                                <td>
+                                                    <a href="#" class="badge bg-info text-dark text-decoration-none"
+                                                       :title="`Open Fiber Node Scan for ${selectedModem.fiber_node}`"
+                                                       @click.prevent="fnScanFiberNode = selectedModem.fiber_node; currentView = 'fibernode'">
+                                                        {{ selectedModem.fiber_node }}
+                                                    </a>
+                                                </td>
                                             </tr>
                                             <tr v-if="selectedModem.topology_path || selectedModem.cmts || selectedModem.cmts_hostname || selectedModem.cable_mac || selectedModem.upstream_interface || selectedModem.fiber_node">
                                                 <td class="text-muted">Path</td>
