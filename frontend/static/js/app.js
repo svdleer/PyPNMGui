@@ -356,7 +356,8 @@ createApp({
             if (!qn) return [];
             return this.searchSeedMacs
                 .filter(v => this.normalizeMacForMatch(v).includes(qn))
-                .slice(0, 10);
+                .slice(0, 10)
+                .map(v => this.formatMacForSearchStyle(v, q));
         },
 
         // Unique fiber nodes present in loaded modems (for filter dropdown)
@@ -1270,6 +1271,17 @@ createApp({
             return String(value || '').toLowerCase().replace(/[^a-f0-9]/g, '');
         },
 
+        formatMacForSearchStyle(value, reference) {
+            const clean = this.normalizeMacForMatch(value);
+            if (!clean) return String(value || '');
+
+            const style = String(reference || '');
+            if (style.includes('.')) return clean.match(/.{1,4}/g).join('.');
+            if (style.includes('-')) return clean.match(/.{1,2}/g).join('-');
+            if (style.includes(':')) return clean.match(/.{1,2}/g).join(':');
+            return clean;
+        },
+
         normalizeMacForDisplay(value) {
             const clean = String(value || '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
             if (clean.length !== 12) return String(value || '');
@@ -1935,6 +1947,8 @@ createApp({
                 } else {
                     this.searchValue = v;
                 }
+            } else if (this.searchType === 'mac') {
+                this.searchValue = this.formatMacForSearchStyle(v, this.searchValue);
             } else {
                 this.searchValue = v;
             }
