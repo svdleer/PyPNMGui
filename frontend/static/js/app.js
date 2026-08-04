@@ -51,7 +51,7 @@ createApp({
             // Search parameters
             locale: GUI_LOCALE,
             messages: GUI_I18N,
-            searchType: 'ip',
+            searchType: 'mac',
             searchValue: '',
             showSearchSuggestions: false,
             searchSeedMacs: [],
