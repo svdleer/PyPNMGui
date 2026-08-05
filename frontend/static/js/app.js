@@ -1296,13 +1296,32 @@ createApp({
         },
 
         findCmtsMatch(cmtsIp, cmtsName) {
+            const candidates = this.cmtsListFull || [];
             const wantedIp = String(cmtsIp || '').trim();
+
+            // IP is authoritative. Do not let a lossy legacy-name match select a
+            // different CMTS before the exact IP appears later in the list.
+            if (wantedIp) {
+                const ipMatch = candidates.find(c => String(c?.ip || '').trim() === wantedIp);
+                if (ipMatch) return ipMatch;
+            }
+
+            // Preserve full hostnames before applying legacy normalization. Names
+            // such as HL-LC0001-CCAP001 and BV-LC0001-CCAP001 otherwise both
+            // normalize to LC0001-CCAP001.
+            const wantedFullName = String(cmtsName || '').trim().toUpperCase();
+            if (wantedFullName) {
+                const nameMatch = candidates.find(c =>
+                    String(c?.name || '').trim().toUpperCase() === wantedFullName
+                );
+                if (nameMatch) return nameMatch;
+            }
+
             const wantedName = this.normalizeCmtsName(cmtsName);
             const canonicalWantedName = this.cmtsLegacyNameMap[wantedName] || wantedName;
-            return (this.cmtsListFull || []).find(c => {
-                const candidateIp = String(c?.ip || '').trim();
+            return candidates.find(c => {
                 const candidateName = this.normalizeCmtsName(c?.name || '');
-                return (wantedIp && candidateIp === wantedIp) || (canonicalWantedName && candidateName === canonicalWantedName);
+                return canonicalWantedName && candidateName === canonicalWantedName;
             }) || null;
         },
 
