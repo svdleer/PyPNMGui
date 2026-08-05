@@ -118,17 +118,24 @@ def get_session_auth_source(auth_session) -> str:
     return source or "internal"
 
 
+def _session_matches_provider(auth_session, provider: AuthProvider) -> bool:
+    source = get_session_auth_source(auth_session)
+    if source == provider.name:
+        return True
+    return source == "internal" and provider.supports_username_password
+
+
 def is_authenticated_session(auth_session) -> bool:
     user_id = auth_session.get("user_id")
     if not user_id:
         return False
-    return get_session_auth_source(auth_session) == get_active_auth_provider().name
+    return _session_matches_provider(auth_session, get_active_auth_provider())
 
 
 def session_matches_active_provider(auth_session) -> bool:
     if not auth_session.get("user_id"):
         return True
-    return get_session_auth_source(auth_session) == get_active_auth_provider().name
+    return _session_matches_provider(auth_session, get_active_auth_provider())
 
 
 def local_user_id(auth_session) -> int | None:

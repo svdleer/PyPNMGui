@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import re
 
-from flask import current_app, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 import requests
 
 from . import auth_bp
@@ -118,30 +118,43 @@ def admin_required(view_func):
     return _wrapped
 
 
-@auth_bp.route("/login", methods=["GET", "POST"])
-def login():
+def _login_response(*, emergency_local: bool = False):
     provider = get_active_auth_provider()
+    local_auth_allowed = provider.is_internal or emergency_local
     if request.method == "GET":
         if is_authenticated_session(session):
             return redirect(_prefixed(url_for("main.index")))
         base_path = current_app.config.get("APP_ROOT", "")
+        oidc_login_path = None
+        if not local_auth_allowed:
+            oidc_login_path = _prefixed(url_for(
+                provider.login_endpoint,
+                next=sanitize_next_path(request.args.get("next"), default=url_for("main.index")),
+            ))
+        template_context = auth_template_context()
+        template_context["auth_supports_username_password"] = local_auth_allowed
         return render_template(
             "login.html",
             base_path=base_path,
-            oidc_login_path=_prefixed(url_for(provider.login_endpoint, next=sanitize_next_path(request.args.get("next"), default=url_for("main.index")))) if not provider.supports_username_password else None,
-            **auth_template_context(),
+            login_form_path=_prefixed(url_for("auth.emergency_login" if emergency_local else "auth.login")),
+            oidc_login_path=oidc_login_path,
+            **template_context,
         )
 
-    if not provider.supports_username_password:
+    if not local_auth_allowed:
         flash(f"{provider.label} is enabled. Internal username/password login is disabled.", "danger")
-        return redirect(_prefixed(url_for(provider.login_endpoint, next=sanitize_next_path(request.args.get("next"), default=url_for("main.index")))))
+        return redirect(_prefixed(url_for(
+            provider.login_endpoint,
+            next=sanitize_next_path(request.args.get("next"), default=url_for("main.index")),
+        )))
 
     username = (request.form.get("username") or "").strip()
     password = request.form.get("password") or ""
     user = auth_db.verify_user(username, password)
     if not user:
         flash("Invalid username/password", "danger")
-        return redirect(_prefixed(url_for("auth.login")))
+        endpoint = "auth.emergency_login" if emergency_local else "auth.login"
+        return redirect(_prefixed(url_for(endpoint)))
 
     session["user_id"] = user["id"]
     session["auth_source"] = "internal"
@@ -151,6 +164,19 @@ def login():
 
     next_url = sanitize_next_path(request.args.get("next"), default=url_for("main.index"))
     return redirect(_prefixed(next_url))
+
+
+@auth_bp.route("/login", methods=["GET", "POST"])
+def login():
+    return _login_response()
+
+
+@auth_bp.route("/__login__", methods=["GET", "POST"])
+def emergency_login():
+    provider = get_active_auth_provider()
+    if provider.is_internal or not provider.supports_username_password:
+        abort(404)
+    return _login_response(emergency_local=True)
 
 
 @auth_bp.route("/logout", methods=["GET", "POST"])

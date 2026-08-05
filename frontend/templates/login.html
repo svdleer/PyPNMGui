@@ -95,7 +95,7 @@
                 </ul>
                 <div class="tab-content">
                     <div class="tab-pane fade show active" id="local-panel">
-                        <form method="post" action="[[ base_path ]]/login">
+                        <form method="post" action="[[ login_form_path ]]">
                             <div class="mb-3"><label class="form-label">Username</label><input name="username" class="form-control" autocomplete="username" required></div>
                             <div class="mb-4"><label class="form-label">Password</label><input name="password" type="password" class="form-control" autocomplete="current-password" required></div>
                             <button type="submit" class="btn btn-primary w-100 py-2">Login</button>
@@ -107,7 +107,7 @@
                     </div>
                 </div>
             {% elif auth_supports_username_password %}
-                <form method="post" action="[[ base_path ]]/login">
+                <form method="post" action="[[ login_form_path ]]">
                     <div class="mb-3"><label class="form-label">Username</label><input name="username" class="form-control" autocomplete="username" required></div>
                     <div class="mb-4"><label class="form-label">Password</label><input name="password" type="password" class="form-control" autocomplete="current-password" required></div>
                     <button type="submit" class="btn btn-primary w-100 py-2">Login</button>

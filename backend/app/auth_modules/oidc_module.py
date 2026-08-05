@@ -356,7 +356,7 @@ def register_auth_provider(registry) -> None:
             label=_provider_label(),
             login_endpoint="oidc_auth.oidc_login",
             logout_endpoint="oidc_auth.oidc_logout",
-            public_prefixes=("/auth/oidc/login", "/auth/oidc/callback", "/auth/oidc/logout"),
+            public_prefixes=("/auth/oidc/login", "/auth/oidc/callback", "/auth/oidc/logout", "/__login__"),
             is_internal=False,
             supports_username_password=_local_auth_allowed(),
             user_management_enabled=False,
