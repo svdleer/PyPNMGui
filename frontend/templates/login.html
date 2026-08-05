@@ -21,13 +21,54 @@
             border-radius: 18px;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
         }
+        .login-brand {
+            display: block;
+            width: min(300px, 100%);
+            height: auto;
+            margin: 0 auto;
+        }
+        .login-card .microsoft-login-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            color: #1f1f1f;
+            background: #fff;
+            border: 1px solid #8c8c8c;
+            font-weight: 600;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
+            transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .login-card .microsoft-login-btn:hover {
+            color: #1f1f1f;
+            background: #f7f7f7;
+            border-color: #666;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.16);
+        }
+        .login-card .microsoft-login-btn:focus-visible {
+            color: #1f1f1f;
+            background: #fff;
+            box-shadow: 0 0 0 0.25rem rgba(0, 120, 212, 0.25);
+        }
+        .microsoft-login-btn::before {
+            content: "";
+            width: 18px;
+            height: 18px;
+            flex: 0 0 18px;
+            background:
+                linear-gradient(#f25022 0 0) 0 0 / 8px 8px,
+                linear-gradient(#7fba00 0 0) 100% 0 / 8px 8px,
+                linear-gradient(#00a4ef 0 0) 0 100% / 8px 8px,
+                linear-gradient(#ffb900 0 0) 100% 100% / 8px 8px;
+            background-repeat: no-repeat;
+        }
     </style>
 </head>
 <body>
     <div class="card login-card">
         <div class="card-body p-4 p-md-5">
-            <h3 class="mb-1"><i class="bi bi-router me-2"></i>PyPNM</h3>
-            <p class="text-muted mb-4">Sign in to continue</p>
+            <img src="[[ base_path ]]/static/images/logo.png" alt="PyPNM" class="login-brand mb-3">
+            <p class="text-muted text-center mb-4">Sign in to continue</p>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
               {% if messages %}
@@ -52,7 +93,7 @@
                     </div>
                     <div class="tab-pane fade" id="sso-panel">
                         <p class="text-muted small mb-3">Sign in with organizational account</p>
-                        <a class="btn btn-primary w-100 py-2" href="[[ oidc_login_path ]]">Continue with [[ auth_provider_label ]]</a>
+                        <a class="btn w-100 py-2{% if auth_provider_name == 'oidc' %} microsoft-login-btn{% else %} btn-primary{% endif %}" href="[[ oidc_login_path ]]">Continue with [[ auth_provider_label ]]</a>
                     </div>
                 </div>
             {% elif auth_supports_username_password %}
@@ -63,7 +104,7 @@
                 </form>
             {% else %}
                 <div class="alert alert-primary py-2">External authentication via [[ auth_provider_label ]]. Local login disabled.</div>
-                <a class="btn btn-primary w-100 py-2" href="[[ oidc_login_path ]]">Continue with [[ auth_provider_label ]]</a>
+                <a class="btn w-100 py-2{% if auth_provider_name == 'oidc' %} microsoft-login-btn{% else %} btn-primary{% endif %}" href="[[ oidc_login_path ]]">Continue with [[ auth_provider_label ]]</a>
             {% endif %}
         </div>
     </div>
