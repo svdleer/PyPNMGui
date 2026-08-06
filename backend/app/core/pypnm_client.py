@@ -574,11 +574,10 @@ class PyPNMClient:
         
         Endpoint: POST /docs/pnm/ds/spectrumAnalyzer/getCapture
         """
-        # Default to 993 MHz (std DOCSIS 3.1). Caller may pass a higher value
-        # for ESD/D4.0 modems (e.g. 1218 MHz, 1794 MHz) — modem rejects values
-        # it doesn't support so this must come from diplexer discovery.
+        # Default to the 1850 MHz extended-spectrum upper boundary. Callers may
+        # still provide a modem-specific value discovered from channel data.
         if last_segment_center_freq_hz <= 0:
-            last_segment_center_freq_hz = 993_000_000
+            last_segment_center_freq_hz = 1_850_000_000
         payload = {
             "cable_modem": {
                 "mac_address": mac_address,

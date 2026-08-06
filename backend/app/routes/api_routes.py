@@ -747,6 +747,7 @@ def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> d
                     'ofdma_channel_count': m.get('ofdma_channel_count'),
                     'docsis_version': m.get('docsis_version') or '',
                     'vendor': m.get('vendor') or '',
+                    'model': m.get('model') or '',
                 }
     return out
 
@@ -761,12 +762,13 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
 
     topo = _topology_fields_by_mac([m.get("mac_address") for m in modems if isinstance(m, dict)])
 
-    # Backfill fiber_node / cable_mac / ofdm(a)_enabled / docsis_version from
+    # Backfill fiber_node, cable_mac, capability, and identity fields from
     # modem_inventory_current when missing or when cache data represents a
     # lower capability. Modem capability cannot downgrade in place.
     inv: dict[str, dict] = {}
     need_inv = [m for m in modems if isinstance(m, dict) and (
         not m.get("fiber_node")
+        or _identity_value_missing(m.get("model"))
         or m.get("ofdm_enabled") is None
         or m.get("ofdma_enabled") is None
         or _docsis_version_rank(m.get("docsis_version")) < 31
@@ -824,6 +826,8 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
                 m["upstream_interface"] = incoming_interface
             if not m.get("vendor") and iv.get("vendor"):
                 m["vendor"] = iv["vendor"]
+            if _identity_value_missing(m.get("model")) and not _identity_value_missing(iv.get("model")):
+                m["model"] = iv["model"]
         _normalize_modem_capability(m, iv)
     return modems
 
@@ -1438,6 +1442,14 @@ def get_cmts_modems(cmts_name):
     if not request.args.get('modem_community'):
         logger.warning("modem_community not provided for %s — using configured default", cmts_name)
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+    # Some consumers (notably the Fiber Node modem selector) can use a
+    # non-empty cached inventory even when an older agent cannot prove that
+    # every source OID walk completed. Full inventory searches keep the strict
+    # completeness requirement.
+    allow_partial_cache = (
+        request.args.get('allow_partial', 'false').lower() == 'true'
+        and not enrich
+    )
     
     try:
         # CMTSProvider returns 'IPAddress' from appdb format
@@ -1496,14 +1508,24 @@ def get_cmts_modems(cmts_name):
                         )
 
                     # Never serve a cache that does not cover the requested
-                    # inventory footprint. Enrichment quality matters only when
-                    # enrichment was requested.
-                    if cache_limit_mismatch or (enrich and cache_needs_enrich):
+                    # inventory footprint unless the caller explicitly accepts
+                    # a non-empty partial inventory. Enrichment quality matters
+                    # only when enrichment was requested.
+                    serve_partial_cache = allow_partial_cache and cached_count > 0
+                    if (
+                        (cache_limit_mismatch and not serve_partial_cache)
+                        or (enrich and cache_needs_enrich)
+                    ):
                         logger.info(
                             f"Bypassing Redis cache for {cmts_name} "
                             f"(partial={cache_limit_mismatch}, needs_enrich={cache_needs_enrich})"
                         )
                         raise RuntimeError("bypass-redis-incomplete-cache")
+                    if serve_partial_cache and cache_limit_mismatch:
+                        logger.info(
+                            f"Serving accepted partial Redis cache for {cmts_name}: "
+                            f"cached_count={cached_count}, requested_limit={limit}"
+                        )
 
                     # Guard against stale/partial empty cache loops.
                     # If Redis has 0 rows while marked partial/non-enriched, returning it causes

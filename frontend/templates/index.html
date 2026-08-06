@@ -3026,16 +3026,28 @@
                                     <option value="">All Taps</option>
                                     <option v-for="tap in fnScanUniqueSelectorTaps" :key="tap" :value="tap">{{ tap }}</option>
                                 </select>
+                                <select v-model="fnScanSelectorFilterDocsis" class="form-select form-select-sm" style="min-width:110px;max-width:140px;">
+                                    <option value="">All DOCSIS</option>
+                                    <option v-for="version in fnScanUniqueSelectorDocsisVersions" :key="version" :value="version">{{ version }}</option>
+                                </select>
+                                <select v-model="fnScanSelectorFilterVendor" class="form-select form-select-sm" style="min-width:110px;max-width:170px;">
+                                    <option value="">All Vendors</option>
+                                    <option v-for="vendor in fnScanUniqueSelectorVendors" :key="vendor" :value="vendor">{{ vendor }}</option>
+                                </select>
+                                <select v-model="fnScanSelectorFilterType" class="form-select form-select-sm" style="min-width:110px;max-width:180px;" title="Modem type/model when known">
+                                    <option value="">All Types</option>
+                                    <option v-for="type in fnScanUniqueSelectorTypes" :key="type" :value="type">{{ type }}</option>
+                                </select>
                                 <select v-model="fnScanSelectorFilterImpairment" class="form-select form-select-sm" style="min-width:140px;max-width:190px;">
                                     <option value="">All OFDM/OFDMA</option>
                                     <option value="impaired_ofdma">Impaired OFDMA</option>
                                     <option value="impaired_ofdm">Impaired OFDM</option>
                                     <option value="impaired_any">Impaired OFDM + OFDMA</option>
                                 </select>
-                                <input v-model="fnScanModemSearch" class="form-control form-control-sm" placeholder="MAC / IP…" style="min-width:120px;max-width:180px;" />
-                                <button v-if="fnScanSelectorFilterFn || fnScanSelectorFilterCableMac || fnScanSelectorFilterGroupAmp || fnScanSelectorFilterEndAmp || fnScanSelectorFilterTap || fnScanSelectorFilterImpairment || fnScanModemSearch"
+                                <input v-model="fnScanModemSearch" class="form-control form-control-sm" placeholder="MAC / IP / model…" style="min-width:120px;max-width:180px;" />
+                                <button v-if="fnScanHasSelectorFilters"
                                         class="btn btn-sm btn-outline-secondary" title="Clear filters"
-                                        @click="fnScanSelectorFilterFn=''; fnScanSelectorFilterCableMac=''; fnScanSelectorFilterGroupAmp=''; fnScanSelectorFilterEndAmp=''; fnScanSelectorFilterTap=''; fnScanSelectorFilterImpairment=''; fnScanModemSearch=''">
+                                        @click="clearFnScanSelectorFilters">
                                     <i class="bi bi-x-lg"></i>
                                 </button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @click="fnScanSelectAllVisibleModems" :disabled="!fnScanCandidateModems.length">Select visible</button>

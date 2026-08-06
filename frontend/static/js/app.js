@@ -218,6 +218,9 @@ createApp({
             fnScanSelectorFilterGroupAmp: '',
             fnScanSelectorFilterEndAmp: '',
             fnScanSelectorFilterTap: '',
+            fnScanSelectorFilterDocsis: '',
+            fnScanSelectorFilterVendor: '',
+            fnScanSelectorFilterType: '',
             fnScanSelectorFilterImpairment: '',
             fnScanTopologyBridgeNodeId: '',
             fnScanExpectedServingGroup: '',
@@ -769,6 +772,38 @@ createApp({
             return [...new Set(vals)].sort();
         },
 
+        fnScanUniqueSelectorDocsisVersions() {
+            const vals = this.fnScanBaseModems.map(m => this.fnSelectorDocsisValue(m));
+            return [...new Set(vals)].sort((a, b) =>
+                this.docsisVersionRank(b) - this.docsisVersionRank(a) || a.localeCompare(b)
+            );
+        },
+
+        fnScanUniqueSelectorVendors() {
+            const vals = this.fnScanBaseModems.map(m => this.fnSelectorVendorValue(m));
+            return [...new Set(vals)].sort((a, b) => a.localeCompare(b));
+        },
+
+        fnScanUniqueSelectorTypes() {
+            const vals = this.fnScanBaseModems.map(m => this.fnSelectorTypeValue(m));
+            return [...new Set(vals)].sort((a, b) => a.localeCompare(b));
+        },
+
+        fnScanHasSelectorFilters() {
+            return [
+                this.fnScanSelectorFilterFn,
+                this.fnScanSelectorFilterCableMac,
+                this.fnScanSelectorFilterGroupAmp,
+                this.fnScanSelectorFilterEndAmp,
+                this.fnScanSelectorFilterTap,
+                this.fnScanSelectorFilterDocsis,
+                this.fnScanSelectorFilterVendor,
+                this.fnScanSelectorFilterType,
+                this.fnScanSelectorFilterImpairment,
+                this.fnScanModemSearch,
+            ].some(value => String(value || '').trim());
+        },
+
         fnScanDominantNodeId() {
             const freq = {};
             for (const m of this.fnScanBaseModems) {
@@ -851,6 +886,15 @@ createApp({
             const filterTap = this.fnScanUniqueSelectorTaps.includes(this.fnScanSelectorFilterTap)
                 ? this.fnScanSelectorFilterTap
                 : '';
+            const filterDocsis = this.fnScanUniqueSelectorDocsisVersions.includes(this.fnScanSelectorFilterDocsis)
+                ? this.fnScanSelectorFilterDocsis
+                : '';
+            const filterVendor = this.fnScanUniqueSelectorVendors.includes(this.fnScanSelectorFilterVendor)
+                ? this.fnScanSelectorFilterVendor
+                : '';
+            const filterType = this.fnScanUniqueSelectorTypes.includes(this.fnScanSelectorFilterType)
+                ? this.fnScanSelectorFilterType
+                : '';
             const validImpairmentFilters = new Set(['impaired_ofdma', 'impaired_ofdm', 'impaired_any']);
             const filterImpairment = validImpairmentFilters.has(this.fnScanSelectorFilterImpairment)
                 ? this.fnScanSelectorFilterImpairment
@@ -870,6 +914,9 @@ createApp({
                     if (filterGa && this.formatTopologyGroupAmplifier(m.topology_group_amplifier) !== filterGa) return false;
                     if (filterEa && this.formatTopologyEndAmplifier(m.topology_end_amplifier) !== filterEa) return false;
                     if (filterTap && this.formatTopologyTap(m.topology_tap) !== filterTap) return false;
+                    if (filterDocsis && this.fnSelectorDocsisValue(m) !== filterDocsis) return false;
+                    if (filterVendor && this.fnSelectorVendorValue(m) !== filterVendor) return false;
+                    if (filterType && this.fnSelectorTypeValue(m) !== filterType) return false;
                     if (filterImpairment) {
                         const ofdmImpaired = this.isDirectionalPartialService(m, 'downstream');
                         const ofdmaImpaired = this.isDirectionalPartialService(m, 'upstream');
@@ -882,6 +929,7 @@ createApp({
                         (m.mac_address || '').toLowerCase().includes(q) ||
                         (m.ip_address || '').toLowerCase().includes(q) ||
                         (m.vendor || '').toLowerCase().includes(q) ||
+                        (m.model || '').toLowerCase().includes(q) ||
                         (m.docsis_version || '').toLowerCase().includes(q) ||
                         (m.upstream_interface || '').toLowerCase().includes(q) ||
                         (m.fiber_node || '').toLowerCase().includes(q) ||
@@ -2132,6 +2180,33 @@ createApp({
             if (raw.includes('3.1')) return '3.1';
             if (raw.includes('3.0')) return '3.0';
             return raw;
+        },
+
+        fnSelectorDocsisValue(modem) {
+            return this.fnDocsisShortLabel(this.resolveDocsisVersion(modem, 'Unknown')) || 'Unknown';
+        },
+
+        fnSelectorVendorValue(modem) {
+            const label = this.fnVendorShortLabel(modem?.vendor);
+            return label === '—' || this._isIdentityPlaceholder(label) ? 'Unknown' : label;
+        },
+
+        fnSelectorTypeValue(modem) {
+            const model = String(modem?.model || '').trim();
+            return this._isIdentityPlaceholder(model) ? 'Unknown' : model;
+        },
+
+        clearFnScanSelectorFilters() {
+            this.fnScanSelectorFilterFn = '';
+            this.fnScanSelectorFilterCableMac = '';
+            this.fnScanSelectorFilterGroupAmp = '';
+            this.fnScanSelectorFilterEndAmp = '';
+            this.fnScanSelectorFilterTap = '';
+            this.fnScanSelectorFilterDocsis = '';
+            this.fnScanSelectorFilterVendor = '';
+            this.fnScanSelectorFilterType = '';
+            this.fnScanSelectorFilterImpairment = '';
+            this.fnScanModemSearch = '';
         },
 
         formatTopologyGroupAmplifier(value) {
@@ -5437,11 +5512,8 @@ createApp({
             this._destroyFiberNodeImpulseCharts();
             this.fnScanChannels       = [];
             this.fnScanFiberNodes     = [];
-            this.fnScanModemSearch    = '';
+            this.clearFnScanSelectorFilters();
             this.fnScanSelectedModemMacs = [];
-            this.fnScanSelectorFilterFn = '';
-            this.fnScanSelectorFilterCableMac = '';
-            this.fnScanSelectorFilterImpairment = '';
             this.fnScanExpectedServingGroup = '';
             this.modems              = [];
             await this.loadFnScanChannels();
@@ -5514,12 +5586,9 @@ createApp({
             } else {
                 this.fnScanExtraIfindices = [];
             }
-            // Reset selector because FN context changed
-            this.fnScanModemSearch = '';
+            // Reset selector because FN context changed.
+            this.clearFnScanSelectorFilters();
             this.fnScanSelectedModemMacs = [];
-            // Keep titlebar sub-filters explicit (All by default)
-            this.fnScanSelectorFilterFn = '';
-            this.fnScanSelectorFilterCableMac = '';
         },
 
         selectFnFiberNode2(fn) {
@@ -5680,7 +5749,7 @@ createApp({
                 // (vendor/firmware/sysDescr per modem) is too slow on large CMTSes.
                 // Only append refresh=true when explicitly requested (liveSnmp) to avoid
                 // triggering a full SNMP walk on every fiber node selection.
-                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=${CM_MODEM_LIMIT}&enrich=false${liveSnmp ? '&refresh=true' : ''}`;
+                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=${CM_MODEM_LIMIT}&enrich=false&allow_partial=true${liveSnmp ? '&refresh=true' : ''}`;
 
                 let resp = await fetch(`${API_BASE}/cmts/${encodeURIComponent(cmtsRef)}/modems?${q}`);
                 if (resp.status === 404) {
@@ -7322,11 +7391,11 @@ createApp({
                     output_type: this.pnmOutputType
                 };
 
-                // For DS spectrum: pass the modem's actual max DS frequency so
-                // ESD/D4.0 modems (>993 MHz) are captured up to their real upper band.
-                // Infer from OFDM channel data already loaded in channel-stats.
+                // For DS spectrum: use the 1850 MHz extended-spectrum upper
+                // boundary while still allowing discovered channel data to
+                // confirm the modem's actual upper band.
                 if (measurementType === 'spectrum') {
-                    let maxFreqHz = 993_000_000; // DOCSIS 3.1 default
+                    let maxFreqHz = 1_850_000_000;
                     try {
                         const ofdmChs = this.channelStats?.downstream?.ofdm?.channels || [];
                         for (const ch of ofdmChs) {
@@ -7336,9 +7405,9 @@ createApp({
                             const endHz = plcHz + bwHz / 2;
                             if (endHz > maxFreqHz) maxFreqHz = endHz;
                         }
-                        // Round down to nearest MHz and keep inside supported range.
+                        // Round down to nearest MHz and keep the configured floor.
                         maxFreqHz = Math.floor(maxFreqHz / 1e6) * 1e6;
-                        if (maxFreqHz < 993_000_000) maxFreqHz = 993_000_000;
+                        if (maxFreqHz < 1_850_000_000) maxFreqHz = 1_850_000_000;
                     } catch (e) { /* ignore; fallback stays */ }
                     payload.last_segment_center_freq_hz = maxFreqHz;
                 }
