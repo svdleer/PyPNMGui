@@ -142,44 +142,307 @@ body.pypnm-brand-skin #app-footer .text-muted {
     color: rgba(255, 255, 255, .78) !important;
 }
 body.pypnm-brand-skin.pypnm-login {
+    display: block;
+    min-height: 100vh;
+    background: var(--pypnm-purple-deep);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-background {
+    position: relative;
+    isolation: isolate;
+    min-height: 100vh;
+    overflow: hidden;
     background:
         radial-gradient(circle at 12% 14%, rgba(243, 111, 33, .28), transparent 25rem),
         radial-gradient(circle at 88% 84%, rgba(142, 31, 120, .22), transparent 30rem),
         linear-gradient(135deg, var(--pypnm-purple-deep) 0%, var(--pypnm-purple) 48%, #72156e 100%);
 }
 
+body.pypnm-brand-skin.pypnm-login .brand-login-grid {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    opacity: .7;
+    pointer-events: none;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .055) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-orb {
+    position: absolute;
+    z-index: -1;
+    border-radius: 50%;
+    pointer-events: none;
+    filter: blur(1px);
+    animation: pypnm-brand-float 9s ease-in-out infinite;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-orb-left {
+    top: 34%;
+    left: -7rem;
+    width: 18rem;
+    height: 18rem;
+    background: rgba(251, 146, 60, .2);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-orb-right {
+    top: -5rem;
+    right: -9rem;
+    width: 24rem;
+    height: 24rem;
+    background: rgba(240, 171, 252, .15);
+    animation-delay: -3s;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.08fr) minmax(27rem, .92fr);
+    width: 100%;
+    max-width: 92.5rem;
+    min-height: 100vh;
+    margin: 0 auto;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-intro {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 4rem 5rem;
+    color: #fff;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-logo-shell {
+    display: inline-flex;
+    width: fit-content;
+    max-width: 36rem;
+    padding: 1.15rem 1.5rem;
+    border: 1px solid rgba(255, 255, 255, .15);
+    border-radius: 1rem;
+    background: rgba(38, 0, 61, .4);
+    box-shadow: 0 20px 42px rgba(38, 0, 61, .3);
+    backdrop-filter: blur(14px);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-logo {
+    display: block;
+    width: 100%;
+    max-width: 34rem;
+    height: auto;
+    object-fit: contain;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-copy {
+    max-width: 42rem;
+    padding-bottom: 2rem;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-copy h1 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(3rem, 4.4vw, 4.15rem);
+    font-weight: 650;
+    line-height: 1.08;
+    letter-spacing: -.035em;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-copy h1 span {
+    color: var(--pypnm-orange-light);
+    background: linear-gradient(90deg, #fdba74, var(--pypnm-orange-light), #fde68a);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-copy p {
+    max-width: 38rem;
+    margin: 1.75rem 0 0;
+    color: rgba(243, 232, 255, .9);
+    font-size: 1.1rem;
+    line-height: 1.75;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-features {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    margin-top: 2.25rem;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-features span {
+    padding: .55rem 1rem;
+    border: 1px solid rgba(255, 255, 255, .15);
+    border-radius: 999px;
+    color: #faf5ff;
+    background: rgba(255, 255, 255, .1);
+    font-size: .875rem;
+    font-weight: 600;
+    backdrop-filter: blur(10px);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-copyright,
+body.pypnm-brand-skin.pypnm-login .brand-login-mobile-copyright {
+    margin: 0;
+    color: rgba(233, 213, 255, .8);
+    font-size: .85rem;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-access {
+    display: flex;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 5rem;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-mobile-logo,
+body.pypnm-brand-skin.pypnm-login .brand-login-mobile-copyright {
+    display: none;
+}
+
 body.pypnm-brand-skin.pypnm-login .login-card {
     position: relative;
+    width: 100%;
+    max-width: 31rem;
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, .7);
+    border-radius: 1.75rem;
+    background: #fff;
     box-shadow: 0 28px 80px rgba(31, 0, 48, .3), 0 3px 16px rgba(31, 0, 48, .12);
 }
 
-body.pypnm-brand-skin.pypnm-login .login-card::before {
-    content: "";
-    display: block;
+body.pypnm-brand-skin.pypnm-login .brand-login-accent {
     height: .4rem;
     background: linear-gradient(90deg, var(--pypnm-purple), var(--pypnm-magenta), var(--pypnm-orange));
 }
 
-body.pypnm-brand-skin.pypnm-login .login-brand-panel {
-    background: linear-gradient(135deg, var(--pypnm-purple-deep), var(--pypnm-purple) 65%, #72156e);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 8px 20px rgba(38, 0, 61, .24);
+body.pypnm-brand-skin.pypnm-login .brand-login-eyebrow {
+    margin: 0 0 .65rem;
+    color: #ea580c;
+    font-size: .75rem;
+    font-weight: 800;
+    letter-spacing: .2em;
+    text-transform: uppercase;
 }
 
-body.pypnm-brand-skin.pypnm-login .btn-primary {
+body.pypnm-brand-skin.pypnm-login .brand-login-title {
+    margin: 0;
+    color: #0f172a;
+    font-size: 2.15rem;
+    font-weight: 650;
+    letter-spacing: -.025em;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-subtitle {
+    margin: .75rem 0 2rem;
+    color: #64748b;
+    font-size: .95rem;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-field-shell {
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    border-radius: .75rem;
+    background: #f8fafc;
+    transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-field-shell:focus-within {
+    border-color: var(--pypnm-purple);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(75, 18, 107, .12);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-field-shell .bi {
+    padding-left: 1rem;
+    color: #94a3b8;
+    font-size: 1.1rem;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-field-shell .form-control {
+    border: 0;
+    padding: .85rem .9rem;
+    background: transparent;
+    box-shadow: none;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-submit {
     border-color: var(--pypnm-orange) !important;
+    border-radius: .75rem;
     background: linear-gradient(110deg, var(--pypnm-orange), var(--pypnm-orange-light)) !important;
     box-shadow: 0 12px 24px rgba(243, 111, 33, .26);
+    transition: transform .2s ease, box-shadow .2s ease, filter .2s ease;
 }
 
-body.pypnm-brand-skin.pypnm-login .nav-link.active {
-    border-top-color: var(--pypnm-purple);
-    color: var(--pypnm-purple) !important;
+body.pypnm-brand-skin.pypnm-login .brand-login-submit:hover {
+    filter: saturate(1.08) brightness(1.03);
+    box-shadow: 0 15px 30px rgba(243, 111, 33, .34);
+    transform: translateY(-1px);
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-divider {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin: 1.5rem 0;
+    color: #94a3b8;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+body.pypnm-brand-skin.pypnm-login .brand-login-divider::before,
+body.pypnm-brand-skin.pypnm-login .brand-login-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #e2e8f0;
 }
 
 body.pypnm-brand-skin.pypnm-login .microsoft-login-btn {
+    border: 1px solid #cbd5e1;
+    border-radius: .75rem;
     color: #1f1f1f !important;
+    background: #fff;
+}
+
+@keyframes pypnm-brand-float {
+    0%, 100% { transform: translate3d(0, 0, 0); }
+    50% { transform: translate3d(0, -14px, 0); }
+}
+
+@media (max-width: 991.98px) {
+    body.pypnm-brand-skin.pypnm-login .brand-login-layout {
+        display: block;
+    }
+
+    body.pypnm-brand-skin.pypnm-login .brand-login-intro {
+        display: none;
+    }
+
+    body.pypnm-brand-skin.pypnm-login .brand-login-access {
+        flex-direction: column;
+        gap: 1.5rem;
+        padding: 2rem 1rem;
+    }
+
+    body.pypnm-brand-skin.pypnm-login .brand-login-mobile-logo,
+    body.pypnm-brand-skin.pypnm-login .brand-login-mobile-copyright {
+        display: block;
+    }
+
+    body.pypnm-brand-skin.pypnm-login .brand-login-mobile-logo {
+        width: min(24rem, 100%);
+    }
+
+    body.pypnm-brand-skin.pypnm-login .brand-login-mobile-logo .brand-login-logo-shell {
+        width: 100%;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
