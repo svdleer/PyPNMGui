@@ -24,6 +24,9 @@
     <link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
     <!-- Custom CSS -->
     <link href="[[ base_path ]]/static/css/style.css" rel="stylesheet">
+    {% if brand_enabled %}
+    <link href="[[ base_path ]]/static/css/brand-skin.css" rel="stylesheet">
+    {% endif %}
     <style>
         :root {
             --app-footer-height: 32px;
@@ -37,12 +40,12 @@
         }
     </style>
 </head>
-<body>
-    <div id="app">
+<body class="pypnm-app-shell{% if brand_enabled %} pypnm-brand-skin{% endif %}" data-ui-skin="[[ ui_skin ]]">
+    <div id="app" class="pypnm-app-main">
         <!-- Navigation -->
-        <nav class="navbar navbar-expand-lg navbar-dark bg-primary py-0 navbar-compact">
+        <nav class="pypnm-app-header pypnm-app-nav navbar navbar-expand-lg navbar-dark bg-primary py-0 navbar-compact">
             <div class="container-fluid">
-            <a class="navbar-brand py-1" href="#" @click.prevent="currentView = 'home'">
+            <a class="pypnm-brand navbar-brand py-1" href="#" @click.prevent="currentView = 'home'">
                     <img
                         src="[[ base_path ]]/static/images/logo.png"
                         alt=""

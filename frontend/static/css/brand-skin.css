@@ -1,0 +1,201 @@
+/* Optional PyPNM purple/orange brand skin. Every rule is body-scoped. */
+body.pypnm-brand-skin {
+    --pypnm-purple: #4b126b;
+    --pypnm-purple-deep: #26003d;
+    --pypnm-magenta: #8e1f78;
+    --pypnm-orange: #f36f21;
+    --pypnm-orange-light: #ff9d3f;
+    --primary-color: #4b126b;
+    --pnm-cmts-accent: #4b126b;
+    --pnm-cable-accent: #8e1f78;
+    --pnm-fiber-accent: #f36f21;
+    --app-footer-background: linear-gradient(110deg, #26003d, #4b126b);
+    --app-footer-border: 1px solid rgba(255, 255, 255, .12);
+    --app-footer-color: rgba(255, 255, 255, .78);
+    --app-footer-shadow: 0 -8px 24px rgba(38, 0, 61, .16);
+    background: #f7f4f9;
+    color: #1f2937;
+}
+
+body.pypnm-brand-skin::before,
+body.pypnm-brand-skin::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+}
+
+body.pypnm-brand-skin::before {
+    z-index: 0;
+    background:
+        radial-gradient(circle at 8% 10%, rgba(243, 111, 33, .14), transparent 25rem),
+        radial-gradient(circle at 92% 85%, rgba(142, 31, 120, .13), transparent 30rem),
+        linear-gradient(145deg, #faf8fb 0%, #f5f0f8 52%, #fff8f3 100%);
+}
+
+body.pypnm-brand-skin::after {
+    z-index: 0;
+    opacity: .35;
+    background-image:
+        linear-gradient(rgba(75, 18, 107, .05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(75, 18, 107, .05) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+body.pypnm-brand-skin .pypnm-app-main,
+body.pypnm-brand-skin .pypnm-app-footer,
+body.pypnm-brand-skin #app {
+    position: relative;
+    z-index: 1;
+}
+
+body.pypnm-brand-skin .pypnm-app-header {
+    position: sticky;
+    z-index: 1030;
+    border-bottom: 1px solid rgba(255, 255, 255, .14);
+    background: linear-gradient(110deg, var(--pypnm-purple-deep), var(--pypnm-purple) 55%, #72156e) !important;
+    box-shadow: 0 12px 32px rgba(38, 0, 61, .24) !important;
+}
+
+body.pypnm-brand-skin .pypnm-app-nav .pypnm-brand {
+    border-right-color: rgba(255, 255, 255, .22);
+}
+
+body.pypnm-brand-skin .pypnm-app-nav .navbar-logo {
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .24));
+}
+
+body.pypnm-brand-skin .pypnm-app-nav .nav-link {
+    color: rgba(255, 255, 255, .74) !important;
+    border-bottom: 2px solid transparent;
+    transition: color .2s ease, border-color .2s ease;
+}
+
+body.pypnm-brand-skin .pypnm-app-nav .nav-link:hover,
+body.pypnm-brand-skin .pypnm-app-nav .nav-link.active {
+    color: #fff !important;
+    border-bottom-color: var(--pypnm-orange-light);
+}
+
+body.pypnm-brand-skin .pypnm-app-nav .btn-light {
+    border-color: rgba(255, 255, 255, .3);
+    background: rgba(255, 255, 255, .94);
+    color: var(--pypnm-purple-deep);
+}
+
+body.pypnm-brand-skin .pypnm-app-nav .dropdown-menu {
+    border: 1px solid rgba(75, 18, 107, .12);
+    box-shadow: 0 14px 36px rgba(38, 0, 61, .18);
+}
+body.pypnm-brand-skin .card {
+    border: 1px solid rgba(75, 18, 107, .09);
+    background-color: rgba(255, 255, 255, .96);
+    box-shadow: 0 10px 28px rgba(38, 0, 61, .08);
+}
+
+body.pypnm-brand-skin .card-header,
+body.pypnm-brand-skin .ofdmstats-subhead,
+body.pypnm-brand-skin .pnm-card-header {
+    border-bottom-color: rgba(75, 18, 107, .12);
+    background: rgba(247, 244, 249, .95) !important;
+}
+
+body.pypnm-brand-skin .modem-header-card {
+    background: linear-gradient(110deg, var(--pypnm-purple), var(--pypnm-magenta), var(--pypnm-orange)) !important;
+}
+
+body.pypnm-brand-skin .btn-primary,
+body.pypnm-brand-skin .bg-primary {
+    border-color: var(--pypnm-purple) !important;
+    background-color: var(--pypnm-purple) !important;
+}
+
+body.pypnm-brand-skin .btn-primary:hover,
+body.pypnm-brand-skin .btn-primary:focus {
+    border-color: var(--pypnm-magenta) !important;
+    background-color: var(--pypnm-magenta) !important;
+}
+
+body.pypnm-brand-skin .btn-outline-primary {
+    border-color: var(--pypnm-purple);
+    color: var(--pypnm-purple);
+}
+
+body.pypnm-brand-skin .btn-outline-primary:hover {
+    border-color: var(--pypnm-purple);
+    background: var(--pypnm-purple);
+    color: #fff;
+}
+
+body.pypnm-brand-skin .text-primary,
+body.pypnm-brand-skin a:not(.nav-link):not(.dropdown-item) {
+    color: var(--pypnm-magenta) !important;
+}
+
+body.pypnm-brand-skin .form-control:focus,
+body.pypnm-brand-skin .form-select:focus {
+    border-color: var(--pypnm-purple);
+    box-shadow: 0 0 0 .2rem rgba(75, 18, 107, .14);
+}
+
+body.pypnm-brand-skin #app-footer .text-muted {
+    color: rgba(255, 255, 255, .78) !important;
+}
+body.pypnm-brand-skin.pypnm-login {
+    background:
+        radial-gradient(circle at 12% 14%, rgba(243, 111, 33, .28), transparent 25rem),
+        radial-gradient(circle at 88% 84%, rgba(142, 31, 120, .22), transparent 30rem),
+        linear-gradient(135deg, var(--pypnm-purple-deep) 0%, var(--pypnm-purple) 48%, #72156e 100%);
+}
+
+body.pypnm-brand-skin.pypnm-login .login-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .7);
+    box-shadow: 0 28px 80px rgba(31, 0, 48, .3), 0 3px 16px rgba(31, 0, 48, .12);
+}
+
+body.pypnm-brand-skin.pypnm-login .login-card::before {
+    content: "";
+    display: block;
+    height: .4rem;
+    background: linear-gradient(90deg, var(--pypnm-purple), var(--pypnm-magenta), var(--pypnm-orange));
+}
+
+body.pypnm-brand-skin.pypnm-login .login-brand-panel {
+    background: linear-gradient(135deg, var(--pypnm-purple-deep), var(--pypnm-purple) 65%, #72156e);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 8px 20px rgba(38, 0, 61, .24);
+}
+
+body.pypnm-brand-skin.pypnm-login .btn-primary {
+    border-color: var(--pypnm-orange) !important;
+    background: linear-gradient(110deg, var(--pypnm-orange), var(--pypnm-orange-light)) !important;
+    box-shadow: 0 12px 24px rgba(243, 111, 33, .26);
+}
+
+body.pypnm-brand-skin.pypnm-login .nav-link.active {
+    border-top-color: var(--pypnm-purple);
+    color: var(--pypnm-purple) !important;
+}
+
+body.pypnm-brand-skin.pypnm-login .microsoft-login-btn {
+    color: #1f1f1f !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.pypnm-brand-skin *,
+    body.pypnm-brand-skin *::before,
+    body.pypnm-brand-skin *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+    }
+}
+
+body.pypnm-brand-skin #app-footer {
+    border-top: var(--app-footer-border) !important;
+    background: var(--app-footer-background) !important;
+    color: var(--app-footer-color) !important;
+    box-shadow: var(--app-footer-shadow) !important;
+}

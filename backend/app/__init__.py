@@ -155,6 +155,8 @@ def create_app():
         locale = normalize_locale(locale)
         return {
             'enable_topology': enable_topology,
+            'ui_skin': app.config.get('UI_SKIN', 'classic'),
+            'brand_enabled': app.config.get('BRAND_ENABLED', False),
             'current_locale': locale,
             'supported_locales': SUPPORTED_LOCALES,
             't': lambda key, default=None: translate(locale, key, default),

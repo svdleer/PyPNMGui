@@ -52,6 +52,7 @@ services:
       - TZ=Europe/Amsterdam
       - FLASK_ENV=lab
       - PYPNM_MODE=lab
+      - UI_SKIN=${UI_SKIN:-brand}
       - PYPNM_BASE_URL=http://localhost:8000
       - REDIS_HOST=localhost
       - REDIS_PORT=6379

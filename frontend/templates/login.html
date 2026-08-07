@@ -71,8 +71,11 @@
             background-repeat: no-repeat;
         }
     </style>
+    {% if brand_enabled %}
+    <link href="[[ base_path ]]/static/css/brand-skin.css" rel="stylesheet">
+    {% endif %}
 </head>
-<body>
+<body class="pypnm-login{% if brand_enabled %} pypnm-brand-skin{% endif %}" data-ui-skin="[[ ui_skin ]]">
     <div class="card login-card">
         <div class="card-body p-4 p-md-5">
             <div class="login-brand-panel">

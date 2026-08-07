@@ -19,6 +19,11 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
+    # Optional UI skin. Unknown values deliberately fall back to classic.
+    _ui_skin_raw = os.environ.get('UI_SKIN', '').strip().lower()
+    UI_SKIN = 'brand' if _ui_skin_raw in {'brand', 'branded', 'login'} else 'classic'
+    BRAND_ENABLED = UI_SKIN == 'brand'
+
     # Authentication provider.
     # - internal: local username/password accounts from auth_db
     # - oidc: generic OpenID Connect login (Keycloak, Microsoft 365 / Entra ID, etc.)
