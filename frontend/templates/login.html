@@ -146,7 +146,14 @@
         <div class="brand-login-layout">
             <section class="brand-login-intro" aria-labelledby="brand-heading">
                 <div class="brand-login-logo-shell">
+                    {% if logo_available %}
                     <img src="[[ base_path ]]/static/images/logo.png" alt="PyPNM" class="brand-login-logo">
+                    {% else %}
+                    <span class="d-inline-flex align-items-center gap-3 text-white fw-bold fs-1" aria-label="PyPNM">
+                        <span class="d-inline-flex align-items-center justify-content-center rounded-circle border border-light border-opacity-25 p-2"><i class="bi bi-activity" aria-hidden="true"></i></span>
+                        <span>PyPNM</span>
+                    </span>
+                    {% endif %}
                 </div>
                 <div class="brand-login-copy">
                     <h1 id="brand-heading">Cable Modem PNM<br><span>Measurement &amp; Analysis</span></h1>
@@ -163,7 +170,14 @@
             <section class="brand-login-access" aria-labelledby="login-heading">
                 <div class="brand-login-mobile-logo">
                     <div class="brand-login-logo-shell">
+                        {% if logo_available %}
                         <img src="[[ base_path ]]/static/images/logo.png" alt="PyPNM" class="brand-login-logo">
+                        {% else %}
+                        <span class="d-inline-flex align-items-center gap-3 text-white fw-bold fs-1" aria-label="PyPNM">
+                            <span class="d-inline-flex align-items-center justify-content-center rounded-circle border border-light border-opacity-25 p-2"><i class="bi bi-activity" aria-hidden="true"></i></span>
+                            <span>PyPNM</span>
+                        </span>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="card login-card">
@@ -182,8 +196,14 @@
     {% else %}
     <div class="card login-card">
         <div class="card-body p-4 p-md-5">
-            <div class="login-brand-panel">
+            <div class="login-brand-panel text-center">
+                {% if logo_available %}
                 <img src="[[ base_path ]]/static/images/logo.png" alt="PyPNM" class="login-brand">
+                {% else %}
+                <span class="d-inline-flex align-items-center gap-2 text-white fw-bold fs-2" aria-label="PyPNM">
+                    <i class="bi bi-activity" aria-hidden="true"></i><span>PyPNM</span>
+                </span>
+                {% endif %}
             </div>
             <p class="text-muted text-center mb-4">Sign in to continue</p>
             [[ auth_controls(false) ]]

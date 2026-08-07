@@ -46,12 +46,16 @@
         <nav class="pypnm-app-header pypnm-app-nav navbar navbar-expand-lg navbar-dark bg-primary py-0 navbar-compact">
             <div class="container-fluid">
             <a class="pypnm-brand navbar-brand py-1" href="#" @click.prevent="currentView = 'home'">
+                    {% if logo_available %}
                     <img
                         src="[[ base_path ]]/static/images/logo.png"
-                        alt=""
+                        alt="PyPNM"
                         class="navbar-logo"
                         @error="useLogoFallback($event)"
                     >
+                    {% else %}
+                    <span class="d-inline-flex align-items-center gap-2 text-white fw-bold fs-5" aria-label="PyPNM"><i class="bi bi-activity" aria-hidden="true"></i><span>PyPNM</span></span>
+                    {% endif %}
                 </a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                     <span class="navbar-toggler-icon"></span>

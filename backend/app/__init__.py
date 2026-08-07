@@ -157,6 +157,7 @@ def create_app():
             'enable_topology': enable_topology,
             'ui_skin': app.config.get('UI_SKIN', 'classic'),
             'brand_enabled': app.config.get('BRAND_ENABLED', False),
+            'logo_available': os.path.isfile(os.path.join(app.static_folder, 'images', 'logo.png')),
             'current_locale': locale,
             'supported_locales': SUPPORTED_LOCALES,
             't': lambda key, default=None: translate(locale, key, default),
