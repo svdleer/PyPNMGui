@@ -454,6 +454,13 @@ body.pypnm-brand-skin.pypnm-login .microsoft-login-btn {
         scroll-behavior: auto !important;
         transition-duration: .01ms !important;
     }
+
+    /* Keep operational loading indicators visible while honoring reduced motion. */
+    body.pypnm-brand-skin .spinner-border,
+    body.pypnm-brand-skin .spin {
+        animation-duration: 1.5s !important;
+        animation-iteration-count: infinite !important;
+    }
 }
 
 body.pypnm-brand-skin #app-footer {
