@@ -75,6 +75,7 @@ services:
       - TZ=Europe/Amsterdam
       - FLASK_ENV=production
       - PYPNM_MODE=production
+      - UI_SKIN=${UI_SKIN:-brand}
       - PYPNM_BASE_URL=${PYPNM_BASE_URL:-http://localhost:8000}
       # Redis is optional - uncomment if you have Redis running
       # - REDIS_HOST=localhost
