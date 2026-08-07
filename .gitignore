@@ -81,8 +81,7 @@ test_pnm_endpoints.sh
 memories/
 /memories/
 
-# Server-local branding assets (kept out of git)
-frontend/static/images/logo.png
+# Optional server-local fallback branding asset
 frontend/static/images/logo-fallback.png
 
 # Archive (historical/deprecated scripts)
