@@ -682,11 +682,7 @@
             <div class="card shadow-sm">
                 <div class="card-header bg-white d-flex align-items-center gap-2">
                     <strong><i class="bi bi-database me-1"></i>Database</strong>
-                    {% if db_status.backend == 'mysql' %}
-                        <span class="chip" style="background:#dbeafe;color:#1e40af">MySQL</span>
-                    {% else %}
-                        <span class="chip" style="background:#f1f5f9;color:#334155">SQLite</span>
-                    {% endif %}
+                    <span class="chip" style="background:#dbeafe;color:#1e40af">MySQL</span>
                     {% if db_status.connected %}
                         <span class="chip" style="background:#dcfce7;color:#166534">Connected</span>
                     {% else %}
@@ -694,18 +690,10 @@
                     {% endif %}
                 </div>
                 <div class="card-body">
-                    {% if db_status.backend == 'sqlite' %}
-                        <div class="alert alert-warning py-2 mb-3">
-                            <i class="bi bi-exclamation-triangle me-1"></i>
-                            User and API-key management is currently running on local SQLite.
-                            To use shared/persistent authentication across instances, switch to MySQL.
-                        </div>
-                        <div class="small text-muted mb-2">Current SQLite path:</div>
-                        <code>[[ db_status.sqlite_path or 'N/A' ]]</code>
-                    {% elif not db_status.connected %}
+                    {% if not db_status.connected %}
                         <div class="alert alert-danger py-2 mb-3">
                             <i class="bi bi-x-circle me-1"></i>
-                            MySQL is selected but connection failed.
+                            MySQL connection failed.
                             Check host/port/credentials and restart the GUI container.
                             <div class="small mt-1"><code>[[ db_status.error or 'unknown error' ]]</code></div>
                         </div>

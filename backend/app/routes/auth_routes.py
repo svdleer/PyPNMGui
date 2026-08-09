@@ -268,14 +268,16 @@ def admin_page():
     )
 
     # Auth DB status/config panel
-    db_backend = getattr(auth_db, "backend", "sqlite")
+    db_backend = getattr(auth_db, "backend", "mysql")
     db_connected = True
     db_error = None
     try:
         conn = auth_db._connect()
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+        finally:
+            conn.close()
     except Exception as exc:
         db_connected = False
         db_error = str(exc)
@@ -284,7 +286,6 @@ def admin_page():
         "backend": db_backend,
         "connected": db_connected,
         "error": db_error,
-        "sqlite_path": getattr(auth_db, "sqlite_path", None),
         "mysql_host": os.environ.get("AUTH_DB_HOST"),
         "mysql_port": os.environ.get("AUTH_DB_PORT", "3306"),
         "mysql_user": os.environ.get("AUTH_DB_USER"),
@@ -786,7 +787,7 @@ def admin_export_sql():
     lines = [
         "-- PyPNMGui auth export",
         f"-- Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
-        "-- Source backend: " + getattr(auth_db, 'backend', 'sqlite'),
+        "-- Source backend: " + getattr(auth_db, 'backend', 'mysql'),
         "",
         "CREATE DATABASE IF NOT EXISTS `pypnm_auth` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
         "USE `pypnm_auth`;",

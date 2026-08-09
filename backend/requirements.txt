@@ -35,5 +35,5 @@ redis>=5.0.0
 # python-socketio>=5.10.0
 eventlet>=0.35.0
 
-# Optional auth database backend (MySQL)
+# Required MySQL auth database driver
 pymysql>=1.1.1

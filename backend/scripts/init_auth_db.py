@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Initialize and verify the auth database.
+"""Initialize and verify the mandatory MySQL auth database.
 
 Usage:
-  python backend/scripts/init_auth_db.py
+  AUTH_DB_HOST=... AUTH_DB_USER=... AUTH_DB_PASSWORD=... AUTH_DB_NAME=... \
+    python backend/scripts/init_auth_db.py
 
 This script:
   1) creates/updates auth tables
@@ -18,9 +19,6 @@ import importlib.util
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 AUTH_DB_PATH = os.path.join(BACKEND_DIR, "app", "core", "auth_db.py")
-
-if "AUTH_SQLITE_PATH" not in os.environ:
-    os.environ["AUTH_SQLITE_PATH"] = os.path.join(BACKEND_DIR, "data", "auth.db")
 
 spec = importlib.util.spec_from_file_location("auth_db_module", AUTH_DB_PATH)
 if spec is None or spec.loader is None:
