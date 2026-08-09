@@ -3,11 +3,9 @@
 import os
 import re
 import json
-import ipaddress
 import logging
 import time
 import threading
-import uuid
 import uuid
 from datetime import datetime, timezone
 from flask import jsonify, request, current_app, session
@@ -110,108 +108,6 @@ except Exception as e:
     REDIS_AVAILABLE = False
     redis_client = None
     print(f"[WARNING] Redis not available: {e}", flush=True)
-
-
-_CPE_REDIS_KEY = 'cpe:ip-index:v1'
-_CPE_REDIS_TTL = 1800
-_cpe_cache_lock = threading.Lock()
-
-
-def _normalize_cpe_query(value: str) -> dict:
-    query = str(value or '').strip()
-    if not query:
-        raise ValueError('CPE address is required')
-    if ':' in query:
-        try:
-            address = ipaddress.ip_address(query)
-        except ValueError as exc:
-            raise ValueError('Enter a complete valid IPv6 address') from exc
-        if address.version != 6:
-            raise ValueError('Enter a complete valid IPv6 address')
-        return {'family': 'ipv6', 'value': address.compressed, 'prefix': False}
-
-    trailing_dot = query.endswith('.')
-    parts = query[:-1].split('.') if trailing_dot else query.split('.')
-    if not 1 <= len(parts) <= 4 or any(not part.isdigit() for part in parts):
-        raise ValueError('Enter a valid dotted IPv4 address prefix')
-    octets = [int(part) for part in parts]
-    if any(not 0 <= octet <= 255 for octet in octets):
-        raise ValueError('IPv4 prefix octets must be between 0 and 255')
-    if len(octets) == 4 and not trailing_dot:
-        return {'family': 'ipv4', 'value': str(ipaddress.ip_address(query)), 'prefix': False}
-    if len(octets) == 4:
-        raise ValueError('A complete IPv4 address cannot end with a dot')
-    return {
-        'family': 'ipv4',
-        'value': '.'.join(str(o) for o in octets) + '.',
-        'prefix': True,
-    }
-
-
-def warm_cpe_search_cache(force: bool = False) -> bool:
-    """Warm a separate CPE address-to-CM Redis hash from persisted rows."""
-    if not REDIS_AVAILABLE or not redis_client:
-        return False
-    if not force and redis_client.exists(_CPE_REDIS_KEY):
-        return True
-    with _cpe_cache_lock:
-        if not force and redis_client.exists(_CPE_REDIS_KEY):
-            return True
-        response = PyPNMClient().get_inventory_cpe_index(request_timeout=30)
-        rows = response.get('rows') or []
-        if (response.get('status') != 'success'
-                or response.get('truncated') is True
-                or int(response.get('row_count') or 0) != len(rows)):
-            return False
-        grouped: dict[str, set[str]] = {}
-        for row in rows:
-            try:
-                address = ipaddress.ip_address(str(row.get('ip_address') or '')).compressed
-            except ValueError:
-                return False
-            mac = str(row.get('modem_mac') or '').strip().lower()
-            if not mac:
-                return False
-            grouped.setdefault(address, set()).add(mac)
-        temp_key = f'{_CPE_REDIS_KEY}:build:{uuid.uuid4().hex}'
-        pipe = redis_client.pipeline(transaction=False)
-        pipe.hset(temp_key, '__empty__', '[]')
-        for address, macs in grouped.items():
-            pipe.hset(temp_key, address, json.dumps(sorted(macs)))
-        pipe.expire(temp_key, _CPE_REDIS_TTL)
-        pipe.execute()
-        redis_client.rename(temp_key, _CPE_REDIS_KEY)
-        logger.info('Warmed CPE Redis index with %s addresses', len(grouped))
-        return True
-
-
-def _cpe_cached_matches(
-    value: str,
-    max_macs: int = 50000,
-) -> tuple[set[str], list[str], bool]:
-    normalized = _normalize_cpe_query(value)
-    if not warm_cpe_search_cache():
-        return set(), [], False
-    if normalized['prefix']:
-        iterator = redis_client.hscan_iter(_CPE_REDIS_KEY, match=f"{normalized['value']}*")
-    else:
-        payload = redis_client.hget(_CPE_REDIS_KEY, normalized['value'])
-        iterator = [(normalized['value'], payload)] if payload else []
-    macs: set[str] = set()
-    addresses: list[str] = []
-    truncated = False
-    for address, payload in iterator:
-        if address == '__empty__':
-            continue
-        addresses.append(str(address))
-        try:
-            macs.update(json.loads(payload or '[]'))
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if len(macs) >= max_macs:
-            truncated = True
-            break
-    return macs, sorted(set(addresses)), truncated
 
 
 def _redis_cache_modems_for_key(
@@ -875,63 +771,11 @@ def get_modems():
     cmts_filter = (request.args.get('cmts') or '').strip()
     iface_filter = (request.args.get('interface') or '').strip().lower()
 
-    # CPE lookup is a CM search only. The separate Redis index resolves the
-    # address to modem MACs; indexed bulk inventory lookup supplies list rows
-    # without exposing CPE addresses outside the detail endpoint.
+    # CPE addresses are persisted and indexed by PyPNM. Keep the GUI as a
+    # thin proxy and bypass its per-worker Redis modem caches for this search.
     if search_type == 'cpe_ip':
         if not search_value:
             return jsonify({'status': 'error', 'message': 'CPE address is required'}), 400
-        try:
-            _normalize_cpe_query(search_value)
-        except ValueError as exc:
-            return jsonify({'status': 'error', 'message': str(exc)}), 400
-
-        try:
-            matched_macs, _, matches_truncated = _cpe_cached_matches(search_value)
-            if (
-                not matches_truncated
-                and REDIS_AVAILABLE
-                and redis_client
-                and redis_client.exists(_CPE_REDIS_KEY)
-            ):
-                modems = []
-                client = PyPNMClient()
-                ordered_macs = sorted(matched_macs)
-                for offset in range(0, len(ordered_macs), 5000):
-                    response = client.get_inventory_modems_bulk(
-                        ordered_macs[offset:offset + 5000]
-                    )
-                    if response.get('status') != 'success':
-                        raise RuntimeError(response.get('message') or 'Inventory lookup failed')
-                    modems.extend(response.get('modems') or [])
-                modems = filter_ignored_modems(modems)
-                if cmts_filter:
-                    expected = cmts_filter.lower()
-                    modems = [
-                        modem for modem in modems
-                        if expected in {
-                            str(modem.get('cmts') or '').lower(),
-                            str(modem.get('cmts_ip') or '').lower(),
-                        }
-                    ]
-                if iface_filter:
-                    modems = [
-                        modem for modem in modems
-                        if any(iface_filter in str(modem.get(field) or '').lower()
-                               for field in ('interface', 'cmts_interface',
-                                             'upstream_interface', 'cable_mac'))
-                    ]
-                _augment_modems_with_topology_fields(modems)
-                modems.sort(key=lambda modem: (
-                    str(modem.get('cmts') or ''), str(modem.get('mac_address') or '')
-                ))
-                return jsonify({
-                    'status': 'success', 'modems': modems, 'count': len(modems),
-                    'cached': True, 'source': 'cpe-redis-index',
-                })
-        except Exception as exc:
-            logger.warning('CPE Redis lookup falling back to MySQL: %s', exc)
-
         try:
             response = PyPNMClient().get_inventory_modems(
                 cmts=cmts_filter or None,
@@ -941,17 +785,19 @@ def get_modems():
                 limit=_cm_modem_limit_default(),
             )
             if response.get('status') != 'success':
-                return jsonify({
-                    'status': 'error',
-                    'message': response.get('message') or 'CPE inventory search failed',
-                }), 503
+                message = response.get('message') or 'CPE inventory search failed'
+                logger.warning('PyPNM CPE inventory search failed: %s', message)
+                return jsonify({'status': 'error', 'message': message}), 503
             modems = filter_ignored_modems(response.get('modems') or [])
-            _augment_modems_with_topology_fields(modems)
             return jsonify({
-                'status': 'success', 'modems': modems, 'count': len(modems),
-                'cached': False, 'source': 'pypnm-inventory',
+                'status': 'success',
+                'modems': modems,
+                'count': len(modems),
+                'cached': bool(response.get('cached')),
+                'source': response.get('source') or 'pypnm-inventory',
             })
         except Exception as exc:
+            logger.exception('PyPNM CPE inventory search failed')
             return jsonify({'status': 'error', 'message': str(exc)}), 503
 
     def _fallback_for_mac(query_mac: str):
@@ -1160,7 +1006,7 @@ def get_modems():
 
 @api_bp.route('/modems/cpe-suggestions', methods=['GET'])
 def get_cpe_suggestions():
-    """Suggest CPE addresses for the CM search box."""
+    """Proxy CPE address autocomplete to PyPNM's persisted CPE index."""
     query = (request.args.get('q') or '').strip()
     try:
         limit = max(1, min(int(request.args.get('limit') or 10), 50))
@@ -1168,24 +1014,22 @@ def get_cpe_suggestions():
         limit = 10
     if not query:
         return jsonify({'status': 'success', 'suggestions': []})
-    try:
-        _, suggestions, _ = _cpe_cached_matches(query)
-        if REDIS_AVAILABLE and redis_client and redis_client.exists(_CPE_REDIS_KEY):
-            return jsonify({
-                'status': 'success', 'suggestions': suggestions[:limit], 'cached': True,
-            })
-    except ValueError:
-        return jsonify({'status': 'success', 'suggestions': []})
-    except Exception as exc:
-        logger.warning('CPE suggestion Redis fallback: %s', exc)
+
     try:
         response = PyPNMClient().get_inventory_cpe_suggestions(query, limit=limit)
+        if response.get('status') != 'success':
+            logger.warning(
+                'PyPNM CPE suggestions unavailable: %s',
+                response.get('message') or 'unknown error',
+            )
+            return jsonify({'status': 'success', 'suggestions': []})
         return jsonify({
-            'status': response.get('status', 'success'),
+            'status': 'success',
             'suggestions': (response.get('suggestions') or [])[:limit],
-            'cached': False,
+            'source': 'pypnm-inventory',
         })
-    except Exception:
+    except Exception as exc:
+        logger.warning('PyPNM CPE suggestions unavailable: %s', exc)
         return jsonify({'status': 'success', 'suggestions': []})
 
 
