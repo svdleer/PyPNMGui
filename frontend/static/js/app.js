@@ -8191,8 +8191,59 @@ createApp({
 
         renderUsRxmerChart() {
             const capture = this.usRxmerCaptures[this.usRxmerDisplayIndex]?.rxmer_data;
-            this._renderQuantitativeChart('surface-us-rxmer', 'usRxmerChart', [this._rxmerCaptureDataset(capture)], {
-                title: 'Upstream OFDMA RxMER', xTitle: capture?.frequencies_mhz?.length ? 'Frequency (MHz)' : 'Subcarrier', yTitle: 'RxMER (dB)'
+            const canvas = document.getElementById('usRxmerChart');
+            const values = Array.isArray(capture?.values) ? capture.values : [];
+            const frequencies = Array.isArray(capture?.frequencies_mhz) ? capture.frequencies_mhz : [];
+            const firstIndex = Number(capture?.first_active_subcarrier_index || 0);
+            if (!canvas || !values.length) return;
+
+            const points = values
+                .map((value, index) => ({
+                    x: Number.isFinite(Number(frequencies[index]))
+                        ? Number(frequencies[index])
+                        : firstIndex + index,
+                    y: Number(value),
+                }))
+                .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+            if (!points.length) return;
+
+            if (this.usRxmerChartInstance) this.usRxmerChartInstance.destroy();
+            this.usRxmerChartInstance = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'RxMER (dB)',
+                        data: points,
+                        parsing: false,
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13,110,253,0.08)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                    plugins: {
+                        title: { display: true, text: 'Upstream OFDMA RxMER' },
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: frequencies.length ? 'Frequency (MHz)' : 'Subcarrier',
+                            },
+                        },
+                        y: {
+                            title: { display: true, text: 'RxMER (dB)' },
+                        },
+                    },
+                },
             });
         },
 
