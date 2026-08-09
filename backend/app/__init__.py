@@ -65,10 +65,45 @@ def create_app():
         
         app.wsgi_app = prefix_middleware(app.wsgi_app)
     
-    # Add no-cache headers to prevent browser caching issues
+    # Cache immutable, content-versioned assets for one year. Legacy static URLs
+    # remain conditionally cacheable so a deployment is visible immediately.
+    from functools import lru_cache
+    import hashlib
+    from pathlib import Path
+
+    @lru_cache(maxsize=128)
+    def _asset_digest(filename: str) -> str:
+        static_root = Path(app.static_folder).resolve()
+        asset_path = (static_root / filename).resolve()
+        try:
+            asset_path.relative_to(static_root)
+        except ValueError as exc:
+            raise ValueError("Static asset must remain inside the static directory") from exc
+        try:
+            return hashlib.sha256(asset_path.read_bytes()).hexdigest()[:12]
+        except OSError:
+            return "missing"
+
+    def _asset_url(filename: str) -> str:
+        return url_for('static', filename=filename, v=_asset_digest(filename))
+
+    app.jinja_env.globals['asset_url'] = _asset_url
+
     @app.after_request
-    def add_no_cache_headers(response):
-        if request.path.startswith('/static/') or response.content_type.startswith('text/html'):
+    def add_cache_headers(response):
+        if request.path.startswith('/static/'):
+            version = request.args.get('v', '')
+            is_content_version = (
+                len(version) == 12
+                and all(char in '0123456789abcdef' for char in version.lower())
+            )
+            if is_content_version:
+                response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+            else:
+                response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
+            response.headers.pop('Pragma', None)
+            response.headers.pop('Expires', None)
+        elif response.mimetype == 'text/html':
             response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'

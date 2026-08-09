@@ -23,9 +23,9 @@
     <!-- Leaflet map renderer (pinned, uses OpenStreetMap tiles) -->
     <link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
     <!-- Custom CSS -->
-    <link href="[[ base_path ]]/static/css/style.css" rel="stylesheet">
+    <link href="[[ asset_url('css/style.css') ]]" rel="stylesheet">
     {% if brand_enabled %}
-    <link href="[[ base_path ]]/static/css/brand-skin.css" rel="stylesheet">
+    <link href="[[ asset_url('css/brand-skin.css') ]]" rel="stylesheet">
     {% endif %}
     <style>
         :root {
@@ -48,7 +48,7 @@
             <a class="pypnm-brand navbar-brand py-1" href="#" @click.prevent="currentView = 'home'">
                     {% if logo_available %}
                     <img
-                        src="[[ base_path ]]/static/images/logo.png"
+                        src="[[ asset_url('images/logo.png') ]]"
                         alt="PyPNM"
                         class="navbar-logo"
                         @error="useLogoFallback($event)"
@@ -3840,13 +3840,11 @@
     <!-- Leaflet (pinned) for selected-modem OpenStreetMap plots -->
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Shared engineering chart theme and PNG export -->
-    <script src="[[ base_path ]]/static/js/chart-theme.js?v=3"></script>
-    <!-- Application JS with cache busting -->
+    <script src="[[ asset_url('js/chart-theme.js') ]]"></script>
+    <!-- Application JS with content-based cache versioning -->
     <script>
-        // Cache busting: Load app.js with timestamp to always get latest version
         const appScript = document.createElement('script');
-        const basePath = window.BASE_PATH || '';
-        appScript.src = basePath + '/static/js/app.js?v=' + Date.now();
+        appScript.src = [[ asset_url('js/app.js')|tojson ]];
         console.log('Loading app.js from:', appScript.src);
         document.head.appendChild(appScript);
     </script>
