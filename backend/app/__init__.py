@@ -135,7 +135,16 @@ def create_app():
         )
         app.logger.info("Poller engine runs in PyPNM API — GUI is proxy-only")
         if not active_auth_provider.is_internal:
-            app.logger.info("External auth provider active (%s); internal user login is disabled", active_auth_provider.label)
+            if active_auth_provider.supports_username_password:
+                app.logger.warning(
+                    "External auth provider active (%s); emergency local login is enabled at /__login__",
+                    active_auth_provider.label,
+                )
+            else:
+                app.logger.info(
+                    "External auth provider active (%s); internal user login is disabled",
+                    active_auth_provider.label,
+                )
     except Exception as exc:
         app.logger.error("Auth DB startup check failed: %s", exc)
     

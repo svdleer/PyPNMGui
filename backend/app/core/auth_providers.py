@@ -77,7 +77,13 @@ class AuthProviderRegistry:
     @property
     def active_provider(self) -> AuthProvider:
         self.load_modules()
-        return self._providers.get(self.requested_provider_name, self._providers["internal"])
+        provider_name = self.requested_provider_name
+        try:
+            return self._providers[provider_name]
+        except KeyError as exc:
+            raise RuntimeError(
+                f"Unsupported or unavailable AUTH_PROVIDER: {provider_name}"
+            ) from exc
 
     @property
     def all_public_prefixes(self) -> tuple[str, ...]:
