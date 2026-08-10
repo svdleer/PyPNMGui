@@ -148,15 +148,16 @@ def create_app():
     except Exception as exc:
         app.logger.error("Auth DB startup check failed: %s", exc)
     
-    # Initialize WebSocket support for agents
+    # Initialize browser-facing UTSC WebSocket support.
+    # ENABLE_AGENT_WEBSOCKET is retained as the existing deployment feature flag.
     if app.config.get('ENABLE_AGENT_WEBSOCKET', True):
         try:
             from app.routes.ws_routes import init_websocket
             sock = init_websocket(app)
             if sock:
-                app.logger.info("Agent WebSocket support enabled at /ws/agent")
+                app.logger.info("UTSC WebSocket support enabled at /ws/utsc/<mac>")
         except Exception as e:
-            app.logger.warning(f"Agent WebSocket not available: {e}")
+            app.logger.warning(f"UTSC WebSocket not available: {e}")
     
     # Register blueprints
     from app.routes import main_bp, api_bp, auth_bp, topology_bp, apidoc_bp
@@ -266,7 +267,6 @@ def create_app():
             '/static/',
             '/api/health',
             '/health',
-            '/ws/agent',
             '/ws/utsc/',
         ) + auth_registry.all_public_prefixes
         if any(path.startswith(p) for p in public_prefixes):

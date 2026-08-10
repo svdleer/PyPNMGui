@@ -306,39 +306,12 @@ STATUS_ERROR = 5
 
 
 def init_websocket(app):
-    """Initialize WebSocket support."""
+    """Initialize browser-facing WebSocket support."""
     if not WEBSOCKET_AVAILABLE:
         logger.warning("WebSocket not available")
         return None
     
     sock = Sock(app)
-    
-    # Initialize the simple agent manager
-    from app.core.simple_ws import init_simple_agent_manager
-    auth_token = app.config.get('AGENT_AUTH_TOKEN', 'dev-token-change-me')
-    agent_manager = init_simple_agent_manager(auth_token)
-    
-    @sock.route('/ws/agent')
-    def agent_websocket(ws):
-        """WebSocket endpoint for agent connections."""
-        logger.info("Agent WebSocket connection opened")
-        
-        try:
-            while True:
-                message = ws.receive()
-                if message is None:
-                    break
-                
-                # Handle message
-                response = agent_manager.handle_message(ws, message)
-                if response:
-                    ws.send(response)
-                    
-        except Exception as e:
-            logger.error(f"WebSocket error: {e}")
-        finally:
-            agent_manager.remove_agent(ws)
-            logger.info("Agent WebSocket connection closed")
     
     @sock.route('/ws/utsc/<mac_address>')
     def utsc_websocket(ws, mac_address):
@@ -789,6 +762,5 @@ def init_websocket(app):
             logger.info(f"UTSC WebSocket closed for {mac_address}")
             logger.info(f"UTSC WebSocket closed for {mac_address} after {run_counter} runs")
     
-    logger.info("WebSocket agent endpoint registered at /ws/agent")
     logger.info("WebSocket UTSC endpoint registered at /ws/utsc/<mac>")
     return sock
