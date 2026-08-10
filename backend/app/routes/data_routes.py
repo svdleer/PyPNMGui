@@ -28,10 +28,25 @@ def _poller_api_base() -> str:
     return f"{pypnm_base}/api/admin"
 
 
-def _proxy(method: str, path: str, *, payload=None, params=None):
-    timeout = int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "30"))
+def _proxy(method: str, path: str, *, payload=None, params=None, timeout=None):
+    request_timeout = timeout or int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "30"))
     url = f"{_poller_api_base()}{path}"
-    resp = requests.request(method=method, url=url, json=payload, params=params, timeout=timeout, verify=False)
+    try:
+        resp = requests.request(
+            method=method,
+            url=url,
+            json=payload,
+            params=params,
+            timeout=request_timeout,
+            verify=False,
+        )
+    except requests.Timeout:
+        return jsonify({
+            "status": "error",
+            "message": "PyPNM request timed out; the operation may still complete",
+        }), 504
+    except requests.RequestException:
+        return jsonify({"status": "error", "message": "PyPNM API unavailable"}), 502
     return jsonify(resp.json() if resp.content else {"status": "success"}), resp.status_code
 
 
@@ -195,7 +210,16 @@ def network_rxmer_plan():
         return gate
     payload = request.get_json(silent=True) or {}
     payload["requested_by"] = session.get("username") or "admin"
-    return _proxy("POST", "/rxmer-analytics/jobs/plan", payload=payload)
+    plan_timeout = max(
+        30,
+        min(int(os.environ.get("PYPNM_RXMER_PLAN_TIMEOUT_SEC", "180")), 600),
+    )
+    return _proxy(
+        "POST",
+        "/rxmer-analytics/jobs/plan",
+        payload=payload,
+        timeout=plan_timeout,
+    )
 
 
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>', methods=['GET'])

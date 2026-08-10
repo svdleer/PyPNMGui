@@ -11,6 +11,17 @@
     const cancellableStates = new Set(['queued', 'running', 'cancel_requested']);
     let selectedJobId = null;
     let pollTimer = null;
+    let pendingPlanKey = null;
+    let pendingPlanFingerprint = null;
+    const pendingPlanStorageKey = 'networkRxmerPendingPlan';
+
+    try {
+        const pending = JSON.parse(window.sessionStorage.getItem(pendingPlanStorageKey) || 'null');
+        pendingPlanKey = pending && pending.key ? pending.key : null;
+        pendingPlanFingerprint = pending && pending.fingerprint ? pending.fingerprint : null;
+    } catch (_) {
+        window.sessionStorage.removeItem(pendingPlanStorageKey);
+    }
 
     const byId = (id) => document.getElementById(id);
     const alertBox = byId('rxmer-alert');
@@ -246,24 +257,47 @@
             showAlert('Enter at least one CMTS for selected-CMTS scope.', 'warning');
             return;
         }
+        const planPayload = {
+            scope: {type: scopeType, cmts},
+            online_only: byId('rxmer-online-only').checked,
+            raw_retention_days: Number(byId('rxmer-raw-retention').value),
+            aggregate_retention_days: Number(byId('rxmer-aggregate-retention').value),
+        };
+        const fingerprint = JSON.stringify(planPayload);
+        if (!pendingPlanKey || pendingPlanFingerprint !== fingerprint) {
+            pendingPlanKey = window.crypto && window.crypto.randomUUID
+                ? window.crypto.randomUUID()
+                : `gui-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            pendingPlanFingerprint = fingerprint;
+            window.sessionStorage.setItem(
+                pendingPlanStorageKey,
+                JSON.stringify({key: pendingPlanKey, fingerprint}),
+            );
+        }
+        planPayload.idempotency_key = pendingPlanKey;
+
         const button = byId('rxmer-plan-button');
         button.disabled = true;
         try {
             const response = await request('/jobs/plan', {
                 method: 'POST',
-                body: JSON.stringify({
-                    scope: {type: scopeType, cmts},
-                    online_only: byId('rxmer-online-only').checked,
-                    raw_retention_days: Number(byId('rxmer-raw-retention').value),
-                    aggregate_retention_days: Number(byId('rxmer-aggregate-retention').value),
-                }),
+                body: JSON.stringify(planPayload),
             });
+            pendingPlanKey = null;
+            pendingPlanFingerprint = null;
+            window.sessionStorage.removeItem(pendingPlanStorageKey);
             showAlert(response.reused ? 'Existing matching plan selected.' : 'Plan created. No collection has started.', 'success');
             selectedJobId = response.job.public_id;
             await refreshSelectedJob();
             await loadJobs();
         } catch (error) {
-            showAlert(error.message);
+            const ambiguous = error.message.includes('may still complete');
+            showAlert(
+                ambiguous
+                    ? `${error.message}. Refresh the job list before retrying; a retry will reuse the same request key.`
+                    : error.message,
+                ambiguous ? 'warning' : 'danger',
+            );
         } finally {
             button.disabled = false;
         }
