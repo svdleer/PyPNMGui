@@ -18,6 +18,7 @@
     let spectrumChart = null;
     let pendingPlanKey = null;
     let pendingPlanFingerprint = null;
+    let planRequestInFlight = false;
     const selectedPlanCmts = new Set();
     let planningCmtsOptions = [];
     let jobCmtsOptions = [];
@@ -704,6 +705,8 @@
 
     async function createPlan(event) {
         event.preventDefault();
+        if (planRequestInFlight) return;
+
         clearAlert();
         const scopeType = byId('rxmer-scope-type').value;
         const cmts = scopeType === 'cmts' ? selectedCmts() : [];
@@ -731,7 +734,12 @@
         planPayload.idempotency_key = pendingPlanKey;
 
         const button = byId('rxmer-plan-button');
+        const originalButtonMarkup = button.innerHTML;
+        planRequestInFlight = true;
         button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Creating plan…';
+        showAlert('Creating plan from persisted inventory… No modem collection has started.', 'info');
         try {
             const response = await request('/jobs/plan', {
                 method: 'POST',
@@ -741,6 +749,7 @@
             pendingPlanFingerprint = null;
             window.sessionStorage.removeItem(pendingPlanStorageKey);
             showAlert(response.reused ? 'Existing matching plan selected.' : 'Plan created. No collection has started.', 'success');
+            button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading plan…';
             selectedJobId = response.job.public_id;
             resultFilters = {cmts: '', fiberNode: ''};
             pendingResultCmts = '';
@@ -759,7 +768,10 @@
                 ambiguous ? 'warning' : 'danger',
             );
         } finally {
+            planRequestInFlight = false;
             button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.innerHTML = originalButtonMarkup;
         }
     }
 

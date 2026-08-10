@@ -263,7 +263,7 @@ def network_rxmer_plan():
     payload["requested_by"] = session.get("username") or "admin"
     plan_timeout = max(
         30,
-        min(int(os.environ.get("PYPNM_RXMER_PLAN_TIMEOUT_SEC", "180")), 600),
+        min(int(os.environ.get("PYPNM_RXMER_PLAN_TIMEOUT_SEC", "600")), 600),
     )
     return _proxy(
         "POST",
