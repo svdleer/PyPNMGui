@@ -121,7 +121,7 @@ services:
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
-      - /var/lib/tftpboot:/tftpboot:ro
+      - /var/lib/tftpboot:/tftpboot:rw
       # Mount source code for live updates without rebuild
       - ${AGENT_SRC:-/home/svdleer/docker/pyPNMAgent}/agent.py:/app/agent.py:ro
       - ${AGENT_SRC:-/home/svdleer/docker/pyPNMAgent}/requirements.txt:/app/requirements.txt:ro
