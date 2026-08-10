@@ -19,6 +19,10 @@
     let pendingPlanKey = null;
     let pendingPlanFingerprint = null;
     const selectedPlanCmts = new Set();
+    let planningCmtsOptions = [];
+    let jobCmtsOptions = [];
+    let indexCmtsPromise = null;
+    let pendingResultCmts = '';
     let resultFilters = {cmts: '', fiberNode: ''};
     const pendingPlanStorageKey = 'networkRxmerPendingPlan';
 
@@ -71,6 +75,111 @@
             option.value = value;
             return option;
         }));
+    }
+
+    function loadIndexCmtsMetadata() {
+        if (!indexCmtsPromise) {
+            indexCmtsPromise = fetch(`${basePath}/api/cmts`, {credentials: 'same-origin'})
+                .then((response) => response.ok ? response.json() : Promise.reject(new Error('CMTS list unavailable')))
+                .then((body) => (body.cmts_list || []).map((cmts) => ({
+                    name: String(cmts.HostName || '').trim(),
+                    ip: String(cmts.IPAddress || '').trim(),
+                    vendor: String(cmts.Vendor || '').trim(),
+                })).filter((cmts) => cmts.name))
+                .catch((error) => {
+                    console.warn('Index CMTS metadata unavailable:', error);
+                    return [];
+                });
+        }
+        return indexCmtsPromise;
+    }
+
+    function enrichCmtsOptions(names, metadata) {
+        const metadataByName = new Map(
+            (metadata || []).map((cmts) => [cmts.name.toLowerCase(), cmts]),
+        );
+        return (names || []).map((nameValue) => {
+            const name = String(nameValue || '').trim();
+            const match = metadataByName.get(name.toLowerCase()) || {};
+            return {name, ip: match.ip || '', vendor: match.vendor || ''};
+        }).filter((cmts) => cmts.name);
+    }
+
+    function filterCmtsOptions(options, query) {
+        const search = String(query || '').trim().toLowerCase();
+        if (!search) return options;
+        return options.filter((cmts) =>
+            cmts.name.toLowerCase().includes(search)
+            || cmts.ip.toLowerCase().includes(search)
+            || cmts.vendor.toLowerCase().includes(search)
+        );
+    }
+
+    function renderCmtsMenu(containerId, emptyId, options, onSelect) {
+        const container = byId(containerId);
+        container.replaceChildren();
+        options.forEach((cmts) => {
+            const link = document.createElement('a');
+            link.className = 'dropdown-item small py-1';
+            link.href = '#';
+            const name = document.createElement('span');
+            name.className = 'fw-bold';
+            name.textContent = cmts.name;
+            link.appendChild(name);
+            if (cmts.ip) {
+                const ip = document.createElement('span');
+                ip.className = 'text-muted ms-1';
+                ip.textContent = cmts.ip;
+                link.appendChild(ip);
+            }
+            if (cmts.vendor) {
+                const vendor = document.createElement('span');
+                vendor.className = 'badge bg-secondary ms-1';
+                vendor.style.fontSize = '0.65rem';
+                vendor.textContent = cmts.vendor;
+                link.appendChild(vendor);
+            }
+            link.addEventListener('click', (event) => {
+                event.preventDefault();
+                onSelect(cmts);
+            });
+            container.appendChild(link);
+        });
+        byId(emptyId).classList.toggle('d-none', options.length > 0);
+    }
+
+    function updatePlanningCmtsLabel() {
+        const selected = [...selectedPlanCmts];
+        byId('rxmer-cmts-button-label').textContent = selected.length === 0
+            ? `Select CMTS (${planningCmtsOptions.length})`
+            : selected.length === 1 ? selected[0] : `${selected.length} CMTS selected`;
+    }
+
+    function renderPlanningCmtsMenu() {
+        const options = filterCmtsOptions(planningCmtsOptions, byId('rxmer-cmts-search').value);
+        renderCmtsMenu('rxmer-cmts-menu-items', 'rxmer-cmts-empty', options, (cmts) => {
+            selectedPlanCmts.add(cmts.name);
+            byId('rxmer-cmts-search').value = '';
+            renderSelectedCmts();
+            renderPlanningCmtsMenu();
+        });
+        updatePlanningCmtsLabel();
+    }
+
+    function updateResultCmtsLabel() {
+        const allLabel = `All CMTS (${jobCmtsOptions.length})`;
+        byId('rxmer-filter-cmts-label').textContent = pendingResultCmts || allLabel;
+        byId('rxmer-filter-cmts-all').textContent = allLabel;
+    }
+
+    function renderResultCmtsMenu() {
+        const options = filterCmtsOptions(jobCmtsOptions, byId('rxmer-filter-cmts-search').value);
+        renderCmtsMenu('rxmer-filter-cmts-items', 'rxmer-filter-cmts-empty', options, (cmts) => {
+            pendingResultCmts = cmts.name;
+            byId('rxmer-filter-cmts-search').value = '';
+            renderResultCmtsMenu();
+        });
+        updateResultCmtsLabel();
     }
 
     function filteredQuery(extra = {}) {
@@ -510,8 +619,11 @@
         selectedJobId = publicId;
         selectedJobStatus = null;
         resultFilters = {cmts: '', fiberNode: ''};
-        byId('rxmer-filter-cmts').value = '';
+        pendingResultCmts = '';
+        jobCmtsOptions = [];
+        byId('rxmer-filter-cmts-search').value = '';
         byId('rxmer-filter-fiber').value = '';
+        updateResultCmtsLabel();
         progressPollCount = 0;
         setSpectrumStatus('Loading spectrum status…');
         clearAlert();
@@ -568,14 +680,7 @@
             });
             container.appendChild(chip);
         });
-    }
-
-    function addSelectedCmts() {
-        const input = byId('rxmer-cmts-search');
-        const value = input.value.trim();
-        if (value) selectedPlanCmts.add(value);
-        input.value = '';
-        renderSelectedCmts();
+        updatePlanningCmtsLabel();
     }
 
     function selectedCmts() {
@@ -584,17 +689,25 @@
 
     async function loadCmtsOptions() {
         try {
-            const response = await request('/options/cmts?limit=5000');
-            populateDatalist('rxmer-cmts-options', response.cmts || []);
+            const [response, metadata] = await Promise.all([
+                request('/options/cmts?limit=5000'),
+                loadIndexCmtsMetadata(),
+            ]);
+            planningCmtsOptions = enrichCmtsOptions(response.cmts || [], metadata);
+            renderPlanningCmtsMenu();
         } catch (error) {
             showAlert(error.message);
         }
     }
 
     async function loadJobOptions(publicId) {
-        const response = await request(`/jobs/${encodeURIComponent(publicId)}/options`);
+        const [response, metadata] = await Promise.all([
+            request(`/jobs/${encodeURIComponent(publicId)}/options`),
+            loadIndexCmtsMetadata(),
+        ]);
         if (publicId !== selectedJobId) return;
-        populateDatalist('rxmer-job-cmts-options', response.cmts || []);
+        jobCmtsOptions = enrichCmtsOptions(response.cmts || [], metadata);
+        renderResultCmtsMenu();
         populateDatalist('rxmer-job-fiber-options', response.fiber_nodes || []);
     }
 
@@ -639,8 +752,10 @@
             showAlert(response.reused ? 'Existing matching plan selected.' : 'Plan created. No collection has started.', 'success');
             selectedJobId = response.job.public_id;
             resultFilters = {cmts: '', fiberNode: ''};
-            byId('rxmer-filter-cmts').value = '';
+            pendingResultCmts = '';
+            byId('rxmer-filter-cmts-search').value = '';
             byId('rxmer-filter-fiber').value = '';
+            updateResultCmtsLabel();
             await loadJobOptions(selectedJobId);
             await refreshSelectedJob();
             await loadJobs();
@@ -694,6 +809,9 @@
                 selectedJobId = null;
                 selectedJobStatus = null;
                 resultFilters = {cmts: '', fiberNode: ''};
+                pendingResultCmts = '';
+                jobCmtsOptions = [];
+                updateResultCmtsLabel();
                 updateReportLinks();
                 destroySpectrumChart();
                 byId('rxmer-detail-card').classList.add('d-none');
@@ -743,7 +861,7 @@
 
     async function applyResultFilters() {
         resultFilters = {
-            cmts: byId('rxmer-filter-cmts').value.trim(),
+            cmts: pendingResultCmts,
             fiberNode: byId('rxmer-filter-fiber').value.trim(),
         };
         updateReportLinks();
@@ -751,9 +869,11 @@
     }
 
     async function clearResultFilters() {
-        byId('rxmer-filter-cmts').value = '';
+        pendingResultCmts = '';
+        byId('rxmer-filter-cmts-search').value = '';
         byId('rxmer-filter-fiber').value = '';
         resultFilters = {cmts: '', fiberNode: ''};
+        renderResultCmtsMenu();
         updateReportLinks();
         await refreshSelectedJob();
     }
@@ -762,12 +882,15 @@
         byId('rxmer-cmts-field').hidden = event.target.value !== 'cmts';
     });
     byId('rxmer-plan-form').addEventListener('submit', createPlan);
-    byId('rxmer-cmts-add').addEventListener('click', addSelectedCmts);
-    byId('rxmer-cmts-search').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            addSelectedCmts();
-        }
+    byId('rxmer-cmts-search').addEventListener('click', (event) => event.stopPropagation());
+    byId('rxmer-cmts-search').addEventListener('input', renderPlanningCmtsMenu);
+    byId('rxmer-filter-cmts-search').addEventListener('click', (event) => event.stopPropagation());
+    byId('rxmer-filter-cmts-search').addEventListener('input', renderResultCmtsMenu);
+    byId('rxmer-filter-cmts-all').addEventListener('click', (event) => {
+        event.preventDefault();
+        pendingResultCmts = '';
+        byId('rxmer-filter-cmts-search').value = '';
+        renderResultCmtsMenu();
     });
     byId('rxmer-apply-filters').addEventListener('click', applyResultFilters);
     byId('rxmer-clear-filters').addEventListener('click', clearResultFilters);

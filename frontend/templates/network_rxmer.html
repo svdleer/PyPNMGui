@@ -44,14 +44,23 @@
                     </select>
                 </div>
                 <div class="col-md-5" id="rxmer-cmts-field" hidden>
-                    <label class="form-label" for="rxmer-cmts-search">CMTS names</label>
-                    <div class="input-group">
-                        <input class="form-control" id="rxmer-cmts-search" list="rxmer-cmts-options" placeholder="Search persisted CMTS names" autocomplete="off">
-                        <button class="btn btn-outline-secondary" id="rxmer-cmts-add" type="button">Add</button>
+                    <label class="form-label">CMTS names</label>
+                    <div class="dropdown w-100">
+                        <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
+                                id="rxmer-cmts-button" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-server me-1"></i><span id="rxmer-cmts-button-label">Select CMTS</span>
+                        </button>
+                        <ul class="dropdown-menu w-100" style="max-height:260px;overflow-y:auto;">
+                            <li class="px-2 py-1">
+                                <input class="form-control form-control-sm" id="rxmer-cmts-search" placeholder="Search hostname" autocomplete="off">
+                            </li>
+                            <li><hr class="dropdown-divider my-1"></li>
+                            <li id="rxmer-cmts-menu-items"></li>
+                            <li class="px-3 py-1 text-muted small d-none" id="rxmer-cmts-empty">No CMTS found</li>
+                        </ul>
                     </div>
-                    <datalist id="rxmer-cmts-options"></datalist>
                     <div class="d-flex flex-wrap gap-1 mt-2" id="rxmer-cmts-selected"></div>
-                    <div class="form-text">Select one or more names from persisted inventory.</div>
+                    <div class="form-text">Select one or more persisted CMTS systems.</div>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Raw retention</label>
@@ -106,9 +115,22 @@
                 <div class="card-body py-2">
                     <div class="row g-2 align-items-end">
                         <div class="col-md-4">
-                            <label class="form-label small mb-1" for="rxmer-filter-cmts">Filter CMTS</label>
-                            <input class="form-control form-control-sm" id="rxmer-filter-cmts" list="rxmer-job-cmts-options" placeholder="All CMTS" autocomplete="off">
-                            <datalist id="rxmer-job-cmts-options"></datalist>
+                            <label class="form-label small mb-1">Filter CMTS</label>
+                            <div class="dropdown w-100">
+                                <button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start"
+                                        id="rxmer-filter-cmts-button" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <i class="bi bi-server me-1"></i><span id="rxmer-filter-cmts-label">All CMTS</span>
+                                </button>
+                                <ul class="dropdown-menu w-100" style="max-height:260px;overflow-y:auto;">
+                                    <li class="px-2 py-1">
+                                        <input class="form-control form-control-sm" id="rxmer-filter-cmts-search" placeholder="Search hostname" autocomplete="off">
+                                    </li>
+                                    <li><hr class="dropdown-divider my-1"></li>
+                                    <li><a class="dropdown-item small py-1" href="#" id="rxmer-filter-cmts-all">All CMTS</a></li>
+                                    <li id="rxmer-filter-cmts-items"></li>
+                                    <li class="px-3 py-1 text-muted small d-none" id="rxmer-filter-cmts-empty">No CMTS found</li>
+                                </ul>
+                            </div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label small mb-1" for="rxmer-filter-fiber">Filter fiber node</label>
