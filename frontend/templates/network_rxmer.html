@@ -44,8 +44,14 @@
                     </select>
                 </div>
                 <div class="col-md-5" id="rxmer-cmts-field" hidden>
-                    <label class="form-label">CMTS names</label>
-                    <textarea class="form-control" id="rxmer-cmts" rows="2" placeholder="One per line or comma-separated"></textarea>
+                    <label class="form-label" for="rxmer-cmts-search">CMTS names</label>
+                    <div class="input-group">
+                        <input class="form-control" id="rxmer-cmts-search" list="rxmer-cmts-options" placeholder="Search persisted CMTS names" autocomplete="off">
+                        <button class="btn btn-outline-secondary" id="rxmer-cmts-add" type="button">Add</button>
+                    </div>
+                    <datalist id="rxmer-cmts-options"></datalist>
+                    <div class="d-flex flex-wrap gap-1 mt-2" id="rxmer-cmts-selected"></div>
+                    <div class="form-text">Select one or more names from persisted inventory.</div>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Raw retention</label>
@@ -86,6 +92,8 @@
                     <span class="input-group-text">Parallel</span>
                     <input class="form-control" id="rxmer-concurrency" type="number" min="1" max="20" value="10" aria-label="Parallel modems">
                 </div>
+                <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-json" href="#" aria-disabled="true"><i class="bi bi-filetype-json me-1"></i>JSON</a>
+                <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-csv" href="#" aria-disabled="true"><i class="bi bi-filetype-csv me-1"></i>CSV</a>
                 <button class="btn btn-success btn-sm d-none" id="rxmer-start-job"><i class="bi bi-play-fill me-1"></i>Start collection</button>
                 <button class="btn btn-outline-danger btn-sm d-none" id="rxmer-cancel-job"><i class="bi bi-stop-fill me-1"></i>Cancel</button>
             </div>
@@ -94,6 +102,26 @@
             <div class="d-flex flex-wrap gap-2 mb-3" id="rxmer-metrics"></div>
             <div class="progress mb-3" style="height: 1.1rem"><div class="progress-bar" id="rxmer-progress" style="width: 0%">0%</div></div>
             <div class="alert alert-danger d-none" id="rxmer-job-error"></div>
+            <div class="card bg-light border-0 mb-3">
+                <div class="card-body py-2">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1" for="rxmer-filter-cmts">Filter CMTS</label>
+                            <input class="form-control form-control-sm" id="rxmer-filter-cmts" list="rxmer-job-cmts-options" placeholder="All CMTS" autocomplete="off">
+                            <datalist id="rxmer-job-cmts-options"></datalist>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1" for="rxmer-filter-fiber">Filter fiber node</label>
+                            <input class="form-control form-control-sm" id="rxmer-filter-fiber" list="rxmer-job-fiber-options" placeholder="All fiber nodes" autocomplete="off">
+                            <datalist id="rxmer-job-fiber-options"></datalist>
+                        </div>
+                        <div class="col-md-4 d-flex gap-2">
+                            <button class="btn btn-primary btn-sm" id="rxmer-apply-filters" type="button">Apply filters</button>
+                            <button class="btn btn-outline-secondary btn-sm" id="rxmer-clear-filters" type="button">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="row g-3">
                 <div class="col-lg-6">
                     <div class="card h-100"><div class="card-header bg-white">Average RxMER distribution</div><div class="card-body rxmer-histogram" id="rxmer-average-histogram"></div></div>
@@ -114,8 +142,19 @@
                 </div>
                 <div class="card-body">
                     <div class="small text-muted mb-2" id="rxmer-spectrum-status">Select a completed job to build its spectrum profile.</div>
+                    <div class="small text-muted mb-2">Spectrum and rankings are job-wide; CMTS/fiber-node filters apply to histograms, modem rows, and downloads.</div>
                     <div class="rxmer-spectrum-wrap d-none" id="rxmer-spectrum-wrap">
                         <canvas id="rxmer-spectrum-chart" aria-label="Network OFDM RxMER spectrum by frequency"></canvas>
+                    </div>
+                    <div class="row g-3 mt-1 d-none" id="rxmer-spectrum-rankings">
+                        <div class="col-lg-6">
+                            <h6>Best 10 subcarriers</h6>
+                            <div class="table-responsive"><table class="table table-sm"><thead><tr><th>#</th><th>Frequency</th><th>Average</th><th>Maximum</th><th>Worst</th><th>Samples</th></tr></thead><tbody id="rxmer-best-subcarriers"></tbody></table></div>
+                        </div>
+                        <div class="col-lg-6">
+                            <h6>Worst 10 subcarriers</h6>
+                            <div class="table-responsive"><table class="table table-sm"><thead><tr><th>#</th><th>Frequency</th><th>Average</th><th>Maximum</th><th>Worst</th><th>Samples</th></tr></thead><tbody id="rxmer-worst-subcarriers"></tbody></table></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -123,10 +162,10 @@
     </div>
 
     <div class="card rxmer-card d-none" id="rxmer-modems-card">
-        <div class="card-header bg-white"><strong>Modem results</strong> <span class="small text-muted">First 200 targets</span></div>
+        <div class="card-header bg-white"><strong>Modem results</strong> <span class="small text-muted" id="rxmer-modem-summary">First 200 targets</span></div>
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0">
-                <thead><tr><th>MAC</th><th>CMTS</th><th>Fiber node</th><th>State</th><th>Completeness</th><th>Average</th><th>Best</th><th>Best frequency</th><th>Samples</th></tr></thead>
+                <thead><tr><th>MAC</th><th>CMTS</th><th>Fiber node</th><th>State</th><th>Completeness</th><th>Average</th><th>Best</th><th>Best frequency</th><th>Worst</th><th>Worst frequency</th><th>Samples</th></tr></thead>
                 <tbody id="rxmer-modems-body"></tbody>
             </table>
         </div>

@@ -6,7 +6,7 @@
 
     const basePath = root.dataset.basePath || '';
     const apiBase = `${basePath}/api/admin/rxmer-analytics`;
-    const terminalStates = new Set(['completed', 'completed_with_errors', 'partial', 'failed', 'cancelled']);
+    const terminalStates = new Set(['completed', 'completed_with_errors', 'partial', 'failed', 'cancelled', 'interrupted']);
     const startableStates = new Set(['planned', 'interrupted', 'failed']);
     const cancellableStates = new Set(['queued', 'running', 'cancelling']);
     const activeStates = new Set(['queued', 'running', 'cancelling']);
@@ -18,6 +18,8 @@
     let spectrumChart = null;
     let pendingPlanKey = null;
     let pendingPlanFingerprint = null;
+    const selectedPlanCmts = new Set();
+    let resultFilters = {cmts: '', fiberNode: ''};
     const pendingPlanStorageKey = 'networkRxmerPendingPlan';
 
     try {
@@ -60,6 +62,37 @@
         if (className) cell.className = className;
         row.appendChild(cell);
         return cell;
+    }
+
+    function populateDatalist(elementId, values) {
+        const list = byId(elementId);
+        list.replaceChildren(...(values || []).map((value) => {
+            const option = document.createElement('option');
+            option.value = value;
+            return option;
+        }));
+    }
+
+    function filteredQuery(extra = {}) {
+        const params = new URLSearchParams(extra);
+        if (resultFilters.cmts) params.set('cmts', resultFilters.cmts);
+        if (resultFilters.fiberNode) params.set('fiber_node', resultFilters.fiberNode);
+        return params.toString();
+    }
+
+    function updateReportLinks() {
+        ['json', 'csv'].forEach((format) => {
+            const link = byId(`rxmer-report-${format}`);
+            if (!selectedJobId) {
+                link.href = '#';
+                link.classList.add('disabled');
+                link.setAttribute('aria-disabled', 'true');
+                return;
+            }
+            link.href = `${apiBase}/jobs/${encodeURIComponent(selectedJobId)}/report?${filteredQuery({format})}`;
+            link.classList.remove('disabled');
+            link.removeAttribute('aria-disabled');
+        });
     }
 
     function scopeLabel(scope) {
@@ -257,6 +290,9 @@
         if (spectrumChart) spectrumChart.destroy();
         spectrumChart = null;
         byId('rxmer-spectrum-wrap').classList.add('d-none');
+        byId('rxmer-spectrum-rankings').classList.add('d-none');
+        byId('rxmer-best-subcarriers').replaceChildren();
+        byId('rxmer-worst-subcarriers').replaceChildren();
     }
 
     function setSpectrumStatus(message, kind = 'muted') {
@@ -270,7 +306,28 @@
         spectrumPollTimer = window.setTimeout(() => loadSpectrum(), 3000);
     }
 
+    function renderSubcarrierRanking(elementId, rows) {
+        const body = byId(elementId);
+        body.replaceChildren();
+        (rows || []).forEach((item, index) => {
+            const row = document.createElement('tr');
+            textCell(row, index + 1);
+            textCell(row, formatFrequencyHz(item.frequency_hz));
+            textCell(row, `${Number(item.average_db).toFixed(2)} dB`);
+            textCell(row, `${Number(item.max_db).toFixed(2)} dB`);
+            textCell(row, `${Number(item.worst_db).toFixed(2)} dB`);
+            textCell(row, Number(item.sample_count || 0).toLocaleString());
+            body.appendChild(row);
+        });
+    }
+
     function renderSpectrum(payload) {
+        renderSubcarrierRanking('rxmer-best-subcarriers', payload.best_subcarriers || []);
+        renderSubcarrierRanking('rxmer-worst-subcarriers', payload.worst_subcarriers || []);
+        byId('rxmer-spectrum-rankings').classList.toggle(
+            'd-none',
+            !(payload.best_subcarriers || []).length && !(payload.worst_subcarriers || []).length,
+        );
         clearSpectrumPolling();
         const points = Array.isArray(payload.points) ? payload.points : [];
         if (!points.length) {
@@ -387,8 +444,8 @@
         card.classList.remove('d-none');
         if (!targets.length) {
             const row = document.createElement('tr');
-            const cell = textCell(row, 'No target rows available.', 'text-center text-muted py-3');
-            cell.colSpan = 9;
+            const cell = textCell(row, 'No target rows match the selected filters.', 'text-center text-muted py-3');
+            cell.colSpan = 11;
             body.appendChild(row);
             return;
         }
@@ -408,6 +465,14 @@
                     : `; subcarrier ${target.best_subcarrier_index}`;
                 frequencyCell.title = `${Math.round(Number(target.best_frequency_hz))} Hz${subcarrier}`;
             }
+            textCell(row, target.worst_db == null ? '—' : `${Number(target.worst_db).toFixed(2)} dB`);
+            const worstFrequencyCell = textCell(row, formatFrequencyHz(target.worst_frequency_hz));
+            if (target.worst_frequency_hz != null && Number.isFinite(Number(target.worst_frequency_hz))) {
+                const subcarrier = target.worst_subcarrier_index == null
+                    ? ''
+                    : `; subcarrier ${target.worst_subcarrier_index}`;
+                worstFrequencyCell.title = `${Math.round(Number(target.worst_frequency_hz))} Hz${subcarrier}`;
+            }
             textCell(row, target.sample_count || 0);
             body.appendChild(row);
         });
@@ -416,15 +481,22 @@
     async function refreshSelectedJob() {
         if (!selectedJobId) return;
         try {
+            const filterQuery = filteredQuery({bucket_db: '0.5'});
+            const modemQuery = filteredQuery({cursor: '0', limit: '200'});
             const [jobResponse, aggregateResponse, modemResponse] = await Promise.all([
                 request(`/jobs/${encodeURIComponent(selectedJobId)}`),
-                request(`/jobs/${encodeURIComponent(selectedJobId)}/aggregates?bucket_db=0.5`),
-                request(`/jobs/${encodeURIComponent(selectedJobId)}/modems?cursor=0&limit=200`),
+                request(`/jobs/${encodeURIComponent(selectedJobId)}/aggregates?${filterQuery}`),
+                request(`/jobs/${encodeURIComponent(selectedJobId)}/modems?${modemQuery}`),
             ]);
             renderJob(jobResponse.job);
             renderHistogram('rxmer-average-histogram', aggregateResponse.average_rxmer || []);
             renderHistogram('rxmer-best-histogram', aggregateResponse.best_subcarrier_rxmer || []);
             renderModems(modemResponse.targets || []);
+            const activeFilters = [resultFilters.cmts, resultFilters.fiberNode].filter(Boolean);
+            byId('rxmer-modem-summary').textContent = activeFilters.length
+                ? `First 200 matching targets (${activeFilters.join(' / ')})`
+                : 'First 200 targets';
+            updateReportLinks();
             await loadSpectrum();
             schedulePolling(jobResponse.job.status);
         } catch (error) {
@@ -437,9 +509,14 @@
         destroySpectrumChart();
         selectedJobId = publicId;
         selectedJobStatus = null;
+        resultFilters = {cmts: '', fiberNode: ''};
+        byId('rxmer-filter-cmts').value = '';
+        byId('rxmer-filter-fiber').value = '';
         progressPollCount = 0;
         setSpectrumStatus('Loading spectrum status…');
         clearAlert();
+        updateReportLinks();
+        await loadJobOptions(publicId);
         await refreshSelectedJob();
         await loadJobs();
     }
@@ -476,8 +553,49 @@
         pollTimer = window.setTimeout(pollSelectedJob, 2000);
     }
 
+    function renderSelectedCmts() {
+        const container = byId('rxmer-cmts-selected');
+        container.replaceChildren();
+        [...selectedPlanCmts].sort().forEach((cmts) => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'btn btn-sm btn-outline-primary';
+            chip.textContent = `${cmts} ×`;
+            chip.title = `Remove ${cmts}`;
+            chip.addEventListener('click', () => {
+                selectedPlanCmts.delete(cmts);
+                renderSelectedCmts();
+            });
+            container.appendChild(chip);
+        });
+    }
+
+    function addSelectedCmts() {
+        const input = byId('rxmer-cmts-search');
+        const value = input.value.trim();
+        if (value) selectedPlanCmts.add(value);
+        input.value = '';
+        renderSelectedCmts();
+    }
+
     function selectedCmts() {
-        return [...new Set(byId('rxmer-cmts').value.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean))].sort();
+        return [...selectedPlanCmts].sort();
+    }
+
+    async function loadCmtsOptions() {
+        try {
+            const response = await request('/options/cmts?limit=5000');
+            populateDatalist('rxmer-cmts-options', response.cmts || []);
+        } catch (error) {
+            showAlert(error.message);
+        }
+    }
+
+    async function loadJobOptions(publicId) {
+        const response = await request(`/jobs/${encodeURIComponent(publicId)}/options`);
+        if (publicId !== selectedJobId) return;
+        populateDatalist('rxmer-job-cmts-options', response.cmts || []);
+        populateDatalist('rxmer-job-fiber-options', response.fiber_nodes || []);
     }
 
     async function createPlan(event) {
@@ -520,6 +638,10 @@
             window.sessionStorage.removeItem(pendingPlanStorageKey);
             showAlert(response.reused ? 'Existing matching plan selected.' : 'Plan created. No collection has started.', 'success');
             selectedJobId = response.job.public_id;
+            resultFilters = {cmts: '', fiberNode: ''};
+            byId('rxmer-filter-cmts').value = '';
+            byId('rxmer-filter-fiber').value = '';
+            await loadJobOptions(selectedJobId);
             await refreshSelectedJob();
             await loadJobs();
         } catch (error) {
@@ -571,6 +693,8 @@
             if (publicId === selectedJobId) {
                 selectedJobId = null;
                 selectedJobStatus = null;
+                resultFilters = {cmts: '', fiberNode: ''};
+                updateReportLinks();
                 destroySpectrumChart();
                 byId('rxmer-detail-card').classList.add('d-none');
                 byId('rxmer-modems-card').classList.add('d-none');
@@ -617,10 +741,36 @@
         }
     }
 
+    async function applyResultFilters() {
+        resultFilters = {
+            cmts: byId('rxmer-filter-cmts').value.trim(),
+            fiberNode: byId('rxmer-filter-fiber').value.trim(),
+        };
+        updateReportLinks();
+        await refreshSelectedJob();
+    }
+
+    async function clearResultFilters() {
+        byId('rxmer-filter-cmts').value = '';
+        byId('rxmer-filter-fiber').value = '';
+        resultFilters = {cmts: '', fiberNode: ''};
+        updateReportLinks();
+        await refreshSelectedJob();
+    }
+
     byId('rxmer-scope-type').addEventListener('change', (event) => {
         byId('rxmer-cmts-field').hidden = event.target.value !== 'cmts';
     });
     byId('rxmer-plan-form').addEventListener('submit', createPlan);
+    byId('rxmer-cmts-add').addEventListener('click', addSelectedCmts);
+    byId('rxmer-cmts-search').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addSelectedCmts();
+        }
+    });
+    byId('rxmer-apply-filters').addEventListener('click', applyResultFilters);
+    byId('rxmer-clear-filters').addEventListener('click', clearResultFilters);
     byId('rxmer-refresh-jobs').addEventListener('click', loadJobs);
     byId('rxmer-start-job').addEventListener('click', startSelectedJob);
     byId('rxmer-cancel-job').addEventListener('click', cancelSelectedJob);
@@ -631,5 +781,5 @@
         if (spectrumChart) spectrumChart.destroy();
     });
 
-    loadJobs();
+    Promise.all([loadCmtsOptions(), loadJobs()]);
 })();

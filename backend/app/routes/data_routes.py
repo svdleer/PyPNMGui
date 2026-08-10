@@ -7,7 +7,7 @@ No local database access. No business logic.
 
 import os
 
-from flask import jsonify, request, session
+from flask import Response, jsonify, request, session, stream_with_context
 import requests
 
 from app.core.feature_flags import is_network_rxmer_analytics_enabled
@@ -48,6 +48,48 @@ def _proxy(method: str, path: str, *, payload=None, params=None, timeout=None):
     except requests.RequestException:
         return jsonify({"status": "error", "message": "PyPNM API unavailable"}), 502
     return jsonify(resp.json() if resp.content else {"status": "success"}), resp.status_code
+
+
+def _stream_proxy(path: str, *, params=None):
+    url = f"{_poller_api_base()}{path}"
+    try:
+        upstream = requests.get(
+            url,
+            params=params,
+            stream=True,
+            timeout=(10, 600),
+            verify=False,
+        )
+    except requests.Timeout:
+        return jsonify({"status": "error", "message": "PyPNM report timed out"}), 504
+    except requests.RequestException:
+        return jsonify({"status": "error", "message": "PyPNM API unavailable"}), 502
+    if not upstream.ok:
+        try:
+            body = upstream.json()
+        except ValueError:
+            body = {"status": "error", "message": "PyPNM report unavailable"}
+        status_code = upstream.status_code
+        upstream.close()
+        return jsonify(body), status_code
+
+    @stream_with_context
+    def generate():
+        try:
+            yield from upstream.iter_content(chunk_size=64 * 1024)
+        finally:
+            upstream.close()
+
+    headers = {}
+    disposition = upstream.headers.get("Content-Disposition")
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    return Response(
+        generate(),
+        status=upstream.status_code,
+        content_type=upstream.headers.get("Content-Type", "application/octet-stream"),
+        headers=headers,
+    )
 
 
 # ── Data-store status ────────────────────────────────────────
@@ -195,6 +237,15 @@ def network_rxmer_capabilities():
     return gate or _proxy("GET", "/rxmer-analytics/capabilities")
 
 
+@api_bp.route('/admin/rxmer-analytics/options/cmts', methods=['GET'])
+def network_rxmer_cmts_options():
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    params = {key: value for key, value in request.args.items() if key in {"q", "limit"}}
+    return _proxy("GET", "/rxmer-analytics/options/cmts", params=params)
+
+
 @api_bp.route('/admin/rxmer-analytics/jobs', methods=['GET'])
 def network_rxmer_jobs():
     gate = _require_network_rxmer_analytics()
@@ -228,15 +279,28 @@ def network_rxmer_job(public_id):
     return gate or _proxy("GET", f"/rxmer-analytics/jobs/{public_id}")
 
 
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/options', methods=['GET'])
+def network_rxmer_job_options(public_id):
+    gate = _require_network_rxmer_analytics()
+    return gate or _proxy("GET", f"/rxmer-analytics/jobs/{public_id}/options")
+
+
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/modems', methods=['GET'])
 def network_rxmer_modems(public_id):
     gate = _require_network_rxmer_analytics()
     if gate:
         return gate
+    params = {
+        key: value
+        for key, value in request.args.items()
+        if key in {"cursor", "limit", "cmts", "fiber_node"}
+    }
+    params.setdefault("cursor", 0)
+    params.setdefault("limit", 200)
     return _proxy(
         "GET",
         f"/rxmer-analytics/jobs/{public_id}/modems",
-        params={"cursor": request.args.get("cursor", 0), "limit": request.args.get("limit", 200)},
+        params=params,
     )
 
 
@@ -247,6 +311,19 @@ def network_rxmer_aggregates(public_id):
         return gate
     params = {key: value for key, value in request.args.items() if key in {"bucket_db", "cmts", "fiber_node"}}
     return _proxy("GET", f"/rxmer-analytics/jobs/{public_id}/aggregates", params=params)
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/report', methods=['GET'])
+def network_rxmer_report(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    params = {
+        key: value
+        for key, value in request.args.items()
+        if key in {"format", "cmts", "fiber_node"}
+    }
+    return _stream_proxy(f"/rxmer-analytics/jobs/{public_id}/report", params=params)
 
 
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/spectrum', methods=['GET'])
