@@ -22,6 +22,7 @@ import os
 
 from app.core.auth_db import auth_db
 from app.core.auth_providers import auth_template_context, get_auth_registry, local_user_id, session_matches_active_provider
+from app.core.feature_flags import is_network_rxmer_analytics_enabled
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, get_messages, normalize_locale, translate
 
 def create_app():
@@ -182,6 +183,7 @@ def create_app():
         locale = normalize_locale(locale)
         return {
             'enable_topology': enable_topology,
+            'network_rxmer_analytics_enabled': is_network_rxmer_analytics_enabled(),
             'ui_skin': app.config.get('UI_SKIN', 'classic'),
             'brand_enabled': app.config.get('BRAND_ENABLED', False),
             'logo_available': os.path.isfile(os.path.join(app.static_folder, 'images', 'logo.png')),

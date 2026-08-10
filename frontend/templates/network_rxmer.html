@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Network RxMER Analytics - PyPNM{% endblock %}
+
+{% block extra_head %}
+<style>
+    .rxmer-shell { max-width: 1500px; margin: 0 auto; }
+    .rxmer-card { border: 0; border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .08); }
+    .rxmer-metric { min-width: 125px; padding: .75rem; border-radius: 10px; background: #f8fafc; }
+    .rxmer-metric strong { display: block; font-size: 1.35rem; }
+    .rxmer-histogram { display: grid; gap: .35rem; }
+    .rxmer-bin { display: grid; grid-template-columns: 5rem 1fr 4rem; gap: .5rem; align-items: center; font-size: .82rem; }
+    .rxmer-bar-track { height: .75rem; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+    .rxmer-bar { height: 100%; min-width: 2px; background: linear-gradient(90deg, #0d6efd, #06b6d4); }
+    .rxmer-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 pb-4 rxmer-shell" id="network-rxmer-app" data-base-path="[[ base_path ]]">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-bar-chart-line me-2"></i>Network RxMER Analytics</h2>
+            <p class="text-muted mb-0">Durable downstream OFDM RxMER collection and network-level analysis.</p>
+        </div>
+        <button class="btn btn-outline-primary" id="rxmer-refresh-jobs"><i class="bi bi-arrow-clockwise me-1"></i>Refresh jobs</button>
+    </div>
+
+    <div id="rxmer-alert" class="alert d-none" role="alert"></div>
+
+    <div class="card rxmer-card mb-3">
+        <div class="card-header bg-white"><strong>Create a non-executing plan</strong></div>
+        <div class="card-body">
+            <div class="alert alert-info py-2 small">Planning snapshots persisted inventory only. It does not contact modems or start a measurement.</div>
+            <form id="rxmer-plan-form" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Scope</label>
+                    <select class="form-select" id="rxmer-scope-type">
+                        <option value="all_network">Entire network</option>
+                        <option value="cmts">Selected CMTS systems</option>
+                    </select>
+                </div>
+                <div class="col-md-5" id="rxmer-cmts-field" hidden>
+                    <label class="form-label">CMTS names</label>
+                    <textarea class="form-control" id="rxmer-cmts" rows="2" placeholder="One per line or comma-separated"></textarea>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Raw retention</label>
+                    <input class="form-control" id="rxmer-raw-retention" type="number" min="1" max="365" value="7">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Aggregate retention</label>
+                    <input class="form-control" id="rxmer-aggregate-retention" type="number" min="1" max="3650" value="90">
+                </div>
+                <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div class="form-check">
+                        <input class="form-check-input" id="rxmer-online-only" type="checkbox" checked>
+                        <label class="form-check-label" for="rxmer-online-only">Use inventory rows marked online only</label>
+                    </div>
+                    <button class="btn btn-primary" type="submit" id="rxmer-plan-button">
+                        <i class="bi bi-list-check me-1"></i>Create plan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card rxmer-card mb-3">
+        <div class="card-header bg-white"><strong>Collection jobs</strong></div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Created</th><th>Status</th><th>Scope</th><th>Targets</th><th>Completed</th><th>Channels</th><th></th></tr></thead>
+                <tbody id="rxmer-jobs-body"><tr><td colspan="7" class="text-center text-muted py-4">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card rxmer-card mb-3 d-none" id="rxmer-detail-card">
+        <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div><strong>Selected job</strong> <span class="rxmer-code ms-2" id="rxmer-job-id"></span></div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-success btn-sm d-none" id="rxmer-start-job"><i class="bi bi-play-fill me-1"></i>Start collection</button>
+                <button class="btn btn-outline-danger btn-sm d-none" id="rxmer-cancel-job"><i class="bi bi-stop-fill me-1"></i>Cancel</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 mb-3" id="rxmer-metrics"></div>
+            <div class="progress mb-3" style="height: 1.1rem"><div class="progress-bar" id="rxmer-progress" style="width: 0%">0%</div></div>
+            <div class="alert alert-danger d-none" id="rxmer-job-error"></div>
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <div class="card h-100"><div class="card-header bg-white">Average RxMER distribution</div><div class="card-body rxmer-histogram" id="rxmer-average-histogram"></div></div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card h-100"><div class="card-header bg-white">Best-subcarrier RxMER distribution</div><div class="card-body rxmer-histogram" id="rxmer-best-histogram"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card rxmer-card d-none" id="rxmer-modems-card">
+        <div class="card-header bg-white"><strong>Modem results</strong> <span class="small text-muted">First 200 targets</span></div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead><tr><th>MAC</th><th>CMTS</th><th>Fiber node</th><th>State</th><th>Completeness</th><th>Average</th><th>Best</th><th>Samples</th></tr></thead>
+                <tbody id="rxmer-modems-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="[[ asset_url('js/network-rxmer.js') ]]" defer></script>
+{% endblock %}

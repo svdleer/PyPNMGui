@@ -10,6 +10,7 @@ import os
 from flask import jsonify, request, session
 import requests
 
+from app.core.feature_flags import is_network_rxmer_analytics_enabled
 from . import api_bp
 
 
@@ -159,3 +160,84 @@ def run_poller_scheduler_once():
     if gate:
         return gate
     return _proxy("POST", "/poller-scheduler/run-once")
+
+
+# ── Network RxMER analytics ─────────────────────────────────
+
+
+def _require_network_rxmer_analytics():
+    gate = _require_admin()
+    if gate:
+        return gate
+    if not is_network_rxmer_analytics_enabled():
+        return jsonify({"status": "error", "message": "Network RxMER Analytics is disabled"}), 404
+    return None
+
+
+@api_bp.route('/admin/rxmer-analytics/capabilities', methods=['GET'])
+def network_rxmer_capabilities():
+    gate = _require_network_rxmer_analytics()
+    return gate or _proxy("GET", "/rxmer-analytics/capabilities")
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs', methods=['GET'])
+def network_rxmer_jobs():
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    return _proxy("GET", "/rxmer-analytics/jobs", params={"limit": request.args.get("limit", 100)})
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/plan', methods=['POST'])
+def network_rxmer_plan():
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    payload = request.get_json(silent=True) or {}
+    payload["requested_by"] = session.get("username") or "admin"
+    return _proxy("POST", "/rxmer-analytics/jobs/plan", payload=payload)
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>', methods=['GET'])
+def network_rxmer_job(public_id):
+    gate = _require_network_rxmer_analytics()
+    return gate or _proxy("GET", f"/rxmer-analytics/jobs/{public_id}")
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/modems', methods=['GET'])
+def network_rxmer_modems(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    return _proxy(
+        "GET",
+        f"/rxmer-analytics/jobs/{public_id}/modems",
+        params={"cursor": request.args.get("cursor", 0), "limit": request.args.get("limit", 200)},
+    )
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/aggregates', methods=['GET'])
+def network_rxmer_aggregates(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    params = {key: value for key, value in request.args.items() if key in {"bucket_db", "cmts", "fiber_node"}}
+    return _proxy("GET", f"/rxmer-analytics/jobs/{public_id}/aggregates", params=params)
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/start', methods=['POST'])
+def network_rxmer_start(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    return _proxy(
+        "POST",
+        f"/rxmer-analytics/jobs/{public_id}/start",
+        payload=request.get_json(silent=True) or {"max_concurrency": 2},
+    )
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/cancel', methods=['POST'])
+def network_rxmer_cancel(public_id):
+    gate = _require_network_rxmer_analytics()
+    return gate or _proxy("POST", f"/rxmer-analytics/jobs/{public_id}/cancel")

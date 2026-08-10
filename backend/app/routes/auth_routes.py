@@ -11,6 +11,10 @@ from . import auth_bp
 from app.core.auth_db import auth_db
 from app.core.auth_providers import auth_template_context, get_active_auth_provider, is_authenticated_session, local_user_id, sanitize_next_path
 from app.core.cmts_provider import CMTSProvider
+from app.core.feature_flags import (
+    NETWORK_RXMER_ANALYTICS_SETTING,
+    is_network_rxmer_analytics_enabled,
+)
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale, translate
 
 
@@ -384,8 +388,41 @@ def admin_page():
         snapshot_counts=snapshot_counts,
         snapshot_analytics=snapshot_analytics,
         poller_scheduler_status=poller_scheduler_status,
+        network_rxmer_analytics_enabled=is_network_rxmer_analytics_enabled(),
         data_store_backend="PyPNM",
         data_store_error=data_store_error,
+    )
+
+
+@auth_bp.route("/admin/features/network-rxmer-analytics", methods=["POST"])
+@admin_required
+def admin_set_network_rxmer_analytics_enabled():
+    enabled = request.form.get("enabled") == "true"
+    try:
+        auth_db.set_setting(
+            NETWORK_RXMER_ANALYTICS_SETTING,
+            "true" if enabled else "false",
+            updated_by=session.get("username") or "admin",
+        )
+        flash(
+            f"Network RxMER Analytics {'enabled' if enabled else 'disabled'}",
+            "success",
+        )
+    except Exception as exc:
+        flash(f"Feature toggle failed: {exc}", "danger")
+    return redirect(_prefixed(url_for("auth.admin_page")))
+
+
+@auth_bp.route("/network-rxmer", methods=["GET"])
+@admin_required
+def network_rxmer_analytics_page():
+    if not is_network_rxmer_analytics_enabled():
+        abort(404)
+    return render_template(
+        "network_rxmer.html",
+        base_path=current_app.config.get("APP_ROOT", ""),
+        auth_username=session.get("username", ""),
+        auth_role=session.get("role", "admin"),
     )
 
 

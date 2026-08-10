@@ -33,6 +33,13 @@
                         <i class="bi bi-diagram-3 me-1"></i>[[ t('nav.fiber_node') ]]
                     </a>
                 </li>
+                {% if network_rxmer_analytics_enabled and auth_role == 'admin' %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'auth.network_rxmer_analytics_page' %}active{% endif %}" href="[[ base_path ]]/network-rxmer">
+                        <i class="bi bi-bar-chart-line me-1"></i>Network RxMER
+                    </a>
+                </li>
+                {% endif %}
                 {% if enable_topology %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.path.endswith('/topology') %}active{% endif %}" href="[[ base_path ]]/topology">

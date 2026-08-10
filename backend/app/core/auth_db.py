@@ -73,6 +73,17 @@ class AuthDB:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    setting_key VARCHAR(128) PRIMARY KEY,
+                    setting_value VARCHAR(1024) NOT NULL,
+                    updated_by VARCHAR(64),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
             try:
                 cur.execute(
                     "ALTER TABLE users ADD COLUMN language_preference "
@@ -98,6 +109,35 @@ class AuthDB:
             cur = conn.cursor()
             cur.execute(query, params)
             return list(cur.fetchall())
+        finally:
+            conn.close()
+
+    def get_setting(self, setting_key, default=None):
+        row = self._fetchone(
+            "SELECT setting_value FROM app_settings WHERE setting_key=%s",
+            (setting_key,),
+        )
+        return row["setting_value"] if row else default
+
+    def get_bool_setting(self, setting_key, default=False):
+        value = self.get_setting(setting_key)
+        if value is None:
+            return bool(default)
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def set_setting(self, setting_key, setting_value, updated_by=None):
+        now = self._now()
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO app_settings "
+                "(setting_key, setting_value, updated_by, created_at, updated_at) "
+                "VALUES (%s,%s,%s,%s,%s) "
+                "ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value), "
+                "updated_by=VALUES(updated_by), updated_at=VALUES(updated_at)",
+                (setting_key, str(setting_value), updated_by, now, now),
+            )
         finally:
             conn.close()
 
