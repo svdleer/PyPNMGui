@@ -1190,15 +1190,71 @@ class PyPNMClient:
         write_community: Optional[str] = None,
         cfg_index: int = 1
     ) -> Dict[str, Any]:
-        """
-        Get current UTSC configuration for an RF port.
-
-        Endpoint: GET /pnm/us/utsc/config
-        """
+        """Get current UTSC configuration for an RF port."""
         params = {"cmts_ip": cmts_ip, "community": community,
                   "write_community": write_community or community,
                   "rf_port_ifindex": rf_port_ifindex, "cfg_index": cfg_index}
         return self._get("/pnm/us/utsc/config", params)
+
+    def list_utsc_files(
+        self,
+        *,
+        prefix: Optional[str] = None,
+        rf_port_ifindex: Optional[int] = None,
+        mac_address: Optional[str] = None,
+        vendor: Optional[str] = None,
+        exclude: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return self._post("/pnm/us/utsc/files/list", {
+            "prefix": prefix,
+            "rf_port_ifindex": rf_port_ifindex,
+            "mac_address": mac_address,
+            "vendor": vendor,
+            "exclude": exclude or [],
+        }, request_timeout=15)
+
+    def get_utsc_sample(
+        self,
+        *,
+        filename: str,
+        vendor: Optional[str] = None,
+        center_freq_hz: int = 50000000,
+        span_hz: int = 80000000,
+        max_bins: int = 1600,
+        glob: bool = False,
+    ) -> Dict[str, Any]:
+        return self._post("/pnm/us/utsc/files/sample", {
+            "filename": filename,
+            "glob": glob,
+            "vendor": vendor,
+            "center_freq_hz": center_freq_hz,
+            "span_hz": span_hz,
+            "max_bins": max_bins,
+        }, request_timeout=30)
+
+    def delete_utsc_files(
+        self,
+        *,
+        filenames: List[str],
+        vendor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._post("/pnm/us/utsc/files/delete", {
+            "filenames": filenames,
+            "vendor": vendor,
+        }, request_timeout=120)
+
+    def housekeeping_utsc_files(
+        self,
+        *,
+        max_age_seconds: int,
+        dry_run: bool = True,
+        vendor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._post("/pnm/us/utsc/files/housekeeping", {
+            "max_age_seconds": max_age_seconds,
+            "dry_run": dry_run,
+            "vendor": vendor,
+        }, request_timeout=120)
 
     def get_bulk_destinations(
         self,

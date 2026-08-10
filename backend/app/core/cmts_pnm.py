@@ -45,9 +45,9 @@ class UsOfdmaRxMerConfig:
     filename: str = "us_rxmer"
     pre_eq: bool = True
     num_averages: int = 1
-    destination_index: int = 0  # 0=auto-create row 1, >0=explicit row
-    tftp_server: Optional[str] = None  # TFTP IP required on Cisco cBR-8
-    dest_path: str = "./"  # Upload path on TFTP server
+    destination_index: int = 0
+    tftp_server: Optional[str] = None
+    dest_path: Optional[str] = None
 
 
 class CmtsPnmClient:
@@ -176,9 +176,11 @@ class CmtsPnmClient:
             "pre_eq": config.pre_eq,
             "num_averages": config.num_averages,
             "destination_index": config.destination_index,
-            "tftp_server": config.tftp_server,
-            "dest_path": config.dest_path
         }
+        if config.tftp_server:
+            payload["tftp_server"] = config.tftp_server
+        if config.dest_path:
+            payload["dest_path"] = config.dest_path
         
         result = self._post("/pnm/us/ofdma/rxmer/start", payload)
         

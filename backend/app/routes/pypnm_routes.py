@@ -19,20 +19,6 @@ import json
 from app.core.spectrum_plotter import generate_spectrum_plot_from_data
 from app.core.constellation_plotter import generate_constellation_plots_from_data
 
-# PNM file source: local TFTP mount (default) or FTP fetch
-from app.core.pnm_file_source import (
-    ensure_pnm_files_local as _ensure_pnm_local,
-    local_tftp_path              as _local_tftp_path,
-    fetch_pnm_files              as _fetch_pnm_files,
-    delete_pnm_files             as _delete_pnm_files,
-    is_ftp_mode                  as _is_ftp_mode,
-    get_ftp_config               as _get_ftp_config,
-    get_ftp_config_for_vendor    as _get_ftp_config_for_vendor,
-    get_all_ftp_configs          as _get_all_ftp_configs,
-    get_tftp_dest_path           as _get_tftp_dest_path,
-    get_tftp_dest_path_for_vendor as _get_tftp_dest_path_for_vendor,
-)
-
 logger = logging.getLogger(__name__)
 
 PYPNM_API_TIMEOUT = int(os.environ.get('PYPNM_API_TIMEOUT', '45'))
@@ -314,100 +300,13 @@ def get_cmts_write_community():
     return os.environ.get('CMTS_WRITE_COMMUNITY', 'private')
 
 
-def _tftp_ip_for_vendor(vendor: str) -> str:
-    """Resolve TFTP server IP for the given vendor string.
-
-    Lookup order (first non-empty wins):
-      TFTP_COMMSCOPE / TFTP_CISCO / TFTP_CASA / TFTP_ALT
-      Cisco also falls back to TFTP_IPV4_ALT (per .env.pypnm convention:
-      "Alternate TFTP for Cisco CMTS and CM operations").
-      Final fallback: TFTP_IPV4 → '172.16.6.101'.
-    """
-    vendor = (vendor or '').lower()
-    # Accept exact values and composite strings (e.g. "Cisco cBR-8", "CommScope E6000").
-    if 'cisco' in vendor or 'cbr' in vendor:
-        key = 'TFTP_CISCO'
-    elif 'casa' in vendor:
-        key = 'TFTP_CASA'
-    elif 'commscope' in vendor or 'arris' in vendor or 'e6000' in vendor:
-        key = 'TFTP_COMMSCOPE'
-    else:
-        key = 'TFTP_ALT'
-    return (
-        os.environ.get(key, '')
-        or (os.environ.get('TFTP_ARRIS', '') if key == 'TFTP_COMMSCOPE' else '')
-        or (os.environ.get('TFTP_IPV4_ALT', '') if key in ('TFTP_CISCO', 'TFTP_ALT') else '')
-        or os.environ.get('TFTP_IPV4', '172.16.6.101')
-    )
-
-
-def get_default_tftp():
-    """CommScope E6000 TFTP IP (TFTP_COMMSCOPE → TFTP_IPV4)."""
-    return os.environ.get('TFTP_COMMSCOPE') or os.environ.get('TFTP_IPV4', '172.16.6.101')
-
-
 def get_alternate_tftp():
     """CM modem-side TFTP IP (TFTP_ALT → TFTP_IPV4_ALT)."""
     return os.environ.get('TFTP_ALT') or os.environ.get('TFTP_IPV4_ALT', '127.0.0.1')
 
 
-def get_cmts_alt_tftp():
-    """Legacy alias — returns the alt/Casa TFTP IP."""
-    return _tftp_ip_for_vendor('casa')
-
-
-def get_tftp_for_cmts(cmts_ip: str) -> str:
-    """Return TFTP server IP for CMTS-side bulk upload (UTSC/US RxMER).
-
-    Lookup order per vendor:
-      TFTP_COMMSCOPE  — CommScope E6000
-      TFTP_CISCO      — Cisco cBR-8
-      TFTP_CASA       — Casa Systems 100G
-      TFTP_ALT        — any other vendor
-    Each falls back to TFTP_IPV4_ALT, then TFTP_IPV4.
-    """
-    from app.core.cmts_provider import CMTSProvider
-    try:
-        cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-        # Fallback: some deployments provide hostname or alternate IP fields.
-        if not cmts:
-            cmts = CMTSProvider.get_cmts_by_hostname(cmts_ip)
-        if not cmts:
-            for rec in CMTSProvider.get_all_cmts() or []:
-                rec_ips = {
-                    str(rec.get('IPAddress', '')).strip(),
-                    str(rec.get('ip', '')).strip(),
-                    str(rec.get('ip_address', '')).strip(),
-                    str(rec.get('management_ip', '')).strip(),
-                    str(rec.get('HostName', '')).strip(),
-                    str(rec.get('hostname', '')).strip(),
-                }
-                if str(cmts_ip).strip() in rec_ips:
-                    cmts = rec
-                    break
-        if cmts:
-            vendor = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".strip().lower()
-            return _tftp_ip_for_vendor(vendor)
-    except Exception:
-        pass
-    return get_default_tftp()
-
-
-def get_tftp_dest_path_for_cmts(cmts_ip: str) -> str:
-    """Return the TFTP upload root path for the CMTS vendor at cmts_ip."""
-    from app.core.cmts_provider import CMTSProvider
-    try:
-        cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-        if cmts:
-            vendor = cmts.get('Vendor', '').lower()
-            return _get_tftp_dest_path_for_vendor(vendor)
-    except Exception:
-        pass
-    return _get_tftp_dest_path()
-
-
 def get_tftp_for_cm() -> str:
-    """Return TFTP IP for CM modem-side PNM uploads (TFTP_ALT → TFTP_IPV4_ALT)."""
+    """Return TFTP IP for CM modem-side PNM uploads."""
     return get_alternate_tftp()
 
 
@@ -1428,131 +1327,33 @@ def _extract_ofdma_channels(data: Dict[str, Any]) -> list:
 
 @pypnm_bp.route('/housekeeping', methods=['POST'])
 def housekeeping():
-    """
-    Clean up old PNM files.
-    
-    POST body:
-    {
-        "max_age_days": 7,
-        "dry_run": false
-    }
-    """
+    """Delegate aged UTSC capture housekeeping to authoritative PyPNM storage."""
+    from app.core.pypnm_client import PyPNMClient
+
     data = request.get_json() or {}
-    max_age_days = data.get('max_age_days', 7)
-    dry_run = data.get('dry_run', False)
-    
     try:
-        import os
-        import time
-        import ftplib
-        from datetime import datetime, timezone
-        from pathlib import Path
-        
-        # PyPNM data directories - PNM files land in tftpboot
-        data_dirs = [
-            '/var/lib/tftpboot',
-            '/app/data',
-            '/app/logs',
-        ]
-        
-        max_age_seconds = max_age_days * 24 * 60 * 60
-        current_time = time.time()
-        deleted_files = []
-        total_size = 0
-
-        # In FTP mode, remove old files from the remote FTP directory first.
-        # This uses the same env-backed config as file fetch:
-        # FTP_SERVER_IP / FTP_USER / FTP_PASSWORD / FTP_TFTPBOOT_DIR.
-        if _is_ftp_mode():
-            ftp_cfg = _get_ftp_config()
-            ftp = None
-            try:
-                ftp = ftplib.FTP()
-                ftp.connect(ftp_cfg['host'], ftp_cfg['port'], timeout=15)
-                ftp.login(ftp_cfg['user'], ftp_cfg['password'])
-                ftp.cwd(ftp_cfg['ftp_dir'])
-
-                try:
-                    ftp_files = [os.path.basename(n) for n in ftp.nlst()]
-                except ftplib.error_perm:
-                    ftp_files = []
-
-                for name in ftp_files:
-                    if not name or name in ('.', '..'):
-                        continue
-                    try:
-                        # RFC 3659 format: '213 YYYYMMDDHHMMSS'
-                        mdtm_resp = ftp.sendcmd(f'MDTM {name}')
-                        mdtm_str = mdtm_resp.split()[-1]
-                        modified = datetime.strptime(mdtm_str, '%Y%m%d%H%M%S').replace(tzinfo=timezone.utc)
-                        file_age = current_time - modified.timestamp()
-                    except Exception:
-                        # If mtime cannot be read, skip age-based deletion for safety
-                        continue
-
-                    if file_age > max_age_seconds:
-                        file_size = 0
-                        try:
-                            file_size = int(ftp.size(name) or 0)
-                        except Exception:
-                            pass
-
-                        if not dry_run:
-                            ftp.delete(name)
-
-                        deleted_files.append({
-                            'path': f"ftp://{ftp_cfg['host']}/{ftp_cfg['ftp_dir'].lstrip('/')}/{name}",
-                            'age_days': round(file_age / 86400, 1),
-                            'size_mb': round(file_size / 1024 / 1024, 2)
-                        })
-                        total_size += file_size
-            except Exception as e:
-                logger.warning(f"FTP housekeeping failed (host={ftp_cfg.get('host')}): {e}")
-            finally:
-                if ftp is not None:
-                    try:
-                        ftp.quit()
-                    except Exception:
-                        pass
-        
-        for dir_path in data_dirs:
-            if not os.path.exists(dir_path):
-                continue
-                
-            for root, dirs, files in os.walk(dir_path):
-                for filename in files:
-                    file_path = os.path.join(root, filename)
-                    try:
-                        file_age = current_time - os.path.getmtime(file_path)
-                        file_size = os.path.getsize(file_path)
-                        
-                        if file_age > max_age_seconds:
-                            if not dry_run:
-                                os.remove(file_path)
-                            deleted_files.append({
-                                'path': file_path,
-                                'age_days': round(file_age / 86400, 1),
-                                'size_mb': round(file_size / 1024 / 1024, 2)
-                            })
-                            total_size += file_size
-                    except Exception as e:
-                        logger.warning(f"Could not process file {file_path}: {e}")
-        
+        max_age_days = max(1, int(data.get('max_age_days', 7)))
+        result = PyPNMClient().housekeeping_utsc_files(
+            max_age_seconds=max_age_days * 86400,
+            dry_run=bool(data.get('dry_run', True)),
+        )
+        if not result.get('success'):
+            return jsonify({
+                'status': 'error',
+                'message': result.get('error') or 'PyPNM housekeeping failed',
+            }), 502
         return jsonify({
-            "status": "success",
-            "dry_run": dry_run,
-            "ftp_mode": _is_ftp_mode(),
-            "deleted_count": len(deleted_files),
-            "total_size_mb": round(total_size / 1024 / 1024, 2),
-            "files": deleted_files[:50]  # Return first 50
+            'status': 'success',
+            'dry_run': result.get('dry_run', True),
+            'candidate_count': result.get('candidate_count', 0),
+            'deleted_count': result.get('deleted_count', 0),
+            'total_size_mb': round(result.get('total_size_bytes', 0) / 1024 / 1024, 2),
+            'files': result.get('files', []),
+            'truncated': result.get('truncated', False),
         })
-        
-    except Exception as e:
-        logger.error(f"Housekeeping failed: {e}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+    except Exception as exc:
+        logger.error("Housekeeping failed: %s", exc)
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
 
 
 @pypnm_bp.route('/download/<filename>', methods=['GET'])
@@ -2052,8 +1853,6 @@ def start_cmts_us_rxmer(mac_address):
             filename=data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
             pre_eq=data.get('pre_eq', True),
             num_averages=data.get('num_averages', 1),
-            tftp_server=data.get('tftp_server', get_tftp_for_cmts(cmts_ip)),
-            dest_path=get_tftp_dest_path_for_cmts(cmts_ip)
         )
         
         result = start_us_rxmer_sync(config)
@@ -2136,10 +1935,7 @@ def get_cmts_us_rxmer_data(mac_address):
         base_url = get_pypnm_api_url()
 
         _filename = data.get('filename', f'usrxmer_{mac_address.replace(":", "")}')
-        payload = {
-            "filename": _filename,
-            "tftp_path": data.get('tftp_path', '/var/lib/tftpboot'),
-        }
+        payload = {"filename": _filename}
 
         # Single call — file fetched once, returns PNG (base64) + JSON data
         resp = req.post(
@@ -2187,7 +1983,6 @@ def get_cmts_us_rxmer_comparison(mac_address):
     data = request.get_json() or {}
     filename_on  = data.get('filename_preeq_on')
     filename_off = data.get('filename_preeq_off')
-    tftp_path    = data.get('tftp_path') or _local_tftp_path()
 
     if not filename_on or not filename_off:
         return jsonify({"success": False, "error": "filename_preeq_on and filename_preeq_off required"}), 400
@@ -2195,14 +1990,9 @@ def get_cmts_us_rxmer_comparison(mac_address):
     try:
         import requests as req
         base_url = get_pypnm_api_url()
-        if _is_ftp_mode():
-            _fetch_pnm_files(filename_on)
-            _fetch_pnm_files(filename_off)
-            tftp_path = _local_tftp_path()
         payload = {
-            "filename_preeq_on":  filename_on,
+            "filename_preeq_on": filename_on,
             "filename_preeq_off": filename_off,
-            "tftp_path": tftp_path,
         }
 
         img_resp  = req.post(f"{base_url}/pnm/us/ofdma/rxmer/getComparison",     json=payload, timeout=60)
@@ -2231,8 +2021,7 @@ def get_cmts_us_rxmer_comparison(mac_address):
 def get_cmts_us_rxmer_fibernode():
     """
     Fiber node group RxMER analysis — N captures across multiple modems.
-    Body: {"captures": [{"cm_mac_address":..., "filename":..., "preeq_enabled": true}, ...],
-           "tftp_path": "..."}
+    Body: {"captures": [{"cm_mac_address":..., "filename":..., "preeq_enabled": true}, ...]}
     Returns: {"success": true, "image_data": "<b64 png>", "analysis": <FiberNodeAnalysis>}
     """
     from app.core.cmts_pnm import get_pypnm_api_url, PYPNM_AVAILABLE
@@ -2242,46 +2031,15 @@ def get_cmts_us_rxmer_fibernode():
         return jsonify({"success": False, "error": "PyPNM not available"}), 503
 
     data = request.get_json() or {}
-    captures  = data.get('captures', [])
-    tftp_path = data.get('tftp_path') or _local_tftp_path()
-    ftp_prefetch_enabled = _is_ftp_mode() or bool(os.environ.get('FTP_SERVER_IP'))
+    captures = data.get('captures', [])
 
     if not captures:
         return jsonify({"success": False, "error": "captures[] required"}), 400
 
     try:
         import requests as req
-        import time as _time
-        if ftp_prefetch_enabled:
-            import glob as _glob
-            pending = []
-            for _cap in captures:
-                _fn = (_cap.get('filename') or '').strip()
-                if not _fn:
-                    continue
-                _bn = os.path.basename(_fn)
-                # Skip FTP if file already exists locally (Commscope TFTP)
-                if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
-                    continue
-                pending.append(_fn)
-            max_fetch_rounds = 6
-            for round_idx in range(max_fetch_rounds):
-                still_pending = []
-                for _prefix in pending:
-                    files = _fetch_pnm_files(_prefix, allow_when_local=True)
-                    if not files:
-                        still_pending.append(_prefix)
-                pending = still_pending
-                if not still_pending:
-                    break
-                if round_idx < max_fetch_rounds - 1:
-                    _time.sleep(1.0)
-            if pending:
-                logger.warning(f"fiberNode: FTP prefetch missing {len(pending)} capture(s) after retries; sample={pending[:3]}")
-            # In mixed mode, pre-fetched files are in cache dir.
-            tftp_path = os.environ.get('PNM_CACHE_DIR', '/app/data/pnm_cache')
         base_url = get_pypnm_api_url()
-        payload  = {"captures": captures, "tftp_path": tftp_path}
+        payload = {"captures": captures}
 
         img_resp  = req.post(f"{base_url}/pnm/us/ofdma/rxmer/fiberNode/plot",    json=payload, timeout=120)
         data_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/fiberNode/analyze", json=payload, timeout=60)
@@ -2414,7 +2172,7 @@ def get_cmts_us_rxmer_fibernode_scan():
     computes group delay variation for each modem.
     
     Body: {cmts_ip, community, write_community, ofdma_ifindex,
-           preeq_enabled, tftp_path, max_modems, fiber_node, compare_preeq,
+           preeq_enabled, max_modems, fiber_node, compare_preeq,
             include_group_delay, selected_macs}
     """
     from app.core.cmts_pnm import get_pypnm_api_url, PYPNM_AVAILABLE
@@ -2430,8 +2188,6 @@ def get_cmts_us_rxmer_fibernode_scan():
     preeq_enabled       = data.get('preeq_enabled', True)
     compare_preeq       = data.get('compare_preeq', False)
     include_group_delay = data.get('include_group_delay', False)
-    tftp_path           = data.get('tftp_path') or _local_tftp_path()
-    ftp_prefetch_enabled = _is_ftp_mode() or bool(os.environ.get('FTP_SERVER_IP'))
 
     max_modems          = int(data.get('max_modems') or 20)
     scan_id             = data.get('scan_id', '')
@@ -2454,11 +2210,6 @@ def get_cmts_us_rxmer_fibernode_scan():
     if not cmts_ip or not ofdma_ifindices:
         return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex(es) required"}), 400
 
-
-    # Pre-extract app config — current_app proxy not available in background thread
-    _ftp_server_ip = current_app.config.get('FTP_SERVER_IP') or os.environ.get('TFTP_IPV4', '127.0.0.1')
-    _ftp_user      = current_app.config.get('FTP_USER', 'ftpaccess')
-    _ftp_pass      = current_app.config.get('FTP_PASSWORD', 'ftpaccessftp')
 
     def _run_scan():
         try:
@@ -2571,22 +2322,8 @@ def get_cmts_us_rxmer_fibernode_scan():
             _progress(
                 pct=8, phase='setup', phase_current=1, phase_total=2,
                 step=0, total=total_steps, modem='', modem_idx=0, modem_total=len(modems),
-                channel='', action='Cleaning previous capture files…', done='false',
+                channel='', action='Preparing capture requests…', done='false',
             )
-
-            # Remove stale rxmer files via FTP.
-            try:
-                from app.routes.ws_routes import delete_rxmer_files_by_mac_via_ftp
-                # FTP server follows the TFTP host by default.
-                ftp_server = _ftp_server_ip
-                ftp_user   = _ftp_user
-                ftp_pass   = _ftp_pass
-                mac_list   = [m.get('cm_mac_address') or m.get('mac_address') for m in modems]
-                cleaned = delete_rxmer_files_by_mac_via_ftp(ftp_server, ftp_user, ftp_pass, mac_list, tftp_path)
-                if cleaned:
-                    logger.info(f"Fiber node scan: removed {cleaned} stale capture file(s) via FTP before starting")
-            except Exception as e:
-                logger.warning(f"Fiber node scan: FTP housekeeping failed (continuing): {e}")
 
             captures = []
             group_delay_data = {}  # MAC -> group delay summary
@@ -2595,27 +2332,7 @@ def get_cmts_us_rxmer_fibernode_scan():
             # Capture one or both pre-eq modes.
             preeq_modes = [True, False] if compare_preeq else [preeq_enabled]
 
-            # Create the bulk destination once before the modem loop.
-            tftp_server     = get_tftp_for_cmts(cmts_ip)
-            bulk_dest_index = 1   # default; updated from API response if call succeeds
-            _prime_resp = req.post(
-                f"{base_url}/pnm/us/bulk-destination",
-                json={
-                    "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
-                    "dest_ip": tftp_server,
-                    "index": 1,
-                    "pnm_types": ["rxmer"],
-                    "dest_path": get_tftp_dest_path_for_cmts(cmts_ip),
-                },
-                timeout=30
-            )
-            if _prime_resp.status_code == 200:
-                _prime_data = _prime_resp.json()
-                bulk_dest_index = _prime_data.get('standard_dest_index') or 1
-                logger.info(f"Fiber node scan: bulk dest configured at index {bulk_dest_index} -> {tftp_server}")
-            else:
-                logger.warning(f"Fiber node scan: bulk dest setup failed ({_prime_resp.status_code}), using index 1")
-
+            # PyPNM provisions the vendor-specific destination for each start.
             _progress(
                 pct=10, phase='capture', phase_current=0, phase_total=total_steps,
                 step=0, total=total_steps, action='Capture setup complete', done='false',
@@ -2638,9 +2355,7 @@ def get_cmts_us_rxmer_fibernode_scan():
                         "ofdma_ifindex": modem_ifindex,
                         "pre_eq": pre_eq,
                         "filename": unique_filename,
-                        "tftp_server": tftp_server,
-                        "destination_index": bulk_dest_index,
-                        "dest_path": get_tftp_dest_path_for_cmts(cmts_ip),
+                        "destination_index": 0,
                     },
                     timeout=30
                 )
@@ -2815,46 +2530,10 @@ def get_cmts_us_rxmer_fibernode_scan():
                 return
 
             _progress(
-                pct=90, phase='retrieval', phase_current=0, phase_total=len(captures),
-                action='Locating capture files…', done='false',
+                pct=94, phase='retrieval', phase_current=0, phase_total=len(captures),
+                action='PyPNM is locating capture files…', done='false',
             )
-            # FTP mode: pull capture files not already on the local TFTP mount
-            _effective_tftp_path = tftp_path
-            if ftp_prefetch_enabled:
-                import glob as _glob
-                pending = []
-                for _cap in captures:
-                    _fn = (_cap.get('filename') or '').strip()
-                    if not _fn:
-                        continue
-                    _bn = os.path.basename(_fn)
-                    # Skip FTP if file already exists locally (Commscope TFTP)
-                    if _glob.glob(os.path.join(tftp_path, '**', _bn), recursive=True):
-                        continue
-                    pending.append(_fn)
-                fetch_total = len(pending)
-                max_fetch_rounds = 8
-                for round_idx in range(max_fetch_rounds):
-                    still_pending = []
-                    for _prefix in pending:
-                        files = _fetch_pnm_files(_prefix, allow_when_local=True)
-                        if not files:
-                            still_pending.append(_prefix)
-                    pending = still_pending
-                    retrieved = fetch_total - len(pending)
-                    _progress(
-                        pct=90 + (4 * retrieved / max(1, fetch_total)),
-                        phase='retrieval', phase_current=retrieved, phase_total=fetch_total,
-                        action=f'Retrieved {retrieved}/{fetch_total} capture files', done='false',
-                    )
-                    if not still_pending:
-                        break
-                    if round_idx < max_fetch_rounds - 1:
-                        time.sleep(1.0)
-                if pending:
-                    logger.warning(f"fiberNode scan: FTP prefetch missing {len(pending)} capture(s) after retries; sample={pending[:3]}")
-                _effective_tftp_path = os.environ.get('PNM_CACHE_DIR', '/app/data/pnm_cache')
-            payload = {"captures": captures, "tftp_path": _effective_tftp_path}
+            payload = {"captures": captures}
             _progress(
                 pct=95, phase='analysis', phase_current=0, phase_total=4,
                 action='Generating RxMER plot…', done='false',
@@ -3893,8 +3572,6 @@ def configure_utsc(mac_address):
                 filename=data.get('filename', f'utsc_{mac_address.replace(":", "")}'),
                 cm_mac_address=cm_mac,
                 logical_ch_ifindex=logical_ch_ifindex,
-                tftp_server=get_tftp_for_cmts(cmts_ip),
-                dest_path=get_tftp_dest_path_for_cmts(cmts_ip),
             )
 
         # Row management (probe / clear / createAndWait for Arris) is handled
@@ -4089,28 +3766,7 @@ def start_us_rxmer(mac_address):
     
     try:
         client = PyPNMClient()
-        tftp_server = data.get('tftp_server', get_tftp_for_cmts(cmts_ip))
-        dest_path = data.get('dest_path', get_tftp_dest_path_for_cmts(cmts_ip))
-
-        # Preflight: explicitly provision/verify bulk destination before start.
-        bulk_resp = client._post("/pnm/us/bulk-destination", {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community,
-            },
-            "dest_ip": tftp_server,
-            "index": int(data.get('destination_index') or 1),
-            "pnm_types": ["rxmer"],
-            "dest_path": dest_path,
-        })
-        if not bulk_resp or not bulk_resp.get("success"):
-            bulk_err = (bulk_resp or {}).get("error") or "bulk destination provisioning failed"
-            return jsonify({"status": "error", "message": f"Bulk destination error: {bulk_err}"}), 500
-        dest_index = int(bulk_resp.get("standard_dest_index") or data.get('destination_index') or 1)
-
-        # Use vendor-aware OFDMA endpoint so bulk-destination is provisioned
-        # consistently (same path as FiberNode scanner flow).
+        # PyPNM detects the CMTS vendor and owns destination provisioning.
         result = client._post("/pnm/us/ofdma/rxmer/start", {
             "cmts": {
                 "cmts_ip": cmts_ip,
@@ -4122,9 +3778,7 @@ def start_us_rxmer(mac_address):
             "pre_eq": data.get('pre_eq', True),
             "num_averages": data.get('num_averages', 1),
             "filename": data.get('filename', f'usrxmer_{mac_address.replace(":", "")}'),
-            "destination_index": dest_index,
-            "tftp_server": tftp_server,
-            "dest_path": dest_path,
+            "destination_index": int(data.get('destination_index') or 0),
         })
         
         if not result or result.get('status') == 'error':
@@ -4183,154 +3837,101 @@ def get_us_rxmer_status(mac_address):
 
 @pypnm_bp.route('/upstream/utsc/data/<mac_address>', methods=['POST'])
 def get_utsc_data(mac_address):
-    """
-    Fetch UTSC spectrum data from TFTP server (local filesystem access).
-    
-    POST body:
-    {
-        "cmts_ip": "x.x.x.x",
-        "rf_port_ifindex": 12345,
-        "filename": "optional",
-        "community": "optional"
-    }
-    
-    Returns spectrum data with frequencies and amplitudes for graphing.
-    """
-    import glob
-    import os
-    import struct
-    
+    """Return the latest normalized UTSC sample from PyPNM."""
+    from app.core.pypnm_client import PyPNMClient
+
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    raw_filename = data.get('filename')
-    if raw_filename:
-        filename_base = os.path.basename(str(raw_filename))
-    else:
-        filename_base = f'utsc_{mac_address.replace(":", "")}'
-    
-    # For FTP prefix matching, use only the MAC-based stem (utsc_{mac})
-    # so we find all captures for this modem, not just one exact file.
-    # E6000 appends timestamp: utsc_{mac}_YYYY-MM-DD_HH.MM.SS.mmm
-    mac_clean = mac_address.replace(":", "")
-    ftp_prefix = f'utsc_{mac_clean}'
-    
     if not cmts_ip:
-        return jsonify({"status": "error", "message": "cmts_ip required"}), 400
-    
+        return jsonify({'status': 'error', 'message': 'cmts_ip required'}), 400
+
+    vendor = None
     try:
-        # Fetch from FTP if configured, then resolve local path
-        _fetch_pnm_files(ftp_prefix)
-        tftp_base = _local_tftp_path()
+        from app.core.cmts_provider import CMTSProvider
+        cmts = CMTSProvider.get_cmts_by_ip(cmts_ip) or {}
+        vendor_text = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".lower()
+        if 'cisco' in vendor_text or 'cbr' in vendor_text:
+            vendor = 'cisco'
+        elif any(token in vendor_text for token in ('casa', 'evo', 'vccap')):
+            vendor = 'casa'
+        elif any(token in vendor_text for token in ('arris', 'commscope', 'e6000')):
+            vendor = 'commscope'
+    except Exception:
+        pass
 
-        # Find the most recent UTSC file matching the MAC-based prefix.
-        # E6000 naming: utsc_{mac}_YYYY-MM-DD_HH.MM.SS.mmm
-        patterns = [
-            f"{tftp_base}/{ftp_prefix}",
-            f"{tftp_base}/{ftp_prefix}_*",
-            f"{tftp_base}/{ftp_prefix}*",
-        ]
-        files = []
-        for p in patterns:
-            files.extend(glob.glob(p))
-        # Keep only regular files (glob can include directories such as tftp root).
-        files = [p for p in set(files) if os.path.isfile(p)]
-        files = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
-        
-        if not files:
-            # No files yet - return empty result (not an error)
-            logger.info(f"No UTSC files found for {ftp_prefix}")
-            return jsonify({
-                "success": True,
-                "message": "No UTSC data available yet. Start a measurement to begin.",
-                "data": None
-            }), 200
-        
-        # Get the most recent file
-        latest_file = files[0]
-        logger.info(f"Reading UTSC file: {latest_file}")
-        
-        # Read the binary file
-        with open(latest_file, 'rb') as f:
-            binary_data = f.read()
+    config = {}
+    try:
+        config_json = redis_client.get(f'utsc_config:{mac_address}')
+        config = json.loads(config_json) if config_json else {}
+    except Exception as exc:
+        logger.warning("Failed to retrieve UTSC presentation config: %s", exc)
 
-        if len(binary_data) < 328:
+    mac_clean = mac_address.replace(':', '').replace('-', '').lower()
+    rf_port = data.get('rf_port_ifindex')
+    requested = data.get('filename')
+    requested_pattern = f"{str(requested).rsplit('/', 1)[-1]}*" if requested else None
+    patterns = [requested_pattern] if requested_pattern else [f'utsc_{mac_clean}*']
+    if rf_port:
+        patterns.append(f'PNMCcapUsSpecAn_*_{rf_port}')
+    patterns.append('PNMCcapUsSpecAn_*')
+
+    try:
+        client = PyPNMClient()
+        filenames = []
+        for pattern in patterns:
+            result = client.list_utsc_files(
+                prefix=pattern,
+                rf_port_ifindex=int(rf_port) if rf_port else None,
+                mac_address=mac_address,
+                vendor=vendor,
+            )
+            if result.get('success'):
+                filenames.extend(result.get('files') or [])
+        filenames = sorted({str(name).rsplit('/', 1)[-1] for name in filenames}, reverse=True)
+        if not filenames:
             return jsonify({
-                "success": False,
-                "message": "File too small - invalid UTSC data"
-            }), 400
-        
-        # Retrieve UTSC config from Redis FIRST to get correct span
-        utsc_config = {}
-        try:
-            config_json = redis_client.get(f'utsc_config:{mac_address}')
-            if config_json:
-                utsc_config = json.loads(config_json)
-                logger.info(f"Retrieved UTSC config: {utsc_config}")
-        except Exception as e:
-            logger.warning(f"Failed to retrieve UTSC config: {e}")
-        
-        # Basic parsing: skip 328-byte header, extract amplitude data
-        # Vendor-specific parsing: CommScope uses little-endian signed int16, Cisco uses big-endian
-        header = binary_data[:328]
-        samples = binary_data[328:]
-        
-        # Try to detect vendor from filename
-        is_cisco = 'PNMCcap' in os.path.basename(latest_file)
-        
-        # Convert binary samples to amplitude values
-        amplitudes = []
-        for i in range(0, len(samples), 2):
-            if i+1 < len(samples):
-                if is_cisco:
-                    # Cisco cBR-8: big-endian signed int16, centidB (test with /100)
-                    val = struct.unpack('>h', samples[i:i+2])[0]
-                    amplitudes.append(val / 100.0)  # Test: centidB like CommScope
-                else:
-                    # CommScope E6000: little-endian signed int16, centidB
-                    val = struct.unpack('<h', samples[i:i+2])[0]
-                    amplitudes.append(val / 100.0)  # Scale to dB
-        
-        # Generate frequencies using configured span (defaults: 5-85 MHz = 80 MHz span, center 45 MHz)
-        num_bins = len(amplitudes)
-        span_hz = utsc_config.get('span_hz', 80000000)  # 80 MHz default
-        center_freq_hz = utsc_config.get('center_freq_hz', 45000000)  # 45 MHz default
-        freq_start = center_freq_hz - (span_hz / 2)
-        freq_end = center_freq_hz + (span_hz / 2)
-        freq_step = span_hz / num_bins if num_bins > 0 else 1
-        frequencies = [freq_start + i * freq_step for i in range(num_bins)]
-        
-        logger.info(f"UTSC freq range: {freq_start/1e6:.1f} - {freq_end/1e6:.1f} MHz, {num_bins} bins")
-        
+                'success': True,
+                'message': 'No UTSC data available yet. Start a measurement to begin.',
+                'data': None,
+            })
+
+        sample = client.get_utsc_sample(
+            filename=filenames[0],
+            vendor=vendor,
+            center_freq_hz=int(config.get('center_freq_hz', 45000000)),
+            span_hz=int(config.get('span_hz', 80000000)),
+            max_bins=1600,
+        )
+        if not sample.get('success'):
+            return jsonify({'success': False, 'message': sample.get('error', 'UTSC parse failed')}), 502
+
+        bins = sample.get('bins') or []
+        freq_start = float(sample.get('freq_start_hz') or 0)
+        freq_step = float(sample.get('freq_step_hz') or 1)
         spectrum_data = {
-            'filename': os.path.basename(latest_file),
-            'file_mtime': os.path.getmtime(latest_file),
-            'file_size': os.path.getsize(latest_file),
-            'num_samples': len(amplitudes),
-            'frequencies': frequencies[:800],  # Limit to first 800 points
-            'amplitudes': amplitudes[:800],
-            'span_hz': span_hz,
-            'center_freq_hz': center_freq_hz,
-            'num_bins': num_bins
+            'filename': sample.get('filename'),
+            'file_mtime': sample.get('collected_at'),
+            'file_size': sample.get('file_size'),
+            'num_samples': len(bins),
+            'frequencies': [freq_start + index * freq_step for index in range(min(800, len(bins)))],
+            'amplitudes': bins[:800],
+            'span_hz': sample.get('span_hz'),
+            'center_freq_hz': sample.get('center_freq_hz'),
+            'num_bins': sample.get('num_bins', len(bins)),
+            'units': sample.get('units', 'dBmV'),
         }
-        
-        response = {
-            "success": True,
-            "mac_address": mac_address,
-            "data": spectrum_data,
-        }
-        
-        # Only generate matplotlib plot if explicitly requested (skip for live polling)
+        response = {'success': True, 'mac_address': mac_address, 'data': spectrum_data}
         if data.get('include_plot', False):
             from app.core.utsc_plotter import generate_utsc_plot_from_data
-            rf_port_desc = data.get('rf_port_description', '')
-            plot = generate_utsc_plot_from_data(spectrum_data, mac_address, rf_port_desc)
-            response['plot'] = plot
-        
+            response['plot'] = generate_utsc_plot_from_data(
+                spectrum_data,
+                mac_address,
+                data.get('rf_port_description', ''),
+            )
         return jsonify(response)
-        
-    except Exception as e:
-        logger.error(f"Get UTSC data failed: {e}", exc_info=True)
-        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as exc:
+        logger.error("Get UTSC data failed: %s", exc, exc_info=True)
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
 
 
 @pypnm_bp.route('/upstream/rxmer/data/<mac_address>', methods=['POST'])
