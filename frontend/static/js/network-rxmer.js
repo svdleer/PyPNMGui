@@ -126,19 +126,6 @@
             name.className = 'fw-bold';
             name.textContent = cmts.name;
             link.appendChild(name);
-            if (cmts.ip) {
-                const ip = document.createElement('span');
-                ip.className = 'text-muted ms-1';
-                ip.textContent = cmts.ip;
-                link.appendChild(ip);
-            }
-            if (cmts.vendor) {
-                const vendor = document.createElement('span');
-                vendor.className = 'badge bg-secondary ms-1';
-                vendor.style.fontSize = '0.65rem';
-                vendor.textContent = cmts.vendor;
-                link.appendChild(vendor);
-            }
             link.addEventListener('click', (event) => {
                 event.preventDefault();
                 onSelect(cmts);
