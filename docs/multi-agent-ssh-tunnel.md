@@ -22,8 +22,8 @@ Webserver:8000 (PyPNM API)
       │
 Server A ──SSH -R 18000:localhost:8000──▶ Server B
                                                │
-                                          Agent B listens on
-                                          ws://localhost:18000
+                                          Agent B connects to
+                                          ws://localhost:18000/api/agents/ws
                                                │
                                           SNMP → Modems (LAN only)
 ```
@@ -73,26 +73,30 @@ systemctl enable --now pypnm-tunnel-b
 ```json
 {
   "agent_id": "agent-b-modemside",
-  "api_url": "ws://localhost:18000/ws/agent",
-  "auth_token": "your-token-here",
+  "pypnm_server": {
+    "url": "ws://localhost:18000/api/agents/ws",
+    "auth_token": "your-token-here"
+  },
   "log_level": "INFO"
 }
 ```
 
-Agent B connects to `localhost:18000` which tunnels through Server A back to the Webserver API.
+Agent B connects to `localhost:18000`, which tunnels through Server A to the PyPNM API.
 
 ## Server A: Agent A config (`agent_config.json`)
 
 ```json
 {
   "agent_id": "agent-a-cmtsside",
-  "api_url": "ws://webserver:8000/ws/agent",
-  "auth_token": "your-token-here",
+  "pypnm_server": {
+    "url": "ws://webserver:8000/api/agents/ws",
+    "auth_token": "your-token-here"
+  },
   "log_level": "INFO"
 }
 ```
 
-Agent A connects directly (it can reach the webserver).
+Agent A connects directly to the PyPNM API.
 
 ## Requirements
 
@@ -101,9 +105,6 @@ Agent A connects directly (it can reach the webserver).
   — Agent B only needs `localhost:18000`, not external access
 - `autossh` installed on Server A (`apt install autossh`)
 
-## Agent assignment in PyPNM GUI/API
+## Agent assignment in PyPNM
 
-Currently the API routes tasks to the first available alive agent.  
-When both agents are connected, CMTS walks should go to `agent-a-cmtsside`  
-and modem walks to `agent-b-modemside`.  
-This per-network agent assignment can be configured in the CMTS config — to be implemented.
+PyPNM routes tasks by advertised capability. Configure Agent A with CMTS reachability and Agent B with cable-modem reachability so each task is sent to an agent that can reach its target network.

@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 LABEL maintainer="PyPNM Team"
-LABEL description="PyPNM Web GUI Server with WebSocket agent support"
+LABEL description="PyPNM Web GUI Server with browser UTSC WebSocket support"
 
 ARG http_proxy
 ARG https_proxy

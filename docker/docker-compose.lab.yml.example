@@ -74,15 +74,15 @@ services:
     env_file:
       - .env
     environment:
-      - AGENT_ID=lab-agent-local
-      - SERVER_URL=ws://localhost:5051/ws/agent
+      - PYPNM_AGENT_ID=lab-agent-local
+      - PYPNM_SERVER_URL=ws://127.0.0.1:8000/api/agents/ws
       - AGENT_CAPABILITIES=snmp_get,snmp_walk,snmp_set,snmp_bulk_get,cmts_snmp_direct,cmts_get_modems,cmts_get_modem_info,enrich_modems,execute_pnm,pnm_ofdm_channels,pnm_ofdm_capture,pnm_ofdm_rxmer,pnm_set_tftp,pnm_utsc_configure,pnm_utsc_start,pnm_utsc_stop,pnm_utsc_status,pnm_utsc_data,pnm_us_rxmer_start,pnm_us_rxmer_status,pnm_us_rxmer_data,pnm_us_get_interfaces
     volumes:
       - agent-config-lab:/app/config
       - agent-logs-lab:/app/logs
     restart: unless-stopped
     depends_on:
-      - gui-server-lab
+      - pypnm-api
 
 volumes:
   pypnm-data-lab:

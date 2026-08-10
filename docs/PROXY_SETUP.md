@@ -1,172 +1,57 @@
-# PyPNM Proxy/Agent Architecture
+# PyPNM Remote Agent Architecture
 
-## The Problem
+## Ownership
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│   ┌─────────────┐                           ┌─────────────┐                 │
-│   │   GUI       │ ──────── ╳ ──────────────►│   Jump      │                 │
-│   │   Server    │   CANNOT CONNECT          │   Server    │                 │
-│   └─────────────┘                           └──────┬──────┘                 │
-│         ▲                                          │                        │
-│         │                                          │ CAN CONNECT            │
-│         │ CAN CONNECT                              ▼                        │
-│         │                                   ┌─────────────┐                 │
-│         └───────────────────────────────────│   SSH       │                 │
-│                                             │   Proxy     │                 │
-│                                             └──────┬──────┘                 │
-│                                                    │                        │
-│                                                    ▼                        │
-│                                             ┌─────────────┐                 │
-│                                             │   Cable     │                 │
-│                                             │   Modems    │                 │
-│                                             └─────────────┘                 │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+PyPNM owns remote-agent connections and exposes the canonical WebSocket endpoint:
+
+```text
+/api/agents/ws
 ```
 
-## The Solution: Reverse WebSocket Connection
+PyPNMGui calls PyPNM over HTTP and does not accept remote-agent connections. Its `/ws/utsc/<mac>` endpoint is a separate browser-facing spectrum stream.
 
-Since the **Jump Server CAN connect to the GUI Server**, we flip the connection:
+## Data flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│   ┌─────────────┐     WebSocket      ┌─────────────┐                        │
-│   │   GUI       │◄───────────────────│   Jump      │                        │
-│   │   Server    │    (Agent          │   Server    │                        │
-│   │   (Flask +  │     connects       │   (Agent)   │                        │
-│   │   SocketIO) │     TO server)     └──────┬──────┘                        │
-│   └─────────────┘                           │                               │
-│                                             │ SSH                           │
-│                                             ▼                               │
-│                                      ┌─────────────┐                        │
-│                                      │   SSH       │                        │
-│                                      │   Proxy     │                        │
-│                                      └──────┬──────┘                        │
-│                                             │ SNMP                          │
-│                                             ▼                               │
-│                                      ┌─────────────┐                        │
-│                                      │   Cable     │                        │
-│                                      │   Modems    │                        │
-│                                      └─────────────┘                        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```text
+Browser -> PyPNMGui -> PyPNM API -> /api/agents/ws -> pyPNMAgent -> SNMP/SSH/TFTP
 ```
 
-## Components
+The agent initiates the outbound WebSocket connection, which supports networks where PyPNM cannot directly reach DOCSIS equipment. PyPNM selects a connected agent by advertised capability and sends approved tasks through that connection.
 
-### 1. GUI Server (Flask + SocketIO)
-- Serves web interface
-- Accepts WebSocket connections from agents
-- Sends SNMP commands through agents
-- Receives results and displays to users
+## Agent configuration
 
-### 2. Jump Server Agent (Python)
-- Connects OUT to GUI Server via WebSocket
-- Maintains persistent connection
-- Executes SNMP commands (locally or via SSH proxy)
-- Returns results through WebSocket
+Use the complete PyPNM WebSocket URL in JSON configuration:
 
-### 3. SSH Proxy (Optional)
-- Reached by agent via SSH
-- Has direct network access to cable modems
-- Agent executes SNMP commands there
-
-## Data Flow Example
-
-```
-User clicks "Get System Info"
-         │
-         ▼
-Browser ──► GUI Server ──► WebSocket ──► Agent ──► SSH ──► SNMP ──► Modem
-                                                                      │
-User sees result                                                      │
-         ▲                                                            │
-         │                                                            │
-Browser ◄── GUI Server ◄── WebSocket ◄── Agent ◄── SSH ◄── SNMP ◄────┘
+```json
+{
+  "agent_id": "agent-01",
+  "pypnm_server": {
+    "url": "ws://pypnm-server:8000/api/agents/ws",
+    "auth_token": "your-token"
+  }
+}
 ```
 
-## Quick Start
-
-### On GUI Server:
+Equivalent environment variables:
 
 ```bash
-# Install dependencies
-cd /path/to/PyPNMGui
-source venv/bin/activate
-pip install -r backend/requirements.txt
-
-# Start with agent support
-./start_with_agent.sh
-
-# Or manually:
-export ENABLE_AGENT_WEBSOCKET=true
-export AGENT_AUTH_TOKEN=your-secure-token
-cd backend && python run.py
+export PYPNM_SERVER_URL=ws://pypnm-server:8000/api/agents/ws
+export PYPNM_AUTH_TOKEN=your-token
+export PYPNM_AGENT_ID=agent-01
 ```
 
-### On Jump Server:
+The PyPNM server validates agent authentication with `PYPNM_AGENT_TOKEN`. Agent and server token values must match.
+
+## Verification
+
+Check the PyPNM agent API rather than the GUI:
 
 ```bash
-# Install agent
-pip install websocket-client paramiko
-
-# Configure
-cd /path/to/agent
-cp agent_config.example.json agent_config.json
-# Edit agent_config.json with your settings
-
-# Start agent
-python agent.py -c agent_config.json
-
-# Or with environment variables:
-export PYPNM_GUI_URL=ws://gui-server:5050/agent
-export PYPNM_AUTH_TOKEN=your-secure-token
-export PYPNM_SSH_PROXY_HOST=ssh-proxy.internal
-python agent.py
+curl http://pypnm-server:8000/api/agents
 ```
 
-## Configuration
+The response reports connected agents and their capabilities. For connection failures, verify the URL ends in `/api/agents/ws`, confirm network reachability to the PyPNM API port, and review PyPNM and agent logs.
 
-### GUI Server Environment Variables
+## Security
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENABLE_AGENT_WEBSOCKET` | `false` | Enable agent WebSocket support |
-| `AGENT_AUTH_TOKEN` | `dev-token` | Token for agent authentication |
-| `DATA_MODE` | `mock` | `mock`, `agent`, or `direct` |
-| `PORT` | `5050` | HTTP/WebSocket port |
-
-### Agent Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PYPNM_GUI_URL` | `ws://localhost:5051` | GUI Server WebSocket URL |
-| `PYPNM_AUTH_TOKEN` | `dev-token` | Authentication token |
-| `PYPNM_AGENT_ID` | `agent-01` | Unique agent identifier |
-| `PYPNM_SSH_PROXY_HOST` | - | SSH proxy hostname |
-| `PYPNM_SSH_PROXY_USER` | - | SSH proxy username |
-| `PYPNM_SSH_PROXY_KEY` | - | Path to SSH key file |
-
-## Security Considerations
-
-1. **Use strong tokens** - Change default tokens in production
-2. **Use TLS** - Put behind nginx with SSL for production
-3. **Firewall rules** - Only allow Jump Server IPs to WebSocket port
-4. **SSH key authentication** - Never use passwords for SSH proxy
-5. **Command whitelisting** - Agent only executes approved SNMP commands
-
-## Alternative: Polling Mode
-
-If WebSocket is blocked, use HTTP polling:
-
-```bash
-# On Jump Server
-export PYPNM_POLL_MODE=true
-export PYPNM_POLL_INTERVAL=5  # seconds
-python agent.py
-```
-
-Agent polls `GET /api/agent/tasks` and posts results to `POST /api/agent/results`.
+Use TLS (`wss://`) through the approved reverse proxy in production, use a non-default token, restrict network access to the API, use SSH keys rather than passwords, and keep agent command capabilities minimal.

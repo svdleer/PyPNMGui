@@ -1,4 +1,4 @@
-# PyPNM Web GUI - WebSocket Routes for Agents
+# PyPNM Web GUI - Browser-facing WebSocket Routes
 
 import logging
 import json
