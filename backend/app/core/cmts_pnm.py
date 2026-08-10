@@ -294,52 +294,6 @@ class CmtsPnmClient:
             payload["dest_index"] = dest_index
         
         return self._post("/pnm/us/ofdma/rxmer/destinations/create", payload)
-    
-    def ensure_tftp_destination(
-        self,
-        cmts_ip: str,
-        tftp_ip: str,
-        community: str = "private",
-        write_community: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Ensure a TFTP bulk destination exists, creating if necessary.
-        
-        This is a convenience method that:
-        1. Checks if a destination pointing to tftp_ip exists
-        2. If not, creates one
-        3. Returns the destination_index to use
-        
-        Args:
-            cmts_ip: CMTS IP address
-            tftp_ip: TFTP server IP address
-            community: SNMP community
-            write_community: SNMP write community
-            
-        Returns:
-            Dict with destination_index and status
-        """
-        # First check existing destinations
-        existing = self.get_bulk_destinations(cmts_ip, community, write_community)
-        
-        if existing.get("success") and existing.get("destinations"):
-            for dest in existing["destinations"]:
-                if dest.get("ip_address") == tftp_ip:
-                    logger.info(f"Found existing TFTP destination at index {dest['index']}")
-                    return {
-                        "success": True,
-                        "destination_index": dest["index"],
-                        "message": f"Using existing destination {dest['index']}",
-                        "created": False
-                    }
-        
-        # No existing destination, create one
-        return self.create_bulk_destination(
-            cmts_ip=cmts_ip,
-            tftp_ip=tftp_ip,
-            community=community,
-            write_community=write_community
-        )
 
 
 # Convenience functions for Flask routes
