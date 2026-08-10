@@ -20,14 +20,17 @@ services:
       - PYPNM_AGENT_TOKEN=dev-token-change-me
       # Enable agent-based SNMP routing
       - PYPNM_USE_AGENT_SNMP=true
+      # Runtime config is stored on a named volume, never in the source tree.
+      - PYPNM_CONFIG_PATH=/app/config/system.json
       # TFTP server IPs: general for CMTS (E6000/Casa/vCCAP), alternate for Cisco CMTS and CM operations
       - TFTP_IPV4=${TFTP_IPV4:-212.178.218.234}
       - TFTP_IPV4_ALT=${TFTP_IPV4_ALT:-127.0.0.1}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
-      # Mount source code for live updates without rebuild (read-write for dev)
-      - ${PYPNM_SRC:-/home/svdleer/docker/PyPNM}/src/pypnm:/app/pypnm
+      - pypnm-config-lab:/app/config
+      # Mount source read-only so container startup cannot modify the Git worktree.
+      - ${PYPNM_SRC:-/home/svdleer/docker/PyPNM}/src/pypnm:/app/pypnm:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
@@ -127,6 +130,9 @@ services:
       - pypnm-api
 
 volumes:
+  pypnm-config-lab:
+    name: pypnm-config-lab
+    driver: local
   pypnm-data-lab:
     driver: local
   pypnm-logs-lab:
