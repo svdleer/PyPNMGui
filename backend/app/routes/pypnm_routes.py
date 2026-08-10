@@ -3966,13 +3966,20 @@ def stop_utsc(mac_address):
     rf_port_ifindex = data.get('rf_port_ifindex')
     community = data.get('community', get_cmts_community())
     write_community = data.get('write_community', get_cmts_write_community())
+    cfg_index = int(data.get('cfg_index', 1) or 1)
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
     
     try:
         client = PyPNMClient()
-        result = client.stop_utsc(cmts_ip, rf_port_ifindex, community, write_community)
+        result = client.stop_utsc(
+            cmts_ip,
+            rf_port_ifindex,
+            community,
+            write_community,
+            cfg_index=cfg_index,
+        )
         return jsonify({
             "success": result.get('success', True),
             **result

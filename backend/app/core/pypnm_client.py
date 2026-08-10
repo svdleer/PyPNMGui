@@ -1032,7 +1032,8 @@ class PyPNMClient:
         cmts_ip: str,
         rf_port_ifindex: int,
         community: str = "public",
-        write_community: Optional[str] = None
+        write_community: Optional[str] = None,
+        cfg_index: int = 1,
     ) -> Dict[str, Any]:
         """
         Stop a running UTSC capture via PyPNM API.
@@ -1045,7 +1046,8 @@ class PyPNMClient:
                 "community": community,
                 "write_community": write_community or community
             },
-            "rf_port_ifindex": rf_port_ifindex
+            "rf_port_ifindex": rf_port_ifindex,
+            "cfg_index": cfg_index,
         }
         return self._post("/pnm/us/utsc/stop", payload)
 

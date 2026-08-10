@@ -142,159 +142,70 @@ def delete_rxmer_files_by_mac_via_ftp(ftp_server, ftp_user, ftp_pass, mac_list, 
     return deleted
 
 
-def trigger_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
-    """Trigger UTSC test via agent's snmp_set capability.
-
-    Fallback to PyPNM REST path only when the legacy capability path is unavailable.
-    """
+def start_utsc_via_pypnm(
+    cmts_ip,
+    rf_port_ifindex,
+    community,
+    write_community=None,
+    cfg_index=0,
+    trigger_mode=2,
+):
+    """Start UTSC through PyPNM, the sole owner of remote-agent execution."""
     try:
-        vendor_is_cisco = False
-        try:
-            from app.core.cmts_provider import CMTSProvider
+        from app.core.pypnm_client import PyPNMClient
 
-            cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-            if cmts:
-                vendor_text = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".strip().lower()
-                vendor_is_cisco = 'cisco' in vendor_text or 'cbr' in vendor_text
-        except Exception:
-            vendor_is_cisco = False
-
-        from app.core.simple_ws import get_simple_agent_manager
-
-        agent_manager = get_simple_agent_manager()
-        if agent_manager:
-            agent = agent_manager.get_agent_for_capability('snmp_set')
-            if agent:
-                oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
-                task_id = agent_manager.send_task_sync(
-                    agent_id=agent.agent_id,
-                    command='snmp_set',
-                    params={
-                        'target_ip': cmts_ip,
-                        'oid': oid,
-                        'value': 1,  # 1 = start
-                        'type': 'i',
-                        'community': community
-                    },
-                    timeout=5
-                )
-                result = agent_manager.wait_for_task(task_id, timeout=5)
-                if result and result.get('result', {}).get('success'):
-                    logger.debug(f"UTSC triggered via agent on port {rf_port_ifindex}")
-                    return True
-                logger.warning(f"UTSC trigger failed via capability path: {result}")
-
-        if not vendor_is_cisco:
-            logger.warning("No snmp_set-capable legacy agent; non-Cisco UTSC will not use PyPNM fallback")
-            return False
-
-        logger.warning("Cisco UTSC using PyPNM /pnm/us/utsc/start fallback because legacy agent path was unavailable")
-        base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
-        response = requests.post(
-            f"{base_url}/pnm/us/utsc/start",
-            json={
-                "cmts": {
-                    "cmts_ip": cmts_ip,
-                    "community": community,
-                    "write_community": community,
-                },
-                "rf_port_ifindex": int(rf_port_ifindex),
-                "cfg_index": int(cfg_index or 1),
-                "trigger_mode": 2,
-            },
-            timeout=12,
+        result = PyPNMClient().start_utsc(
+            cmts_ip=cmts_ip,
+            rf_port_ifindex=int(rf_port_ifindex),
+            community=community,
+            write_community=write_community or community,
+            cfg_index=int(cfg_index),
+            trigger_mode=int(trigger_mode),
         )
-        if response.status_code >= 400:
-            logger.warning(f"UTSC trigger HTTP {response.status_code}: {response.text[:300]}")
-            return False
-
-        result = response.json()
-        if result.get('success', False):
-            logger.debug(f"UTSC triggered via PyPNM on port {rf_port_ifindex}")
-            return True
-
-        logger.warning(f"UTSC trigger failed: {result}")
-        return False
-    except Exception as e:
-        logger.error(f"UTSC trigger error: {e}")
-        return False
+        if result.get('success'):
+            logger.debug(
+                "UTSC started via PyPNM on port %s cfg_index=%s",
+                rf_port_ifindex,
+                result.get('cfg_index'),
+            )
+        else:
+            logger.warning("UTSC start via PyPNM failed: %s", result)
+        return result
+    except Exception as exc:
+        logger.error("UTSC start via PyPNM failed: %s", exc)
+        return {'success': False, 'error': str(exc)}
 
 
-def stop_utsc_via_agent(cmts_ip, rf_port_ifindex, community, cfg_index=1):
-    """Stop UTSC test via agent's snmp_set capability.
-
-    Fallback to PyPNM REST path only when the legacy capability path is unavailable.
-    """
+def stop_utsc_via_pypnm(
+    cmts_ip,
+    rf_port_ifindex,
+    community,
+    write_community=None,
+    cfg_index=1,
+):
+    """Stop UTSC through PyPNM using the row returned by start/configure."""
     try:
-        vendor_is_cisco = False
-        try:
-            from app.core.cmts_provider import CMTSProvider
+        from app.core.pypnm_client import PyPNMClient
 
-            cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-            if cmts:
-                vendor_text = f"{cmts.get('Vendor', '')} {cmts.get('Type', '')}".strip().lower()
-                vendor_is_cisco = 'cisco' in vendor_text or 'cbr' in vendor_text
-        except Exception:
-            vendor_is_cisco = False
-
-        from app.core.simple_ws import get_simple_agent_manager
-
-        agent_manager = get_simple_agent_manager()
-        if agent_manager:
-            agent = agent_manager.get_agent_for_capability('snmp_set')
-            if agent:
-                oid = f"1.3.6.1.4.1.4491.2.1.27.1.3.10.3.1.1.{rf_port_ifindex}.{cfg_index}"
-                task_id = agent_manager.send_task_sync(
-                    agent_id=agent.agent_id,
-                    command='snmp_set',
-                    params={
-                        'target_ip': cmts_ip,
-                        'oid': oid,
-                        'value': 2,  # 2 = abort
-                        'type': 'i',
-                        'community': community
-                    },
-                    timeout=5
-                )
-                result = agent_manager.wait_for_task(task_id, timeout=5)
-                if result and result.get('result', {}).get('success'):
-                    logger.debug(f"UTSC stopped via agent on port {rf_port_ifindex}")
-                    return True
-                logger.warning(f"UTSC stop failed via capability path: {result}")
-
-        if not vendor_is_cisco:
-            logger.warning("No snmp_set-capable legacy agent; non-Cisco UTSC will not use PyPNM fallback")
-            return False
-
-        logger.warning("Cisco UTSC using PyPNM /pnm/us/utsc/stop fallback because legacy agent path was unavailable")
-        base_url = os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://localhost:8000')).rstrip('/')
-        response = requests.post(
-            f"{base_url}/pnm/us/utsc/stop",
-            json={
-                "cmts": {
-                    "cmts_ip": cmts_ip,
-                    "community": community,
-                    "write_community": community,
-                },
-                "rf_port_ifindex": int(rf_port_ifindex),
-                "cfg_index": int(cfg_index or 1),
-            },
-            timeout=12,
+        result = PyPNMClient().stop_utsc(
+            cmts_ip=cmts_ip,
+            rf_port_ifindex=int(rf_port_ifindex),
+            community=community,
+            write_community=write_community or community,
+            cfg_index=int(cfg_index),
         )
-        if response.status_code >= 400:
-            logger.warning(f"UTSC stop HTTP {response.status_code}: {response.text[:300]}")
-            return False
-
-        result = response.json()
-        if result.get('success', False):
-            logger.debug(f"UTSC stopped via PyPNM on port {rf_port_ifindex}")
-            return True
-
-        logger.warning(f"UTSC stop failed: {result}")
-        return False
-    except Exception as e:
-        logger.error(f"UTSC stop error: {e}")
-        return False
+        if result.get('success'):
+            logger.debug(
+                "UTSC stopped via PyPNM on port %s cfg_index=%s",
+                rf_port_ifindex,
+                cfg_index,
+            )
+        else:
+            logger.warning("UTSC stop via PyPNM failed: %s", result)
+        return result
+    except Exception as exc:
+        logger.error("UTSC stop via PyPNM failed: %s", exc)
+        return {'success': False, 'error': str(exc)}
 
 
 # UTSC Status values (from CMTS MIB)
@@ -325,14 +236,16 @@ def init_websocket(app):
             refresh_ms = int(request.args.get('refresh', 500))  # Refresh rate in ms
             duration_s = int(request.args.get('duration', 60))  # Duration in seconds
             rf_port = request.args.get('rf_port')
-            cfg_index = int(request.args.get('cfg_index', 1))
+            cfg_index = int(request.args.get('cfg_index', 0))
             cmts_ip = request.args.get('cmts_ip')
             community = request.args.get('community', 'public')
             write_community = request.args.get('write_community', community)
+            externally_started = request.args.get('live', '').lower() in {'1', 'true', 'yes', 'on'}
             
             logger.info(
                 f"UTSC WebSocket opened for {mac_address}: refresh={refresh_ms}ms, "
-                f"duration={duration_s}s, rf_port={rf_port}, cfg_index={cfg_index}, cmts_ip={cmts_ip}"
+                f"duration={duration_s}s, rf_port={rf_port}, cfg_index={cfg_index}, "
+                f"cmts_ip={cmts_ip}, externally_started={externally_started}"
             )
         except Exception as e:
             logger.error(f"UTSC WebSocket parameter parsing failed: {e}")
@@ -473,9 +386,13 @@ def init_websocket(app):
         initial_buffer_target = 0
         streaming_started = False
         
-        # No re-trigger needed - E6000 delivers files continuously (~30s apart)
+        # Sessions opened after the normal GUI start call stream only. Direct
+        # analyzer sessions own their PyPNM start/retrigger/stop lifecycle.
         run_counter = 0
-        trigger_interval = 30  # seconds between re-triggers
+        trigger_interval = 30  # seconds between direct-session re-triggers
+        owns_utsc = False
+        resolved_cfg_index = cfg_index
+        last_trigger_time = time.time()
         
         try:
             # Send initial connected message
@@ -514,22 +431,40 @@ def init_websocket(app):
             else:
                 logger.info(f"UTSC WebSocket: No recent files found - waiting for new captures")
             
-            # CONTINUOUS STREAMING MODE: Trigger first run immediately
+            # The normal GUI flow starts UTSC before opening this stream. A direct
+            # analyzer session without live=1 starts UTSC through canonical PyPNM.
             stream_start_time = time.time()
+            last_trigger_time = stream_start_time
             
             if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Starting continuous streaming mode (re-trigger every {trigger_interval}s)")
-                logger.info(f"UTSC WebSocket: Triggering initial UTSC run #{run_counter}")
-                try:
-                    trigger_utsc_via_agent(cmts_ip, int(rf_port), community, cfg_index=cfg_index)
-                    last_trigger_time = stream_start_time
+                if externally_started:
+                    logger.info(
+                        "UTSC WebSocket: streaming existing run at cfg_index=%s",
+                        resolved_cfg_index,
+                    )
+                else:
+                    logger.info("UTSC WebSocket: starting direct analyzer run via PyPNM")
+                    start_result = start_utsc_via_pypnm(
+                        cmts_ip,
+                        int(rf_port),
+                        community,
+                        write_community=write_community,
+                        cfg_index=cfg_index,
+                    )
+                    if not start_result.get('success'):
+                        error = start_result.get('error') or 'PyPNM rejected UTSC start'
+                        logger.error("UTSC initial start failed: %s", error)
+                        ws.send(json.dumps({'type': 'error', 'message': f'Failed to start UTSC: {error}'}))
+                        return
+                    resolved_cfg_index = int(start_result.get('cfg_index') or cfg_index)
+                    if resolved_cfg_index <= 0:
+                        logger.error("UTSC start returned invalid cfg_index=%s", resolved_cfg_index)
+                        ws.send(json.dumps({'type': 'error', 'message': 'UTSC start returned no usable config row'}))
+                        return
+                    owns_utsc = True
                     run_counter += 1
-                except Exception as e:
-                    logger.error(f"UTSC initial trigger failed: {e}")
-                    ws.send(json.dumps({'type': 'error', 'message': f'Failed to start UTSC: {e}'}))
-                    return
             else:
-                logger.info(f"UTSC WebSocket: Passive mode - streaming pre-existing files only")
+                logger.info("UTSC WebSocket: passive mode - streaming pre-existing files only")
             
             last_ftp_fetch_time = 0
             FTP_FETCH_INTERVAL = 2.0  # seconds between FTP polls
@@ -540,15 +475,31 @@ def init_websocket(app):
                 current_time = time.time()
                 elapsed = current_time - connection_start_time
                 
-                # Re-trigger UTSC periodically to keep files flowing
-                if rf_port and cmts_ip and (current_time - last_trigger_time) >= trigger_interval:
-                    try:
-                        logger.info(f"UTSC WebSocket: Re-triggering UTSC run #{run_counter} (every {trigger_interval}s)")
-                        trigger_utsc_via_agent(cmts_ip, int(rf_port), community, cfg_index=cfg_index)
-                        last_trigger_time = current_time
+                # Only direct analyzer sessions own periodic retriggers. GUI-started
+                # sessions are already running and must not be triggered twice.
+                if owns_utsc and (current_time - last_trigger_time) >= trigger_interval:
+                    logger.info(
+                        "UTSC WebSocket: re-triggering direct run #%s via PyPNM",
+                        run_counter,
+                    )
+                    start_result = start_utsc_via_pypnm(
+                        cmts_ip,
+                        int(rf_port),
+                        community,
+                        write_community=write_community,
+                        cfg_index=resolved_cfg_index,
+                    )
+                    last_trigger_time = current_time
+                    if start_result.get('success'):
+                        resolved_cfg_index = int(
+                            start_result.get('cfg_index') or resolved_cfg_index
+                        )
                         run_counter += 1
-                    except Exception as e:
-                        logger.warning(f"UTSC re-trigger failed: {e}")
+                    else:
+                        logger.warning(
+                            "UTSC direct-session re-trigger failed: %s",
+                            start_result.get('error') or start_result,
+                        )
                 
                 # Fetch new files — throttled to every FTP_FETCH_INTERVAL seconds.
                 # Agent mode: API prefetch handles retrieval; skip FTP entirely.
@@ -750,13 +701,28 @@ def init_websocket(app):
             raise
         finally:
             logger.info(f"UTSC WebSocket closing for {mac_address}")
-            # Stop UTSC on WebSocket disconnect (clean shutdown)
-            if rf_port and cmts_ip:
-                logger.info(f"UTSC WebSocket: Stopping continuous UTSC on {cmts_ip} port {rf_port} (completed {run_counter} runs)")
-                try:
-                    stop_utsc_via_agent(cmts_ip, int(rf_port), community, cfg_index=cfg_index)
-                except Exception as e:
-                    logger.warning(f"UTSC stop failed on cleanup: {e}")
+            # Only a direct analyzer session stops the run it started. Normal GUI
+            # sessions are stopped by the matching authenticated stop endpoint.
+            if owns_utsc and rf_port and cmts_ip:
+                logger.info(
+                    "UTSC WebSocket: stopping owned run on port %s cfg_index=%s "
+                    "after %s successful start(s)",
+                    rf_port,
+                    resolved_cfg_index,
+                    run_counter,
+                )
+                stop_result = stop_utsc_via_pypnm(
+                    cmts_ip,
+                    int(rf_port),
+                    community,
+                    write_community=write_community,
+                    cfg_index=resolved_cfg_index,
+                )
+                if not stop_result.get('success'):
+                    logger.warning(
+                        "UTSC stop failed on cleanup: %s",
+                        stop_result.get('error') or stop_result,
+                    )
             
             _utsc_sessions.pop(session_id, None)
             logger.info(f"UTSC WebSocket closed for {mac_address}")

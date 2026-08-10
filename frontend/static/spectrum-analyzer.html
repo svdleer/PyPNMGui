@@ -161,7 +161,8 @@ const paramNumBins = parseInt(urlParams.get('num_bins')) || 800;
 const paramOutputFormat = parseInt(urlParams.get('output_format')) || 5;
 const paramWindow = parseInt(urlParams.get('window')) || 4;
 const paramRuntime = parseInt(urlParams.get('runtime')) || 60;
-const paramCfgIndex = parseInt(urlParams.get('cfg_index')) || 1;
+const parsedCfgIndex = Number.parseInt(urlParams.get('cfg_index'), 10);
+const paramCfgIndex = Number.isNaN(parsedCfgIndex) ? 0 : parsedCfgIndex;
 const paramLive = urlParams.get('live') || '';
 const paramCommunity = urlParams.get('community') || '';
 
@@ -174,9 +175,10 @@ function updateWsUrl() {
     const mac = document.getElementById('targetMac').value.trim().replace(/:/g, '').toLowerCase();
     const qs = new URLSearchParams({
         rf_port: paramRfPort || '',
-      cfg_index: String(paramCfgIndex || 1),
+        cfg_index: String(paramCfgIndex),
         cmts_ip: paramCmts || '',
         community: paramCommunity || 'private',
+        live: paramLive === '1' ? '1' : '0',
         refresh: '500',
         duration: String(paramRuntime || 60)
     });
@@ -557,17 +559,17 @@ if (paramMac && paramCmts && paramRfPort) {
   setTimeout(connectWebSocket, 500);
 }
 
-// Stop UTSC when window/tab closes
+// A normal embedded analyzer is stopped by the parent GUI exactly once. Keep a
+// beacon only for a standalone page attached to an externally started run.
 window.addEventListener('beforeunload', () => {
-  if (ws) {
-    // Send stop command to PyPNM API
+  if (ws && window.parent === window && paramLive === '1') {
     const stopUrl = `/api/pypnm/upstream/utsc/stop/${paramMac}`;
     const data = JSON.stringify({
       cmts_ip: paramCmts,
       rf_port_ifindex: parseInt(paramRfPort),
+      cfg_index: paramCfgIndex || 1,
       community: paramCommunity || 'private'
     });
-    // Use sendBeacon for reliable delivery on page unload
     navigator.sendBeacon(stopUrl, new Blob([data], {type: 'application/json'}));
   }
 });

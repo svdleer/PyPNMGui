@@ -5044,6 +5044,14 @@ createApp({
                 const result = await response.json();
                 if (!this._isTaskActive(token)) return;
                 if (result.success) {
+                    const resolvedCfgIndex = Number.parseInt(result.cfg_index, 10);
+                    if (!Number.isInteger(resolvedCfgIndex) || resolvedCfgIndex <= 0) {
+                        this.$toast?.error('UTSC start returned no usable config row');
+                        this.runningUtsc = false;
+                        this._activeTaskLabel = null;
+                        return;
+                    }
+                    this.utscConfig.cfgIndex = resolvedCfgIndex;
                     this.$toast?.success('UTSC test started');
                     // Poll for status
                     this.pollUtscStatus(token);
@@ -5074,6 +5082,7 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
+                        cfg_index: this.utscConfig.cfgIndex || 1,
                         community: this.snmpCommunity,
                         write_community: this.snmpCommunityRW
                     })
@@ -7080,6 +7089,13 @@ createApp({
                 
                 const result = await response.json();
                 if (result.success) {
+                    const resolvedCfgIndex = Number.parseInt(result.cfg_index, 10);
+                    if (!Number.isInteger(resolvedCfgIndex) || resolvedCfgIndex <= 0) {
+                        this.$toast?.error('UTSC start returned no usable config row');
+                        this.liveSpectrumEnabled = false;
+                        return;
+                    }
+                    this.utscConfig.cfgIndex = resolvedCfgIndex;
                     this.$toast?.success('Live spectrum started');
                     this.runningUtsc = true;
                     // Open Pro Spectrum Analyzer (WS handles streaming, no HTTP polling needed)
