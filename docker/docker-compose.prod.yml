@@ -26,6 +26,8 @@ services:
       - PYPNM_AGENT_TOKEN=${AGENT_AUTH_TOKEN:-dev-token-change-me}
       # Enable agent-based SNMP routing
       - PYPNM_USE_AGENT_SNMP=true
+      # Runtime configuration persists independently of images and source.
+      - PYPNM_CONFIG_PATH=/app/config/system.json
       # PNM file retrieval method is set in .env.pypnm (PNM_FILE_SOURCE=ftp)
       # Vendor-specific TFTP IPs and upload roots — all sourced from env_file (.env.pypnm).
       # Each falls back to TFTP_IPV4_ALT, then TFTP_IPV4 if not set.
@@ -40,13 +42,14 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/lib/tftpboot:/var/lib/tftpboot:ro
+      - pypnm-config-prod:/app/config
       # Topology dataset volume (NL_topology_YYYYMMDD + NL_modemlocation_YYYYMMDD)
       - ${TOPOLOGY_VOLUME_HOST:-/app/topology}:/app/data/topology:ro
       # Share data volume with GUI so FTP-prefetched RxMER files in
       # /app/data/pnm_cache are visible to PyPNM fiberNode plot/analyze.
       - pypnm-data-prod:/app/data
-      # Mount source code for live updates without rebuild
-      - ${PYPNM_SRC:-/opt/pypnm}/src/pypnm:/app/pypnm
+      # Mount source read-only so container startup cannot modify the Git worktree.
+      - ${PYPNM_SRC:-/opt/pypnm}/src/pypnm:/app/pypnm:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
@@ -203,6 +206,9 @@ services:
   #     retries: 3
 
 volumes:
+  pypnm-config-prod:
+    name: pypnm-config-prod
+    driver: local
   pypnm-data-prod:
     driver: local
   pypnm-logs-prod:
