@@ -104,7 +104,7 @@
                         <span class="badge d-flex align-items-center"
                               :class="hasCmtsAgent ? 'bg-success' : 'bg-danger'"
                               style="font-size: 0.75rem; min-width: 110px; height: 32px; padding: 0.5rem 0.75rem;"
-                              :title="hasCmtsAgent ? cmtsAgentCount + ' CMTS agent(s) connected' : 'No CMTS agent — modem discovery disabled'">
+                              :title="hasCmtsAgent ? cmtsAgentCount + ' CMTS agent(s) connected' : 'No CMTS agent — persisted inventory remains available; live discovery unavailable'">
                             <i class="bi bi-router-fill me-1" style="font-size: 0.85rem;"></i>
                             <span>CMTS</span>
                             <span class="badge bg-light text-dark ms-1" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">{{ cmtsAgentCount }}</span>
@@ -288,10 +288,9 @@
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">
                                         <button @click="getLiveModems" class="btn btn-success w-100"
-                                                :disabled="!selectedCmts || loadingLiveModems || isEnriching || !hasCmtsAgent"
-                                                :title="!hasCmtsAgent ? 'No CMTS agent connected' : (isEnriching ? 'Enrichment in progress...' : '')">
+                                                :disabled="!selectedCmts || loadingLiveModems"
+                                                title="Load persisted modem inventory; live discovery occurs only when no inventory exists">
                                             <span v-if="loadingLiveModems"><i class="bi bi-arrow-repeat spin me-1"></i>{{ t('search.loading') }}</span>
-                                            <span v-else-if="isEnriching"><i class="bi bi-arrow-repeat spin me-1"></i>{{ t('search.enriching') }}</span>
                                             <span v-else><i class="bi bi-router me-1"></i>{{ t('search.get_modems') }}</span>
                                         </button>
                                     </div>
@@ -344,9 +343,10 @@
                                         <small v-if="liveModemSource" class="text-muted">
                                             <i class="bi bi-broadcast me-1"></i>{{ liveModemSource }}
                                             <span v-if="liveCachePartial" class="badge bg-warning text-dark ms-2">
-                                                cached partial
-                                                <span v-if="liveCacheRefreshing"><i class="bi bi-arrow-repeat spin ms-1"></i> refreshing</span>
+                                                partial inventory
+                                                <span v-if="liveCacheRefreshing"><i class="bi bi-arrow-repeat spin ms-1"></i> enriching</span>
                                             </span>
+                                            <span v-if="liveInventoryStale" class="badge bg-secondary ms-2">stale inventory</span>
                                         </small>
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">

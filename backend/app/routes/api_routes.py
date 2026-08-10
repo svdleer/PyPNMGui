@@ -69,17 +69,43 @@ def _run_modem_job(job_id: str, cmts_ip: str, cmts_name: str,
 logger = logging.getLogger(__name__)
 
 
-def _cm_modem_limit_default() -> int:
-    value = current_app.config.get('CM_MODEM_LIMIT', os.environ.get('CM_MODEM_LIMIT', 50000))
+MAX_CM_MODEM_LIMIT = 50000
+_INVENTORY_METADATA_FIELDS = (
+    'complete', 'truncated', 'requested_limit', 'row_count', 'snapshot_id',
+    'capability_enriched', 'collected_at', 'revision_at', 'source',
+    'inventory_source', 'critical_oid_errors',
+)
+
+
+def _bounded_modem_limit(value, default: int = MAX_CM_MODEM_LIMIT) -> int:
     try:
-        parsed = int(value)
-        return parsed if parsed > 0 else 50000
+        return max(1, min(int(value), MAX_CM_MODEM_LIMIT))
     except (TypeError, ValueError):
-        return 50000
+        return default
+
+
+def _cm_modem_limit_default() -> int:
+    value = current_app.config.get(
+        'CM_MODEM_LIMIT', os.environ.get('CM_MODEM_LIMIT', MAX_CM_MODEM_LIMIT)
+    )
+    return _bounded_modem_limit(value)
+
+
+def _inventory_freshness_seconds() -> int:
+    value = current_app.config.get(
+        'INVENTORY_FRESHNESS_SECONDS',
+        os.environ.get('INVENTORY_FRESHNESS_SECONDS', 172800),
+    )
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 172800
+
+
+
 
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '127.0.0.1')
-
 
 def get_default_community():
     """Get default SNMP community for modems."""
@@ -115,13 +141,7 @@ def _redis_cache_modems_for_key(
     cmts_name: str,
     modems: list[dict],
     requested_limit: int | None = None,
-    *,
-    capability_enriched: bool = False,
-    complete: bool = False,
-    truncated: bool = False,
-    collected_at=None,
-    inventory_revision=None,
-    critical_oid_errors: dict | None = None,
+    metadata: dict | None = None,
 ) -> None:
     if not REDIS_AVAILABLE or not redis_client or not cache_key:
         return
@@ -129,25 +149,24 @@ def _redis_cache_modems_for_key(
         requested_limit = _cm_modem_limit_default()
     try:
         modems = filter_ignored_modems(modems)
-        payload_data = {
+        payload = {
             "cmts": cmts_name,
             "requested_limit": requested_limit,
+            "cache_query_limit": requested_limit,
             "modems": modems,
-            "timestamp": int(time.time()),
+            "cache_written_at": int(time.time()),
             "source": "pypnm-inventory",
-            "capability_enriched": capability_enriched is True,
-            "complete": complete is True,
-            "truncated": truncated is True,
-            "collected_at": collected_at,
-            "inventory_revision": inventory_revision,
-            "critical_oid_errors": critical_oid_errors or {},
         }
-        ttl = _cache_remaining_ttl(payload_data)
+        payload.update(_snapshot_metadata(metadata or {}, modems))
+        for state_key in ('enriched', 'enriching', 'enrichment_progress'):
+            if state_key in (metadata or {}):
+                payload[state_key] = metadata.get(state_key)
+        ttl = _cache_remaining_ttl(payload)
         if ttl <= 0:
             redis_client.delete(cache_key)
             logger.info("Skipped stale modem cache write for %s", cache_key)
             return
-        redis_client.setex(cache_key, ttl, json.dumps(payload_data))
+        redis_client.setex(cache_key, ttl, json.dumps(payload))
     except Exception as exc:
         logger.warning(f"Redis modem cache write error for {cache_key}: {exc}")
 
@@ -155,13 +174,7 @@ def _redis_cache_modems_for_key(
 def _backfill_redis_from_inventory(
     modems: list[dict],
     requested_limit: int | None = None,
-    *,
-    capability_enriched: bool = False,
-    complete: bool = False,
-    truncated: bool = False,
-    collected_at=None,
-    inventory_revision=None,
-    critical_oid_errors: dict | None = None,
+    metadata: dict | None = None,
 ) -> None:
     if not REDIS_AVAILABLE or not redis_client or not modems:
         return
@@ -182,51 +195,18 @@ def _backfill_redis_from_inventory(
         elif cmts_ip:
             grouped.setdefault(cmts_ip, []).append(modem)
 
-    def _group_cache_metadata(rows: list[dict]):
-        if collected_at is not None:
-            return collected_at, inventory_revision
-        timestamps = [
-            _parse_inventory_timestamp(row.get("updated_at"))
-            for row in rows
-            if isinstance(row, dict)
-        ]
-        timestamps = [value for value in timestamps if value is not None]
-        if not timestamps:
-            return None, inventory_revision
-        # The dataset is only as fresh as its oldest row, while its revision
-        # is the newest row change represented by this payload.
-        return min(timestamps).isoformat(), inventory_revision or max(timestamps).isoformat()
-
     for group_name, rows in grouped.items():
-        group_collected_at, group_revision = _group_cache_metadata(rows)
         _redis_cache_modems_for_key(
-            f"modems:{group_name}",
-            group_name,
-            rows,
-            requested_limit=requested_limit,
-            capability_enriched=capability_enriched,
-            complete=complete,
-            truncated=truncated,
-            collected_at=group_collected_at,
-            inventory_revision=group_revision,
-            critical_oid_errors=critical_oid_errors,
+            f"modems:{group_name}", group_name, rows,
+            requested_limit=requested_limit, metadata=metadata,
         )
 
     for alias_key, group_name in aliases.items():
         rows = grouped.get(group_name) or []
         if rows:
-            group_collected_at, group_revision = _group_cache_metadata(rows)
             _redis_cache_modems_for_key(
-                f"modems:{alias_key}",
-                group_name,
-                rows,
-                requested_limit=requested_limit,
-                capability_enriched=capability_enriched,
-                complete=complete,
-                truncated=truncated,
-                collected_at=group_collected_at,
-                inventory_revision=group_revision,
-                critical_oid_errors=critical_oid_errors,
+                f"modems:{alias_key}", group_name, rows,
+                requested_limit=requested_limit, metadata=metadata,
             )
 
 
@@ -249,6 +229,43 @@ def _parse_inventory_timestamp(value):
     except Exception:
         return None
 
+
+def _inventory_stale(metadata: dict, modems: list[dict]) -> bool | None:
+    collected = _parse_inventory_timestamp(metadata.get('collected_at'))
+    if collected is None:
+        timestamps = [
+            _parse_inventory_timestamp(m.get('updated_at') or m.get('last_seen_at'))
+            for m in modems if isinstance(m, dict)
+        ]
+        timestamps = [value for value in timestamps if value is not None]
+        collected = min(timestamps) if timestamps else None
+    if collected is None:
+        return None
+    age_seconds = (datetime.now(timezone.utc) - collected).total_seconds()
+    return age_seconds > _inventory_freshness_seconds()
+
+def _snapshot_metadata(metadata: dict, modems: list[dict]) -> dict:
+    """Preserve authoritative snapshot axes without deriving completeness from row count."""
+    source = metadata.get('source') or metadata.get('inventory_source')
+    inventory_source = metadata.get('inventory_source') or metadata.get('source')
+    out = {
+        key: metadata.get(key)
+        for key in _INVENTORY_METADATA_FIELDS
+        if key in metadata
+    }
+    out['row_count'] = metadata.get('row_count', len(modems))
+    out['source'] = source or 'pypnm-inventory'
+    out['inventory_source'] = inventory_source or out['source']
+    out['critical_oid_errors'] = metadata.get('critical_oid_errors') or {}
+    out['capability_enriched'] = metadata.get('capability_enriched') is True
+    out['inventory_complete'] = (
+        metadata.get('complete') is True and metadata.get('truncated') is not True
+    )
+    out['inventory_stale'] = _inventory_stale(metadata, modems)
+    # Unknown legacy completeness is not authoritative; present it as partial
+    # rather than implying a complete inventory from row count alone.
+    out['partial'] = not out['inventory_complete']
+    return out
 
 def _cache_reference_time(payload: dict):
     return _parse_inventory_timestamp(payload.get("collected_at")) or _parse_inventory_timestamp(
@@ -363,12 +380,11 @@ def _modems_are_enriched(modems: list[dict]) -> bool:
 
 
 def _modem_missing_enrichment(modem: dict) -> bool:
-    cable_mac = str(modem.get('cable_mac') or '').strip()
-    return (
-        _identity_value_missing(modem.get('vendor'))
-        or _identity_value_missing(modem.get('software_version') or modem.get('firmware'))
-        or not cable_mac
-    )
+    vendor = str(modem.get('vendor') or '').strip().lower()
+    fw = str(modem.get('software_version') or modem.get('firmware') or '').strip().lower()
+    vendor_missing = vendor in ('', 'unknown', 'n/a')
+    fw_missing = fw in ('', 'unknown', 'n/a')
+    return vendor_missing or fw_missing
 
 
 def _docsis_version_rank(value) -> int:
@@ -770,6 +786,9 @@ def get_modems():
     search_value = (request.args.get('search_value') or '').strip().lower()
     cmts_filter = (request.args.get('cmts') or '').strip()
     iface_filter = (request.args.get('interface') or '').strip().lower()
+    query_limit = _bounded_modem_limit(
+        request.args.get('limit', _cm_modem_limit_default())
+    )
 
     # CPE addresses are persisted and indexed by PyPNM. Keep the GUI as a
     # thin proxy and bypass its per-worker Redis modem caches for this search.
@@ -782,7 +801,7 @@ def get_modems():
                 search_type='cpe_ip',
                 search_value=search_value,
                 interface=iface_filter or None,
-                limit=_cm_modem_limit_default(),
+                limit=query_limit,
             )
             if response.get('status') != 'success':
                 message = response.get('message') or 'CPE inventory search failed'
@@ -858,7 +877,7 @@ def get_modems():
     # MySQL inventory fallback path when Redis is unavailable.
     if not REDIS_AVAILABLE or not redis_client:
         try:
-            default_limit = _cm_modem_limit_default()
+            default_limit = query_limit
             modems_resp = PyPNMClient().get_inventory_modems(
                 cmts=cmts_filter or None,
                 search_type=search_type or None,
@@ -886,15 +905,19 @@ def get_modems():
             }), 503
 
     try:
-        keys = [f"modems:{cmts_filter}"] if cmts_filter else list(redis_client.scan_iter('modems:*'))
-        revisions = _inventory_revision_map()
+        keys = (
+            [f"modems:{cmts_filter}"]
+            if cmts_filter
+            else redis_client.scan_iter(match='modems:*', count=500)
+        )
         seen_macs: set[str] = set()
         modems = []
 
         for key in keys:
-            payload = _read_modem_cache(key, revisions)
-            if not payload:
+            cached = redis_client.get(key)
+            if not cached:
                 continue
+            payload = json.loads(cached)
             cmts_name = str(payload.get('cmts') or key.split(':', 1)[-1])
             for m in payload.get('modems', []):
                 mac_key = str(m.get('mac_address', '')).lower().replace(':', '').replace('-', '')
@@ -909,7 +932,7 @@ def get_modems():
 
         if not modems:
             # If Redis has no records yet, fallback to PyPNM inventory snapshot.
-            default_limit = _cm_modem_limit_default()
+            default_limit = query_limit
             db_resp = PyPNMClient().get_inventory_modems(
                 cmts=cmts_filter or None,
                 search_type=search_type or None,
@@ -922,15 +945,7 @@ def get_modems():
                 _backfill_redis_from_inventory(
                     db_modems,
                     requested_limit=db_resp.get('requested_limit') or default_limit,
-                    capability_enriched=db_resp.get('capability_enriched') is True,
-                    complete=(
-                        db_resp.get('complete') is True
-                        and db_resp.get('truncated') is not True
-                    ),
-                    truncated=db_resp.get('truncated') is True,
-                    collected_at=db_resp.get('collected_at'),
-                    inventory_revision=db_resp.get('revision_at'),
-                    critical_oid_errors=db_resp.get('critical_oid_errors') or {},
+                    metadata=db_resp,
                 )
                 _augment_modems_with_topology_fields(db_modems)
                 return jsonify({
@@ -982,13 +997,42 @@ def get_modems():
                 return any(iface_filter in f for f in fields)
             modems = [m for m in modems if _iface_match(m)]
 
+        # Redis may contain rows for other searches while having no match for
+        # this query. Always ask persisted PyPNM inventory before MAC/topology
+        # fallback so expiration or a sparse acceleration cache cannot hide data.
+        if not modems:
+            default_limit = query_limit
+            db_resp = PyPNMClient().get_inventory_modems(
+                cmts=cmts_filter or None,
+                search_type=search_type or None,
+                search_value=search_value or None,
+                interface=iface_filter or None,
+                limit=default_limit,
+            )
+            db_modems = filter_ignored_modems(db_resp.get('modems') or [])
+            if db_modems:
+                _backfill_redis_from_inventory(
+                    db_modems,
+                    requested_limit=db_resp.get('requested_limit') or default_limit,
+                    metadata=db_resp,
+                )
+                _augment_modems_with_topology_fields(db_modems)
+                return jsonify({
+                    "status": "success",
+                    "modems": db_modems,
+                    "count": len(db_modems),
+                    "cached": False,
+                    "source": db_resp.get('source') or "pypnm-inventory",
+                })
+
         if not modems and search_type == 'mac' and search_value:
             mac_fallback = _fallback_for_mac(search_value)
             if mac_fallback is not None:
                 return mac_fallback
 
-        # Stable ordering for UI
+        # Stable ordering for UI and honor the bounded caller limit.
         modems.sort(key=lambda m: (str(m.get('cmts', '')), str(m.get('mac_address', ''))))
+        modems = modems[:query_limit]
 
         # Enrich inventory results with topology fields (fibernode, customer_id, lat/lon)
         _augment_modems_with_topology_fields(modems)
@@ -1053,11 +1097,11 @@ def get_modem(mac_address):
     # Try to find in Redis cache first
     if REDIS_AVAILABLE and redis_client:
         try:
-            revisions = _inventory_revision_map()
-            keys = list(redis_client.scan_iter('modems:*'))
+            keys = redis_client.scan_iter(match='modems:*', count=500)
             for key in keys:
-                data = _read_modem_cache(key, revisions)
-                if data:
+                cached = redis_client.get(key)
+                if cached:
+                    data = json.loads(cached)
                     modems = data.get('modems', [])
                     for modem in modems:
                         if _bare(modem.get('mac_address', '')) == mac_bare:
@@ -1267,222 +1311,161 @@ def get_cmts_interfaces(cmts_name):
 
 @api_bp.route('/cmts/<cmts_name>/modems', methods=['GET'])
 def get_cmts_modems(cmts_name):
-    """Get modems from a specific CMTS via PyPNM API -> Agent -> SNMP."""
+    """Return persisted CMTS inventory first; discover live only when explicitly needed."""
     logger = logging.getLogger(__name__)
-    
-    # Get CMTS info from provider
+
     cmts = CMTSProvider.get_cmts_by_hostname(cmts_name)
     if not cmts:
         return jsonify({
             "status": "error",
             "message": f"CMTS '{cmts_name}' not found"
         }), 404
-    
-    # Get query parameters
+
     community = request.args.get('community', get_cmts_community())
-    limit = int(request.args.get('limit', _cm_modem_limit_default()))
+    limit = _bounded_modem_limit(request.args.get('limit', _cm_modem_limit_default()))
     enrich = request.args.get('enrich', 'false').lower() == 'true'
     modem_community = request.args.get('modem_community') or get_default_community()
-    if not request.args.get('modem_community'):
-        logger.warning("modem_community not provided for %s — using configured default", cmts_name)
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
-    # Some consumers (notably the Fiber Node modem selector) can use a
-    # non-empty cached inventory even when an older agent cannot prove that
-    # every source OID walk completed. Full inventory searches keep the strict
-    # completeness requirement.
-    allow_partial_cache = (
-        request.args.get('allow_partial', 'false').lower() == 'true'
-        and not enrich
-    )
-    
+
     try:
-        # CMTSProvider returns 'IPAddress' from appdb format
         cmts_ip = cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address')
-        
+        canonical_name = str(cmts.get('HostName') or cmts_name).strip()
         if not cmts_ip:
             logger.error(f"CMTS {cmts_name} has no IP address: {cmts}")
             return jsonify({
                 "status": "error",
                 "message": f"CMTS '{cmts_name}' has no IP address configured"
             }), 500
-        
-        # Check Redis cache first (unless force_refresh)
+
+        def _prepare_rows(rows):
+            prepared = filter_ignored_modems(rows or [])[:limit]
+            for modem in prepared:
+                modem['cmts'] = canonical_name
+                modem['cmts_ip'] = cmts_ip
+                modem['cmts_community'] = community
+            _augment_modems_with_topology_fields(prepared, cmts_name=canonical_name)
+            return prepared
+
+        def _success_response(rows, metadata, agent_id, cached):
+            snapshot = _snapshot_metadata(metadata or {}, rows)
+            return jsonify({
+                "status": "success",
+                "cmts": canonical_name,
+                "cmts_hostname": canonical_name,
+                "cmts_ip": cmts_ip,
+                "agent_id": agent_id,
+                "modems": rows,
+                "count": len(rows),
+                "cached": cached,
+                "enriched": (metadata or {}).get('enriched') is True,
+                "enriching": (metadata or {}).get('enriching') is True,
+                "enrichment_progress": (
+                    (metadata or {}).get('enrichment_progress')
+                    or (metadata or {}).get('enrich_progress')
+                ),
+                **snapshot,
+            })
+
+        # Redis accelerates reads, but it is not the inventory authority. Read
+        # canonical hostname first and then the configured-IP alias.
+        cache_candidate = None
         if REDIS_AVAILABLE and redis_client and not force_refresh:
-            try:
-                cache_key = f"modems:{cmts_name}"
-                revisions = _inventory_revision_map()
-                data = _read_modem_cache(cache_key, revisions)
-                if data:
-                    cached_modems = filter_ignored_modems(data.get('modems', []))
-                    cached_count = len(cached_modems)
-                    cached_requested_limit = int(data.get('requested_limit') or 0)
-                    cached_source = str(data.get('source') or '')
-                    cached_complete = data.get('complete') is True
-                    cache_limit_mismatch = not (
-                        cached_count >= limit
-                        or (
-                            cached_complete
+            seen_keys = set()
+            for cache_ref in (canonical_name, cmts_ip):
+                cache_key = f"modems:{cache_ref}"
+                if cache_key in seen_keys:
+                    continue
+                seen_keys.add(cache_key)
+                try:
+                    cached = redis_client.get(cache_key)
+                    if not cached:
+                        continue
+                    data = json.loads(cached)
+                    cached_rows = filter_ignored_modems(data.get('modems') or [])
+                    if not cached_rows:
+                        continue
+                    cache_candidate = (cached_rows, data)
+                    cached_limit = _bounded_modem_limit(
+                        data.get('cache_query_limit'), default=0
+                    ) if data.get('cache_query_limit') else 0
+                    try:
+                        authoritative_row_count = int(data.get('row_count'))
+                    except (TypeError, ValueError):
+                        authoritative_row_count = len(cached_rows)
+                    cache_contains_complete_generation = (
+                        authoritative_row_count <= len(cached_rows)
+                    )
+                    cache_covers_request = (
+                        (
+                            data.get('complete') is True
                             and data.get('truncated') is not True
+                            and cache_contains_complete_generation
                         )
+                        or cached_limit == 0
+                        or cached_limit >= limit
                     )
-                    cache_needs_enrich = False
-
-                    # A complete, non-truncated walk proves that the CMTS had
-                    # fewer rows than the configured safety cap. Row count alone
-                    # is only needed for explicitly limited partial responses.
-                    if cache_limit_mismatch:
+                    if cache_covers_request:
+                        rows = _prepare_rows(cached_rows)
                         logger.info(
-                            f"Using partial Redis cache for {cmts_name}: "
-                            f"cached_count={cached_count}, cached_limit={cached_requested_limit}, "
-                            f"requested_limit={limit}, source={cached_source or 'unknown'}"
+                            "Returning %d persisted modems from Redis key %s",
+                            len(rows), cache_key,
                         )
+                        return _success_response(rows, data, 'cached', True)
+                    # A smaller partial cache is retained as a fallback while
+                    # the authoritative persisted inventory is queried below.
+                    break
+                except Exception as exc:
+                    logger.warning("Redis cache read error for %s: %s", cache_key, exc)
 
-                    # Fill missing CMTS fields on cached rows.
-                    for m in cached_modems:
-                        if not m.get('cmts_ip'):
-                            m['cmts_ip'] = cmts_ip
-                        if not m.get('cmts_community'):
-                            m['cmts_community'] = community
-                    _augment_modems_with_topology_fields(cached_modems, cmts_name=cmts_name)
-                    cache_is_enriched = _modems_are_enriched(cached_modems)
-                    if not cache_is_enriched and enrich:
-                        cache_needs_enrich = True
-                        logger.info(
-                            f"Redis cache for {cmts_name} is not enriched; live enrichment state must be fetched from PyPNM."
-                        )
-
-                    # Never serve a cache that does not cover the requested
-                    # inventory footprint unless the caller explicitly accepts
-                    # a non-empty partial inventory. Enrichment quality matters
-                    # only when enrichment was requested.
-                    serve_partial_cache = allow_partial_cache and cached_count > 0
-                    if (
-                        (cache_limit_mismatch and not serve_partial_cache)
-                        or (enrich and cache_needs_enrich)
-                    ):
-                        logger.info(
-                            f"Bypassing Redis cache for {cmts_name} "
-                            f"(partial={cache_limit_mismatch}, needs_enrich={cache_needs_enrich})"
-                        )
-                        raise RuntimeError("bypass-redis-incomplete-cache")
-                    if serve_partial_cache and cache_limit_mismatch:
-                        logger.info(
-                            f"Serving accepted partial Redis cache for {cmts_name}: "
-                            f"cached_count={cached_count}, requested_limit={limit}"
-                        )
-
-                    # Guard against stale/partial empty cache loops.
-                    # If Redis has 0 rows while marked partial/non-enriched, returning it causes
-                    # the frontend to spin forever with empty selector state. Fall through to live
-                    # CMTS query so cache can be repopulated.
-                    if cached_count == 0 and (cache_limit_mismatch or cache_needs_enrich):
-                        logger.warning(
-                            f"Bypassing empty partial Redis cache for {cmts_name} "
-                            f"(cached_limit={cached_requested_limit}, requested_limit={limit}, "
-                            f"needs_enrich={cache_needs_enrich})"
-                        )
-                        raise RuntimeError("stale-empty-partial-cache")
-
-                    response_modems = cached_modems[:limit] if limit else cached_modems
-                    logger.info(
-                        f"Returning {len(response_modems)}/{cached_count} modems from Redis cache for {cmts_name} "
-                        f"(enriched={cache_is_enriched}, partial={cache_limit_mismatch or cache_needs_enrich})"
+        # Query authoritative persisted inventory by canonical hostname and then
+        # configured IP. Age, completeness, truncation, and identity metadata do
+        # not invalidate rows.
+        if not force_refresh:
+            client = PyPNMClient()
+            seen_refs = set()
+            for inventory_ref in (canonical_name, cmts_ip):
+                normalized_ref = str(inventory_ref or '').strip()
+                if not normalized_ref or normalized_ref.lower() in seen_refs:
+                    continue
+                seen_refs.add(normalized_ref.lower())
+                try:
+                    inventory_resp = client.get_inventory_modems(
+                        cmts=normalized_ref,
+                        limit=limit,
                     )
-                    return jsonify({
-                        "status": "success",
-                        "cmts": cmts_name,
-                        "cmts_hostname": cmts_name,
-                        "cmts_ip": cmts_ip,
-                        "agent_id": "cached",
-                        "modems": response_modems,
-                        "count": cached_count,
-                        "enriched": cache_is_enriched,
-                        "capability_enriched": data.get('capability_enriched') is True,
-                        "cached": True,
-                        "enriching": bool(cache_needs_enrich),
-                        "complete": cached_complete,
-                        "truncated": data.get('truncated') is True,
-                        "partial": bool(not cached_complete or data.get('truncated') is True or cache_limit_mismatch),
-                        "cached_requested_limit": cached_requested_limit,
-                        "requested_limit": cached_requested_limit,
-                        "source": data.get('source'),
-                        "collected_at": data.get('collected_at'),
-                        "critical_oid_errors": data.get('critical_oid_errors') or {},
-                    })
-            except Exception as e:
-                logger.warning(f"Redis cache read error: {e}")
+                except Exception as exc:
+                    logger.warning(
+                        "Persisted inventory lookup failed for %s: %s",
+                        normalized_ref, exc,
+                    )
+                    continue
+                inventory_rows = inventory_resp.get('modems') or []
+                if not inventory_rows:
+                    continue
+                rows = _prepare_rows(inventory_rows)
+                inventory_resp.setdefault('source', 'pypnm-inventory')
+                _backfill_redis_from_inventory(
+                    rows,
+                    requested_limit=limit,
+                    metadata=inventory_resp,
+                )
+                logger.info(
+                    "Returning %d persisted modems for %s via inventory key %s",
+                    len(rows), canonical_name, normalized_ref,
+                )
+                return _success_response(rows, inventory_resp, 'inventory', True)
 
-        # Reuse fresh poller inventory before starting another enrichment cycle.
-        if enrich and not force_refresh:
-            try:
-                client = PyPNMClient()
-                inventory_resp = client.get_inventory_modems(
-                    cmts=cmts_name,
-                    limit=limit,
+            if cache_candidate:
+                cached_rows, data = cache_candidate
+                rows = _prepare_rows(cached_rows)
+                logger.info(
+                    "Returning %d partial Redis rows for %s after persisted lookup miss",
+                    len(rows), canonical_name,
                 )
-                inventory_modems = inventory_resp.get('modems') or []
-                inventory_modems = filter_ignored_modems(inventory_modems)
-                inventory_complete = (
-                    inventory_resp.get('complete') is True
-                    and inventory_resp.get('truncated') is not True
-                )
-                inventory_covers_request = (
-                    inventory_complete
-                    or limit <= 200
-                    or len(inventory_modems) >= limit
-                )
-                if (
-                    inventory_modems
-                    and inventory_covers_request
-                    and _inventory_snapshot_is_fresh(inventory_modems)
-                ):
-                    inventory_enriched = _modems_are_enriched(inventory_modems)
-                    if not inventory_enriched:
-                        logger.info(
-                            f"Inventory for {cmts_name} is fresh but lacks vendor/firmware — falling through to live SNMP enrichment."
-                        )
-                    else:
-                        for m in inventory_modems:
-                            m['cmts'] = cmts_name
-                            m['cmts_ip'] = cmts_ip
-                            m['cmts_community'] = community
-                        _augment_modems_with_topology_fields(inventory_modems, cmts_name=cmts_name)
-                        _backfill_redis_from_inventory(
-                            inventory_modems,
-                            requested_limit=inventory_resp.get('requested_limit') or limit,
-                            capability_enriched=inventory_resp.get('capability_enriched') is True,
-                            complete=inventory_complete,
-                            truncated=inventory_resp.get('truncated') is True,
-                            collected_at=inventory_resp.get('collected_at'),
-                            inventory_revision=inventory_resp.get('revision_at'),
-                            critical_oid_errors=inventory_resp.get('critical_oid_errors') or {},
-                        )
-                        logger.info(
-                            f"Returning {len(inventory_modems)} modems for {cmts_name} from fresh poller inventory instead of re-enriching"
-                        )
-                        return jsonify({
-                            "status": "success",
-                            "cmts": cmts_name,
-                            "cmts_hostname": cmts_name,
-                            "cmts_ip": cmts_ip,
-                            "agent_id": "inventory",
-                            "modems": inventory_modems,
-                            "count": len(inventory_modems),
-                            "enriched": True,
-                            "capability_enriched": inventory_resp.get('capability_enriched') is True,
-                            "cached": True,
-                            "enriching": False,
-                            "source": inventory_resp.get('source') or "pypnm-inventory",
-                            "complete": inventory_complete,
-                            "truncated": inventory_resp.get('truncated') is True,
-                            "partial": not inventory_complete,
-                            "requested_limit": inventory_resp.get('requested_limit'),
-                            "collected_at": inventory_resp.get('collected_at'),
-                        })
-            except Exception as e:
-                logger.warning(f"Poller inventory reuse skipped for {cmts_name}: {e}")
-        
-        # Query PyPNM for modem data and optional enrichment.
+                return _success_response(rows, data, 'cached', True)
+
+        # Live base discovery is reserved for refresh=true or genuinely absent
+        # persisted inventory. Forward refresh so PyPNM owns that policy.
         client = PyPNMClient()
         result = client.get_cmts_modems(
             cmts_ip=cmts_ip,
@@ -1491,116 +1474,38 @@ def get_cmts_modems(cmts_name):
             enrich=enrich,
             refresh=force_refresh,
             modem_community=modem_community,
-            cmts_hostname=cmts_name,
+            cmts_hostname=canonical_name,
         )
-        
+
         if result.get('success'):
-            raw_modems = result.get('modems', [])
-            returned_row_count = len(raw_modems)
-            modems = filter_ignored_modems(raw_modems)
-            logger.info(f"Retrieved {len(modems)} modems from {cmts_name} via PyPNM API/agent")
-
-            # Stamp CMTS fields onto every modem record.
-            for m in modems:
-                m['cmts'] = cmts_name
-                m['cmts_ip'] = cmts_ip
-                m['cmts_community'] = community
-
-            _augment_modems_with_topology_fields(modems, cmts_name=cmts_name)
-
-            is_enriched = result.get('enriched', False)
-            is_enriching = result.get('enriching', False)
-            # A complete upstream generation may still be sliced to this
-            # endpoint's requested preview limit. Do not label that sliced
-            # Redis payload as a complete inventory; the background full-load
-            # request must be allowed to bypass it and retrieve every row.
-            cache_contains_complete_generation = bool(
-                result.get('complete') is True
-                and returned_row_count < limit
+            rows = _prepare_rows(result.get('modems') or [])
+            result.setdefault('source', 'pypnm-live')
+            if rows:
+                _redis_cache_modems_for_key(
+                    f"modems:{canonical_name}", canonical_name, rows,
+                    requested_limit=limit,
+                    metadata=result,
+                )
+                if cmts_ip != canonical_name:
+                    _redis_cache_modems_for_key(
+                        f"modems:{cmts_ip}", canonical_name, rows,
+                        requested_limit=limit,
+                        metadata=result,
+                    )
+            logger.info(
+                "Retrieved %d modems from %s via PyPNM live query",
+                len(rows), canonical_name,
             )
+            return _success_response(rows, result, result.get('agent_id', 'agent'), False)
 
-            # Cache successful modem data immediately so subsequent CMTS searches
-            # can reuse inventory even while enrichment is still running.
-            if REDIS_AVAILABLE and redis_client:
-                try:
-                    cache_payload = {
-                        "cmts": cmts_name,
-                        "requested_limit": result.get('requested_limit') or limit,
-                        "modems": modems,
-                        "timestamp": int(time.time()),
-                        "enriched": is_enriched,
-                        "enriching": is_enriching,
-                        "capability_enriched": result.get('capability_enriched') is True,
-                        "source": "pypnm-live" if result.get('source') == 'snmp-live' else (result.get('source') or 'pypnm-inventory'),
-                        "complete": cache_contains_complete_generation,
-                        "truncated": result.get('truncated') is True,
-                        "collected_at": result.get('collected_at'),
-                        "inventory_revision": result.get('revision_at'),
-                        "critical_oid_errors": result.get('critical_oid_errors') or {},
-                    }
-                    ttl = _cache_remaining_ttl(cache_payload)
-                    cache_keys = [f"modems:{cmts_name}"]
-                    if cmts_ip and cmts_ip != cmts_name:
-                        cache_keys.append(f"modems:{cmts_ip}")
-                    if ttl > 0:
-                        payload_json = json.dumps(cache_payload)
-                        for cache_key in cache_keys:
-                            redis_client.setex(cache_key, ttl, payload_json)
-                        logger.info(
-                            f"Cached {len(modems)} modems for {cmts_name} "
-                            f"(enriched={is_enriched}, enriching={is_enriching}, TTL={ttl}s)"
-                        )
-                    else:
-                        redis_client.delete(*cache_keys)
-                        logger.info("Skipped stale modem cache write for %s", cmts_name)
-                except Exception as e:
-                    logger.warning(f"Redis cache error: {e}")
-            
-            return jsonify({
-                "status": "success",
-                "cmts": cmts_name,
-                "cmts_hostname": cmts_name,
-                "cmts_ip": cmts_ip,
-                "agent_id": result.get('agent_id', 'agent'),
-                "modems": modems,
-                "count": len(modems),
-                "enriched": result.get('enriched', False),
-                "capability_enriched": result.get('capability_enriched') is True,
-                "cached": result.get('cached', False),
-                "enriching": result.get('enriching', False),
-                "source": result.get('source'),
-                "complete": result.get('complete') is True,
-                "truncated": result.get('truncated') is True,
-                "partial": bool(
-                    result.get('complete') is not True
-                    or result.get('truncated') is True
-                ),
-                "requested_limit": result.get('requested_limit'),
-                "collected_at": result.get('collected_at'),
-                "critical_oid_errors": result.get('critical_oid_errors') or {},
-                "raw_legacy_mac_count": result.get('raw_legacy_mac_count'),
-                "raw_d3_mac_count": result.get('raw_d3_mac_count'),
-                # PyPNM stores it as 'enrich_progress' — pass through under both names for compat
-                "enrichment_progress": result.get('enrichment_progress') or result.get('enrich_progress'),
-            })
-        else:
-            error_value = result.get('error') or result.get('message') or result.get('detail')
-            if isinstance(error_value, (dict, list)):
-                error_msg = json.dumps(error_value, default=str)
-            else:
-                error_msg = str(error_value or 'Unknown error from PyPNM API')
-            logger.error(f"PyPNM API error for {cmts_name}: {error_msg}")
-            return jsonify({
-                "status": "error",
-                "message": error_msg
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Error getting modems from {cmts_name}: {e}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        error_value = result.get('error') or result.get('message') or 'Unknown error from PyPNM API'
+        error_msg = json.dumps(error_value, default=str) if isinstance(error_value, (dict, list)) else str(error_value)
+        logger.error(f"PyPNM API error for {canonical_name}: {error_msg}")
+        return jsonify({"status": "error", "message": error_msg}), 500
+
+    except Exception as exc:
+        logger.exception("Error getting modems from %s", cmts_name)
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
 
 # ============== System Information Endpoints ==============
@@ -1747,15 +1652,7 @@ def refresh_cmts_modem_cache(cmts_name):
         _backfill_redis_from_inventory(
             inv_modems,
             requested_limit=inv_resp.get('requested_limit') or default_limit,
-            capability_enriched=inv_resp.get('capability_enriched') is True,
-            complete=(
-                inv_resp.get('complete') is True
-                and inv_resp.get('truncated') is not True
-            ),
-            truncated=inv_resp.get('truncated') is True,
-            collected_at=inv_resp.get('collected_at'),
-            inventory_revision=inv_resp.get('revision_at'),
-            critical_oid_errors=inv_resp.get('critical_oid_errors') or {},
+            metadata=inv_resp,
         )
         _log.info(f"cache/refresh: wrote {len(inv_modems)} enriched modems to Redis for {cmts_name}")
         return jsonify({"status": "success", "count": len(inv_modems)})
@@ -1771,14 +1668,19 @@ def enqueue_delta_enrichment(cmts_name):
         return jsonify({"status": "error", "message": "Redis not available"}), 503
 
     payload = request.get_json(silent=True) or {}
-    max_batch = max(1, min(int(payload.get('max_batch') or 10), 25))
+    try:
+        max_batch = max(1, min(int(payload.get('max_batch') or 25), 25))
+    except (TypeError, ValueError):
+        max_batch = 25
 
-    data = _read_modem_cache(
-        f"modems:{cmts_name}",
-        _inventory_revision_map(),
-    )
-    if not data:
-        return jsonify({"status": "error", "message": f"No current cached modems for {cmts_name}"}), 404
+    cached = redis_client.get(f"modems:{cmts_name}")
+    if not cached:
+        return jsonify({"status": "error", "message": f"No cached modems for {cmts_name}"}), 404
+
+    try:
+        data = json.loads(cached)
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Invalid cache payload: {exc}"}), 500
 
     modems = data.get('modems') or []
     if not modems:
@@ -1845,12 +1747,15 @@ def flush_modem_cache():
         return jsonify({"status": "error", "message": "Redis not available"}), 503
     
     try:
-        keys = redis_client.keys("modems:*")
-        if keys:
-            redis_client.delete(*keys)
-            count = len(keys)
-        else:
-            count = 0
+        count = 0
+        batch = []
+        for key in redis_client.scan_iter(match="modems:*", count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                count += redis_client.delete(*batch)
+                batch = []
+        if batch:
+            count += redis_client.delete(*batch)
         return jsonify({"status": "success", "message": f"Flushed {count} modem cache keys"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

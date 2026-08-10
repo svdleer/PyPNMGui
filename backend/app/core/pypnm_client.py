@@ -46,13 +46,20 @@ def _redact_payload(value: Any) -> Any:
     return value
 
 
-def _cm_modem_limit_default() -> int:
-    raw = os.environ.get('CM_MODEM_LIMIT', '50000')
+MAX_CM_MODEM_LIMIT = 50000
+
+
+def _bounded_modem_limit(value: Any, default: int = MAX_CM_MODEM_LIMIT) -> int:
     try:
-        value = int(raw)
-        return value if value > 0 else 50000
+        return max(1, min(int(value), MAX_CM_MODEM_LIMIT))
     except (TypeError, ValueError):
-        return 50000
+        return default
+
+
+def _cm_modem_limit_default() -> int:
+    return _bounded_modem_limit(
+        os.environ.get('CM_MODEM_LIMIT', str(MAX_CM_MODEM_LIMIT))
+    )
 
 
 @dataclass
@@ -298,8 +305,9 @@ class PyPNMClient:
         interface: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        if limit is None:
-            limit = _cm_modem_limit_default()
+        limit = _bounded_modem_limit(
+            _cm_modem_limit_default() if limit is None else limit
+        )
         params: Dict[str, Any] = {"limit": limit}
         if cmts:
             params["cmts"] = cmts
@@ -1311,8 +1319,9 @@ class PyPNMClient:
         Returns:
             Dictionary with 'success', 'modems', and optional 'error'
         """
-        if limit is None:
-            limit = _cm_modem_limit_default()
+        limit = _bounded_modem_limit(
+            _cm_modem_limit_default() if limit is None else limit
+        )
 
         payload = {
             "cmts_ip": cmts_ip,

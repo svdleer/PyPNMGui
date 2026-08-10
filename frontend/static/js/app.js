@@ -8,7 +8,11 @@ const API_BASE = BASE_PATH + '/api';
 const GUI_LOCALE = window.GUI_LOCALE || 'en-US';
 const GUI_I18N = window.GUI_I18N || {};
 const TOPOLOGY_ENABLED = window.ENABLE_TOPOLOGY || false;
-const CM_MODEM_LIMIT = Number.parseInt(window.CM_MODEM_LIMIT, 10) > 0 ? Number.parseInt(window.CM_MODEM_LIMIT, 10) : 50000;
+const _configuredCmModemLimit = Number.parseInt(window.CM_MODEM_LIMIT, 10);
+const CM_MODEM_LIMIT = Math.min(
+    Number.isFinite(_configuredCmModemLimit) && _configuredCmModemLimit > 0 ? _configuredCmModemLimit : 50000,
+    50000
+);
 const DEFAULT_VELOCITY_FACTOR = 0.87;
 const MIN_VELOCITY_FACTOR = 0.50;
 const MAX_VELOCITY_FACTOR = 1.00;
@@ -258,7 +262,10 @@ createApp({
             liveModemSource: '',
             liveCachePartial: false,
             liveCacheRefreshing: false,
-            enrichModems: true,
+            liveInventoryComplete: false,
+            liveInventoryStale: false,
+            liveCapabilityEnriched: false,
+            enrichModems: false,
             enrichmentProgress: { current: 0, total: 0 },
             isEnriching: false,    // reactive flag — drives progress bar in card header
             targetedEnrichmentRunning: false,
@@ -1684,6 +1691,23 @@ createApp({
                 console.warn(`Targeted enrichment failed for ${target.mac}:`, error?.message || error);
             }
             return 'failed';
+        },
+
+        async _requestDeltaEnrichmentForSelectedCmts() {
+            if (!this.selectedCmts || !this.enrichModems) return;
+            try {
+                const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/enrich/delta`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_batch: 25 }),
+                });
+                const data = await response.json();
+                if (data?.status === 'success' && Number(data?.enqueued || 0) > 0) {
+                    this.$toast?.info(`Delta enrichment queued for ${data.enqueued} modem(s).`);
+                }
+            } catch (error) {
+                console.warn('Delta enrichment request failed:', error?.message || error);
+            }
         },
 
         async _discoverPreferredOFDMAIfindex(macAddress, cmtsIp) {
@@ -3439,6 +3463,9 @@ createApp({
             this.liveModemSource = '';
             this.liveCachePartial = false;
             this.liveCacheRefreshing = false;
+            this.liveInventoryComplete = false;
+            this.liveInventoryStale = false;
+            this.liveCapabilityEnriched = false;
             this.enrichmentProgress = { current: 0, total: 0 };
             this.modemPage = 1;
             this.loadProgress = 0;
@@ -3460,11 +3487,10 @@ createApp({
                 const buildUrl = (limit, enrichEnabled, forceRefresh = false) => {
                     // This same-origin API uses configured server-side communities.
                     // Never put SNMP credentials in browser URLs or access logs.
-                    let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${limit}`;
+                    const boundedLimit = Math.max(1, Math.min(Number(limit) || CM_MODEM_LIMIT, 50000));
+                    let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${boundedLimit}`;
                     u += `&enrich=${enrichEnabled ? 'true' : 'false'}`;
-                    if (forceRefresh) {
-                        u += '&refresh=true';
-                    }
+                    if (forceRefresh) u += '&refresh=true';
                     return u;
                 };
 
@@ -3526,7 +3552,7 @@ createApp({
 
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 360000);
+                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 180000);
 
                 if (preview.status !== 'success') {
                     this.showError('Failed to get modems', preview.message || 'Unknown error');
@@ -3536,53 +3562,23 @@ createApp({
                 if (this._liveLoadToken !== loadToken) return;
 
                 const previewRaw = Array.isArray(preview.modems) ? preview.modems : [];
-                this.modems = previewRaw.map(m => mapModem(m, preview));
+                const previewVisible = this._filterBySelectedInterface(previewRaw);
+                this.modems = previewVisible.map(m => mapModem(m, preview));
                 this._mergeSearchSeed(this.modems);
-                this.queueSelectedModemEnrichment(this.modems, {
-                    scope: 'initial CMTS results',
-                    maxBatch: 20,
-                    cmts: this.selectedCmts || preview.cmts_hostname || preview.cmts_ip,
-                });
                 this.searchPerformed = true;
-                this.liveModemSource = `Live preview from ${preview.cmts_hostname} (${preview.cmts_ip}) - ${this.modems.length}/${preview.count} modems (first page loaded)`;
+                this.liveModemSource = `Inventory preview from ${preview.cmts_hostname} (${preview.cmts_ip}) - ${this.modems.length}/${preview.count} modems (first page loaded)`;
                 this.liveCachePartial = Boolean(preview?.partial);
+                this.liveInventoryComplete = preview?.inventory_complete === true;
+                this.liveInventoryStale = preview?.inventory_stale === true;
+                this.liveCapabilityEnriched = preview?.capability_enriched === true;
 
-                const metadataCheck = this._shouldRefreshCacheForMetadata(previewRaw);
-                const alreadyTriggered = !!this._metadataRefreshTriggeredByCmts[cmtsKey];
-                const backendEnriching = preview?.enriching === true;
-                const backendEnriched = preview?.enriched === true;
-                // Capability collection is a CMTS-wide base walk, distinct
-                // from direct per-modem metadata enrichment. A legacy cache
-                // without the marker gets exactly one complete live refresh.
-                const needsCapabilityRefresh = this.enrichModems && preview?.capability_enriched !== true;
-                const forceCompleteRefresh = Boolean(preview?.partial) || needsCapabilityRefresh;
-
-                // Release UI immediately; continue full inventory/enrichment in background.
+                // Continue the complete persisted base inventory load without
+                // metadata-driven enrichment or forced refresh.
                 if (this._progressTimer) { clearInterval(this._progressTimer); this._progressTimer = null; }
                 this.loadProgress = 100;
                 this.loadingLiveModems = false;
-
-                // Full inventory loads never launch per-modem enrichment. Optional
-                // metadata refresh uses the bounded delta queue instead.
-                if (metadataCheck.refresh && !backendEnriching && !backendEnriched && !alreadyTriggered) {
-                    this.$toast?.info(`Metadata quality low (${Math.round(metadataCheck.ratio * 100)}% missing vendor+firmware). Loading complete inventory and queuing delta enrichment...`);
-                    if (cmtsKey) this._metadataRefreshTriggeredByCmts[cmtsKey] = true;
-                    this.liveCacheRefreshing = forceCompleteRefresh;
-                    this._loadAllModemsInBackground(
-                        buildUrl(CM_MODEM_LIMIT, false, forceCompleteRefresh),
-                        mapModem,
-                        loadToken,
-                    );
-                    return;
-                }
-
-                // Always load the complete base inventory in the background.
-                // A partial cache or a legacy generation without authoritative
-                // capability collection forces one live CMTS walk. enrich=false
-                // ensures this never launches direct per-modem SNMP enrichment.
-                this.liveCacheRefreshing = forceCompleteRefresh;
-                const backgroundUrl = buildUrl(CM_MODEM_LIMIT, false, forceCompleteRefresh);
-                this._loadAllModemsInBackground(backgroundUrl, mapModem, loadToken);
+                this.liveCacheRefreshing = false;
+                this._loadAllModemsInBackground(buildUrl(CM_MODEM_LIMIT, false, false), mapModem, loadToken);
                 return;
             } catch (error) {
                 if (error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('timed out')) {
@@ -3651,9 +3647,9 @@ createApp({
 
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
-                const data = await this._fetchJsonWithTimeout(url, 360000);
+                const data = await this._fetchJsonWithTimeout(url, 180000);
                 if (data.status !== 'success') {
-                    throw new Error(data.message || 'Full modem load failed');
+                    throw new Error(data?.message || 'Background inventory load failed');
                 }
                 if (this._liveLoadToken !== loadToken) return;
 
@@ -3675,7 +3671,8 @@ createApp({
                     // fields to false/null. Reconcile through the monotonic merge.
                     return this._mergeModemPreservingCmts({ ...prev }, row);
                 });
-                this._mergeSearchSeed(mapped);
+                const visibleMapped = this._filterBySelectedInterface(mapped);
+                this._mergeSearchSeed(visibleMapped);
                 // Identity enrichment is selection-scoped and starts from the
                 // initial preview/search rows. Never probe the full CMTS list.
 
@@ -3685,10 +3682,10 @@ createApp({
                 let nextIdx = 0;
                 const appendChunk = () => {
                     if (this._liveLoadToken !== loadToken) return;
-                    if (nextIdx >= mapped.length) return;
-                    this.modems.push(...mapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
+                    if (nextIdx >= visibleMapped.length) return;
+                    this.modems.push(...visibleMapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
                     nextIdx += CHUNK_SIZE;
-                    if (nextIdx < mapped.length) setTimeout(appendChunk, 0);
+                    if (nextIdx < visibleMapped.length) setTimeout(appendChunk, 0);
                 };
                 appendChunk();
 
@@ -3699,35 +3696,25 @@ createApp({
                     };
                 }
 
-                const cacheInfo = data.cached ? ' (cached)' : '';
-                const enrichInfo = data.enriched ? ' [enriched]' : (data.enriching ? ' [enriching in background...]' : '');
-                this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) via agent ${data.agent_id} - ${data.count} modems${cacheInfo}${enrichInfo}`;
+                const cacheInfo = data.cached ? ' (persisted)' : '';
+                const enrichInfo = data.enriched === true ? ' [enriched]' : (data.enriching === true ? ' [enriching in background...]' : '');
+                this.liveModemSource = `Inventory from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems${cacheInfo}${enrichInfo}`;
                 this.liveCachePartial = Boolean(data.partial);
-                this.liveCacheRefreshing = Boolean(data.enriching) || (this.enrichModems && Boolean(data.partial));
-
-                // Start enrichment polling only when backend reports active enrichment.
-                if (this.enrichModems && !data.enriched && (data.enriching || data.enrichment_progress)) {
-                    if (data.enrichment_progress && data.enrichment_progress.total > 0) {
-                        this.enrichmentProgress = {
-                            current: data.enrichment_progress.completed || 0,
-                            total: data.enrichment_progress.total,
-                        };
-                    }
+                this.liveInventoryComplete = data.inventory_complete === true;
+                this.liveInventoryStale = data.inventory_stale === true;
+                this.liveCapabilityEnriched = data.capability_enriched === true;
+                this.liveCacheRefreshing = data.enriching === true;
+                if (this.enrichModems && !this.liveCachePartial && data.enriched !== true && data.enriching !== true) await this._requestDeltaEnrichmentForSelectedCmts();
+                if (this.enrichModems && data.enriched !== true && data.enriching === true) {
+                    if (data.enrichment_progress && data.enrichment_progress.total > 0) this.enrichmentProgress = { current: data.enrichment_progress.completed || 0, total: data.enrichment_progress.total };
                     this.isEnriching = true;
                     this._enrichBatch1Refreshed = false;
                     this._enrichPollAttempts = 0;
                     this._scheduleEnrichPoll();
-                } else if (!this.enrichModems) {
-                    // Enrichment is disabled
-                    this.isEnriching = false;
-                    this.liveCacheRefreshing = false;
-                } else {
-                    // Data is already enriched
-                    this.isEnriching = false;
-                    this.liveCacheRefreshing = false;
-                }
+                } else this._stopEnrichmentPolling(data.enriched === true ? 'backend reports enriched' : 'backend reports not enriching');
             } catch (error) {
                 console.warn('Background full modem load failed:', error?.message || error);
+                this._stopEnrichmentPolling('background load error');
                 if (this._liveLoadToken !== loadToken) return;
                 this.liveCacheRefreshing = false;
                 this.liveCachePartial = true;
@@ -3741,7 +3728,7 @@ createApp({
         
         _scheduleEnrichPoll() {
             if (!this.isEnriching) return;
-            const MAX_ATTEMPTS = 900;  // 900 × 2s = 30 min max
+            const MAX_ATTEMPTS = 60;  // 60 × 2s = 2 min max
             const POLL_INTERVAL_MS = 2000;
             if (this._enrichPollAttempts >= MAX_ATTEMPTS) {
                 console.warn('Enrichment polling gave up after', MAX_ATTEMPTS, 'attempts');
@@ -3768,7 +3755,10 @@ createApp({
 
         async refreshEnrichedModems() {
             // Refresh enriched data without showing the loading spinner.
-            if (!this.selectedCmts) return true;
+            if (!this.selectedCmts) {
+                this._stopEnrichmentPolling('no CMTS selected');
+                return true;
+            }
 
             // Pause while modem-detail context is active to avoid poller contention.
             // Enrichment resumes once user leaves modem detail view.
@@ -3776,11 +3766,10 @@ createApp({
             if (this.channelStatsLoading || this.upstreamInterfaces?.loading || inModemDetailContext) return false;
 
             try {
-                // Poll cached state here; avoid forcing a fresh walk each time.
-                // Communities remain server-side and never enter browser URLs.
-                let url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${CM_MODEM_LIMIT}&enrich=false`;
+                // Poll explicit enrichment state; never force a base refresh.
+                const url = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${CM_MODEM_LIMIT}&enrich=true`;
 
-                const data = await this._fetchJsonWithTimeout(url, 360000);
+                const data = await this._fetchJsonWithTimeout(url, 120000);
 
                 if (data.status === 'success' && data.modems) {
                     // Always update progress bar from the latest poll response
@@ -3818,7 +3807,7 @@ createApp({
                     // and re-render rows with updated vendor/model/docsis fields.
                     this.modems = this.modems.slice();
 
-                    // Patch selectedModem in-place too — don't replace the reference.
+                    // Patch selectedModem in-place too — don't replace the reference
                     if (this.selectedModem) {
                         const updatedSel = patchMap[this.normalizeMacForMatch(this.selectedModem.mac_address)];
                         if (updatedSel) {
@@ -3840,29 +3829,29 @@ createApp({
                         }
                     }
 
-                    // Stop polling only when backend signals enrichment is fully complete
-                    const enrichPct = data.enrichment_progress
-                        ? (data.enrichment_progress.completed || 0) / (data.enrichment_progress.total || 1)
-                        : 0;
-                    const isFullyEnriched = data.enriched === true ||
-                        (data.enrichment_progress && data.enrichment_progress.total > 0 && enrichPct >= 1.0);
-                    const backendDone = data.enriching === false && !data.enrichment_progress;
-                    if (isFullyEnriched || backendDone) {
-                        this.liveModemSource = `Live data from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
-                        console.log('Modem list fully enriched');
-                        this._stopEnrichmentPolling('backend reports completed');
-                        // Refresh Redis cache with the now-enriched data (cable_mac,
-                        // fiber_node etc. were missing in the earlier partial write).
-                        // Fire-and-forget — don't await so UI is not delayed.
+                    // Backend enriching=false is terminal even if an old
+                    // progress object remains attached to the response.
+                    if (data.enriched === true) {
+                        this.liveModemSource = `Inventory from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
+                        this._stopEnrichmentPolling('backend reports enriched');
                         if (this.selectedCmts) {
                             fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/refresh`, { method: 'POST' })
                                 .catch(() => {});
                         }
                         return true;
                     }
+                    if (data.enriching === false) {
+                        this.liveModemSource = `Inventory from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems`;
+                        this._stopEnrichmentPolling('backend reports not enriching');
+                        return true;
+                    }
+                } else {
+                    throw new Error(data?.message || 'Enrichment poll failed');
                 }
             } catch (error) {
                 console.warn('Silent refresh failed:', error);
+                this._stopEnrichmentPolling('poll error');
+                return true;
             }
             return false;
         },
