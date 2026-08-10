@@ -3,6 +3,8 @@
 {% block title %}Network RxMER Analytics - PyPNM{% endblock %}
 
 {% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="[[ asset_url('js/chart-theme.js') ]]" defer></script>
 <style>
     .rxmer-shell { max-width: 1500px; margin: 0 auto; }
     .rxmer-card { border: 0; border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .08); }
@@ -13,6 +15,7 @@
     .rxmer-bar-track { height: .75rem; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
     .rxmer-bar { height: 100%; min-width: 2px; background: linear-gradient(90deg, #0d6efd, #06b6d4); }
     .rxmer-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    .rxmer-spectrum-wrap { position: relative; height: 430px; min-height: 320px; }
 </style>
 {% endblock %}
 
@@ -78,7 +81,11 @@
     <div class="card rxmer-card mb-3 d-none" id="rxmer-detail-card">
         <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
             <div><strong>Selected job</strong> <span class="rxmer-code ms-2" id="rxmer-job-id"></span></div>
-            <div class="d-flex gap-2">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="input-group input-group-sm" style="width: 10rem" title="Number of modems collected in parallel (1–20)">
+                    <span class="input-group-text">Parallel</span>
+                    <input class="form-control" id="rxmer-concurrency" type="number" min="1" max="20" value="10" aria-label="Parallel modems">
+                </div>
                 <button class="btn btn-success btn-sm d-none" id="rxmer-start-job"><i class="bi bi-play-fill me-1"></i>Start collection</button>
                 <button class="btn btn-outline-danger btn-sm d-none" id="rxmer-cancel-job"><i class="bi bi-stop-fill me-1"></i>Cancel</button>
             </div>
@@ -95,6 +102,23 @@
                     <div class="card h-100"><div class="card-header bg-white">Best-subcarrier RxMER distribution</div><div class="card-body rxmer-histogram" id="rxmer-best-histogram"></div></div>
                 </div>
             </div>
+            <div class="card mt-3" id="rxmer-spectrum-card">
+                <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div>
+                        <strong>Network OFDM RxMER spectrum</strong>
+                        <span class="small text-muted ms-2">Average, maximum, and worst detected by frequency</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary d-none" id="rxmer-spectrum-rebuild" type="button">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Build spectrum
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="small text-muted mb-2" id="rxmer-spectrum-status">Select a completed job to build its spectrum profile.</div>
+                    <div class="rxmer-spectrum-wrap d-none" id="rxmer-spectrum-wrap">
+                        <canvas id="rxmer-spectrum-chart" aria-label="Network OFDM RxMER spectrum by frequency"></canvas>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -102,7 +126,7 @@
         <div class="card-header bg-white"><strong>Modem results</strong> <span class="small text-muted">First 200 targets</span></div>
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0">
-                <thead><tr><th>MAC</th><th>CMTS</th><th>Fiber node</th><th>State</th><th>Completeness</th><th>Average</th><th>Best</th><th>Samples</th></tr></thead>
+                <thead><tr><th>MAC</th><th>CMTS</th><th>Fiber node</th><th>State</th><th>Completeness</th><th>Average</th><th>Best</th><th>Best frequency</th><th>Samples</th></tr></thead>
                 <tbody id="rxmer-modems-body"></tbody>
             </table>
         </div>

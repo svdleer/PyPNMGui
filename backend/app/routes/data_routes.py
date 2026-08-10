@@ -249,6 +249,38 @@ def network_rxmer_aggregates(public_id):
     return _proxy("GET", f"/rxmer-analytics/jobs/{public_id}/aggregates", params=params)
 
 
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/spectrum', methods=['GET'])
+def network_rxmer_spectrum(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    return _proxy(
+        "GET",
+        f"/rxmer-analytics/jobs/{public_id}/spectrum",
+        params={"max_points": request.args.get("max_points", 1600)},
+    )
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/spectrum/materialize', methods=['POST'])
+def network_rxmer_materialize_spectrum(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    return _proxy("POST", f"/rxmer-analytics/jobs/{public_id}/spectrum/materialize")
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/results', methods=['DELETE'])
+def network_rxmer_delete_results(public_id):
+    gate = _require_network_rxmer_analytics()
+    return gate or _proxy("DELETE", f"/rxmer-analytics/jobs/{public_id}/results")
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>', methods=['DELETE'])
+def network_rxmer_delete_job(public_id):
+    gate = _require_network_rxmer_analytics()
+    return gate or _proxy("DELETE", f"/rxmer-analytics/jobs/{public_id}")
+
+
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/start', methods=['POST'])
 def network_rxmer_start(public_id):
     gate = _require_network_rxmer_analytics()
@@ -257,7 +289,7 @@ def network_rxmer_start(public_id):
     return _proxy(
         "POST",
         f"/rxmer-analytics/jobs/{public_id}/start",
-        payload=request.get_json(silent=True) or {"max_concurrency": 2},
+        payload=request.get_json(silent=True) or {"max_concurrency": 10},
     )
 
 
