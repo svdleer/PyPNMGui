@@ -94,6 +94,10 @@
         return indexCmtsPromise;
     }
 
+    function isAllowedCcapHostname(value) {
+        return String(value || '').trim().toLowerCase().includes('ccap');
+    }
+
     function enrichCmtsOptions(names, metadata) {
         const metadataByName = new Map(
             (metadata || []).map((cmts) => [cmts.name.toLowerCase(), cmts]),
@@ -102,7 +106,7 @@
             const name = String(nameValue || '').trim();
             const match = metadataByName.get(name.toLowerCase()) || {};
             return {name, ip: match.ip || '', vendor: match.vendor || ''};
-        }).filter((cmts) => cmts.name);
+        }).filter((cmts) => isAllowedCcapHostname(cmts.name));
     }
 
     function filterCmtsOptions(options, query) {
