@@ -326,15 +326,37 @@ def network_rxmer_report(public_id):
     return _stream_proxy(f"/rxmer-analytics/jobs/{public_id}/report", params=params)
 
 
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/subcarriers/report', methods=['GET'])
+def network_rxmer_subcarrier_report(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    params = {
+        key: value
+        for key, value in request.args.items()
+        if key in {"format", "cmts", "fiber_node", "statistic"}
+    }
+    return _stream_proxy(
+        f"/rxmer-analytics/jobs/{public_id}/subcarriers/report",
+        params=params,
+    )
+
+
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/spectrum', methods=['GET'])
 def network_rxmer_spectrum(public_id):
     gate = _require_network_rxmer_analytics()
     if gate:
         return gate
+    params = {
+        key: value
+        for key, value in request.args.items()
+        if key in {"max_points", "cmts", "fiber_node", "statistic"}
+    }
+    params.setdefault("max_points", 1600)
     return _proxy(
         "GET",
         f"/rxmer-analytics/jobs/{public_id}/spectrum",
-        params={"max_points": request.args.get("max_points", 1600)},
+        params=params,
     )
 
 

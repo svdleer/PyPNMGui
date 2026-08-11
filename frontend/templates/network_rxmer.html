@@ -101,8 +101,8 @@
                     <span class="input-group-text">Parallel</span>
                     <input class="form-control" id="rxmer-concurrency" type="number" min="1" max="20" value="10" aria-label="Parallel modems">
                 </div>
-                <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-json" href="#" aria-disabled="true"><i class="bi bi-filetype-json me-1"></i>JSON</a>
-                <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-csv" href="#" aria-disabled="true"><i class="bi bi-filetype-csv me-1"></i>CSV</a>
+                <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-json" href="#" aria-disabled="true"><i class="bi bi-filetype-json me-1"></i>Summary JSON</a>
+                <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-csv" href="#" aria-disabled="true"><i class="bi bi-filetype-csv me-1"></i>Summary CSV</a>
                 <button class="btn btn-success btn-sm d-none" id="rxmer-start-job"><i class="bi bi-play-fill me-1"></i>Start collection</button>
                 <button class="btn btn-outline-danger btn-sm d-none" id="rxmer-cancel-job"><i class="bi bi-stop-fill me-1"></i>Cancel</button>
             </div>
@@ -113,9 +113,16 @@
             <div class="alert alert-danger d-none" id="rxmer-job-error"></div>
             <div class="card bg-light border-0 mb-3">
                 <div class="card-body py-2">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <strong class="small">Display and export filters</strong>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-subcarrier-report-json" href="#" aria-disabled="true"><i class="bi bi-filetype-json me-1"></i>Subcarrier JSON</a>
+                            <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-subcarrier-report-csv" href="#" aria-disabled="true"><i class="bi bi-filetype-csv me-1"></i>Subcarrier CSV</a>
+                        </div>
+                    </div>
                     <div class="row g-2 align-items-end">
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">Filter CMTS</label>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">CMTS</label>
                             <div class="dropdown w-100">
                                 <button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start"
                                         id="rxmer-filter-cmts-button" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -132,16 +139,25 @@
                                 </ul>
                             </div>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1" for="rxmer-filter-fiber">Filter fiber node</label>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1" for="rxmer-filter-fiber">Fiber node</label>
                             <input class="form-control form-control-sm" id="rxmer-filter-fiber" list="rxmer-job-fiber-options" placeholder="All fiber nodes" autocomplete="off">
                             <datalist id="rxmer-job-fiber-options"></datalist>
                         </div>
-                        <div class="col-md-4 d-flex gap-2">
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1" for="rxmer-filter-statistic">Subcarrier statistic</label>
+                            <select class="form-select form-select-sm" id="rxmer-filter-statistic">
+                                <option value="average">Average RxMER</option>
+                                <option value="best">Best RxMER</option>
+                                <option value="worst">Worst RxMER</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 d-flex gap-2">
                             <button class="btn btn-primary btn-sm" id="rxmer-apply-filters" type="button">Apply filters</button>
                             <button class="btn btn-outline-secondary btn-sm" id="rxmer-clear-filters" type="button">Clear</button>
                         </div>
                     </div>
+                    <div class="form-text">These filters change displayed and exported results only; they never alter the plan or collection.</div>
                 </div>
             </div>
             <div class="row g-3">
@@ -164,7 +180,7 @@
                 </div>
                 <div class="card-body">
                     <div class="small text-muted mb-2" id="rxmer-spectrum-status">Select a completed job to build its spectrum profile.</div>
-                    <div class="small text-muted mb-2">Spectrum and rankings are job-wide; CMTS/fiber-node filters apply to histograms, modem rows, and downloads.</div>
+                    <div class="small text-muted mb-2">The spectrum and rankings use the applied CMTS, fiber-node, and subcarrier-statistic display/export filters.</div>
                     <div class="rxmer-spectrum-wrap d-none" id="rxmer-spectrum-wrap">
                         <canvas id="rxmer-spectrum-chart" aria-label="Network OFDM RxMER spectrum by frequency"></canvas>
                     </div>

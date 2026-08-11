@@ -24,7 +24,7 @@
     let jobCmtsOptions = [];
     let indexCmtsPromise = null;
     let pendingResultCmts = '';
-    let resultFilters = {cmts: '', fiberNode: ''};
+    let resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
     const pendingPlanStorageKey = 'networkRxmerPendingPlan';
 
     try {
@@ -178,21 +178,29 @@
         const params = new URLSearchParams(extra);
         if (resultFilters.cmts) params.set('cmts', resultFilters.cmts);
         if (resultFilters.fiberNode) params.set('fiber_node', resultFilters.fiberNode);
+        params.set('statistic', resultFilters.statistic || 'average');
         return params.toString();
     }
 
     function updateReportLinks() {
         ['json', 'csv'].forEach((format) => {
-            const link = byId(`rxmer-report-${format}`);
+            const summaryLink = byId(`rxmer-report-${format}`);
+            const subcarrierLink = byId(`rxmer-subcarrier-report-${format}`);
             if (!selectedJobId) {
-                link.href = '#';
-                link.classList.add('disabled');
-                link.setAttribute('aria-disabled', 'true');
+                [summaryLink, subcarrierLink].forEach((link) => {
+                    link.href = '#';
+                    link.classList.add('disabled');
+                    link.setAttribute('aria-disabled', 'true');
+                });
                 return;
             }
-            link.href = `${apiBase}/jobs/${encodeURIComponent(selectedJobId)}/report?${filteredQuery({format})}`;
-            link.classList.remove('disabled');
-            link.removeAttribute('aria-disabled');
+            const publicId = encodeURIComponent(selectedJobId);
+            summaryLink.href = `${apiBase}/jobs/${publicId}/report?${filteredQuery({format})}`;
+            subcarrierLink.href = `${apiBase}/jobs/${publicId}/subcarriers/report?${filteredQuery({format})}`;
+            [summaryLink, subcarrierLink].forEach((link) => {
+                link.classList.remove('disabled');
+                link.removeAttribute('aria-disabled');
+            });
         });
     }
 
@@ -450,15 +458,25 @@
         const colors = window.PyPnmCharts?.colors || {
             blue: '#2563eb', green: '#198754', red: '#dc3545',
         };
+        const statistic = resultFilters.statistic || payload.statistic || 'average';
+        const series = {
+            average: {key: 'average_db', label: 'Average RxMER', color: colors.blue},
+            best: {key: 'max_db', label: 'Best RxMER', color: colors.green},
+            worst: {key: 'worst_db', label: 'Worst RxMER', color: colors.red},
+        }[statistic];
         byId('rxmer-spectrum-wrap').classList.remove('d-none');
         spectrumChart = new Chart(byId('rxmer-spectrum-chart'), {
             type: 'line',
             plugins: [ofdmChannelBandsPlugin],
             data: {
                 datasets: [
-                    {label: 'Average RxMER', data: toSeries('average_db'), borderColor: colors.blue, backgroundColor: colors.blue, spanGaps: false},
-                    {label: 'Maximum RxMER', data: toSeries('max_db'), borderColor: colors.green, backgroundColor: colors.green, spanGaps: false},
-                    {label: 'Worst RxMER', data: toSeries('worst_db'), borderColor: colors.red, backgroundColor: colors.red, spanGaps: false},
+                    {
+                        label: series.label,
+                        data: toSeries(series.key),
+                        borderColor: series.color,
+                        backgroundColor: series.color,
+                        spanGaps: false,
+                    },
                 ],
             },
             options: {
@@ -487,8 +505,11 @@
         });
         const omitted = Number(payload.span_groups_omitted || 0);
         const detail = omitted ? `; ${omitted} additional channel plan omitted` : '';
+        const activeScope = [resultFilters.cmts, resultFilters.fiberNode].filter(Boolean);
+        const scopeLabel = activeScope.length ? activeScope.join(' / ') : 'entire job';
         setSpectrumStatus(
-            `${Number(payload.source_modems || 0).toLocaleString()} modems, `
+            `${series.label} for ${scopeLabel}: `
+            + `${Number(payload.source_modems || 0).toLocaleString()} modems, `
             + `${Number(payload.source_channels || 0).toLocaleString()} channels, `
             + `${points.length.toLocaleString()} plotted bins at ${formatFrequencyHz(payload.bin_width_hz)}${detail}.`,
         );
@@ -506,10 +527,11 @@
             return;
         }
         try {
-            if (forceBuild) {
+            if (forceBuild && !resultFilters.cmts && !resultFilters.fiberNode) {
                 await request(`/jobs/${encodeURIComponent(publicId)}/spectrum/materialize`, {method: 'POST'});
             }
-            const payload = await request(`/jobs/${encodeURIComponent(publicId)}/spectrum?max_points=1600`);
+            const spectrumQuery = filteredQuery({max_points: '1600'});
+            const payload = await request(`/jobs/${encodeURIComponent(publicId)}/spectrum?${spectrumQuery}`);
             if (publicId !== selectedJobId) return;
             if (payload.state === 'missing' || payload.state === 'stale') {
                 destroySpectrumChart();
@@ -610,11 +632,12 @@
         destroySpectrumChart();
         selectedJobId = publicId;
         selectedJobStatus = null;
-        resultFilters = {cmts: '', fiberNode: ''};
+        resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
         pendingResultCmts = '';
         jobCmtsOptions = [];
         byId('rxmer-filter-cmts-search').value = '';
         byId('rxmer-filter-fiber').value = '';
+        byId('rxmer-filter-statistic').value = 'average';
         updateResultCmtsLabel();
         progressPollCount = 0;
         setSpectrumStatus('Loading spectrum status…');
@@ -751,10 +774,11 @@
             showAlert(response.reused ? 'Existing matching plan selected.' : 'Plan created. No collection has started.', 'success');
             button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading plan…';
             selectedJobId = response.job.public_id;
-            resultFilters = {cmts: '', fiberNode: ''};
+            resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
             pendingResultCmts = '';
             byId('rxmer-filter-cmts-search').value = '';
             byId('rxmer-filter-fiber').value = '';
+            byId('rxmer-filter-statistic').value = 'average';
             updateResultCmtsLabel();
             await loadJobOptions(selectedJobId);
             await refreshSelectedJob();
@@ -866,6 +890,7 @@
         resultFilters = {
             cmts: pendingResultCmts,
             fiberNode: byId('rxmer-filter-fiber').value.trim(),
+            statistic: byId('rxmer-filter-statistic').value || 'average',
         };
         updateReportLinks();
         await refreshSelectedJob();
@@ -875,7 +900,8 @@
         pendingResultCmts = '';
         byId('rxmer-filter-cmts-search').value = '';
         byId('rxmer-filter-fiber').value = '';
-        resultFilters = {cmts: '', fiberNode: ''};
+        byId('rxmer-filter-statistic').value = 'average';
+        resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
         renderResultCmtsMenu();
         updateReportLinks();
         await refreshSelectedJob();
