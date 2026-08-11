@@ -111,6 +111,11 @@
             <div class="d-flex flex-wrap gap-2 mb-3" id="rxmer-metrics"></div>
             <div class="progress mb-3" style="height: 1.1rem"><div class="progress-bar" id="rxmer-progress" style="width: 0%">0%</div></div>
             <div class="alert alert-danger d-none" id="rxmer-job-error"></div>
+            <div class="alert alert-warning py-2" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                <strong>Large export warning:</strong> Whole-network reports can exceed 500 MB.
+                Apply a CMTS or fiber-node filter before downloading; CSV is usually smaller than JSON.
+            </div>
             <div class="card bg-light border-0 mb-3">
                 <div class="card-body py-2">
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
