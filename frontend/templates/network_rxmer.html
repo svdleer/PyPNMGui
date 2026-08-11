@@ -62,6 +62,34 @@
                     <div class="d-flex flex-wrap gap-1 mt-2" id="rxmer-cmts-selected"></div>
                     <div class="form-text">Select one or more persisted CMTS systems.</div>
                 </div>
+                <div class="col-md-4" id="rxmer-plan-fiber-field" hidden>
+                    <label class="form-label" for="rxmer-plan-fiber">Fiber node (optional)</label>
+                    <select class="form-select" id="rxmer-plan-fiber" disabled>
+                        <option value="">All fiber nodes</option>
+                    </select>
+                    <div class="form-text" id="rxmer-plan-fiber-help">
+                        Select a CMTS to load persisted fiber nodes.
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="rxmer-plan-modem-count">Modems to probe</label>
+                    <select class="form-select" id="rxmer-plan-modem-count">
+                        <option value="all">All modems</option>
+                        <option value="10">10 modems</option>
+                        <option value="25">25 modems</option>
+                        <option value="50">50 modems</option>
+                        <option value="100">100 modems</option>
+                        <option value="250">250 modems</option>
+                        <option value="500">500 modems</option>
+                        <option value="1000">1,000 modems</option>
+                        <option value="2500">2,500 modems</option>
+                        <option value="5000">5,000 modems</option>
+                        <option value="10000">10,000 modems</option>
+                    </select>
+                    <div class="form-text">
+                        Without a fiber-node selection, finite plans are balanced across fiber nodes and CMTS systems.
+                    </div>
+                </div>
                 <div class="col-md-2">
                     <label class="form-label">Raw retention</label>
                     <input class="form-control" id="rxmer-raw-retention" type="number" min="1" max="365" value="7">

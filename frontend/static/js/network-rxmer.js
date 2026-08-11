@@ -21,6 +21,8 @@
     let planRequestInFlight = false;
     const selectedPlanCmts = new Set();
     let planningCmtsOptions = [];
+    let planningFiberOptions = [];
+    let planningFiberLoadVersion = 0;
     let jobCmtsOptions = [];
     let indexCmtsPromise = null;
     let pendingResultCmts = '';
@@ -205,8 +207,17 @@
     }
 
     function scopeLabel(scope) {
-        if (!scope || scope.type === 'all_network') return 'Entire network';
-        return (scope.cmts || []).join(', ') || 'Selected CMTS';
+        if (!scope || scope.type === 'all_network') {
+            return scope && scope.modem_count
+                ? `Entire network · ${scope.modem_count} modems`
+                : 'Entire network';
+        }
+        const cmtsLabel = (scope.cmts || []).join(', ') || 'Selected CMTS';
+        const fiberLabel = (scope.fiber_nodes || []).length
+            ? ` · ${(scope.fiber_nodes || []).join(', ')}`
+            : '';
+        const countLabel = scope.modem_count ? ` · ${scope.modem_count} modems` : '';
+        return `${cmtsLabel}${fiberLabel}${countLabel}`;
     }
 
     function completedTargets(job) {
@@ -696,10 +707,67 @@
             container.appendChild(chip);
         });
         updatePlanningCmtsLabel();
+        void loadPlanningFiberOptions();
     }
 
     function selectedCmts() {
         return [...selectedPlanCmts].sort();
+    }
+
+    function setPlanningFiberOptions(values, selectedValue = '') {
+        const select = byId('rxmer-plan-fiber');
+        const allOption = document.createElement('option');
+        allOption.value = '';
+        allOption.textContent = `All fiber nodes (${values.length})`;
+        const options = values.map((value) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            return option;
+        });
+        select.replaceChildren(allOption, ...options);
+        select.value = values.includes(selectedValue) ? selectedValue : '';
+    }
+
+    async function loadPlanningFiberOptions() {
+        const field = byId('rxmer-plan-fiber-field');
+        const select = byId('rxmer-plan-fiber');
+        const help = byId('rxmer-plan-fiber-help');
+        const cmts = selectedCmts();
+        const enabled = byId('rxmer-scope-type').value === 'cmts' && cmts.length > 0;
+        const loadVersion = ++planningFiberLoadVersion;
+        if (!enabled) {
+            planningFiberOptions = [];
+            setPlanningFiberOptions([]);
+            select.disabled = true;
+            field.hidden = true;
+            help.textContent = 'Select a CMTS to load persisted fiber nodes.';
+            return;
+        }
+
+        const previousValue = select.value;
+        field.hidden = false;
+        select.disabled = true;
+        help.textContent = 'Loading persisted fiber nodes…';
+        const params = new URLSearchParams({limit: '50000'});
+        cmts.forEach((name) => params.append('cmts', name));
+        try {
+            const response = await request(`/options/fiber-nodes?${params.toString()}`);
+            if (loadVersion !== planningFiberLoadVersion) return;
+            planningFiberOptions = (response.fiber_nodes || [])
+                .map((value) => String(value || '').trim())
+                .filter(Boolean);
+            setPlanningFiberOptions(planningFiberOptions, previousValue);
+            select.disabled = false;
+            help.textContent = planningFiberOptions.length
+                ? 'Optional. Leave on All fiber nodes to balance a finite plan across nodes and CMTS systems.'
+                : 'No persisted fiber nodes are available for the selected CMTS systems.';
+        } catch (error) {
+            if (loadVersion !== planningFiberLoadVersion) return;
+            planningFiberOptions = [];
+            setPlanningFiberOptions([]);
+            help.textContent = error.message;
+        }
     }
 
     async function loadCmtsOptions() {
@@ -737,12 +805,27 @@
             showAlert('Enter at least one CMTS for selected-CMTS scope.', 'warning');
             return;
         }
+        const scope = {type: scopeType, cmts};
+        const fiberNode = scopeType === 'cmts'
+            ? byId('rxmer-plan-fiber').value.trim()
+            : '';
+        if (fiberNode) scope.fiber_nodes = [fiberNode];
+
+        const modemCountValue = byId('rxmer-plan-modem-count').value;
         const planPayload = {
-            scope: {type: scopeType, cmts},
+            scope,
             online_only: byId('rxmer-online-only').checked,
             raw_retention_days: Number(byId('rxmer-raw-retention').value),
             aggregate_retention_days: Number(byId('rxmer-aggregate-retention').value),
         };
+        if (modemCountValue !== 'all') {
+            const modemCount = Number(modemCountValue);
+            if (!Number.isInteger(modemCount) || modemCount <= 0) {
+                showAlert('Select a valid number of modems to probe.', 'warning');
+                return;
+            }
+            planPayload.modem_count = modemCount;
+        }
         const fingerprint = JSON.stringify(planPayload);
         if (!pendingPlanKey || pendingPlanFingerprint !== fingerprint) {
             pendingPlanKey = window.crypto && window.crypto.randomUUID
@@ -909,6 +992,7 @@
 
     byId('rxmer-scope-type').addEventListener('change', (event) => {
         byId('rxmer-cmts-field').hidden = event.target.value !== 'cmts';
+        void loadPlanningFiberOptions();
     });
     byId('rxmer-plan-form').addEventListener('submit', createPlan);
     byId('rxmer-cmts-search').addEventListener('click', (event) => event.stopPropagation());

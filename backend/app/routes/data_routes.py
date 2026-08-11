@@ -246,6 +246,19 @@ def network_rxmer_cmts_options():
     return _proxy("GET", "/rxmer-analytics/options/cmts", params=params)
 
 
+@api_bp.route('/admin/rxmer-analytics/options/fiber-nodes', methods=['GET'])
+def network_rxmer_fiber_node_options():
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    params: dict[str, object] = {"cmts": request.args.getlist("cmts")}
+    for key in ("q", "limit"):
+        value = request.args.get(key)
+        if value is not None:
+            params[key] = value
+    return _proxy("GET", "/rxmer-analytics/options/fiber-nodes", params=params)
+
+
 @api_bp.route('/admin/rxmer-analytics/jobs', methods=['GET'])
 def network_rxmer_jobs():
     gate = _require_network_rxmer_analytics()
