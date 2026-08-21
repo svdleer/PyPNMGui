@@ -745,7 +745,7 @@ def pnm_measurement(measurement_type, mac_address):
                 response['plots'] = plots
                 response['output_type'] = 'archive'
                 response['archive_file'] = archive_filename
-                response['download_url'] = f"/api/pypnm/download/{archive_filename}"
+                response['download_url'] = f"{current_app.config.get('APP_ROOT', '')}/api/pypnm/download/{archive_filename}"
                 return jsonify(response)
             
             # Fallback if no JSON found
@@ -754,7 +754,7 @@ def pnm_measurement(measurement_type, mac_address):
                 "message": f"Measurement complete - {len(plots)} plots generated",
                 "output_type": "archive",
                 "archive_file": archive_filename,
-                "download_url": f"/api/pypnm/download/{archive_filename}",
+                "download_url": f"{current_app.config.get('APP_ROOT', '')}/api/pypnm/download/{archive_filename}",
                 "plots": plots,
                 "mac_address": mac_address
             })
@@ -798,7 +798,7 @@ def pnm_measurement(measurement_type, mac_address):
                     "message": result.get('message', 'Archive generated successfully'),
                     "output_type": "archive",
                     "zip_file": zip_filename,
-                    "download_url": f"/api/pypnm/download/{zip_filename}",
+                    "download_url": f"{current_app.config.get('APP_ROOT', '')}/api/pypnm/download/{zip_filename}",
                     "plots": plots,
                     "data": result.get('data', {})
                 })
