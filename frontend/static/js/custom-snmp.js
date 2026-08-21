@@ -265,20 +265,27 @@
             const body = byId('snmp-jobs-body');
             const jobs = data.jobs || [];
             if (!jobs.length) { body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No jobs</td></tr>'; return; }
-            body.innerHTML = jobs.map(job => `
+            body.innerHTML = jobs.map(job => {
+                const total = job.targets_total || 1;
+                const done = (job.targets_succeeded || 0) + (job.targets_failed || 0);
+                const pct = Math.round(done * 100 / total);
+                const progressHtml = job.status === 'running' || done > 0
+                    ? `<div class="progress" style="height:4px"><div class="progress-bar ${job.targets_failed ? 'bg-warning' : 'bg-success'}" style="width:${pct}%"></div></div><small class="text-muted">${done}/${total}</small>`
+                    : `<small class="text-muted">${total} targets</small>`;
+                return `
                 <tr data-job-id="${job.public_id}" style="cursor:pointer">
                     <td>${statusBadge(job.status)}</td>
                     <td><small>${job.scope_type || '—'}</small></td>
                     <td><small>${(job.oids || []).length}</small></td>
-                    <td><small>${job.targets_succeeded + job.targets_failed}/${job.targets_total}</small></td>
+                    <td>${progressHtml}</td>
                     <td><small>${job.created_at ? new Date(job.created_at).toLocaleString() : '—'}</small></td>
                     <td>
                         ${job.status === 'planned' ? `<button class="btn btn-sm btn-success snmp-start-btn" data-id="${job.public_id}"><i class="bi bi-play-fill"></i></button>` : ''}
                         ${job.status === 'running' ? `<button class="btn btn-sm btn-outline-danger snmp-cancel-btn" data-id="${job.public_id}"><i class="bi bi-stop-fill"></i></button>` : ''}
                         ${['completed','completed_with_errors','failed','planned'].includes(job.status) ? `<button class="btn btn-sm btn-outline-secondary snmp-delete-btn" data-id="${job.public_id}"><i class="bi bi-trash"></i></button>` : ''}
                     </td>
-                </tr>
-            `).join('');
+                </tr>`;
+            }).join('');
 
             body.querySelectorAll('tr[data-job-id]').forEach(row => {
                 row.addEventListener('click', (e) => { if (!e.target.closest('button')) selectJob(row.dataset.jobId); });
@@ -350,6 +357,9 @@
     async function init() {
         updateScopeUI();
         await Promise.all([loadCmtsOptions(), loadTemplates(), refreshJobs()]);
+        // Auto-poll if any job is running
+        const body = byId('snmp-jobs-body');
+        if (body && body.innerHTML.includes('bg-primary')) startPolling();
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
