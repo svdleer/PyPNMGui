@@ -204,18 +204,31 @@
                 link.removeAttribute('aria-disabled');
             });
         });
-        // Per-modem subcarrier CSV
-        const modemSubLink = byId('rxmer-modem-subcarrier-csv');
-        if (modemSubLink) {
+        // Per-modem subcarrier CSV + JSON
+        const modemSubCsv = byId('rxmer-modem-subcarrier-csv');
+        const modemSubJson = byId('rxmer-modem-subcarrier-json');
+        if (modemSubCsv) {
             if (!selectedJobId) {
-                modemSubLink.href = '#';
-                modemSubLink.classList.add('disabled');
-                modemSubLink.setAttribute('aria-disabled', 'true');
+                modemSubCsv.href = '#';
+                modemSubCsv.classList.add('disabled');
+                modemSubCsv.setAttribute('aria-disabled', 'true');
             } else {
                 const publicId = encodeURIComponent(selectedJobId);
-                modemSubLink.href = `${apiBase}/jobs/${publicId}/modems/subcarriers/report?${filteredQuery({format: 'csv'})}`;
-                modemSubLink.classList.remove('disabled');
-                modemSubLink.removeAttribute('aria-disabled');
+                modemSubCsv.href = `${apiBase}/jobs/${publicId}/modems/subcarriers/report?${filteredQuery({format: 'csv'})}`;
+                modemSubCsv.classList.remove('disabled');
+                modemSubCsv.removeAttribute('aria-disabled');
+            }
+        }
+        if (modemSubJson) {
+            if (!selectedJobId) {
+                modemSubJson.href = '#';
+                modemSubJson.classList.add('disabled');
+                modemSubJson.setAttribute('aria-disabled', 'true');
+            } else {
+                const publicId = encodeURIComponent(selectedJobId);
+                modemSubJson.href = `${apiBase}/jobs/${publicId}/modems/subcarriers/report?${filteredQuery({format: 'json'})}`;
+                modemSubJson.classList.remove('disabled');
+                modemSubJson.removeAttribute('aria-disabled');
             }
         }
     }
