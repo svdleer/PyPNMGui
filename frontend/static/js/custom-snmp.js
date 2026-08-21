@@ -44,6 +44,8 @@
             }
         });
         row.querySelector('.oid-verify-btn').addEventListener('click', async () => {
+            const cmts = byId('snmp-cmts').value;
+            if (!cmts) { alert('Select a CMTS first to verify OIDs'); return; }
             const oidInput = row.querySelector('[data-field="oid"]');
             const oidVal = oidInput.value.trim();
             if (!oidVal) return;
@@ -51,7 +53,6 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
             try {
-                const cmts = byId('snmp-cmts').value || '';
                 const data = await request('POST', '/verify-oid', { oid: oidVal, cmts });
                 if (data.success) {
                     btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
