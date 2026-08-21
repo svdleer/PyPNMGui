@@ -14,8 +14,10 @@ from app.core.cmts_provider import CMTSProvider
 from app.core.feature_flags import (
     NETWORK_RXMER_ANALYTICS_SETTING,
     CM_BULK_RESET_SETTING,
+    CUSTOM_SNMP_SETTING,
     is_network_rxmer_analytics_enabled,
     is_cm_bulk_reset_enabled,
+    is_custom_snmp_enabled,
 )
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale, translate
 
@@ -392,6 +394,7 @@ def admin_page():
         poller_scheduler_status=poller_scheduler_status,
         network_rxmer_analytics_enabled=is_network_rxmer_analytics_enabled(),
         cm_bulk_reset_enabled=is_cm_bulk_reset_enabled(),
+        custom_snmp_enabled=is_custom_snmp_enabled(),
         data_store_backend="PyPNM",
         data_store_error=data_store_error,
     )
@@ -455,6 +458,35 @@ def cm_bulk_reset_page():
         abort(404)
     return render_template(
         "cm_bulk_reset.html",
+        base_path=current_app.config.get("APP_ROOT", ""),
+        auth_username=session.get("username", ""),
+        auth_role=session.get("role", "admin"),
+    )
+
+
+@auth_bp.route("/admin/features/custom-snmp", methods=["POST"])
+@admin_required
+def admin_set_custom_snmp_enabled():
+    enabled = request.form.get("enabled") == "true"
+    try:
+        auth_db.set_setting(
+            CUSTOM_SNMP_SETTING,
+            "true" if enabled else "false",
+            updated_by=session.get("username") or "admin",
+        )
+        flash(f"Custom SNMP {'enabled' if enabled else 'disabled'}", "success")
+    except Exception as exc:
+        flash(f"Feature toggle failed: {exc}", "danger")
+    return redirect(_prefixed(url_for("auth.admin_page")))
+
+
+@auth_bp.route("/custom-snmp", methods=["GET"])
+@admin_required
+def custom_snmp_page():
+    if not is_custom_snmp_enabled():
+        abort(404)
+    return render_template(
+        "custom_snmp.html",
         base_path=current_app.config.get("APP_ROOT", ""),
         auth_username=session.get("username", ""),
         auth_role=session.get("role", "admin"),

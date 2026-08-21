@@ -194,6 +194,29 @@
         </div>
     </div>
 
+    <!-- Custom SNMP Feature -->
+    <div class="card mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong><i class="bi bi-terminal me-2"></i>Custom SNMP Query</strong>
+            <span class="badge [[ 'bg-success' if custom_snmp_enabled else 'bg-secondary' ]]">
+                Custom SNMP: [[ 'Enabled' if custom_snmp_enabled else 'Disabled' ]]
+            </span>
+        </div>
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <div class="fw-semibold">Custom per-modem SNMP query tool with OID templates</div>
+                <div class="small text-muted">Query arbitrary MIB objects across modems by CMTS or fiber-node scope. Results exportable as CSV/JSON.</div>
+            </div>
+            <form method="post" action="[[ base_path ]]/admin/features/custom-snmp">
+                <input type="hidden" name="enabled" value="[[ 'false' if custom_snmp_enabled else 'true' ]]">
+                <button type="submit" class="btn btn-sm [[ 'btn-outline-danger' if custom_snmp_enabled else 'btn-primary' ]]">
+                    <i class="bi [[ 'bi-toggle-off' if custom_snmp_enabled else 'bi-toggle-on' ]] me-1"></i>
+                    [[ 'Disable' if custom_snmp_enabled else 'Enable' ]]
+                </button>
+            </form>
+        </div>
+    </div>
+
     <!-- Tabs Navigation -->
     <ul class="nav nav-tabs" id="adminTabs" role="tablist">
         <li class="nav-item" role="presentation">

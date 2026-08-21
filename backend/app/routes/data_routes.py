@@ -10,7 +10,7 @@ import os
 from flask import Response, jsonify, request, session, stream_with_context
 import requests
 
-from app.core.feature_flags import is_network_rxmer_analytics_enabled, is_cm_bulk_reset_enabled
+from app.core.feature_flags import is_network_rxmer_analytics_enabled, is_cm_bulk_reset_enabled, is_custom_snmp_enabled
 from . import api_bp
 
 
@@ -517,3 +517,120 @@ def cm_reset_targets(public_id):
         return gate
     params = {k: v for k, v in request.args.items() if k in {"cursor", "limit", "state"}}
     return _proxy("GET", f"/cm-reset/jobs/{public_id}/targets", params=params)
+
+
+# ── Custom SNMP Query ────────────────────────────────────────
+
+
+def _require_custom_snmp():
+    gate = _require_admin()
+    if gate:
+        return gate
+    if not is_custom_snmp_enabled():
+        return jsonify({"status": "error", "message": "Custom SNMP is disabled"}), 404
+    return None
+
+
+@api_bp.route('/admin/custom-snmp/capabilities', methods=['GET'])
+def custom_snmp_capabilities():
+    gate = _require_custom_snmp()
+    return gate or _proxy("GET", "/custom-snmp/capabilities")
+
+
+@api_bp.route('/admin/custom-snmp/options/cmts', methods=['GET'])
+def custom_snmp_cmts_options():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/custom-snmp/options/cmts", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/options/fiber-nodes', methods=['GET'])
+def custom_snmp_fiber_node_options():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cmts", "limit"}}
+    return _proxy("GET", "/custom-snmp/options/fiber-nodes", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/templates', methods=['GET'])
+def custom_snmp_templates():
+    gate = _require_custom_snmp()
+    return gate or _proxy("GET", "/custom-snmp/templates")
+
+
+@api_bp.route('/admin/custom-snmp/templates', methods=['POST'])
+def custom_snmp_create_template():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    return _proxy("POST", "/custom-snmp/templates", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/custom-snmp/templates/<int:template_id>', methods=['DELETE'])
+def custom_snmp_delete_template(template_id):
+    gate = _require_custom_snmp()
+    return gate or _proxy("DELETE", f"/custom-snmp/templates/{template_id}")
+
+
+@api_bp.route('/admin/custom-snmp/jobs', methods=['GET'])
+def custom_snmp_jobs():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/custom-snmp/jobs", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/jobs/plan', methods=['POST'])
+def custom_snmp_plan():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    return _proxy("POST", "/custom-snmp/jobs/plan", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/custom-snmp/jobs/<public_id>', methods=['GET'])
+def custom_snmp_job(public_id):
+    gate = _require_custom_snmp()
+    return gate or _proxy("GET", f"/custom-snmp/jobs/{public_id}")
+
+
+@api_bp.route('/admin/custom-snmp/jobs/<public_id>/start', methods=['POST'])
+def custom_snmp_start(public_id):
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    return _proxy("POST", f"/custom-snmp/jobs/{public_id}/start", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/custom-snmp/jobs/<public_id>/cancel', methods=['POST'])
+def custom_snmp_cancel(public_id):
+    gate = _require_custom_snmp()
+    return gate or _proxy("POST", f"/custom-snmp/jobs/{public_id}/cancel")
+
+
+@api_bp.route('/admin/custom-snmp/jobs/<public_id>', methods=['DELETE'])
+def custom_snmp_delete(public_id):
+    gate = _require_custom_snmp()
+    return gate or _proxy("DELETE", f"/custom-snmp/jobs/{public_id}")
+
+
+@api_bp.route('/admin/custom-snmp/jobs/<public_id>/targets', methods=['GET'])
+def custom_snmp_targets(public_id):
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cursor", "limit"}}
+    return _proxy("GET", f"/custom-snmp/jobs/{public_id}/targets", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/jobs/<public_id>/report', methods=['GET'])
+def custom_snmp_report(public_id):
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"format"}}
+    return _stream_proxy(f"/custom-snmp/jobs/{public_id}/report", params=params)

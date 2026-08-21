@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Custom SNMP Query - PyPNM{% endblock %}
+
+{% block extra_head %}
+<style>
+    .snmp-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    .oid-row { display: flex; gap: .5rem; align-items: center; margin-bottom: .25rem; }
+    .oid-row input { flex: 1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3" id="custom-snmp-app" data-base-path="[[ base_path ]]">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0"><i class="bi bi-terminal me-2"></i>Custom SNMP Query</h4>
+        <span class="badge bg-warning text-dark">Admin Only</span>
+    </div>
+
+    <div class="row g-3">
+        <!-- Left: OID builder + scope -->
+        <div class="col-lg-5">
+            <!-- OID Builder -->
+            <div class="card mb-3">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <strong><i class="bi bi-list-ol me-1"></i>OIDs to Query</strong>
+                    <div class="d-flex gap-1">
+                        <select class="form-select form-select-sm" id="snmp-template-select" style="width:auto;max-width:180px;">
+                            <option value="">— templates —</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-primary" id="snmp-load-template" title="Load template"><i class="bi bi-download"></i></button>
+                        <button class="btn btn-sm btn-outline-success" id="snmp-save-template" title="Save as template"><i class="bi bi-save"></i></button>
+                    </div>
+                </div>
+                <div class="card-body" id="oid-list-container">
+                    <div class="oid-row">
+                        <input type="text" class="form-control form-control-sm snmp-code" placeholder="OID (e.g. sysUpTime.0 or 1.3.6.1.2.1.1.3.0)" data-field="oid">
+                        <input type="text" class="form-control form-control-sm" placeholder="Label (optional)" style="max-width:120px;" data-field="label">
+                        <button class="btn btn-sm btn-outline-danger oid-remove-btn" title="Remove"><i class="bi bi-dash"></i></button>
+                    </div>
+                </div>
+                <div class="card-footer bg-white">
+                    <button class="btn btn-sm btn-outline-primary" id="oid-add-btn"><i class="bi bi-plus me-1"></i>Add OID</button>
+                    <span class="small text-muted ms-2" id="oid-count">1 OID</span>
+                </div>
+            </div>
+
+            <!-- Scope -->
+            <div class="card mb-3">
+                <div class="card-header bg-white"><strong>Scope</strong></div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Type</label>
+                            <select class="form-select form-select-sm" id="snmp-scope-type">
+                                <option value="cmts">CMTS</option>
+                                <option value="fiber_node">Fiber node</option>
+                                <option value="all_network">All network</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4" id="snmp-cmts-wrap">
+                            <label class="form-label small fw-bold">CMTS</label>
+                            <select class="form-select form-select-sm" id="snmp-cmts">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 d-none" id="snmp-fn-wrap">
+                            <label class="form-label small fw-bold">Fiber node</label>
+                            <select class="form-select form-select-sm" id="snmp-fiber-node" disabled>
+                                <option value="">Select CMTS</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Max modems</label>
+                            <input type="number" class="form-control form-control-sm" id="snmp-max-modems" value="100" min="1" max="100000">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm mt-3 w-100" id="snmp-plan-btn">
+                        <i class="bi bi-clipboard-check me-1"></i>Create Plan
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Jobs + results -->
+        <div class="col-lg-7">
+            <div class="card mb-3">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <strong>Query Jobs</strong>
+                    <button class="btn btn-sm btn-outline-secondary" id="snmp-refresh-btn"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light">
+                                <tr><th>Status</th><th>Scope</th><th>OIDs</th><th>Targets</th><th>Created</th><th>Actions</th></tr>
+                            </thead>
+                            <tbody id="snmp-jobs-body">
+                                <tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Job detail -->
+            <div class="card d-none" id="snmp-detail-card">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <strong>Results</strong>
+                    <div class="d-flex gap-1">
+                        <a class="btn btn-sm btn-outline-primary disabled" id="snmp-export-csv" href="#"><i class="bi bi-filetype-csv me-1"></i>CSV</a>
+                        <a class="btn btn-sm btn-outline-secondary disabled" id="snmp-export-json" href="#"><i class="bi bi-filetype-json me-1"></i>JSON</a>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height:400px;overflow-y:auto;">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light" id="snmp-results-head"></thead>
+                            <tbody id="snmp-results-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="[[ asset_url('js/custom-snmp.js') ]]" defer></script>
+{% endblock %}
