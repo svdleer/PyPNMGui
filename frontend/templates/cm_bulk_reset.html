@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}CM Bulk Reset - PyPNM{% endblock %}
+
+{% block extra_head %}
+<style>
+    .reset-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    .reset-bar-wrap { width: 100%; height: 6px; background: #e9ecef; border-radius: 3px; overflow: hidden; }
+    .reset-bar { height: 100%; min-width: 2px; background: linear-gradient(90deg, #198754, #20c997); transition: width .3s; }
+    .reset-bar-fail { background: linear-gradient(90deg, #dc3545, #fd7e14); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>CM Bulk Reset</h4>
+        <span class="badge bg-warning text-dark">Admin Only</span>
+    </div>
+
+    <div class="alert alert-info py-2" role="alert">
+        <i class="bi bi-clock me-1"></i>
+        <strong>Execution window:</strong> Resets only run between 01:00 and 06:00.
+        Jobs submitted outside this window will be queued for the next maintenance window.
+    </div>
+
+    <!-- Scope selector -->
+    <div class="card mb-3">
+        <div class="card-header bg-white">
+            <strong>Reset Scope</strong>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Scope type</label>
+                    <select class="form-select form-select-sm" id="reset-scope-type">
+                        <option value="single">Single modem (MAC)</option>
+                        <option value="cmts">Entire CMTS</option>
+                        <option value="fiber_node">Fiber node</option>
+                        <option value="file">Upload MAC file</option>
+                    </select>
+                </div>
+
+                <!-- Single modem -->
+                <div class="col-md-4" id="scope-single-wrap">
+                    <label class="form-label small fw-bold">MAC address</label>
+                    <input type="text" class="form-control form-control-sm" id="reset-mac" placeholder="aa:bb:cc:dd:ee:ff">
+                </div>
+
+                <!-- CMTS selector -->
+                <div class="col-md-4 d-none" id="scope-cmts-wrap">
+                    <label class="form-label small fw-bold">CMTS</label>
+                    <select class="form-select form-select-sm" id="reset-cmts">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+
+                <!-- Fiber node selector -->
+                <div class="col-md-4 d-none" id="scope-fn-wrap">
+                    <label class="form-label small fw-bold">Fiber node</label>
+                    <select class="form-select form-select-sm" id="reset-fiber-node" disabled>
+                        <option value="">Select CMTS first</option>
+                    </select>
+                </div>
+
+                <!-- File upload -->
+                <div class="col-md-5 d-none" id="scope-file-wrap">
+                    <label class="form-label small fw-bold">MAC list (one per line, CSV, or paste)</label>
+                    <textarea class="form-control form-control-sm" id="reset-mac-list" rows="4"
+                              placeholder="aa:bb:cc:dd:ee:ff&#10;11:22:33:44:55:66&#10;..."></textarea>
+                    <div class="form-text">Or drag-drop / paste a .csv or .txt file</div>
+                </div>
+
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-primary btn-sm w-100" id="reset-plan-btn">
+                        <i class="bi bi-clipboard-check me-1"></i>Create Plan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job list -->
+    <div class="card mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong>Reset Jobs</strong>
+            <button class="btn btn-sm btn-outline-secondary" id="reset-refresh-btn">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Status</th>
+                            <th>Scope</th>
+                            <th>Targets</th>
+                            <th>Progress</th>
+                            <th>Scheduled</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reset-jobs-body">
+                        <tr><td colspan="7" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Selected job detail + targets -->
+    <div class="card d-none" id="reset-detail-card">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong>Job Detail</strong>
+            <span class="badge" id="reset-detail-status"></span>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 mb-3" id="reset-detail-meta"></div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>MAC</th>
+                            <th>IP</th>
+                            <th>CMTS</th>
+                            <th>Fiber Node</th>
+                            <th>State</th>
+                            <th>Reset At</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reset-targets-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation modal -->
+<div class="modal fade" id="resetConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Confirm Bulk Reset</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">You are about to reset <strong id="confirm-target-count">0</strong> cable modem(s).</p>
+                <p class="text-danger fw-bold">This will cause service interruption for all affected customers.</p>
+                <hr>
+                <label class="form-label">Type the confirmation passphrase to proceed:</label>
+                <input type="text" class="form-control" id="confirm-passphrase"
+                       placeholder="have you tried turning it on and off again?" autocomplete="off">
+                <div class="form-text text-muted mt-1">Hint: IT Crowd, Season 1</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-start-btn" disabled>
+                    <i class="bi bi-lightning-fill me-1"></i>Execute Reset
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="[[ asset_url('js/cm-bulk-reset.js') ]]" defer></script>
+{% endblock %}

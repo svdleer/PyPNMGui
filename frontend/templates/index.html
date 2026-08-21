@@ -89,6 +89,13 @@
                             </a>
                         </li>
                         {% endif %}
+                        {% if cm_bulk_reset_enabled and auth_role == 'admin' %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="[[ base_path ]]/cm-bulk-reset">
+                                <i class="bi bi-arrow-repeat me-1"></i>CM Reset
+                            </a>
+                        </li>
+                        {% endif %}
                         {% if enable_topology %}
                         <li class="nav-item">
                             <a class="nav-link" href="[[ base_path ]]/topology">

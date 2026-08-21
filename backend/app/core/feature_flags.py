@@ -6,6 +6,7 @@ from app.core.auth_db import auth_db
 
 logger = logging.getLogger(__name__)
 NETWORK_RXMER_ANALYTICS_SETTING = "network_rxmer_analytics_enabled"
+CM_BULK_RESET_SETTING = "cm_bulk_reset_enabled"
 
 
 def is_network_rxmer_analytics_enabled() -> bool:
@@ -14,4 +15,13 @@ def is_network_rxmer_analytics_enabled() -> bool:
         return auth_db.get_bool_setting(NETWORK_RXMER_ANALYTICS_SETTING, default=False)
     except Exception as exc:
         logger.error("Unable to read Network RxMER Analytics feature flag: %s", exc)
+        return False
+
+
+def is_cm_bulk_reset_enabled() -> bool:
+    """Return the persisted admin feature flag for CM Bulk Reset."""
+    try:
+        return auth_db.get_bool_setting(CM_BULK_RESET_SETTING, default=False)
+    except Exception as exc:
+        logger.error("Unable to read CM Bulk Reset feature flag: %s", exc)
         return False

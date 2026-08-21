@@ -10,7 +10,7 @@ import os
 from flask import Response, jsonify, request, session, stream_with_context
 import requests
 
-from app.core.feature_flags import is_network_rxmer_analytics_enabled
+from app.core.feature_flags import is_network_rxmer_analytics_enabled, is_cm_bulk_reset_enabled
 from . import api_bp
 
 
@@ -409,3 +409,95 @@ def network_rxmer_start(public_id):
 def network_rxmer_cancel(public_id):
     gate = _require_network_rxmer_analytics()
     return gate or _proxy("POST", f"/rxmer-analytics/jobs/{public_id}/cancel")
+
+
+# ── CM Bulk Reset ────────────────────────────────────────────
+
+
+def _require_cm_bulk_reset():
+    gate = _require_admin()
+    if gate:
+        return gate
+    if not is_cm_bulk_reset_enabled():
+        return jsonify({"status": "error", "message": "CM Bulk Reset is disabled"}), 404
+    return None
+
+
+@api_bp.route('/admin/cm-reset/capabilities', methods=['GET'])
+def cm_reset_capabilities():
+    gate = _require_cm_bulk_reset()
+    return gate or _proxy("GET", "/cm-reset/capabilities")
+
+
+@api_bp.route('/admin/cm-reset/options/cmts', methods=['GET'])
+def cm_reset_cmts_options():
+    gate = _require_cm_bulk_reset()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/cm-reset/options/cmts", params=params)
+
+
+@api_bp.route('/admin/cm-reset/options/fiber-nodes', methods=['GET'])
+def cm_reset_fiber_node_options():
+    gate = _require_cm_bulk_reset()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cmts", "limit"}}
+    return _proxy("GET", "/cm-reset/options/fiber-nodes", params=params)
+
+
+@api_bp.route('/admin/cm-reset/jobs', methods=['GET'])
+def cm_reset_jobs():
+    gate = _require_cm_bulk_reset()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/cm-reset/jobs", params=params)
+
+
+@api_bp.route('/admin/cm-reset/jobs/plan', methods=['POST'])
+def cm_reset_plan():
+    gate = _require_cm_bulk_reset()
+    if gate:
+        return gate
+    return _proxy("POST", "/cm-reset/jobs/plan", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/cm-reset/jobs/<public_id>', methods=['GET'])
+def cm_reset_job(public_id):
+    gate = _require_cm_bulk_reset()
+    return gate or _proxy("GET", f"/cm-reset/jobs/{public_id}")
+
+
+@api_bp.route('/admin/cm-reset/jobs/<public_id>/start', methods=['POST'])
+def cm_reset_start(public_id):
+    gate = _require_cm_bulk_reset()
+    if gate:
+        return gate
+    return _proxy(
+        "POST",
+        f"/cm-reset/jobs/{public_id}/start",
+        payload=request.get_json(silent=True) or {},
+    )
+
+
+@api_bp.route('/admin/cm-reset/jobs/<public_id>/cancel', methods=['POST'])
+def cm_reset_cancel(public_id):
+    gate = _require_cm_bulk_reset()
+    return gate or _proxy("POST", f"/cm-reset/jobs/{public_id}/cancel")
+
+
+@api_bp.route('/admin/cm-reset/jobs/<public_id>', methods=['DELETE'])
+def cm_reset_delete(public_id):
+    gate = _require_cm_bulk_reset()
+    return gate or _proxy("DELETE", f"/cm-reset/jobs/{public_id}")
+
+
+@api_bp.route('/admin/cm-reset/jobs/<public_id>/targets', methods=['GET'])
+def cm_reset_targets(public_id):
+    gate = _require_cm_bulk_reset()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cursor", "limit", "state"}}
+    return _proxy("GET", f"/cm-reset/jobs/{public_id}/targets", params=params)
