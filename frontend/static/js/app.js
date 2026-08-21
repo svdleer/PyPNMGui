@@ -8499,7 +8499,14 @@ createApp({
                 if (!carrierCount) continue;
 
                 const freqsMhz = freqsHz.slice(0, carrierCount).map(f => Number(f) / 1e6);
-                const ampDb = magsLin.slice(0, carrierCount).map(m => 20 * Math.log10(Math.max(Number(m), 1e-12)));
+                // magnitudes from PyPNM are already in dB (10*log10(|z|^2)).
+                // If values look linear (all positive and < 10), convert to dB;
+                // otherwise assume they're already dB.
+                const rawMags = magsLin.slice(0, carrierCount).map(m => Number(m));
+                const looksLinear = rawMags.length > 0 && rawMags.every(m => m >= 0 && m < 10);
+                const ampDb = looksLinear
+                    ? rawMags.map(m => 20 * Math.log10(Math.max(m, 1e-12)))
+                    : rawMags;
                 const gd = gdValues.slice(0, carrierCount).map(Number);
                 const regY     = this._linRegY(freqsMhz, ampDb);
                 const suckouts = this._detectSuckouts(freqsMhz, ampDb, regY, 3.0);
