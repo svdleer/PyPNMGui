@@ -368,7 +368,7 @@ def admin_page():
         poller_scheduler_status["last_tick"] = _normalize_datetime_24h(poller_scheduler_status.get("last_tick"))
         poller_scheduler_status["decisions"] = [
             d for d in (poller_scheduler_status.get("decisions") or [])
-            if str((d or {}).get("reason") or "").strip().lower() not in {"interval_not_due", "active_job_exists"}
+            if str((d or {}).get("reason") or "").strip().lower() not in {"interval_not_due", "active_job_exists", "scheduled_slot_already_recorded"}
         ]
     except Exception as exc:
         data_store_error = f"Remote poller API unavailable: {exc}"
