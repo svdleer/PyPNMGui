@@ -652,3 +652,9 @@ def custom_snmp_mib_search():
         return gate
     params = {k: v for k, v in request.args.items() if k in {"q", "limit"}}
     return _proxy("GET", "/custom-snmp/mib-search", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/jobs', methods=['DELETE'])
+def custom_snmp_delete_all():
+    gate = _require_custom_snmp()
+    return gate or _proxy("DELETE", "/custom-snmp/jobs")

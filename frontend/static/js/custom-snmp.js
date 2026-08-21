@@ -352,6 +352,17 @@
 
     byId('snmp-refresh-btn').addEventListener('click', async () => { await refreshJobs(); if (selectedJobId) await selectJob(selectedJobId); });
 
+    byId('snmp-delete-all-btn').addEventListener('click', async () => {
+        if (!confirm('Delete ALL completed/failed/planned custom SNMP jobs?')) return;
+        try {
+            const data = await request('DELETE', '/jobs');
+            alert(`Deleted ${data.deleted || 0} job(s)`);
+            selectedJobId = null;
+            byId('snmp-detail-card').classList.add('d-none');
+            await refreshJobs();
+        } catch (e) { alert(`Delete failed: ${e.message}`); }
+    });
+
     // ── Init ────────────────────────────────────────────────
 
     async function init() {
