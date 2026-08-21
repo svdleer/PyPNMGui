@@ -2,7 +2,8 @@
 (function () {
     'use strict';
 
-    const basePath = (document.querySelector('meta[name="base-path"]') || {}).content || '';
+    const root = document.querySelector('.container-fluid');
+    const basePath = (root && root.dataset.basePath) || '';
     const apiBase = `${basePath}/api/admin/cm-reset`;
 
     function byId(id) { return document.getElementById(id); }
