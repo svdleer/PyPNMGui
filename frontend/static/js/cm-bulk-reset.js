@@ -2,7 +2,7 @@
 (function () {
     'use strict';
 
-    const root = document.querySelector('.container-fluid');
+    const root = document.getElementById('cm-bulk-reset-app');
     const basePath = (root && root.dataset.basePath) || '';
     const apiBase = `${basePath}/api/admin/cm-reset`;
 
