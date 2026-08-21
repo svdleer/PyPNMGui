@@ -5088,6 +5088,8 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
                 self.image(logo_path, 10, 8, 30)
             self.set_font('Helvetica', 'B', 14)
             self.cell(0, 10, 'PNM Measurement Report', align='C', new_x='LMARGIN', new_y='NEXT')
+            self.set_font('Helvetica', 'I', 9)
+            self.cell(0, 5, 'Henk-Jan Special Edition', align='C', new_x='LMARGIN', new_y='NEXT')
             self.ln(2)
 
         def footer(self):
