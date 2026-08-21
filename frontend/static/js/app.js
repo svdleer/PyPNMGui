@@ -4895,8 +4895,7 @@ createApp({
                         mac_address: this.selectedModem.mac_address,
                         modem_ip: this.selectedModem.ip_address || this.selectedModem.modem_ip,
                         cmts_ip: this.selectedModem.cmts_ip,
-                        community: this._getCmtsCommunity(),
-                        tftp_ip: this._getTftpIp(),
+                        community: this.snmpCommunityModem || 'private',
                         measurements: this.reportMeasurements,
                         modem_info: {
                             cmts_name: this.selectedModem.cmts || this.selectedModem.cmts_name,
