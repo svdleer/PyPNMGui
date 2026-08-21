@@ -41,6 +41,14 @@ createApp({
             loadingSystemInfo: false,
             runningTest: false,
             activeMeasurement: null,   // which measurement button is running (e.g. 'rxmer', 'us_pre_eq')
+            // PNM Report Builder
+            reportMeasurements: ['spectrum', 'rxmer', 'channel_estimation'],
+            reportRunning: false,
+            reportJobId: null,
+            reportProgressPct: 0,
+            reportProgressLabel: '',
+            reportDownloadUrl: null,
+            _reportPollTimer: null,
             _activeTaskLabel: null,
             _taskGeneration: 0,
             _currentFetchController: null,
@@ -4870,6 +4878,70 @@ createApp({
             return this.runPnmMeasurement('constellation');
         },
         
+        // ============== PNM Report Builder ==============
+
+        async generatePnmReport() {
+            if (!this.selectedModem || !this.reportMeasurements.length) return;
+            this.reportRunning = true;
+            this.reportDownloadUrl = null;
+            this.reportProgressPct = 0;
+            this.reportProgressLabel = 'Starting...';
+            try {
+                const basePath = document.querySelector('[data-base-path]')?.dataset?.basePath || '';
+                const resp = await fetch(`${basePath}/api/pypnm/pnm-report/start`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        mac_address: this.selectedModem.mac_address,
+                        modem_ip: this.selectedModem.ip_address || this.selectedModem.modem_ip,
+                        cmts_ip: this.selectedModem.cmts_ip,
+                        community: this._getCmtsCommunity(),
+                        tftp_ip: this._getTftpIp(),
+                        measurements: this.reportMeasurements,
+                        modem_info: {
+                            cmts_name: this.selectedModem.cmts || this.selectedModem.cmts_name,
+                            fiber_node: this.selectedModem.fiber_node,
+                            modem_ip: this.selectedModem.ip_address || this.selectedModem.modem_ip,
+                        },
+                    }),
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || 'Failed to start');
+                this.reportJobId = data.job_id;
+                this._pollReportStatus();
+            } catch (e) {
+                this.$toast?.error?.(`Report failed: ${e.message}`);
+                this.reportRunning = false;
+            }
+        },
+
+        _pollReportStatus() {
+            if (this._reportPollTimer) clearInterval(this._reportPollTimer);
+            const basePath = document.querySelector('[data-base-path]')?.dataset?.basePath || '';
+            this._reportPollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch(`${basePath}/api/pypnm/pnm-report/status/${this.reportJobId}`);
+                    const data = await resp.json();
+                    if (!data.success) return;
+                    const total = data.total || 1;
+                    const progress = data.progress || 0;
+                    this.reportProgressPct = Math.round((progress / total) * 100);
+                    this.reportProgressLabel = data.current || `${progress}/${total}`;
+                    if (data.status === 'complete') {
+                        clearInterval(this._reportPollTimer);
+                        this.reportRunning = false;
+                        this.reportProgressPct = 100;
+                        this.reportDownloadUrl = `${basePath}/api/pypnm/pnm-report/download/${this.reportJobId}`;
+                        this.$toast?.success?.('PNM Report ready for download');
+                    } else if (data.status === 'failed') {
+                        clearInterval(this._reportPollTimer);
+                        this.reportRunning = false;
+                        this.$toast?.error?.(`Report failed: ${data.error || 'unknown'}`);
+                    }
+                } catch (e) { /* keep polling */ }
+            }, 3000);
+        },
+
         // ============== Upstream PNM Methods (CMTS-side) ==============
         
         async loadUpstreamInterfaces() {

@@ -4892,3 +4892,269 @@ def cancel_fibernode_impulse_job(job_id):
         _impulse_job_abort.add(job_id)
     _set_impulse_job_progress(job_id, action='Cancellation requested', done=False)
     return jsonify({'success': True, 'job_id': job_id})
+
+
+# ================================================================
+# PNM Report Builder — multi-measurement PDF report
+# ================================================================
+
+import threading as _report_threading
+
+_report_jobs: dict = {}  # job_id -> {status, progress, total, current, pdf_path, error}
+_report_lock = _report_threading.Lock()
+
+_REPORT_MEASUREMENT_LABELS = {
+    'rxmer': 'RxMER per Subcarrier',
+    'spectrum': 'Full-Band Spectrum',
+    'channel_estimation': 'Channel Estimation (Amplitude & Group Delay)',
+    'us_pre_eq': 'Upstream Pre-Equalization',
+    'fec_summary': 'FEC Summary',
+    'histogram': 'DS Histogram',
+    'constellation': 'Constellation Display',
+    'modulation_profile': 'Modulation Profile',
+}
+
+
+def _set_report_progress(job_id, **kwargs):
+    with _report_lock:
+        if job_id not in _report_jobs:
+            _report_jobs[job_id] = {}
+        _report_jobs[job_id].update(kwargs)
+
+
+@pypnm_bp.route('/pnm-report/start', methods=['POST'])
+def start_pnm_report():
+    """Start a background PNM report generation.
+
+    POST body: {
+        "mac_address": "aa:bb:cc:dd:ee:ff",
+        "modem_ip": "10.x.x.x",
+        "cmts_ip": "172.x.x.x",
+        "community": "private",
+        "measurements": ["rxmer", "spectrum", "channel_estimation", ...],
+        "modem_info": { "fiber_node": "...", "cmts_name": "..." }
+    }
+    """
+    import uuid as _uuid
+    data = request.get_json() or {}
+    mac_address = data.get('mac_address')
+    modem_ip = data.get('modem_ip')
+    measurements = data.get('measurements') or []
+
+    if not mac_address or not modem_ip:
+        return jsonify({'success': False, 'error': 'mac_address and modem_ip required'}), 400
+    if not measurements:
+        return jsonify({'success': False, 'error': 'Select at least one measurement'}), 400
+
+    valid = [m for m in measurements if m in _REPORT_MEASUREMENT_LABELS]
+    if not valid:
+        return jsonify({'success': False, 'error': 'No valid measurement types selected'}), 400
+
+    job_id = str(_uuid.uuid4())[:8]
+    _set_report_progress(
+        job_id,
+        status='running', progress=0, total=len(valid),
+        current='Starting...', pdf_path=None, error=None,
+    )
+
+    thread = _report_threading.Thread(
+        target=_run_pnm_report,
+        args=(job_id, data, valid),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id, 'total': len(valid)})
+
+
+@pypnm_bp.route('/pnm-report/status/<job_id>', methods=['GET'])
+def pnm_report_status(job_id):
+    with _report_lock:
+        job = _report_jobs.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({'success': True, **job})
+
+
+@pypnm_bp.route('/pnm-report/download/<job_id>', methods=['GET'])
+def pnm_report_download(job_id):
+    import os
+    with _report_lock:
+        job = _report_jobs.get(job_id)
+    if not job or not job.get('pdf_path'):
+        return jsonify({'success': False, 'error': 'Report not ready'}), 404
+    pdf_path = job['pdf_path']
+    if not os.path.exists(pdf_path):
+        return jsonify({'success': False, 'error': 'PDF file missing'}), 404
+    return send_file(
+        pdf_path,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=os.path.basename(pdf_path),
+    )
+
+
+def _run_pnm_report(job_id: str, data: dict, measurements: list):
+    """Background thread: run measurements sequentially and build PDF."""
+    import os
+    import tempfile
+    from datetime import datetime
+    from app.core.pypnm_client import PyPNMClient
+
+    mac_address = data['mac_address']
+    modem_ip = data['modem_ip']
+    community = data.get('community', 'private')
+    tftp_ip = data.get('tftp_ip') or os.environ.get('TFTP_IPV4', '212.178.218.234')
+    modem_info = data.get('modem_info') or {}
+
+    client = PyPNMClient()
+    collected_plots = []  # list of (measurement_label, [{'filename': ..., 'data': base64_png}])
+
+    for idx, mtype in enumerate(measurements):
+        label = _REPORT_MEASUREMENT_LABELS.get(mtype, mtype)
+        _set_report_progress(job_id, progress=idx, current=f'Running: {label}')
+
+        try:
+            if mtype == 'rxmer':
+                result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community, output_type='json')
+            elif mtype == 'spectrum':
+                result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'channel_estimation':
+                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'us_pre_eq':
+                result = client.get_us_ofdma_pre_equalization(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'fec_summary':
+                result = client.get_fec_summary(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'histogram':
+                result = client.get_histogram(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'constellation':
+                result = client.get_constellation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'modulation_profile':
+                result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, community)
+            else:
+                continue
+
+            # Extract plots from archive result
+            plots = []
+            if isinstance(result, bytes) and result[:2] == b'PK':
+                import zipfile
+                import io
+                with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
+                    for name in zf.namelist():
+                        if name.endswith('.png'):
+                            plots.append({
+                                'filename': name.split('/')[-1],
+                                'data': base64.b64encode(zf.read(name)).decode(),
+                            })
+            elif isinstance(result, dict):
+                plots = result.get('plots') or []
+                # Some responses have nested data with plots
+                if not plots and result.get('data') and isinstance(result['data'], dict):
+                    plots = result['data'].get('plots') or []
+
+            if plots:
+                collected_plots.append((label, plots))
+
+        except Exception as exc:
+            logger.warning(f"PNM report: {mtype} failed for {mac_address}: {exc}")
+            collected_plots.append((label, []))  # Empty section with note
+
+    # Build PDF
+    _set_report_progress(job_id, progress=len(measurements), current='Building PDF...')
+
+    try:
+        pdf_path = _build_pnm_pdf(job_id, mac_address, modem_info, collected_plots)
+        _set_report_progress(job_id, status='complete', pdf_path=pdf_path, current='Done')
+    except Exception as exc:
+        logger.error(f"PNM report PDF build failed: {exc}", exc_info=True)
+        _set_report_progress(job_id, status='failed', error=str(exc), current='Failed')
+
+
+def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: list) -> str:
+    """Generate a branded PDF from collected measurement plots."""
+    import os
+    import tempfile
+    from datetime import datetime
+    from fpdf import FPDF
+
+    class PnmPDF(FPDF):
+        def header(self):
+            # Logo if available
+            logo_path = os.path.join(
+                os.environ.get('STATIC_FOLDER', '/app/frontend/static'),
+                'images', 'logo.png'
+            )
+            if os.path.exists(logo_path):
+                self.image(logo_path, 10, 8, 30)
+            self.set_font('Helvetica', 'B', 14)
+            self.cell(0, 10, 'PNM Measurement Report', align='C', new_x='LMARGIN', new_y='NEXT')
+            self.ln(2)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Helvetica', 'I', 8)
+            self.cell(0, 10, f'Page {self.page_no()}/{{nb}}', align='C')
+
+    pdf = PnmPDF(orientation='L', format='A4')
+    pdf.alias_nb_pages()
+    pdf.set_auto_page_break(auto=True, margin=20)
+
+    # Title page
+    pdf.add_page()
+    pdf.set_font('Helvetica', 'B', 20)
+    pdf.ln(30)
+    pdf.cell(0, 15, 'Cable Modem PNM Report', align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(10)
+    pdf.set_font('Helvetica', '', 12)
+    pdf.cell(0, 8, f'MAC Address: {mac_address}', align='C', new_x='LMARGIN', new_y='NEXT')
+    if modem_info.get('cmts_name'):
+        pdf.cell(0, 8, f'CMTS: {modem_info["cmts_name"]}', align='C', new_x='LMARGIN', new_y='NEXT')
+    if modem_info.get('fiber_node'):
+        pdf.cell(0, 8, f'Fiber Node: {modem_info["fiber_node"]}', align='C', new_x='LMARGIN', new_y='NEXT')
+    if modem_info.get('modem_ip'):
+        pdf.cell(0, 8, f'Modem IP: {modem_info["modem_ip"]}', align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(5)
+    pdf.cell(0, 8, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 8, f'Measurements: {len(sections)}', align='C', new_x='LMARGIN', new_y='NEXT')
+
+    # Measurement sections
+    for section_label, plots in sections:
+        pdf.add_page()
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.cell(0, 10, section_label, new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(3)
+
+        if not plots:
+            pdf.set_font('Helvetica', 'I', 10)
+            pdf.cell(0, 8, 'Measurement failed or no data returned.', new_x='LMARGIN', new_y='NEXT')
+            continue
+
+        for plot in plots:
+            png_data = plot.get('data')
+            if not png_data:
+                continue
+            try:
+                img_bytes = base64.b64decode(png_data)
+                # Write to temp file for fpdf2
+                tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+                tmp.write(img_bytes)
+                tmp.close()
+
+                # Fit to page width (landscape A4 usable width ~257mm)
+                pdf.image(tmp.name, x=10, w=257)
+                pdf.ln(5)
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+
+        # Add filename caption for context
+        if plots and plots[0].get('filename'):
+            pdf.set_font('Helvetica', 'I', 7)
+            pdf.cell(0, 5, f'Source: {plots[0]["filename"]}', new_x='LMARGIN', new_y='NEXT')
+
+    # Save
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'pnm_report_{mac_address.replace(":", "")}_{timestamp}.pdf'
+    pdf_path = os.path.join('/app/data', filename)
+    pdf.output(pdf_path)
+    return pdf_path
