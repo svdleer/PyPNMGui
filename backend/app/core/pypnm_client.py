@@ -610,7 +610,7 @@ class PyPNMClient:
                 "inactivity_timeout":         60,
                 "first_segment_center_freq": 108_000_000,
                 "last_segment_center_freq":  last_segment_center_freq_hz,
-                "segment_freq_span":         1_000_000,
+                "segment_freq_span":         12_800_000,
                 "num_bins_per_segment":      256,
                 "spectrum_retrieval_type":   1,
             }
@@ -931,7 +931,9 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         cm_mac_address: str,
-        community: str = "public"
+        community: str = "public",
+        ofdma_ifindex: Optional[int] = None,
+        cm_index: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Discover the correct UTSC RF port for a specific modem.
@@ -939,12 +941,19 @@ class PyPNMClient:
         Endpoint: POST /pnm/us/spectrumAnalyzer/discoverRfPort
         
         Returns rf_port_ifindex, rf_port_description, cm_index, us_channels.
+        
+        When ofdma_ifindex is provided, the backend skips walking the full CM MAC
+        and OFDMA tables (which truncate at 10000 rows on large CMTSes).
         """
         payload = {
             "cmts_ip": cmts_ip,
             "community": community,
             "cm_mac_address": cm_mac_address
         }
+        if ofdma_ifindex is not None:
+            payload["ofdma_ifindex"] = ofdma_ifindex
+        if cm_index is not None:
+            payload["cm_index"] = cm_index
         # CMTS discovery walks can take 50s+ on large/slow CMTS.
         # Keep timeout generous so results are not discarded.
         return self._post(

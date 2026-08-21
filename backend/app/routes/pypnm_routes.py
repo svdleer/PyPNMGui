@@ -3508,6 +3508,7 @@ def configure_utsc(mac_address):
             cmts_ip=cmts_ip,
             cm_mac_address=mac_address,
             community=community,
+            ofdma_ifindex=int(logical_ch_ifindex) if logical_ch_ifindex else None,
         )
         discovered_ifindex = None
         if discovered and discovered.get('success') and discovered.get('rf_port_ifindex'):
