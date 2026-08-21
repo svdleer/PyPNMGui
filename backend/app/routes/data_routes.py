@@ -355,6 +355,22 @@ def network_rxmer_subcarrier_report(public_id):
     )
 
 
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/modems/subcarriers/report', methods=['GET'])
+def network_rxmer_per_modem_subcarrier_report(public_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    params = {
+        key: value
+        for key, value in request.args.items()
+        if key in {"format", "cmts", "fiber_node"}
+    }
+    return _stream_proxy(
+        f"/rxmer-analytics/jobs/{public_id}/modems/subcarriers/report",
+        params=params,
+    )
+
+
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/spectrum', methods=['GET'])
 def network_rxmer_spectrum(public_id):
     gate = _require_network_rxmer_analytics()

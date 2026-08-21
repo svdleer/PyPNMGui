@@ -204,6 +204,20 @@
                 link.removeAttribute('aria-disabled');
             });
         });
+        // Per-modem subcarrier CSV
+        const modemSubLink = byId('rxmer-modem-subcarrier-csv');
+        if (modemSubLink) {
+            if (!selectedJobId) {
+                modemSubLink.href = '#';
+                modemSubLink.classList.add('disabled');
+                modemSubLink.setAttribute('aria-disabled', 'true');
+            } else {
+                const publicId = encodeURIComponent(selectedJobId);
+                modemSubLink.href = `${apiBase}/jobs/${publicId}/modems/subcarriers/report?${filteredQuery({format: 'csv'})}`;
+                modemSubLink.classList.remove('disabled');
+                modemSubLink.removeAttribute('aria-disabled');
+            }
+        }
     }
 
     function scopeLabel(scope) {
