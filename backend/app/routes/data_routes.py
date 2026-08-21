@@ -643,3 +643,12 @@ def custom_snmp_verify_oid():
     if gate:
         return gate
     return _proxy("POST", "/custom-snmp/verify-oid", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/custom-snmp/mib-search', methods=['GET'])
+def custom_snmp_mib_search():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"q", "limit"}}
+    return _proxy("GET", "/custom-snmp/mib-search", params=params)

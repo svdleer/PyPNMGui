@@ -31,12 +31,47 @@
     function createOidRow(oid = '', label = '') {
         const row = document.createElement('div');
         row.className = 'oid-row';
+        row.style.position = 'relative';
         row.innerHTML = `
-            <input type="text" class="form-control form-control-sm snmp-code" placeholder="OID (e.g. sysUpTime.0)" data-field="oid" value="${oid}">
+            <div style="position:relative;flex:1">
+                <input type="text" class="form-control form-control-sm snmp-code" placeholder="OID (e.g. sysUpTime.0 or 1.3.6.1.2.1.1.3.0)" data-field="oid" value="${oid}" autocomplete="off">
+                <div class="list-group position-absolute w-100 shadow-sm" style="z-index:100;max-height:150px;overflow-y:auto;display:none" data-role="suggestions"></div>
+            </div>
             <input type="text" class="form-control form-control-sm" placeholder="Label" style="max-width:120px;" data-field="label" value="${label}">
             <button class="btn btn-sm btn-outline-success oid-verify-btn" title="Verify OID"><i class="bi bi-check-circle"></i></button>
             <button class="btn btn-sm btn-outline-danger oid-remove-btn" title="Remove"><i class="bi bi-dash"></i></button>
         `;
+        // Autocomplete
+        const oidInput = row.querySelector('[data-field="oid"]');
+        const sugBox = row.querySelector('[data-role="suggestions"]');
+        let debounceTimer = null;
+        oidInput.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            const val = oidInput.value.trim();
+            if (val.length < 2 || /^\d/.test(val)) { sugBox.style.display = 'none'; return; }
+            debounceTimer = setTimeout(async () => {
+                try {
+                    const data = await request('GET', `/mib-search?q=${encodeURIComponent(val)}&limit=10`);
+                    const results = data.results || [];
+                    if (!results.length) { sugBox.style.display = 'none'; return; }
+                    sugBox.innerHTML = results.map(r =>
+                        `<a href="#" class="list-group-item list-group-item-action py-1 px-2 small"><strong>${r.name}</strong> <span class="text-muted">${r.oid}</span></a>`
+                    ).join('');
+                    sugBox.style.display = 'block';
+                    sugBox.querySelectorAll('a').forEach((a, i) => {
+                        a.addEventListener('mousedown', (e) => {
+                            e.preventDefault();
+                            oidInput.value = results[i].name;
+                            const labelInput = row.querySelector('[data-field="label"]');
+                            if (!labelInput.value) labelInput.value = results[i].name.split('.')[0];
+                            sugBox.style.display = 'none';
+                        });
+                    });
+                } catch(e) { sugBox.style.display = 'none'; }
+            }, 250);
+        });
+        oidInput.addEventListener('blur', () => { setTimeout(() => { sugBox.style.display = 'none'; }, 200); });
+
         row.querySelector('.oid-remove-btn').addEventListener('click', () => {
             if (oidContainer.querySelectorAll('.oid-row').length > 1) {
                 row.remove();
