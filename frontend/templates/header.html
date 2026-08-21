@@ -49,7 +49,7 @@
                 {% endif %}
                 {% if custom_snmp_enabled and auth_role == 'admin' %}
                 <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'auth.custom_snmp_page' %}active{% endif %}" href="[[ base_path ]]/custom-snmp" style="font-size:.85rem">
+                    <a class="nav-link {% if request.endpoint == 'auth.custom_snmp_page' %}active{% endif %}" href="[[ base_path ]]/custom-snmp">
                         <i class="bi bi-terminal me-1"></i>Custom SNMP
                     </a>
                 </li>
