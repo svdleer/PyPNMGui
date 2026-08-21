@@ -34,6 +34,7 @@
         row.innerHTML = `
             <input type="text" class="form-control form-control-sm snmp-code" placeholder="OID (e.g. sysUpTime.0)" data-field="oid" value="${oid}">
             <input type="text" class="form-control form-control-sm" placeholder="Label" style="max-width:120px;" data-field="label" value="${label}">
+            <button class="btn btn-sm btn-outline-success oid-verify-btn" title="Verify OID"><i class="bi bi-check-circle"></i></button>
             <button class="btn btn-sm btn-outline-danger oid-remove-btn" title="Remove"><i class="bi bi-dash"></i></button>
         `;
         row.querySelector('.oid-remove-btn').addEventListener('click', () => {
@@ -41,6 +42,34 @@
                 row.remove();
                 updateOidCount();
             }
+        });
+        row.querySelector('.oid-verify-btn').addEventListener('click', async () => {
+            const oidInput = row.querySelector('[data-field="oid"]');
+            const oidVal = oidInput.value.trim();
+            if (!oidVal) return;
+            const btn = row.querySelector('.oid-verify-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            try {
+                const cmts = byId('snmp-cmts').value || '';
+                const data = await request('POST', '/verify-oid', { oid: oidVal, cmts });
+                if (data.success) {
+                    btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                    btn.title = `OK: ${data.value} (tested on ${data.modem_ip})`;
+                    oidInput.classList.remove('is-invalid');
+                    oidInput.classList.add('is-valid');
+                } else {
+                    btn.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+                    btn.title = data.error || 'Verification failed';
+                    oidInput.classList.remove('is-valid');
+                    oidInput.classList.add('is-invalid');
+                }
+            } catch (e) {
+                btn.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+                btn.title = e.message;
+                oidInput.classList.add('is-invalid');
+            }
+            btn.disabled = false;
         });
         return row;
     }
@@ -62,6 +91,12 @@
             updateOidCount();
         }
     });
+    // Replace initial row with dynamic version that has verify button
+    const initialRow = oidContainer.querySelector('.oid-row');
+    if (initialRow) {
+        const newRow = createOidRow();
+        initialRow.replaceWith(newRow);
+    }
 
     function getOids() {
         const rows = oidContainer.querySelectorAll('.oid-row');

@@ -634,3 +634,12 @@ def custom_snmp_report(public_id):
         return gate
     params = {k: v for k, v in request.args.items() if k in {"format"}}
     return _stream_proxy(f"/custom-snmp/jobs/{public_id}/report", params=params)
+
+
+
+@api_bp.route('/admin/custom-snmp/verify-oid', methods=['POST'])
+def custom_snmp_verify_oid():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    return _proxy("POST", "/custom-snmp/verify-oid", payload=request.get_json(silent=True) or {})
