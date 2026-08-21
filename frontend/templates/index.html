@@ -889,69 +889,70 @@
                                     <div class="card-header pnm-card-header pnm-card-header--upstream">
                                         <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Modem Details <span v-if="modemDetailLoading" class="spinner-border spinner-border-sm text-primary ms-2" style="width:0.9rem;height:0.9rem;"></span></h5>
                                     </div>
-                                    <div class="card-body">
-                                        <table class="table table-borderless mb-0">
+                                    <div class="card-body p-0">
+                                        <table class="table table-sm table-borderless mb-0" style="font-size:0.85rem;">
+                                            <tbody>
                                             <tr>
-                                                <td class="text-muted" style="width: 40%;">MAC Address</td>
-                                                <td><code>{{ selectedModem.mac_address }}</code></td>
+                                                <td class="text-muted ps-3 py-2" style="width:35%;white-space:nowrap;"><i class="bi bi-ethernet me-1 opacity-50"></i>MAC Address</td>
+                                                <td class="py-2 font-monospace">{{ selectedModem.mac_address }}</td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">CMTS Name</td>
-                                                <td>{{ selectedModem.cmts_hostname || selectedModem.cmts || 'N/A' }}</td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-hdd-network me-1 opacity-50"></i>CMTS Name</td>
+                                                <td class="py-2">{{ selectedModem.cmts_hostname || selectedModem.cmts || 'N/A' }}</td>
                                             </tr>
                                             <tr v-if="selectedModem.cmts_type">
-                                                <td class="text-muted">CMTS Type</td>
-                                                <td><span class="badge bg-secondary">{{ selectedModem.cmts_type }}</span></td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-cpu me-1 opacity-50"></i>CMTS Type</td>
+                                                <td class="py-2"><span class="badge bg-secondary">{{ selectedModem.cmts_type }}</span></td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">IP Address</td>
-                                                <td>{{ selectedModem.ip_address }}</td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-globe me-1 opacity-50"></i>IP Address</td>
+                                                <td class="py-2 font-monospace">{{ selectedModem.ip_address }}</td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">CPE IPv4</td>
-                                                <td>
-                                                    <div v-for="entry in (selectedModem.cpe_ipv4 || [])" :key="entry.address + '/' + entry.prefix_length">
-                                                        <code>{{ entry.address }}<span v-if="entry.prefix_length !== 32">/{{ entry.prefix_length }}</span></code>
+                                                <td class="text-muted ps-3 py-2 align-top"><i class="bi bi-pc-display me-1 opacity-50"></i>CPE IPv4</td>
+                                                <td class="py-2">
+                                                    <div v-for="entry in (selectedModem.cpe_ipv4 || [])" :key="entry.address + '/' + entry.prefix_length" class="font-monospace">
+                                                        {{ entry.address }}<span v-if="entry.prefix_length !== 32" class="text-muted">/{{ entry.prefix_length }}</span>
                                                     </div>
-                                                    <span v-if="!(selectedModem.cpe_ipv4 || []).length" class="text-muted">None</span>
+                                                    <span v-if="!(selectedModem.cpe_ipv4 || []).length" class="text-muted fst-italic">—</span>
                                                 </td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">CPE IPv6</td>
-                                                <td>
-                                                    <div v-for="entry in (selectedModem.cpe_ipv6 || [])" :key="entry.address + '/' + entry.prefix_length">
-                                                        <code>{{ entry.address }}<span v-if="entry.prefix_length !== 128">/{{ entry.prefix_length }}</span></code>
+                                                <td class="text-muted ps-3 py-2 align-top"><i class="bi bi-pc-display me-1 opacity-50"></i>CPE IPv6</td>
+                                                <td class="py-2">
+                                                    <div v-for="entry in (selectedModem.cpe_ipv6 || [])" :key="entry.address + '/' + entry.prefix_length" class="font-monospace" style="font-size:0.78rem;">
+                                                        {{ entry.address }}<span v-if="entry.prefix_length !== 128" class="text-muted">/{{ entry.prefix_length }}</span>
                                                     </div>
-                                                    <span v-if="!(selectedModem.cpe_ipv6 || []).length" class="text-muted">None</span>
+                                                    <span v-if="!(selectedModem.cpe_ipv6 || []).length" class="text-muted fst-italic">—</span>
                                                 </td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">Vendor</td>
-                                                <td>{{ selectedModem.vendor || 'Unknown' }}</td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-building me-1 opacity-50"></i>Vendor</td>
+                                                <td class="py-2 fw-semibold">{{ selectedModem.vendor || 'Unknown' }}</td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">Model</td>
-                                                <td>{{ selectedModem.model || 'Unknown' }}</td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-router me-1 opacity-50"></i>Model</td>
+                                                <td class="py-2">{{ selectedModem.model || 'Unknown' }}</td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">DOCSIS Version</td>
-                                                <td><span class="badge bg-info">{{ selectedDocsisVersion }}</span></td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-speedometer2 me-1 opacity-50"></i>DOCSIS Version</td>
+                                                <td class="py-2"><span class="badge bg-info text-dark">{{ selectedDocsisVersion }}</span></td>
                                             </tr>
                                             <tr>
-                                                <td class="text-muted">Firmware</td>
-                                                <td>{{ selectedModem.firmware || selectedModem.software_version || 'N/A' }}</td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-code-square me-1 opacity-50"></i>Firmware</td>
+                                                <td class="py-2 font-monospace">{{ selectedModem.firmware || selectedModem.software_version || 'N/A' }}</td>
                                             </tr>
                                             <tr v-if="selectedModem.cable_mac">
-                                                <td class="text-muted">Cable MAC Interface</td>
-                                                <td><code>{{ selectedModem.cable_mac }}</code></td>
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-diagram-2 me-1 opacity-50"></i>Cable MAC Interface</td>
+                                                <td class="py-2 font-monospace">{{ selectedModem.cable_mac }}</td>
                                             </tr>
                                             <tr v-if="selectedModem.fiber_node">
-                                                <td class="text-muted">Fiber Node</td>
-                                                <td>
-                                                    <a href="#" class="badge bg-info text-dark text-decoration-none"
+                                                <td class="text-muted ps-3 py-2"><i class="bi bi-share me-1 opacity-50"></i>Fiber Node</td>
+                                                <td class="py-2">
+                                                    <a href="#" class="badge bg-success bg-opacity-75 text-decoration-none"
                                                        :title="`Open Fiber Node Scan for ${selectedModem.fiber_node}`"
                                                        @click.prevent="fnScanFiberNode = selectedModem.fiber_node; currentView = 'fibernode'">
-                                                        {{ selectedModem.fiber_node }}
+                                                        <i class="bi bi-box-arrow-up-right me-1"></i>{{ selectedModem.fiber_node }}
                                                     </a>
                                                 </td>
                                             </tr>
