@@ -1713,6 +1713,68 @@
                     <!-- PNM Measurements Tab -->
                     <div class="tab-pane fade" id="pnm" role="tabpanel">
                         <div class="row">
+                            <!-- PNM Report Builder (standalone card) -->
+                            <div class="col-12 mb-4">
+                                <div class="card shadow-sm border-light">
+                                    <div class="card-header bg-white py-2">
+                                        <strong class="small"><i class="bi bi-file-earmark-pdf me-2"></i>PNM Report Builder</strong>
+                                    </div>
+                                    <div class="card-body py-2">
+                                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                                            <div class="d-flex flex-wrap gap-2 align-items-center">
+                                                <span class="badge bg-primary text-white small me-1">DS Modem-side</span>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="spectrum" id="rpt-spectrum">
+                                                    <label class="form-check-label small" for="rpt-spectrum">Spectrum</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="rxmer" id="rpt-rxmer" :disabled="!hasOfdmChannels">
+                                                    <label class="form-check-label small" for="rpt-rxmer">RxMER</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="channel_estimation" id="rpt-chanest" :disabled="!hasOfdmChannels">
+                                                    <label class="form-check-label small" for="rpt-chanest">Chan Est</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="fec_summary" id="rpt-fec" :disabled="!hasOfdmChannels">
+                                                    <label class="form-check-label small" for="rpt-fec">FEC</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="constellation" id="rpt-const" :disabled="!hasOfdmChannels">
+                                                    <label class="form-check-label small" for="rpt-const">Constellation</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="impulse_response" id="rpt-impulse" :disabled="!hasOfdmChannels">
+                                                    <label class="form-check-label small" for="rpt-impulse">Impulse</label>
+                                                </div>
+                                                <span class="border-start ps-2 ms-1"></span>
+                                                <span class="badge bg-success text-white small me-1">US CMTS-side</span>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="us_rxmer" id="rpt-usrxmer" :disabled="!hasOfdmaChannels">
+                                                    <label class="form-check-label small" for="rpt-usrxmer">US RxMER</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="us_pre_eq" id="rpt-preeq" :disabled="!hasOfdmaChannels">
+                                                    <label class="form-check-label small" for="rpt-preeq">Pre-EQ</label>
+                                                </div>
+                                            </div>
+                                            <button @click="generatePnmReport" class="btn btn-sm btn-outline-danger"
+                                                    :disabled="runningTest || reportRunning || !reportMeasurements.length">
+                                                <span v-if="reportRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                                <i v-else class="bi bi-file-earmark-pdf me-1"></i>
+                                                {{ reportRunning ? reportProgressLabel : 'Generate Report' }}
+                                            </button>
+                                        </div>
+                                        <div v-if="reportRunning" class="progress mt-2" style="height:4px">
+                                            <div class="progress-bar bg-danger" :style="{width: reportProgressPct + '%'}"></div>
+                                        </div>
+                                        <div v-if="reportDownloadUrl" class="mt-2">
+                                            <a :href="reportDownloadUrl" class="btn btn-sm btn-outline-danger"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- PNM Measurement Controls -->
                             <div class="col-12 mb-4">
                                 <div class="card shadow-sm">
@@ -1837,68 +1899,6 @@
                                                     <i class="bi bi-code-square"></i>
                                                 </button>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- PNM Report Builder (standalone card) -->
-                            <div class="col-12 mb-4">
-                                <div class="card shadow-sm border-light">
-                                    <div class="card-header bg-white py-2">
-                                        <strong class="small"><i class="bi bi-file-earmark-pdf me-2"></i>PNM Report Builder</strong>
-                                    </div>
-                                    <div class="card-body py-2">
-                                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                                            <div class="d-flex flex-wrap gap-2 align-items-center">
-                                                <span class="badge bg-primary bg-opacity-10 text-primary small me-1">DS Modem-side</span>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="spectrum" id="rpt-spectrum">
-                                                    <label class="form-check-label small" for="rpt-spectrum">Spectrum</label>
-                                                </div>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="rxmer" id="rpt-rxmer" :disabled="!hasOfdmChannels">
-                                                    <label class="form-check-label small" for="rpt-rxmer">RxMER</label>
-                                                </div>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="channel_estimation" id="rpt-chanest" :disabled="!hasOfdmChannels">
-                                                    <label class="form-check-label small" for="rpt-chanest">Chan Est</label>
-                                                </div>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="fec_summary" id="rpt-fec" :disabled="!hasOfdmChannels">
-                                                    <label class="form-check-label small" for="rpt-fec">FEC</label>
-                                                </div>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="constellation" id="rpt-const" :disabled="!hasOfdmChannels">
-                                                    <label class="form-check-label small" for="rpt-const">Constellation</label>
-                                                </div>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="impulse_response" id="rpt-impulse" :disabled="!hasOfdmChannels">
-                                                    <label class="form-check-label small" for="rpt-impulse">Impulse</label>
-                                                </div>
-                                                <span class="border-start ps-2 ms-1"></span>
-                                                <span class="badge bg-success bg-opacity-10 text-success small me-1">US CMTS-side</span>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="us_rxmer" id="rpt-usrxmer" :disabled="!hasOfdmaChannels">
-                                                    <label class="form-check-label small" for="rpt-usrxmer">US RxMER</label>
-                                                </div>
-                                                <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="us_pre_eq" id="rpt-preeq" :disabled="!hasOfdmaChannels">
-                                                    <label class="form-check-label small" for="rpt-preeq">Pre-EQ</label>
-                                                </div>
-                                            </div>
-                                            <button @click="generatePnmReport" class="btn btn-sm btn-outline-danger"
-                                                    :disabled="runningTest || reportRunning || !reportMeasurements.length">
-                                                <span v-if="reportRunning" class="spinner-border spinner-border-sm me-1"></span>
-                                                <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                                                {{ reportRunning ? reportProgressLabel : 'Generate Report' }}
-                                            </button>
-                                        </div>
-                                        <div v-if="reportRunning" class="progress mt-2" style="height:4px">
-                                            <div class="progress-bar bg-danger" :style="{width: reportProgressPct + '%'}"></div>
-                                        </div>
-                                        <div v-if="reportDownloadUrl" class="mt-2">
-                                            <a :href="reportDownloadUrl" class="btn btn-sm btn-outline-danger"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report</a>
                                         </div>
                                     </div>
                                 </div>
