@@ -4997,8 +4997,10 @@ def pnm_report_download(job_id):
 def _run_pnm_report(job_id: str, data: dict, measurements: list):
     """Background thread: run measurements sequentially and build PDF."""
     import os
+    import io
     import base64
-    import tempfile
+    import zipfile
+    import tarfile
     from datetime import datetime
     from app.core.pypnm_client import PyPNMClient
 
@@ -5009,15 +5011,16 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
     modem_info = data.get('modem_info') or {}
 
     client = PyPNMClient()
-    collected_plots = []  # list of (measurement_label, [{'filename': ..., 'data': base64_png}])
+    collected_plots = []  # list of (measurement_label, [png_bytes, ...])
 
     for idx, mtype in enumerate(measurements):
         label = _REPORT_MEASUREMENT_LABELS.get(mtype, mtype)
         _set_report_progress(job_id, progress=idx, current=f'Running: {label}')
 
         try:
+            result = None
             if mtype == 'rxmer':
-                result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community, output_type='json')
+                result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'spectrum':
                 result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'channel_estimation':
@@ -5035,30 +5038,36 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             else:
                 continue
 
-            # Extract plots from archive result
-            plots = []
-            if isinstance(result, bytes) and result[:2] == b'PK':
-                import zipfile
-                import io
-                with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
-                    for name in zf.namelist():
-                        if name.endswith('.png'):
-                            plots.append({
-                                'filename': name.split('/')[-1],
-                                'data': base64.b64encode(zf.read(name)).decode(),
-                            })
+            # Extract PNG images from result
+            pngs = []
+            if isinstance(result, bytes):
+                if result[:2] == b'PK':  # ZIP
+                    with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
+                        for name in sorted(zf.namelist()):
+                            if name.lower().endswith('.png'):
+                                pngs.append(zf.read(name))
+                elif result[:2] == b'\x1f\x8b':  # tar.gz
+                    with tarfile.open(fileobj=io.BytesIO(result), mode='r:gz') as tf:
+                        for member in tf.getmembers():
+                            if member.name.lower().endswith('.png'):
+                                f = tf.extractfile(member)
+                                if f:
+                                    pngs.append(f.read())
             elif isinstance(result, dict):
+                # JSON response with base64 plots
                 plots = result.get('plots') or []
-                # Some responses have nested data with plots
-                if not plots and result.get('data') and isinstance(result['data'], dict):
+                if not plots and isinstance(result.get('data'), dict):
                     plots = result['data'].get('plots') or []
+                for p in plots:
+                    if p.get('data'):
+                        pngs.append(base64.b64decode(p['data']))
 
-            if plots:
-                collected_plots.append((label, plots))
+            collected_plots.append((label, pngs))
+            logger.info(f"PNM report: {mtype} → {len(pngs)} plot(s)")
 
         except Exception as exc:
             logger.warning(f"PNM report: {mtype} failed for {mac_address}: {exc}")
-            collected_plots.append((label, []))  # Empty section with note
+            collected_plots.append((label, []))
 
     # Build PDF
     _set_report_progress(job_id, progress=len(measurements), current='Building PDF...')
@@ -5072,92 +5081,147 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
 
 
 def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: list) -> str:
-    """Generate a branded PDF from collected measurement plots."""
+    """Generate a management-quality branded PDF from collected measurement plots."""
     import os
     import tempfile
     from datetime import datetime
     from fpdf import FPDF
+    from PIL import Image
+
+    # Brand colors
+    BRAND_PURPLE = (102, 0, 153)
+    BRAND_DARK = (40, 40, 50)
+    BRAND_GRAY = (120, 120, 130)
+    WHITE = (255, 255, 255)
+
+    logo_path = os.path.join(
+        os.environ.get('STATIC_FOLDER', '/app/frontend/static'),
+        'images', 'logo.png'
+    )
+
+    # Convert transparent logo to opaque (white background) for PDF
+    logo_tmp = None
+    if os.path.exists(logo_path):
+        try:
+            img = Image.open(logo_path)
+            if img.mode == 'RGBA':
+                bg = Image.new('RGB', img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[3])
+                logo_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+                bg.save(logo_tmp.name, 'PNG')
+                logo_tmp.close()
+                logo_path = logo_tmp.name
+        except Exception:
+            pass
 
     class PnmPDF(FPDF):
         def header(self):
-            # Logo if available
-            logo_path = os.path.join(
-                os.environ.get('STATIC_FOLDER', '/app/frontend/static'),
-                'images', 'logo.png'
-            )
+            # Purple header bar
+            self.set_fill_color(*BRAND_PURPLE)
+            self.rect(0, 0, self.w, 18, 'F')
+            # Logo (right-aligned)
             if os.path.exists(logo_path):
-                self.image(logo_path, 10, 8, 30)
-            self.set_font('Helvetica', 'B', 14)
-            self.cell(0, 10, 'PNM Measurement Report', align='C', new_x='LMARGIN', new_y='NEXT')
-            self.set_font('Helvetica', 'I', 9)
-            self.cell(0, 5, 'Henk-Jan Special Edition', align='C', new_x='LMARGIN', new_y='NEXT')
-            self.ln(2)
+                self.image(logo_path, self.w - 55, 3, 50)
+            # Title text
+            self.set_text_color(*WHITE)
+            self.set_font('Helvetica', 'B', 11)
+            self.set_xy(8, 4)
+            self.cell(0, 5, 'PNM Measurement Report', new_x='LMARGIN', new_y='NEXT')
+            self.set_font('Helvetica', 'I', 7)
+            self.set_xy(8, 10)
+            self.cell(0, 4, 'Henk-Jan Special Edition')
+            self.set_text_color(*BRAND_DARK)
+            self.set_y(22)
 
         def footer(self):
-            self.set_y(-15)
-            self.set_font('Helvetica', 'I', 8)
-            self.cell(0, 10, f'Page {self.page_no()}/{{nb}}', align='C')
+            self.set_y(-12)
+            self.set_draw_color(*BRAND_GRAY)
+            self.line(10, self.get_y(), self.w - 10, self.get_y())
+            self.set_font('Helvetica', '', 7)
+            self.set_text_color(*BRAND_GRAY)
+            self.cell(0, 10, f'{mac_address}  |  {modem_info.get("cmts_name", "")}  |  Page {self.page_no()}/{{nb}}', align='C')
 
     pdf = PnmPDF(orientation='L', format='A4')
     pdf.alias_nb_pages()
-    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_auto_page_break(auto=True, margin=18)
 
-    # Title page
+    # ── Title page ────────────────────────────────────────────
     pdf.add_page()
-    pdf.set_font('Helvetica', 'B', 20)
-    pdf.ln(30)
+    pdf.ln(25)
+    pdf.set_font('Helvetica', 'B', 28)
+    pdf.set_text_color(*BRAND_PURPLE)
     pdf.cell(0, 15, 'Cable Modem PNM Report', align='C', new_x='LMARGIN', new_y='NEXT')
-    pdf.ln(10)
-    pdf.set_font('Helvetica', '', 12)
-    pdf.cell(0, 8, f'MAC Address: {mac_address}', align='C', new_x='LMARGIN', new_y='NEXT')
-    if modem_info.get('cmts_name'):
-        pdf.cell(0, 8, f'CMTS: {modem_info["cmts_name"]}', align='C', new_x='LMARGIN', new_y='NEXT')
-    if modem_info.get('fiber_node'):
-        pdf.cell(0, 8, f'Fiber Node: {modem_info["fiber_node"]}', align='C', new_x='LMARGIN', new_y='NEXT')
-    if modem_info.get('modem_ip'):
-        pdf.cell(0, 8, f'Modem IP: {modem_info["modem_ip"]}', align='C', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(5)
-    pdf.cell(0, 8, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', align='C', new_x='LMARGIN', new_y='NEXT')
-    pdf.cell(0, 8, f'Measurements: {len(sections)}', align='C', new_x='LMARGIN', new_y='NEXT')
 
-    # Measurement sections
-    for section_label, plots in sections:
+    # Modem info block
+    pdf.set_font('Helvetica', '', 12)
+    pdf.set_text_color(*BRAND_DARK)
+    info_lines = [
+        ('MAC Address', mac_address),
+        ('CMTS', modem_info.get('cmts_name', 'N/A')),
+        ('Fiber Node', modem_info.get('fiber_node', 'N/A')),
+        ('Modem IP', modem_info.get('modem_ip', 'N/A')),
+        ('Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        ('Measurements', str(len(sections))),
+    ]
+    # Centered info table
+    for label, value in info_lines:
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(*BRAND_GRAY)
+        x_start = (pdf.w - 120) / 2
+        pdf.set_x(x_start)
+        pdf.cell(50, 7, label, align='R')
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(*BRAND_DARK)
+        pdf.cell(70, 7, f'  {value}', new_x='LMARGIN', new_y='NEXT')
+
+    # ── Measurement sections ──────────────────────────────────
+    for section_label, pngs in sections:
         pdf.add_page()
+        # Section header with colored underline
         pdf.set_font('Helvetica', 'B', 14)
-        pdf.cell(0, 10, section_label, new_x='LMARGIN', new_y='NEXT')
-        pdf.ln(3)
+        pdf.set_text_color(*BRAND_PURPLE)
+        pdf.cell(0, 9, section_label, new_x='LMARGIN', new_y='NEXT')
+        pdf.set_draw_color(*BRAND_PURPLE)
+        pdf.set_line_width(0.5)
+        pdf.line(10, pdf.get_y(), 100, pdf.get_y())
+        pdf.ln(4)
 
-        if not plots:
+        if not pngs:
             pdf.set_font('Helvetica', 'I', 10)
-            pdf.cell(0, 8, 'Measurement failed or no data returned.', new_x='LMARGIN', new_y='NEXT')
+            pdf.set_text_color(*BRAND_GRAY)
+            pdf.cell(0, 8, 'Measurement failed or returned no data.', new_x='LMARGIN', new_y='NEXT')
             continue
 
-        for plot in plots:
-            png_data = plot.get('data')
-            if not png_data:
-                continue
+        pdf.set_text_color(*BRAND_DARK)
+        for png_bytes in pngs:
             try:
-                img_bytes = base64.b64decode(png_data)
-                # Write to temp file for fpdf2
                 tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-                tmp.write(img_bytes)
+                tmp.write(png_bytes)
                 tmp.close()
 
-                # Fit to page width (landscape A4 usable width ~257mm)
-                pdf.image(tmp.name, x=10, w=257)
-                pdf.ln(5)
+                # Check remaining space; add page if needed
+                if pdf.get_y() > pdf.h - 60:
+                    pdf.add_page()
+
+                # Fit to usable page width (landscape A4 = 297mm, margins 10+10)
+                pdf.image(tmp.name, x=10, w=277)
+                pdf.ln(3)
                 os.unlink(tmp.name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"PDF image embed failed: {e}")
 
-        # Add filename caption for context
-        if plots and plots[0].get('filename'):
-            pdf.set_font('Helvetica', 'I', 7)
-            pdf.cell(0, 5, f'Source: {plots[0]["filename"]}', new_x='LMARGIN', new_y='NEXT')
-
-    # Save
+    # ── Save ──────────────────────────────────────────────────
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'pnm_report_{mac_address.replace(":", "")}_{timestamp}.pdf'
     pdf_path = os.path.join('/app/data', filename)
     pdf.output(pdf_path)
+
+    # Cleanup temp logo
+    if logo_tmp:
+        try:
+            os.unlink(logo_tmp.name)
+        except Exception:
+            pass
+
     return pdf_path
