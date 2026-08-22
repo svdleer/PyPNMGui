@@ -5074,9 +5074,13 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 ready = True
                                 break
                         if ready:
-                            # Fetch data via getCaptureAndData (same endpoint the GUI uses successfully)
+                            # Fetch data via getCaptureAndData
                             data_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
                                 "filename": actual_filename,
+                                "cmts_ip": cmts_ip,
+                                "ofdma_ifindex": int(ofdma_ifindex),
+                                "community": _cmts_comm,
+                                "write_community": _cmts_wcomm,
                             }, request_timeout=120)
                             if data_result and data_result.get('success'):
                                 # Has image_base64 from PyPNM
