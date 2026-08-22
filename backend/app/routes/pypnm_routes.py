@@ -5045,11 +5045,13 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 import requests as _req
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
                 ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
+                # Must send CMTS community — PyPNM doesn't fall back properly without it
+                _cmts_comm = get_cmts_community()
+                _cmts_wcomm = get_cmts_write_community()
                 if cmts_ip and ofdma_ifindex:
                     filename = f'usrxmer_{mac_address.replace(":", "")}'
-                    # Start — don't send community; PyPNM/agent uses its own configured credentials
                     start_result = client._post("/pnm/us/ofdma/rxmer/start", {
-                        "cmts": {"cmts_ip": cmts_ip},
+                        "cmts": {"cmts_ip": cmts_ip, "community": _cmts_comm, "write_community": _cmts_wcomm},
                         "ofdma_ifindex": int(ofdma_ifindex),
                         "cm_mac_address": mac_address,
                         "pre_eq": True,
@@ -5065,6 +5067,8 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                             status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
                                 "cmts_ip": cmts_ip,
                                 "ofdma_ifindex": ofdma_ifindex,
+                                "community": _cmts_comm,
+                                "write_community": _cmts_wcomm,
                             }, request_timeout=15)
                             if status_result and status_result.get('is_ready'):
                                 ready = True
