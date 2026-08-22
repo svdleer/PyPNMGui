@@ -5088,40 +5088,52 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     from fpdf import FPDF
     from PIL import Image
 
-    # Brand colors
-    BRAND_PURPLE = (102, 0, 153)
+    # Brand colors (matching Vodafone/Ziggo brand-skin.css)
+    BRAND_DEEP = (38, 0, 61)       # #26003d
+    BRAND_PURPLE = (75, 18, 107)   # #4b126b
+    BRAND_MAGENTA = (114, 21, 110) # #72156e
     BRAND_DARK = (40, 40, 50)
     BRAND_GRAY = (120, 120, 130)
     WHITE = (255, 255, 255)
 
-    logo_path = os.path.join(
-        os.environ.get('STATIC_FOLDER', '/app/frontend/static'),
-        'images', 'logo.png'
-    )
+    logo_path = '/app/frontend/static/images/logo.png'
 
-    # Convert transparent logo to opaque (white background) for PDF
+    # Convert transparent logo to opaque (purple background to match header)
     logo_tmp = None
     if os.path.exists(logo_path):
         try:
             img = Image.open(logo_path)
-            if img.mode == 'RGBA':
-                bg = Image.new('RGB', img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[3])
+            if img.mode in ('RGBA', 'LA'):
+                bg = Image.new('RGB', img.size, BRAND_PURPLE)
+                if img.mode == 'RGBA':
+                    bg.paste(img, mask=img.split()[3])
+                else:
+                    bg.paste(img, mask=img.split()[1])
                 logo_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
                 bg.save(logo_tmp.name, 'PNG')
                 logo_tmp.close()
                 logo_path = logo_tmp.name
-        except Exception:
-            pass
+            else:
+                # Non-transparent, use as-is
+                pass
+        except Exception as e:
+            logger.warning(f"Logo conversion failed: {e}")
+            logo_path = None
+    else:
+        logo_path = None
 
     class PnmPDF(FPDF):
         def header(self):
-            # Purple header bar
+            # Gradient header bar (simulated with 2 rects: deep purple left, purple right)
+            bar_h = 18
+            mid = self.w * 0.55
+            self.set_fill_color(*BRAND_DEEP)
+            self.rect(0, 0, mid, bar_h, 'F')
             self.set_fill_color(*BRAND_PURPLE)
-            self.rect(0, 0, self.w, 18, 'F')
-            # Logo (right-aligned)
-            if os.path.exists(logo_path):
-                self.image(logo_path, self.w - 55, 3, 50)
+            self.rect(mid, 0, self.w - mid, bar_h, 'F')
+            # Logo (right-aligned, on purple background)
+            if logo_path and os.path.exists(logo_path):
+                self.image(logo_path, self.w - 55, 2, 50)
             # Title text
             self.set_text_color(*WHITE)
             self.set_font('Helvetica', 'B', 11)
