@@ -5056,7 +5056,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                         "pre_eq": True,
                         "num_averages": 1,
                         "filename": filename,
-                    }, request_timeout=90)
+                    })
                     if start_result and start_result.get('success'):
                         actual_filename = start_result.get('filename', filename)
                         # Poll status (max 180s)
