@@ -4997,6 +4997,7 @@ def pnm_report_download(job_id):
 def _run_pnm_report(job_id: str, data: dict, measurements: list):
     """Background thread: run measurements sequentially and build PDF."""
     import os
+    import base64
     import tempfile
     from datetime import datetime
     from app.core.pypnm_client import PyPNMClient
