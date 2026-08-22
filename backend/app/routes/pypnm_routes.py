@@ -5074,7 +5074,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                             "filename": actual_filename,
                         }, request_timeout=120)
                         if cap_result:
-                            png_b64 = cap_result.get('plot_png_b64') or cap_result.get('png_b64') or cap_result.get('png')
+                            png_b64 = cap_result.get('image_base64') or cap_result.get('plot_png_b64') or cap_result.get('png_b64') or cap_result.get('png')
                             if png_b64:
                                 pngs.append(base64.b64decode(png_b64))
                     result = None  # Already handled
