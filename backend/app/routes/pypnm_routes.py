@@ -5075,8 +5075,9 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                         if ready:
                             # Get plot PNG via the GUI's own plot endpoint (same as standalone page)
                             gui_port = os.environ.get('FLASK_PORT', '5000')
+                            app_root = os.environ.get('APPLICATION_ROOT', '/cmtool').rstrip('/')
                             plot_resp = _req.post(
-                                f"http://localhost:{gui_port}{os.environ.get('APPLICATION_ROOT', '')}/api/pypnm/upstream/rxmer/plot/{mac_address}",
+                                f"http://localhost:{gui_port}{app_root}/api/pypnm/upstream/rxmer/plot/{mac_address}",
                                 json={
                                     "cmts_ip": cmts_ip,
                                     "ofdma_ifindex": ofdma_ifindex,
