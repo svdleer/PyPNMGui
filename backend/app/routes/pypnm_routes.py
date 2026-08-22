@@ -5045,13 +5045,11 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 import requests as _req
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
                 ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
-                cmts_community = get_cmts_community()
-                cmts_write_community = get_cmts_write_community()
                 if cmts_ip and ofdma_ifindex:
                     filename = f'usrxmer_{mac_address.replace(":", "")}'
-                    # Start via PyPNMClient
+                    # Start — don't send community; PyPNM/agent uses its own configured credentials
                     start_result = client._post("/pnm/us/ofdma/rxmer/start", {
-                        "cmts": {"cmts_ip": cmts_ip, "community": cmts_community, "write_community": cmts_write_community},
+                        "cmts": {"cmts_ip": cmts_ip},
                         "ofdma_ifindex": int(ofdma_ifindex),
                         "cm_mac_address": mac_address,
                         "pre_eq": True,
@@ -5067,8 +5065,6 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                             status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
                                 "cmts_ip": cmts_ip,
                                 "ofdma_ifindex": ofdma_ifindex,
-                                "community": cmts_community,
-                                "write_community": cmts_write_community,
                             }, request_timeout=15)
                             if status_result and status_result.get('is_ready'):
                                 ready = True
@@ -5079,7 +5075,6 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 "cmts_ip": cmts_ip,
                                 "ofdma_ifindex": ofdma_ifindex,
                                 "filename": actual_filename,
-                                "community": cmts_community,
                             }, request_timeout=60)
                             if data_result and data_result.get('success'):
                                 try:
