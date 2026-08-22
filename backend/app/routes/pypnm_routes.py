@@ -5021,6 +5021,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
 
         try:
             result = None
+            pngs = []
             if mtype == 'rxmer':
                 result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'spectrum':
@@ -5123,7 +5124,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 continue
 
             # Extract PNG images from result
-            pngs = []
+            # Extract PNG images from result (if not already handled by us_rxmer branch)
             if isinstance(result, bytes):
                 if result[:2] == b'PK':  # ZIP
                     with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
