@@ -5040,51 +5040,46 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             elif mtype == 'impulse_response':
                 result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'us_rxmer':
-                # CMTS-based US OFDMA RxMER — needs ofdma_ifindex and cmts_ip
-                import requests as req
+                # CMTS-based US OFDMA RxMER — use same flow as standalone page
                 import time as _time
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
                 ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
                 write_community = data.get('write_community') or community
                 if cmts_ip and ofdma_ifindex:
-                    base_url = os.environ.get('PYPNM_API_URL', 'http://localhost:8000')
                     filename = f'usrxmer_{mac_address.replace(":", "")}'
-                    # Start measurement
-                    start_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/start", json={
+                    # Start via PyPNMClient (same as standalone page)
+                    start_result = client._post("/pnm/us/ofdma/rxmer/start", {
                         "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
                         "ofdma_ifindex": int(ofdma_ifindex),
                         "cm_mac_address": mac_address,
                         "pre_eq": True,
                         "num_averages": 1,
                         "filename": filename,
-                    }, timeout=90)
-                    if start_resp.ok:
-                        # Poll for completion (max 180s — US RxMER can be slow on large CMTSes)
+                    }, request_timeout=90)
+                    if start_result and start_result.get('success'):
+                        actual_filename = start_result.get('filename', filename)
+                        # Poll status (max 180s)
                         for _ in range(60):
                             _time.sleep(3)
-                            status_resp = req.get(f"{base_url}/pnm/us/ofdma/rxmer/status", params={
+                            status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
                                 "cmts_ip": cmts_ip,
                                 "ofdma_ifindex": ofdma_ifindex,
                                 "community": community,
                                 "write_community": write_community,
-                            }, timeout=15)
-                            if status_resp.ok:
-                                sdata = status_resp.json()
-                                status_val = sdata.get('status') or sdata.get('measurement_status')
-                                if str(status_val) in ('4', 'SAMPLE_READY', 'sampleReady'):
-                                    break
-                        # Get capture + data (returns PNG as base64)
-                        cap_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/getCaptureAndData", json={
-                            "filename": filename,
-                        }, timeout=120)
-                        if cap_resp.ok:
-                            cap_data = cap_resp.json()
-                            png_b64 = cap_data.get('plot_png_b64') or cap_data.get('png_b64')
+                            }, request_timeout=15)
+                            if status_result and status_result.get('is_ready'):
+                                break
+                        # Get capture+data (PNG)
+                        cap_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
+                            "filename": actual_filename,
+                        }, request_timeout=120)
+                        if cap_result:
+                            png_b64 = cap_result.get('plot_png_b64') or cap_result.get('png_b64') or cap_result.get('png')
                             if png_b64:
                                 pngs.append(base64.b64decode(png_b64))
-                    result = None  # Already handled pngs directly
+                    result = None  # Already handled
                 else:
-                    logger.warning(f"PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
+                    logger.warning("PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
                     result = None
             else:
                 continue
