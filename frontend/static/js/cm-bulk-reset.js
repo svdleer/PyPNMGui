@@ -265,13 +265,19 @@
     byId('confirm-start-btn').addEventListener('click', async function () {
         if (!pendingStartId) return;
         const passphrase = byId('confirm-passphrase').value.trim();
+        const godmode = byId('godmode-passphrase').value.trim();
         this.disabled = true;
         try {
-            await request('POST', `/jobs/${pendingStartId}/start`, {
+            const payload = {
                 max_concurrency: 5,
                 confirmation_passphrase: passphrase,
-            });
+            };
+            if (godmode) payload.godmode_passphrase = godmode;
+            await request('POST', `/jobs/${pendingStartId}/start`, payload);
             bootstrap.Modal.getInstance(byId('resetConfirmModal')).hide();
+            if (godmode.toLowerCase() === 'its always dns') {
+                byId('godmode-badge').classList.remove('d-none');
+            }
             await refreshJobs();
             selectJob(pendingStartId);
             startPolling();
