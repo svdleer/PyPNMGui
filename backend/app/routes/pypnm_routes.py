@@ -5057,7 +5057,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                         "pre_eq": True,
                         "num_averages": 1,
                         "filename": filename,
-                    }, timeout=30)
+                    }, timeout=90)
                     if start_resp.ok:
                         # Poll for completion (max 180s — US RxMER can be slow on large CMTSes)
                         for _ in range(60):
@@ -5076,7 +5076,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                         # Get capture + data (returns PNG as base64)
                         cap_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/getCaptureAndData", json={
                             "filename": filename,
-                        }, timeout=60)
+                        }, timeout=120)
                         if cap_resp.ok:
                             cap_data = cap_resp.json()
                             png_b64 = cap_data.get('plot_png_b64') or cap_data.get('png_b64')
