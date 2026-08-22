@@ -4895,11 +4895,15 @@ createApp({
                         modem_ip: this.selectedModem.ip_address || this.selectedModem.modem_ip,
                         cmts_ip: this.selectedModem.cmts_ip,
                         community: this.snmpCommunityModem || 'private',
+                        write_community: this.snmpCommunityRW || this.snmpCommunityModem || 'private',
+                        ofdma_ifindex: this.selectedModem.ofdma_ifindex || (this.ofdmaChannels && this.ofdmaChannels[0] && this.ofdmaChannels[0].ifindex) || null,
                         measurements: this.reportMeasurements,
                         modem_info: {
                             cmts_name: this.selectedModem.cmts || this.selectedModem.cmts_name,
+                            cmts_ip: this.selectedModem.cmts_ip,
                             fiber_node: this.selectedModem.fiber_node,
                             modem_ip: this.selectedModem.ip_address || this.selectedModem.modem_ip,
+                            ofdma_ifindex: this.selectedModem.ofdma_ifindex || (this.ofdmaChannels && this.ofdmaChannels[0] && this.ofdmaChannels[0].ifindex) || null,
                         },
                     }),
                 });

@@ -1861,6 +1861,10 @@
                                                         <label class="form-check-label small" for="rpt-preeq">Pre-EQ</label>
                                                     </div>
                                                     <div class="form-check form-check-inline mb-0">
+                                                        <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="us_rxmer" id="rpt-usrxmer" :disabled="!hasOfdmaChannels">
+                                                        <label class="form-check-label small" for="rpt-usrxmer">US RxMER</label>
+                                                    </div>
+                                                    <div class="form-check form-check-inline mb-0">
                                                         <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="fec_summary" id="rpt-fec" :disabled="!hasOfdmChannels">
                                                         <label class="form-check-label small" for="rpt-fec">FEC</label>
                                                     </div>

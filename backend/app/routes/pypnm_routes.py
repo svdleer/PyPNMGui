@@ -4908,7 +4908,7 @@ _REPORT_MEASUREMENT_LABELS = {
     'spectrum': 'Downstream Full-Band Spectrum',
     'channel_estimation': 'Downstream OFDM Channel Estimation (Amplitude & Group Delay)',
     'us_pre_eq': 'Upstream OFDMA Pre-Equalization',
-    'us_rxmer': 'Upstream OFDMA RxMER',
+    'us_rxmer': 'Upstream OFDMA RxMER (CMTS-based)',
     'fec_summary': 'Downstream OFDM FEC Summary',
     'histogram': 'Downstream Histogram',
     'constellation': 'Downstream Constellation Display',
@@ -5039,6 +5039,53 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, community)
             elif mtype == 'impulse_response':
                 result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+            elif mtype == 'us_rxmer':
+                # CMTS-based US OFDMA RxMER — needs ofdma_ifindex and cmts_ip
+                import requests as req
+                import time as _time
+                cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
+                ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
+                write_community = data.get('write_community') or community
+                if cmts_ip and ofdma_ifindex:
+                    base_url = os.environ.get('PYPNM_API_URL', 'http://localhost:8000')
+                    filename = f'usrxmer_{mac_address.replace(":", "")}'
+                    # Start measurement
+                    start_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/start", json={
+                        "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
+                        "ofdma_ifindex": int(ofdma_ifindex),
+                        "cm_mac_address": mac_address,
+                        "pre_eq": True,
+                        "num_averages": 1,
+                        "filename": filename,
+                    }, timeout=30)
+                    if start_resp.ok:
+                        # Poll for completion (max 60s)
+                        for _ in range(20):
+                            _time.sleep(3)
+                            status_resp = req.get(f"{base_url}/pnm/us/ofdma/rxmer/status", params={
+                                "cmts_ip": cmts_ip,
+                                "ofdma_ifindex": ofdma_ifindex,
+                                "community": community,
+                                "write_community": write_community,
+                            }, timeout=15)
+                            if status_resp.ok:
+                                sdata = status_resp.json()
+                                status_val = sdata.get('status') or sdata.get('measurement_status')
+                                if str(status_val) in ('4', 'SAMPLE_READY', 'sampleReady'):
+                                    break
+                        # Get capture + data (returns PNG as base64)
+                        cap_resp = req.post(f"{base_url}/pnm/us/ofdma/rxmer/getCaptureAndData", json={
+                            "filename": filename,
+                        }, timeout=60)
+                        if cap_resp.ok:
+                            cap_data = cap_resp.json()
+                            png_b64 = cap_data.get('plot_png_b64') or cap_data.get('png_b64')
+                            if png_b64:
+                                pngs.append(base64.b64decode(png_b64))
+                    result = None  # Already handled pngs directly
+                else:
+                    logger.warning(f"PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
+                    result = None
             else:
                 continue
 
@@ -5242,7 +5289,6 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'pnm_report_{mac_address.replace(":", "")}_{timestamp}.pdf'
     pdf_path = os.path.join('/app/data', filename)
-    logger.info(f"PNM report: writing PDF to {pdf_path}")
     pdf.output(pdf_path)
 
     # Cleanup temp gradient images
