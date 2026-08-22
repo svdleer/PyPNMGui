@@ -5043,7 +5043,6 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 # CMTS-based US OFDMA RxMER — same flow as standalone page
                 import time as _time
                 import requests as _req
-                from app.core.pypnm_client import get_cmts_community, get_cmts_write_community
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
                 ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
                 cmts_community = get_cmts_community()
@@ -5076,7 +5075,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 break
                         if ready:
                             # Get plot PNG via the GUI's own plot endpoint (same as standalone page)
-                            gui_port = os.environ.get('FLASK_PORT', '5000')
+                            gui_port = os.environ.get('FLASK_PORT', os.environ.get('GUNICORN_PORT', '5050'))
                             app_root = os.environ.get('APPLICATION_ROOT', '/cmtool').rstrip('/')
                             plot_resp = _req.post(
                                 f"http://localhost:{gui_port}{app_root}/api/pypnm/upstream/rxmer/plot/{mac_address}",
