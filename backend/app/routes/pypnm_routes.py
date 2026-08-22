@@ -5074,23 +5074,40 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 ready = True
                                 break
                         if ready:
-                            # Get plot PNG via the GUI's own plot endpoint (same as standalone page)
-                            gui_port = os.environ.get('FLASK_PORT', os.environ.get('GUNICORN_PORT', '5050'))
-                            app_root = os.environ.get('APPLICATION_ROOT', '/cmtool').rstrip('/')
-                            plot_resp = _req.post(
-                                f"http://localhost:{gui_port}{app_root}/api/pypnm/upstream/rxmer/plot/{mac_address}",
-                                json={
-                                    "cmts_ip": cmts_ip,
-                                    "ofdma_ifindex": ofdma_ifindex,
-                                    "community": cmts_community,
-                                    "filename": actual_filename,
-                                },
-                                timeout=60,
-                            )
-                            if plot_resp.ok and 'image/png' in plot_resp.headers.get('Content-Type', ''):
-                                pngs.append(plot_resp.content)
-                            else:
-                                logger.warning(f"PNM report: us_rxmer plot failed: {plot_resp.status_code}")
+                            # Fetch data and generate plot in-process (same as /upstream/rxmer/plot)
+                            data_result = client._post("/pnm/us/rxmer/data", {
+                                "cmts_ip": cmts_ip,
+                                "ofdma_ifindex": ofdma_ifindex,
+                                "filename": actual_filename,
+                                "community": cmts_community,
+                            }, request_timeout=60)
+                            if data_result and data_result.get('success'):
+                                try:
+                                    import matplotlib
+                                    matplotlib.use('Agg')
+                                    import matplotlib.pyplot as plt
+                                    rxmer_values = data_result.get('rxmer_values') or data_result.get('values') or []
+                                    frequencies = data_result.get('frequencies') or []
+                                    if rxmer_values and not frequencies:
+                                        spacing = data_result.get('subcarrier_spacing', 50000)
+                                        zero_freq = data_result.get('subcarrier_zero_frequency', 0)
+                                        first_idx = data_result.get('first_active_subcarrier_index', 0)
+                                        frequencies = [(zero_freq + (first_idx + i) * spacing) / 1e6 for i in range(len(rxmer_values))]
+                                    elif frequencies:
+                                        frequencies = [f / 1e6 if f > 1e6 else f for f in frequencies]
+                                    if rxmer_values:
+                                        fig, ax = plt.subplots(figsize=(12, 4))
+                                        ax.plot(frequencies[:len(rxmer_values)], rxmer_values, linewidth=0.5, color='#0d6efd')
+                                        ax.set_xlabel('Frequency (MHz)')
+                                        ax.set_ylabel('RxMER (dB)')
+                                        ax.set_title(f'Upstream OFDMA RxMER — {mac_address}')
+                                        ax.grid(True, alpha=0.3)
+                                        buf = io.BytesIO()
+                                        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                                        plt.close(fig)
+                                        pngs.append(buf.getvalue())
+                                except Exception as plot_err:
+                                    logger.warning(f"PNM report: us_rxmer plot generation failed: {plot_err}")
                     result = None
                 else:
                     logger.warning("PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
