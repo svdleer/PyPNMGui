@@ -5043,14 +5043,16 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 # CMTS-based US OFDMA RxMER — same flow as standalone page
                 import time as _time
                 import requests as _req
+                from app.core.pypnm_client import get_cmts_community, get_cmts_write_community
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
                 ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
-                write_community = data.get('write_community') or community
+                cmts_community = get_cmts_community()
+                cmts_write_community = get_cmts_write_community()
                 if cmts_ip and ofdma_ifindex:
                     filename = f'usrxmer_{mac_address.replace(":", "")}'
                     # Start via PyPNMClient
                     start_result = client._post("/pnm/us/ofdma/rxmer/start", {
-                        "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
+                        "cmts": {"cmts_ip": cmts_ip, "community": cmts_community, "write_community": cmts_write_community},
                         "ofdma_ifindex": int(ofdma_ifindex),
                         "cm_mac_address": mac_address,
                         "pre_eq": True,
@@ -5066,8 +5068,8 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                             status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
                                 "cmts_ip": cmts_ip,
                                 "ofdma_ifindex": ofdma_ifindex,
-                                "community": community,
-                                "write_community": write_community,
+                                "community": cmts_community,
+                                "write_community": cmts_write_community,
                             }, request_timeout=15)
                             if status_result and status_result.get('is_ready'):
                                 ready = True
@@ -5081,7 +5083,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 json={
                                     "cmts_ip": cmts_ip,
                                     "ofdma_ifindex": ofdma_ifindex,
-                                    "community": community,
+                                    "community": cmts_community,
                                     "filename": actual_filename,
                                 },
                                 timeout=60,
