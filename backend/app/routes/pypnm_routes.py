@@ -5059,8 +5059,8 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                         "filename": filename,
                     }, timeout=30)
                     if start_resp.ok:
-                        # Poll for completion (max 60s)
-                        for _ in range(20):
+                        # Poll for completion (max 180s — US RxMER can be slow on large CMTSes)
+                        for _ in range(60):
                             _time.sleep(3)
                             status_resp = req.get(f"{base_url}/pnm/us/ofdma/rxmer/status", params={
                                 "cmts_ip": cmts_ip,
