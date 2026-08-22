@@ -4887,8 +4887,7 @@ createApp({
             this.reportProgressPct = 0;
             this.reportProgressLabel = 'Starting...';
             try {
-                const basePath = document.querySelector('[data-base-path]')?.dataset?.basePath || '';
-                const resp = await fetch(`${basePath}/api/pypnm/pnm-report/start`, {
+                const resp = await fetch(`${BASE_PATH}/api/pypnm/pnm-report/start`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
@@ -4916,10 +4915,9 @@ createApp({
 
         _pollReportStatus() {
             if (this._reportPollTimer) clearInterval(this._reportPollTimer);
-            const basePath = document.querySelector('[data-base-path]')?.dataset?.basePath || '';
             this._reportPollTimer = setInterval(async () => {
                 try {
-                    const resp = await fetch(`${basePath}/api/pypnm/pnm-report/status/${this.reportJobId}`);
+                    const resp = await fetch(`${BASE_PATH}/api/pypnm/pnm-report/status/${this.reportJobId}`);
                     const data = await resp.json();
                     if (!data.success) return;
                     const total = data.total || 1;
@@ -4930,7 +4928,7 @@ createApp({
                         clearInterval(this._reportPollTimer);
                         this.reportRunning = false;
                         this.reportProgressPct = 100;
-                        this.reportDownloadUrl = `${basePath}/api/pypnm/pnm-report/download/${this.reportJobId}`;
+                        this.reportDownloadUrl = `${BASE_PATH}/api/pypnm/pnm-report/download/${this.reportJobId}`;
                         this.$toast?.success?.('PNM Report ready for download');
                     } else if (data.status === 'failed') {
                         clearInterval(this._reportPollTimer);
