@@ -5040,14 +5040,15 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             elif mtype == 'impulse_response':
                 result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'us_rxmer':
-                # CMTS-based US OFDMA RxMER — use same flow as standalone page
+                # CMTS-based US OFDMA RxMER — same flow as standalone page
                 import time as _time
+                import requests as _req
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
                 ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
                 write_community = data.get('write_community') or community
                 if cmts_ip and ofdma_ifindex:
                     filename = f'usrxmer_{mac_address.replace(":", "")}'
-                    # Start via PyPNMClient (same as standalone page)
+                    # Start via PyPNMClient
                     start_result = client._post("/pnm/us/ofdma/rxmer/start", {
                         "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
                         "ofdma_ifindex": int(ofdma_ifindex),
@@ -5059,6 +5060,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                     if start_result and start_result.get('success'):
                         actual_filename = start_result.get('filename', filename)
                         # Poll status (max 180s)
+                        ready = False
                         for _ in range(60):
                             _time.sleep(3)
                             status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
@@ -5068,16 +5070,26 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 "write_community": write_community,
                             }, request_timeout=15)
                             if status_result and status_result.get('is_ready'):
+                                ready = True
                                 break
-                        # Get capture+data (PNG)
-                        cap_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
-                            "filename": actual_filename,
-                        }, request_timeout=120)
-                        if cap_result:
-                            png_b64 = cap_result.get('image_base64') or cap_result.get('plot_png_b64') or cap_result.get('png_b64') or cap_result.get('png')
-                            if png_b64:
-                                pngs.append(base64.b64decode(png_b64))
-                    result = None  # Already handled
+                        if ready:
+                            # Get plot PNG via the GUI's own plot endpoint (same as standalone page)
+                            gui_port = os.environ.get('FLASK_PORT', '5000')
+                            plot_resp = _req.post(
+                                f"http://localhost:{gui_port}{os.environ.get('APPLICATION_ROOT', '')}/api/pypnm/upstream/rxmer/plot/{mac_address}",
+                                json={
+                                    "cmts_ip": cmts_ip,
+                                    "ofdma_ifindex": ofdma_ifindex,
+                                    "community": community,
+                                    "filename": actual_filename,
+                                },
+                                timeout=60,
+                            )
+                            if plot_resp.ok and 'image/png' in plot_resp.headers.get('Content-Type', ''):
+                                pngs.append(plot_resp.content)
+                            else:
+                                logger.warning(f"PNM report: us_rxmer plot failed: {plot_resp.status_code}")
+                    result = None
                 else:
                     logger.warning("PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
                     result = None
