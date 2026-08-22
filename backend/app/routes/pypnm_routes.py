@@ -5101,13 +5101,31 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
 
     logo_path = '/app/frontend/static/images/logo.png'
 
-    # Convert transparent logo to opaque (orange background to match right side of header)
+    # Convert transparent logo onto the actual gradient background (right side = orange area)
     logo_tmp = None
     if os.path.exists(logo_path):
         try:
+            import numpy as np
             img = Image.open(logo_path)
             if img.mode in ('RGBA', 'LA'):
-                bg = Image.new('RGB', img.size, BRAND_ORANGE)
+                # Create a gradient background matching the logo's position (right side of header)
+                w, h = img.size
+                arr = np.zeros((h, w, 3), dtype=np.uint8)
+                for x in range(w):
+                    # Logo spans roughly the right 18% of the page, so gradient position ~0.8 to 1.0
+                    t = 0.75 + 0.25 * (x / max(w - 1, 1))
+                    if t < 0.5:
+                        s = t * 2
+                        r = int(BRAND_PURPLE[0] + (BRAND_MAGENTA[0] - BRAND_PURPLE[0]) * s)
+                        g = int(BRAND_PURPLE[1] + (BRAND_MAGENTA[1] - BRAND_PURPLE[1]) * s)
+                        b = int(BRAND_PURPLE[2] + (BRAND_MAGENTA[2] - BRAND_PURPLE[2]) * s)
+                    else:
+                        s = (t - 0.5) * 2
+                        r = int(BRAND_MAGENTA[0] + (BRAND_ORANGE[0] - BRAND_MAGENTA[0]) * s)
+                        g = int(BRAND_MAGENTA[1] + (BRAND_ORANGE[1] - BRAND_MAGENTA[1]) * s)
+                        b = int(BRAND_MAGENTA[2] + (BRAND_ORANGE[2] - BRAND_MAGENTA[2]) * s)
+                    arr[:, x] = [r, g, b]
+                bg = Image.fromarray(arr, 'RGB')
                 if img.mode == 'RGBA':
                     bg.paste(img, mask=img.split()[3])
                 else:
@@ -5116,8 +5134,6 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
                 bg.save(logo_tmp.name, 'PNG')
                 logo_tmp.close()
                 logo_path = logo_tmp.name
-            else:
-                pass
         except Exception as e:
             logger.warning(f"Logo conversion failed: {e}")
             logo_path = None
