@@ -5101,77 +5101,55 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
 
     logo_path = '/app/frontend/static/images/logo.png'
 
-    # Convert transparent logo onto the actual gradient background (right side = orange area)
-    logo_tmp = None
+    # Build gradient bar images with logo composited directly into the header
+    import numpy as np
+
+    def _make_gradient(w_px, h_px):
+        arr = np.zeros((h_px, w_px, 3), dtype=np.uint8)
+        for x in range(w_px):
+            t = x / (w_px - 1)
+            if t < 0.5:
+                s = t * 2
+                r = int(BRAND_PURPLE[0] + (BRAND_MAGENTA[0] - BRAND_PURPLE[0]) * s)
+                g = int(BRAND_PURPLE[1] + (BRAND_MAGENTA[1] - BRAND_PURPLE[1]) * s)
+                b = int(BRAND_PURPLE[2] + (BRAND_MAGENTA[2] - BRAND_PURPLE[2]) * s)
+            else:
+                s = (t - 0.5) * 2
+                r = int(BRAND_MAGENTA[0] + (BRAND_ORANGE[0] - BRAND_MAGENTA[0]) * s)
+                g = int(BRAND_MAGENTA[1] + (BRAND_ORANGE[1] - BRAND_MAGENTA[1]) * s)
+                b = int(BRAND_MAGENTA[2] + (BRAND_ORANGE[2] - BRAND_MAGENTA[2]) * s)
+            arr[:, x] = [r, g, b]
+        return Image.fromarray(arr, 'RGB')
+
+    # Header gradient with logo baked in
+    header_img = _make_gradient(1200, 72)
     if os.path.exists(logo_path):
         try:
-            import numpy as np
-            img = Image.open(logo_path)
-            if img.mode in ('RGBA', 'LA'):
-                # Create a gradient background matching the logo's position (right side of header)
-                w, h = img.size
-                arr = np.zeros((h, w, 3), dtype=np.uint8)
-                for x in range(w):
-                    # Logo spans roughly the right 18% of the page, so gradient position ~0.8 to 1.0
-                    t = 0.75 + 0.25 * (x / max(w - 1, 1))
-                    if t < 0.5:
-                        s = t * 2
-                        r = int(BRAND_PURPLE[0] + (BRAND_MAGENTA[0] - BRAND_PURPLE[0]) * s)
-                        g = int(BRAND_PURPLE[1] + (BRAND_MAGENTA[1] - BRAND_PURPLE[1]) * s)
-                        b = int(BRAND_PURPLE[2] + (BRAND_MAGENTA[2] - BRAND_PURPLE[2]) * s)
-                    else:
-                        s = (t - 0.5) * 2
-                        r = int(BRAND_MAGENTA[0] + (BRAND_ORANGE[0] - BRAND_MAGENTA[0]) * s)
-                        g = int(BRAND_MAGENTA[1] + (BRAND_ORANGE[1] - BRAND_MAGENTA[1]) * s)
-                        b = int(BRAND_MAGENTA[2] + (BRAND_ORANGE[2] - BRAND_MAGENTA[2]) * s)
-                    arr[:, x] = [r, g, b]
-                bg = Image.fromarray(arr, 'RGB')
-                if img.mode == 'RGBA':
-                    bg.paste(img, mask=img.split()[3])
-                else:
-                    bg.paste(img, mask=img.split()[1])
-                logo_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-                bg.save(logo_tmp.name, 'PNG')
-                logo_tmp.close()
-                logo_path = logo_tmp.name
+            logo_img = Image.open(logo_path)
+            logo_h = int(72 * 0.7)
+            logo_w = int(logo_img.width * (logo_h / logo_img.height))
+            logo_resized = logo_img.resize((logo_w, logo_h), Image.LANCZOS)
+            x_pos = 1200 - logo_w - 24
+            y_pos = (72 - logo_h) // 2
+            if logo_resized.mode == 'RGBA':
+                header_img.paste(logo_resized, (x_pos, y_pos), mask=logo_resized.split()[3])
+            else:
+                header_img.paste(logo_resized, (x_pos, y_pos))
         except Exception as e:
-            logger.warning(f"Logo conversion failed: {e}")
-            logo_path = None
-    else:
-        logo_path = None
+            logger.warning(f"Logo composite failed: {e}")
+
+    _header_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+    header_img.save(_header_tmp.name, 'PNG')
+    _header_tmp.close()
+
+    footer_img = _make_gradient(1200, 40)
+    _footer_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+    footer_img.save(_footer_tmp.name, 'PNG')
+    _footer_tmp.close()
 
     class PnmPDF(FPDF):
-        def _gradient_image(self, w_px, h_px):
-            """Create a smooth gradient image (purple→magenta→orange) as a temp file."""
-            import numpy as np
-            arr = np.zeros((h_px, w_px, 3), dtype=np.uint8)
-            for x in range(w_px):
-                t = x / (w_px - 1)
-                if t < 0.5:
-                    s = t * 2
-                    r = int(BRAND_PURPLE[0] + (BRAND_MAGENTA[0] - BRAND_PURPLE[0]) * s)
-                    g = int(BRAND_PURPLE[1] + (BRAND_MAGENTA[1] - BRAND_PURPLE[1]) * s)
-                    b = int(BRAND_PURPLE[2] + (BRAND_MAGENTA[2] - BRAND_PURPLE[2]) * s)
-                else:
-                    s = (t - 0.5) * 2
-                    r = int(BRAND_MAGENTA[0] + (BRAND_ORANGE[0] - BRAND_MAGENTA[0]) * s)
-                    g = int(BRAND_MAGENTA[1] + (BRAND_ORANGE[1] - BRAND_MAGENTA[1]) * s)
-                    b = int(BRAND_MAGENTA[2] + (BRAND_ORANGE[2] - BRAND_MAGENTA[2]) * s)
-                arr[:, x] = [r, g, b]
-            img = Image.fromarray(arr, 'RGB')
-            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-            img.save(tmp.name, 'PNG')
-            tmp.close()
-            return tmp.name
-
         def header(self):
-            grad = self._gradient_image(600, 36)
-            self.image(grad, 0, 0, self.w, 18)
-            os.unlink(grad)
-            # Logo (right-aligned)
-            if logo_path and os.path.exists(logo_path):
-                self.image(logo_path, self.w - 55, 2, 50)
-            # Title text
+            self.image(_header_tmp.name, 0, 0, self.w, 18)
             self.set_text_color(*WHITE)
             self.set_font('Helvetica', 'B', 11)
             self.set_xy(8, 4)
@@ -5183,9 +5161,7 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
             self.set_y(22)
 
         def footer(self):
-            grad = self._gradient_image(600, 20)
-            self.image(grad, 0, self.h - 10, self.w, 10)
-            os.unlink(grad)
+            self.image(_footer_tmp.name, 0, self.h - 10, self.w, 10)
             self.set_text_color(*WHITE)
             self.set_font('Helvetica', '', 7)
             self.set_xy(10, self.h - 10 + 2)
@@ -5267,11 +5243,11 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     pdf_path = os.path.join('/app/data', filename)
     pdf.output(pdf_path)
 
-    # Cleanup temp logo
-    if logo_tmp:
-        try:
-            os.unlink(logo_tmp.name)
-        except Exception:
-            pass
+    # Cleanup temp gradient images
+    try:
+        os.unlink(_header_tmp.name)
+        os.unlink(_footer_tmp.name)
+    except Exception:
+        pass
 
     return pdf_path
