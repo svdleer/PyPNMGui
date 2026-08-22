@@ -5125,17 +5125,34 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
         logo_path = None
 
     class PnmPDF(FPDF):
+        def _gradient_image(self, w_px, h_px):
+            """Create a smooth gradient image (purple→magenta→orange) as a temp file."""
+            import numpy as np
+            arr = np.zeros((h_px, w_px, 3), dtype=np.uint8)
+            for x in range(w_px):
+                t = x / (w_px - 1)
+                if t < 0.5:
+                    s = t * 2
+                    r = int(BRAND_PURPLE[0] + (BRAND_MAGENTA[0] - BRAND_PURPLE[0]) * s)
+                    g = int(BRAND_PURPLE[1] + (BRAND_MAGENTA[1] - BRAND_PURPLE[1]) * s)
+                    b = int(BRAND_PURPLE[2] + (BRAND_MAGENTA[2] - BRAND_PURPLE[2]) * s)
+                else:
+                    s = (t - 0.5) * 2
+                    r = int(BRAND_MAGENTA[0] + (BRAND_ORANGE[0] - BRAND_MAGENTA[0]) * s)
+                    g = int(BRAND_MAGENTA[1] + (BRAND_ORANGE[1] - BRAND_MAGENTA[1]) * s)
+                    b = int(BRAND_MAGENTA[2] + (BRAND_ORANGE[2] - BRAND_MAGENTA[2]) * s)
+                arr[:, x] = [r, g, b]
+            img = Image.fromarray(arr, 'RGB')
+            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            img.save(tmp.name, 'PNG')
+            tmp.close()
+            return tmp.name
+
         def header(self):
-            # Gradient header bar (3-part: purple → magenta → orange)
-            bar_h = 18
-            third = self.w / 3
-            self.set_fill_color(*BRAND_PURPLE)
-            self.rect(0, 0, third, bar_h, 'F')
-            self.set_fill_color(*BRAND_MAGENTA)
-            self.rect(third, 0, third, bar_h, 'F')
-            self.set_fill_color(*BRAND_ORANGE)
-            self.rect(third * 2, 0, third + 1, bar_h, 'F')
-            # Logo (right-aligned, on orange portion)
+            grad = self._gradient_image(600, 36)
+            self.image(grad, 0, 0, self.w, 18)
+            os.unlink(grad)
+            # Logo (right-aligned)
             if logo_path and os.path.exists(logo_path):
                 self.image(logo_path, self.w - 55, 2, 50)
             # Title text
@@ -5150,19 +5167,12 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
             self.set_y(22)
 
         def footer(self):
-            self.set_y(-14)
-            # Gradient footer bar
-            bar_h = 10
-            third = self.w / 3
-            self.set_fill_color(*BRAND_PURPLE)
-            self.rect(0, self.h - bar_h, third, bar_h, 'F')
-            self.set_fill_color(*BRAND_MAGENTA)
-            self.rect(third, self.h - bar_h, third, bar_h, 'F')
-            self.set_fill_color(*BRAND_ORANGE)
-            self.rect(third * 2, self.h - bar_h, third + 1, bar_h, 'F')
+            grad = self._gradient_image(600, 20)
+            self.image(grad, 0, self.h - 10, self.w, 10)
+            os.unlink(grad)
             self.set_text_color(*WHITE)
             self.set_font('Helvetica', '', 7)
-            self.set_xy(10, self.h - bar_h + 2)
+            self.set_xy(10, self.h - 10 + 2)
             self.cell(0, 6, f'{mac_address}  |  {modem_info.get("cmts_name", "")}  |  Page {self.page_no()}/{{nb}}', align='C')
 
     pdf = PnmPDF(orientation='L', format='A4')
