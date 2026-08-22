@@ -5041,84 +5041,57 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             elif mtype == 'impulse_response':
                 result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'us_rxmer':
-                # CMTS-based US OFDMA RxMER — same flow as standalone page
+                # CMTS-based US OFDMA RxMER — capture all active OFDMA channels
                 import time as _time
                 import requests as _req
                 cmts_ip = data.get('cmts_ip') or modem_info.get('cmts_ip')
-                ofdma_ifindex = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
-                # Must send CMTS community — PyPNM doesn't fall back properly without it
+                ofdma_channels = data.get('ofdma_channels') or modem_info.get('ofdma_channels') or []
+                if not ofdma_channels:
+                    single = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
+                    if single:
+                        ofdma_channels = [single]
                 _cmts_comm = get_cmts_community()
                 _cmts_wcomm = get_cmts_write_community()
-                if cmts_ip and ofdma_ifindex:
-                    filename = f'usrxmer_{mac_address.replace(":", "")}'
-                    start_result = client._post("/pnm/us/ofdma/rxmer/start", {
-                        "cmts": {"cmts_ip": cmts_ip, "community": _cmts_comm, "write_community": _cmts_wcomm},
-                        "ofdma_ifindex": int(ofdma_ifindex),
-                        "cm_mac_address": mac_address,
-                        "pre_eq": True,
-                        "num_averages": 1,
-                        "filename": filename,
-                    })
-                    if start_result and start_result.get('success'):
-                        actual_filename = start_result.get('filename', filename)
-                        # Poll status (max 180s)
-                        ready = False
-                        for _ in range(60):
-                            _time.sleep(3)
-                            status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
-                                "cmts_ip": cmts_ip,
-                                "ofdma_ifindex": ofdma_ifindex,
-                                "community": _cmts_comm,
-                                "write_community": _cmts_wcomm,
-                            }, request_timeout=15)
-                            if status_result and status_result.get('is_ready'):
-                                ready = True
-                                break
-                        if ready:
-                            # Fetch data via getCaptureAndData
-                            data_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
-                                "filename": actual_filename,
-                                "cmts_ip": cmts_ip,
-                                "ofdma_ifindex": int(ofdma_ifindex),
-                                "community": _cmts_comm,
-                                "write_community": _cmts_wcomm,
-                            }, request_timeout=120)
-                            if data_result and data_result.get('success'):
-                                # Has image_base64 from PyPNM
-                                png_b64 = data_result.get('image_base64')
-                                if png_b64:
-                                    pngs.append(base64.b64decode(png_b64))
-                                else:
-                                    # Try to plot from rxmer_values
-                                    try:
-                                        import matplotlib
-                                        matplotlib.use('Agg')
-                                        import matplotlib.pyplot as plt
-                                        rxmer_values = data_result.get('rxmer_values') or data_result.get('values') or []
-                                        frequencies = data_result.get('frequencies') or []
-                                        if rxmer_values and not frequencies:
-                                            spacing = data_result.get('subcarrier_spacing', 50000)
-                                            zero_freq = data_result.get('subcarrier_zero_frequency', 0)
-                                            first_idx = data_result.get('first_active_subcarrier_index', 0)
-                                            frequencies = [(zero_freq + (first_idx + i) * spacing) / 1e6 for i in range(len(rxmer_values))]
-                                        elif frequencies:
-                                            frequencies = [f / 1e6 if f > 1e6 else f for f in frequencies]
-                                        if rxmer_values:
-                                            fig, ax = plt.subplots(figsize=(12, 4))
-                                            ax.plot(frequencies[:len(rxmer_values)], rxmer_values, linewidth=0.5, color='#0d6efd')
-                                            ax.set_xlabel('Frequency (MHz)')
-                                            ax.set_ylabel('RxMER (dB)')
-                                            ax.set_title(f'Upstream OFDMA RxMER — {mac_address}')
-                                            ax.grid(True, alpha=0.3)
-                                            buf = io.BytesIO()
-                                            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-                                            plt.close(fig)
-                                            pngs.append(buf.getvalue())
-                                    except Exception as plot_err:
-                                        logger.warning(f"PNM report: us_rxmer plot generation failed: {plot_err}")
+                if cmts_ip and ofdma_channels:
+                    for ch_idx, ofdma_ifindex in enumerate(ofdma_channels):
+                        filename = f'usrxmer_{mac_address.replace(":", "")}_{ch_idx}'
+                        start_result = client._post("/pnm/us/ofdma/rxmer/start", {
+                            "cmts": {"cmts_ip": cmts_ip, "community": _cmts_comm, "write_community": _cmts_wcomm},
+                            "ofdma_ifindex": int(ofdma_ifindex),
+                            "cm_mac_address": mac_address,
+                            "pre_eq": True,
+                            "num_averages": 1,
+                            "filename": filename,
+                        })
+                        if start_result and start_result.get('success'):
+                            actual_filename = start_result.get('filename', filename)
+                            ready = False
+                            for _ in range(60):
+                                _time.sleep(3)
+                                status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
+                                    "cmts_ip": cmts_ip,
+                                    "ofdma_ifindex": ofdma_ifindex,
+                                    "community": _cmts_comm,
+                                    "write_community": _cmts_wcomm,
+                                }, request_timeout=15)
+                                if status_result and status_result.get('is_ready'):
+                                    ready = True
+                                    break
+                            if ready:
+                                data_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
+                                    "filename": actual_filename,
+                                    "cmts_ip": cmts_ip,
+                                    "ofdma_ifindex": int(ofdma_ifindex),
+                                    "community": _cmts_comm,
+                                    "write_community": _cmts_wcomm,
+                                }, request_timeout=120)
+                                if data_result and data_result.get('success'):
+                                    png_b64 = data_result.get('image_base64')
+                                    if png_b64:
+                                        pngs.append(base64.b64decode(png_b64))
                     result = None
                 else:
-                    logger.warning("PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
+                    logger.warning("PNM report: us_rxmer skipped — no cmts_ip or ofdma channels")
                     result = None
             else:
                 continue
