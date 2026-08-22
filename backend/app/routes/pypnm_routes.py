@@ -4904,14 +4904,15 @@ _report_jobs: dict = {}  # job_id -> {status, progress, total, current, pdf_path
 _report_lock = _report_threading.Lock()
 
 _REPORT_MEASUREMENT_LABELS = {
-    'rxmer': 'RxMER per Subcarrier',
-    'spectrum': 'Full-Band Spectrum',
-    'channel_estimation': 'Channel Estimation (Amplitude & Group Delay)',
-    'us_pre_eq': 'Upstream Pre-Equalization',
-    'fec_summary': 'FEC Summary',
-    'histogram': 'DS Histogram',
-    'constellation': 'Constellation Display',
-    'modulation_profile': 'Modulation Profile',
+    'rxmer': 'Downstream OFDM RxMER per Subcarrier',
+    'spectrum': 'Downstream Full-Band Spectrum',
+    'channel_estimation': 'Downstream OFDM Channel Estimation (Amplitude & Group Delay)',
+    'us_pre_eq': 'Upstream OFDMA Pre-Equalization',
+    'fec_summary': 'Downstream OFDM FEC Summary',
+    'histogram': 'Downstream Histogram',
+    'constellation': 'Downstream Constellation Display',
+    'modulation_profile': 'Downstream OFDM Modulation Profile',
+    'impulse_response': 'OFDM/OFDMA Impulse Response',
 }
 
 
@@ -5035,6 +5036,8 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 result = client.get_constellation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'modulation_profile':
                 result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, community)
+            elif mtype == 'impulse_response':
+                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             else:
                 continue
 
@@ -5088,23 +5091,23 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     from fpdf import FPDF
     from PIL import Image
 
-    # Brand colors (matching Vodafone/Ziggo brand-skin.css)
-    BRAND_DEEP = (38, 0, 61)       # #26003d
-    BRAND_PURPLE = (75, 18, 107)   # #4b126b
-    BRAND_MAGENTA = (114, 21, 110) # #72156e
+    # Brand colors (matching modem-header-card gradient: purple → magenta → orange)
+    BRAND_PURPLE = (75, 18, 107)    # #4b126b
+    BRAND_MAGENTA = (142, 31, 120)  # #8e1f78
+    BRAND_ORANGE = (243, 111, 33)   # #f36f21
     BRAND_DARK = (40, 40, 50)
     BRAND_GRAY = (120, 120, 130)
     WHITE = (255, 255, 255)
 
     logo_path = '/app/frontend/static/images/logo.png'
 
-    # Convert transparent logo to opaque (purple background to match header)
+    # Convert transparent logo to opaque (orange background to match right side of header)
     logo_tmp = None
     if os.path.exists(logo_path):
         try:
             img = Image.open(logo_path)
             if img.mode in ('RGBA', 'LA'):
-                bg = Image.new('RGB', img.size, BRAND_PURPLE)
+                bg = Image.new('RGB', img.size, BRAND_ORANGE)
                 if img.mode == 'RGBA':
                     bg.paste(img, mask=img.split()[3])
                 else:
@@ -5114,7 +5117,6 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
                 logo_tmp.close()
                 logo_path = logo_tmp.name
             else:
-                # Non-transparent, use as-is
                 pass
         except Exception as e:
             logger.warning(f"Logo conversion failed: {e}")
@@ -5124,14 +5126,16 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
 
     class PnmPDF(FPDF):
         def header(self):
-            # Gradient header bar (simulated with 2 rects: deep purple left, purple right)
+            # Gradient header bar (3-part: purple → magenta → orange)
             bar_h = 18
-            mid = self.w * 0.55
-            self.set_fill_color(*BRAND_DEEP)
-            self.rect(0, 0, mid, bar_h, 'F')
+            third = self.w / 3
             self.set_fill_color(*BRAND_PURPLE)
-            self.rect(mid, 0, self.w - mid, bar_h, 'F')
-            # Logo (right-aligned, on purple background)
+            self.rect(0, 0, third, bar_h, 'F')
+            self.set_fill_color(*BRAND_MAGENTA)
+            self.rect(third, 0, third, bar_h, 'F')
+            self.set_fill_color(*BRAND_ORANGE)
+            self.rect(third * 2, 0, third + 1, bar_h, 'F')
+            # Logo (right-aligned, on orange portion)
             if logo_path and os.path.exists(logo_path):
                 self.image(logo_path, self.w - 55, 2, 50)
             # Title text
@@ -5146,12 +5150,20 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
             self.set_y(22)
 
         def footer(self):
-            self.set_y(-12)
-            self.set_draw_color(*BRAND_GRAY)
-            self.line(10, self.get_y(), self.w - 10, self.get_y())
+            self.set_y(-14)
+            # Gradient footer bar
+            bar_h = 10
+            third = self.w / 3
+            self.set_fill_color(*BRAND_PURPLE)
+            self.rect(0, self.h - bar_h, third, bar_h, 'F')
+            self.set_fill_color(*BRAND_MAGENTA)
+            self.rect(third, self.h - bar_h, third, bar_h, 'F')
+            self.set_fill_color(*BRAND_ORANGE)
+            self.rect(third * 2, self.h - bar_h, third + 1, bar_h, 'F')
+            self.set_text_color(*WHITE)
             self.set_font('Helvetica', '', 7)
-            self.set_text_color(*BRAND_GRAY)
-            self.cell(0, 10, f'{mac_address}  |  {modem_info.get("cmts_name", "")}  |  Page {self.page_no()}/{{nb}}', align='C')
+            self.set_xy(10, self.h - bar_h + 2)
+            self.cell(0, 6, f'{mac_address}  |  {modem_info.get("cmts_name", "")}  |  Page {self.page_no()}/{{nb}}', align='C')
 
     pdf = PnmPDF(orientation='L', format='A4')
     pdf.alias_nb_pages()
