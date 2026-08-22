@@ -1758,7 +1758,10 @@
                                                     <label class="form-check-label small" for="rpt-preeq">Pre-EQ</label>
                                                 </div>
                                             </div>
-                                            <button @click="generatePnmReport" class="btn btn-sm btn-outline-danger"
+                                            <a v-if="reportDownloadUrl" :href="reportDownloadUrl" class="btn btn-sm btn-outline-danger">
+                                                <i class="bi bi-file-earmark-pdf me-1"></i>Download Report
+                                            </a>
+                                            <button v-else @click="generatePnmReport" class="btn btn-sm btn-outline-danger"
                                                     :disabled="runningTest || reportRunning || !reportMeasurements.length">
                                                 <span v-if="reportRunning" class="spinner-border spinner-border-sm me-1"></span>
                                                 <i v-else class="bi bi-file-earmark-pdf me-1"></i>
@@ -1767,9 +1770,6 @@
                                         </div>
                                         <div v-if="reportRunning" class="progress mt-2" style="height:4px">
                                             <div class="progress-bar bg-danger" :style="{width: reportProgressPct + '%'}"></div>
-                                        </div>
-                                        <div v-if="reportDownloadUrl" class="mt-2">
-                                            <a :href="reportDownloadUrl" class="btn btn-sm btn-outline-danger"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report</a>
                                         </div>
                                     </div>
                                 </div>
