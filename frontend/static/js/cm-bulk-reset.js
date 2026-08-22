@@ -275,7 +275,7 @@
             if (godmode) payload.godmode_passphrase = godmode;
             await request('POST', `/jobs/${pendingStartId}/start`, payload);
             bootstrap.Modal.getInstance(byId('resetConfirmModal')).hide();
-            if (godmode.toLowerCase() === 'its always dns') {
+            if (godmode.toLowerCase() === 'iddqd') {
                 byId('godmode-badge').classList.remove('d-none');
             }
             await refreshJobs();
