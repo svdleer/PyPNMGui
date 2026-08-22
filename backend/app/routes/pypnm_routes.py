@@ -4908,6 +4908,7 @@ _REPORT_MEASUREMENT_LABELS = {
     'spectrum': 'Downstream Full-Band Spectrum',
     'channel_estimation': 'Downstream OFDM Channel Estimation (Amplitude & Group Delay)',
     'us_pre_eq': 'Upstream OFDMA Pre-Equalization',
+    'us_rxmer': 'Upstream OFDMA RxMER',
     'fec_summary': 'Downstream OFDM FEC Summary',
     'histogram': 'Downstream Histogram',
     'constellation': 'Downstream Constellation Display',
@@ -5079,8 +5080,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
         pdf_path = _build_pnm_pdf(job_id, mac_address, modem_info, collected_plots)
         _set_report_progress(job_id, status='complete', pdf_path=pdf_path, current='Done')
     except Exception as exc:
-        import traceback
-        logger.error(f"PNM report PDF build failed: {exc}\n{traceback.format_exc()}")
+        logger.error(f"PNM report PDF build failed: {exc}", exc_info=True)
         _set_report_progress(job_id, status='failed', error=str(exc), current='Failed')
 
 
@@ -5244,7 +5244,6 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     pdf_path = os.path.join('/app/data', filename)
     logger.info(f"PNM report: writing PDF to {pdf_path}")
     pdf.output(pdf_path)
-    logger.info(f"PNM report: PDF written successfully ({os.path.getsize(pdf_path)} bytes)")
 
     # Cleanup temp gradient images
     try:
