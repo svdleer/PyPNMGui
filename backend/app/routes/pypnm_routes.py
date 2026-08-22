@@ -5074,39 +5074,43 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                                 ready = True
                                 break
                         if ready:
-                            # Fetch data and generate plot in-process (same as /upstream/rxmer/plot)
-                            data_result = client._post("/pnm/us/rxmer/data", {
-                                "cmts_ip": cmts_ip,
-                                "ofdma_ifindex": ofdma_ifindex,
+                            # Fetch data via getCaptureAndData (same endpoint the GUI uses successfully)
+                            data_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
                                 "filename": actual_filename,
-                            }, request_timeout=60)
+                            }, request_timeout=120)
                             if data_result and data_result.get('success'):
-                                try:
-                                    import matplotlib
-                                    matplotlib.use('Agg')
-                                    import matplotlib.pyplot as plt
-                                    rxmer_values = data_result.get('rxmer_values') or data_result.get('values') or []
-                                    frequencies = data_result.get('frequencies') or []
-                                    if rxmer_values and not frequencies:
-                                        spacing = data_result.get('subcarrier_spacing', 50000)
-                                        zero_freq = data_result.get('subcarrier_zero_frequency', 0)
-                                        first_idx = data_result.get('first_active_subcarrier_index', 0)
-                                        frequencies = [(zero_freq + (first_idx + i) * spacing) / 1e6 for i in range(len(rxmer_values))]
-                                    elif frequencies:
-                                        frequencies = [f / 1e6 if f > 1e6 else f for f in frequencies]
-                                    if rxmer_values:
-                                        fig, ax = plt.subplots(figsize=(12, 4))
-                                        ax.plot(frequencies[:len(rxmer_values)], rxmer_values, linewidth=0.5, color='#0d6efd')
-                                        ax.set_xlabel('Frequency (MHz)')
-                                        ax.set_ylabel('RxMER (dB)')
-                                        ax.set_title(f'Upstream OFDMA RxMER — {mac_address}')
-                                        ax.grid(True, alpha=0.3)
-                                        buf = io.BytesIO()
-                                        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-                                        plt.close(fig)
-                                        pngs.append(buf.getvalue())
-                                except Exception as plot_err:
-                                    logger.warning(f"PNM report: us_rxmer plot generation failed: {plot_err}")
+                                # Has image_base64 from PyPNM
+                                png_b64 = data_result.get('image_base64')
+                                if png_b64:
+                                    pngs.append(base64.b64decode(png_b64))
+                                else:
+                                    # Try to plot from rxmer_values
+                                    try:
+                                        import matplotlib
+                                        matplotlib.use('Agg')
+                                        import matplotlib.pyplot as plt
+                                        rxmer_values = data_result.get('rxmer_values') or data_result.get('values') or []
+                                        frequencies = data_result.get('frequencies') or []
+                                        if rxmer_values and not frequencies:
+                                            spacing = data_result.get('subcarrier_spacing', 50000)
+                                            zero_freq = data_result.get('subcarrier_zero_frequency', 0)
+                                            first_idx = data_result.get('first_active_subcarrier_index', 0)
+                                            frequencies = [(zero_freq + (first_idx + i) * spacing) / 1e6 for i in range(len(rxmer_values))]
+                                        elif frequencies:
+                                            frequencies = [f / 1e6 if f > 1e6 else f for f in frequencies]
+                                        if rxmer_values:
+                                            fig, ax = plt.subplots(figsize=(12, 4))
+                                            ax.plot(frequencies[:len(rxmer_values)], rxmer_values, linewidth=0.5, color='#0d6efd')
+                                            ax.set_xlabel('Frequency (MHz)')
+                                            ax.set_ylabel('RxMER (dB)')
+                                            ax.set_title(f'Upstream OFDMA RxMER — {mac_address}')
+                                            ax.grid(True, alpha=0.3)
+                                            buf = io.BytesIO()
+                                            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                                            plt.close(fig)
+                                            pngs.append(buf.getvalue())
+                                    except Exception as plot_err:
+                                        logger.warning(f"PNM report: us_rxmer plot generation failed: {plot_err}")
                     result = None
                 else:
                     logger.warning("PNM report: us_rxmer skipped — no cmts_ip or ofdma_ifindex")
