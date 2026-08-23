@@ -1758,18 +1758,18 @@
                                                     <label class="form-check-label small" for="rpt-preeq">Pre-EQ</label>
                                                 </div>
                                             </div>
-                                            <a v-if="reportDownloadUrl" :href="reportDownloadUrl" class="btn btn-sm btn-outline-danger">
-                                                <i class="bi bi-file-earmark-pdf me-1"></i>Download Report
+                                            <a v-if="reportDownloadUrl" :href="reportDownloadUrl" class="btn btn-outline-secondary btn-sm">
+                                                <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF
                                             </a>
-                                            <button v-else @click="generatePnmReport" class="btn btn-sm btn-outline-danger"
+                                            <button v-else @click="generatePnmReport" class="btn btn-outline-secondary btn-sm"
                                                     :disabled="runningTest || reportRunning || !reportMeasurements.length">
                                                 <span v-if="reportRunning" class="spinner-border spinner-border-sm me-1"></span>
                                                 <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                                                {{ reportRunning ? reportProgressLabel : 'Generate Report' }}
+                                                {{ reportRunning ? reportProgressLabel : 'Generate PDF' }}
                                             </button>
                                         </div>
                                         <div v-if="reportRunning" class="progress mt-2" style="height:4px">
-                                            <div class="progress-bar bg-danger" :style="{width: reportProgressPct + '%'}"></div>
+                                            <div class="progress-bar" :style="{width: reportProgressPct + '%'}"></div>
                                         </div>
                                     </div>
                                 </div>
@@ -3312,20 +3312,20 @@
                     <div class="card shadow-sm border-light mb-3">
                         <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Fiber Node / Service Group RxMER Report</h5>
-                            <a v-if="fnScanReportDownloadUrl" :href="fnScanReportDownloadUrl" class="btn btn-sm btn-outline-danger">
-                                <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                            <a v-if="fnScanReportDownloadUrl" :href="fnScanReportDownloadUrl" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF
                             </a>
-                            <button v-else type="button" @click="generateFnScanReport" class="btn btn-sm btn-outline-danger"
+                            <button v-else type="button" @click="generateFnScanReport" class="btn btn-outline-secondary btn-sm"
                                     :disabled="fnScanReportRunning || !fnScanId || !fnScanResult || !!fnScanResult.error"
                                     :title="fnScanResult?.error ? fnScanResult.error : 'Available after a successful US RxMER Fiber Node scan'">
                                 <span v-if="fnScanReportRunning" class="spinner-border spinner-border-sm me-1"></span>
                                 <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                                {{ fnScanReportRunning ? fnScanReportProgressLabel : (fnScanResult?.error ? 'Scan Failed — PDF Unavailable' : (fnScanResult ? 'Generate PDF Report' : 'Complete Scan to Generate PDF')) }}
+                                {{ fnScanReportRunning ? fnScanReportProgressLabel : (fnScanResult?.error ? 'Scan Failed — PDF Unavailable' : (fnScanResult ? 'Generate PDF' : 'Complete Scan to Generate PDF')) }}
                             </button>
                         </div>
                         <div v-if="fnScanReportRunning" class="card-body py-2">
                             <div class="progress" style="height:4px">
-                                <div class="progress-bar bg-danger" :style="{width: fnScanReportProgressPct + '%'}"></div>
+                                <div class="progress-bar" :style="{width: fnScanReportProgressPct + '%'}"></div>
                             </div>
                             <div class="small text-muted mt-1">{{ fnScanReportProgressLabel }}</div>
                         </div>
@@ -3334,19 +3334,19 @@
                     <div class="card shadow-sm border-light mb-3">
                         <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Bulk Impulse Response Report</h5>
-                            <a v-if="bulkReportStates.bulk_impulse.downloadUrl" :href="bulkReportStates.bulk_impulse.downloadUrl" class="btn btn-sm btn-outline-danger">
-                                <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                            <a v-if="bulkReportStates.bulk_impulse.downloadUrl" :href="bulkReportStates.bulk_impulse.downloadUrl" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF
                             </a>
-                            <button v-else type="button" @click="generateBulkScanReport('bulk_impulse')" class="btn btn-sm btn-outline-danger"
+                            <button v-else type="button" @click="generateBulkScanReport('bulk_impulse')" class="btn btn-outline-secondary btn-sm"
                                     :disabled="bulkReportStates.bulk_impulse.running || !fnImpulseReportJobIds.length || !fnImpulseResult || !!fnImpulseResult.error"
                                     title="Available after a completed Bulk Impulse Response scan">
                                 <span v-if="bulkReportStates.bulk_impulse.running" class="spinner-border spinner-border-sm me-1"></span>
                                 <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                                {{ bulkReportStates.bulk_impulse.running ? bulkReportStates.bulk_impulse.progressLabel : (fnImpulseResult && !fnImpulseResult.error ? 'Generate PDF Report' : 'Complete Scan to Generate PDF') }}
+                                {{ bulkReportStates.bulk_impulse.running ? bulkReportStates.bulk_impulse.progressLabel : (fnImpulseResult && !fnImpulseResult.error ? 'Generate PDF' : 'Complete Scan to Generate PDF') }}
                             </button>
                         </div>
                         <div v-if="bulkReportStates.bulk_impulse.running" class="card-body py-2">
-                            <div class="progress" style="height:4px"><div class="progress-bar bg-danger" :style="{width: bulkReportStates.bulk_impulse.progressPct + '%'}"></div></div>
+                            <div class="progress" style="height:4px"><div class="progress-bar" :style="{width: bulkReportStates.bulk_impulse.progressPct + '%'}"></div></div>
                             <div class="small text-muted mt-1">{{ bulkReportStates.bulk_impulse.progressLabel }}</div>
                         </div>
                     </div>
@@ -3664,19 +3664,19 @@
                 <div class="card shadow-sm border-light mb-3">
                     <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>DS Suckout Scan Report</h5>
-                        <a v-if="bulkReportStates.ds_suckout.downloadUrl" :href="bulkReportStates.ds_suckout.downloadUrl" class="btn btn-sm btn-outline-danger">
-                            <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                        <a v-if="bulkReportStates.ds_suckout.downloadUrl" :href="bulkReportStates.ds_suckout.downloadUrl" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF
                         </a>
-                        <button v-else type="button" @click="generateBulkScanReport('ds_suckout')" class="btn btn-sm btn-outline-danger"
+                        <button v-else type="button" @click="generateBulkScanReport('ds_suckout')" class="btn btn-outline-secondary btn-sm"
                                 :disabled="bulkReportStates.ds_suckout.running || !dsScanId || !dsScanResult?.success"
                                 title="Available after a completed DS Suckout scan">
                             <span v-if="bulkReportStates.ds_suckout.running" class="spinner-border spinner-border-sm me-1"></span>
                             <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                            {{ bulkReportStates.ds_suckout.running ? bulkReportStates.ds_suckout.progressLabel : 'Generate PDF Report' }}
+                            {{ bulkReportStates.ds_suckout.running ? bulkReportStates.ds_suckout.progressLabel : 'Generate PDF' }}
                         </button>
                     </div>
                     <div v-if="bulkReportStates.ds_suckout.running" class="card-body py-2">
-                        <div class="progress" style="height:4px"><div class="progress-bar bg-danger" :style="{width: bulkReportStates.ds_suckout.progressPct + '%'}"></div></div>
+                        <div class="progress" style="height:4px"><div class="progress-bar" :style="{width: bulkReportStates.ds_suckout.progressPct + '%'}"></div></div>
                         <div class="small text-muted mt-1">{{ bulkReportStates.ds_suckout.progressLabel }}</div>
                     </div>
                 </div>
@@ -3816,19 +3816,19 @@
             <div class="card shadow-sm border-light mb-3">
                 <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>DS Fullband Scan Report</h5>
-                    <a v-if="bulkReportStates.ds_fullband.downloadUrl" :href="bulkReportStates.ds_fullband.downloadUrl" class="btn btn-sm btn-outline-danger">
-                        <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                    <a v-if="bulkReportStates.ds_fullband.downloadUrl" :href="bulkReportStates.ds_fullband.downloadUrl" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF
                     </a>
-                    <button v-else type="button" @click="generateBulkScanReport('ds_fullband')" class="btn btn-sm btn-outline-danger"
+                    <button v-else type="button" @click="generateBulkScanReport('ds_fullband')" class="btn btn-outline-secondary btn-sm"
                             :disabled="bulkReportStates.ds_fullband.running || !fbScanId || !fbScanResult?.success"
                             title="Available after a completed DS Fullband scan">
                         <span v-if="bulkReportStates.ds_fullband.running" class="spinner-border spinner-border-sm me-1"></span>
                         <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                        {{ bulkReportStates.ds_fullband.running ? bulkReportStates.ds_fullband.progressLabel : 'Generate PDF Report' }}
+                        {{ bulkReportStates.ds_fullband.running ? bulkReportStates.ds_fullband.progressLabel : 'Generate PDF' }}
                     </button>
                 </div>
                 <div v-if="bulkReportStates.ds_fullband.running" class="card-body py-2">
-                    <div class="progress" style="height:4px"><div class="progress-bar bg-danger" :style="{width: bulkReportStates.ds_fullband.progressPct + '%'}"></div></div>
+                    <div class="progress" style="height:4px"><div class="progress-bar" :style="{width: bulkReportStates.ds_fullband.progressPct + '%'}"></div></div>
                     <div class="small text-muted mt-1">{{ bulkReportStates.ds_fullband.progressLabel }}</div>
                 </div>
             </div>
