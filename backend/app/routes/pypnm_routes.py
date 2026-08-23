@@ -73,6 +73,59 @@ import threading as _threading
 _ds_progress_store: dict = {}
 _ds_progress_lock = _threading.Lock()
 _scan_abort_store: dict = {}
+_bulk_report_source_store: dict[tuple[str, str], tuple[float, dict]] = {}
+_bulk_report_source_lock = _threading.Lock()
+_BULK_REPORT_SOURCE_TTL = 3600
+
+
+def _bulk_report_source_key(report_type: str, source_id: str) -> str:
+    return f"bulk_report_source:{report_type}:{source_id}"
+
+
+def _prune_bulk_report_sources(now: float):
+    expired = [
+        key for key, (expires_at, _) in _bulk_report_source_store.items()
+        if expires_at <= now
+    ]
+    for key in expired:
+        _bulk_report_source_store.pop(key, None)
+
+
+def _store_bulk_report_source(report_type: str, source_id: str, source: dict):
+    """Persist an immutable, report-specific completed scan snapshot."""
+    if not source_id:
+        return
+    key = (report_type, source_id)
+    now = time.monotonic()
+    with _bulk_report_source_lock:
+        _prune_bulk_report_sources(now)
+        _bulk_report_source_store[key] = (now + _BULK_REPORT_SOURCE_TTL, source)
+    if REDIS_AVAILABLE:
+        try:
+            redis_client.set(
+                _bulk_report_source_key(report_type, source_id),
+                json.dumps(source),
+                ex=_BULK_REPORT_SOURCE_TTL,
+            )
+        except Exception as exc:
+            logger.warning('Could not persist %s report source %s: %s', report_type, source_id, exc)
+
+
+def _get_bulk_report_source(report_type: str, source_id: str) -> dict | None:
+    key = (report_type, source_id)
+    now = time.monotonic()
+    with _bulk_report_source_lock:
+        _prune_bulk_report_sources(now)
+        stored = _bulk_report_source_store.get(key)
+    if stored is not None:
+        return stored[1]
+    if REDIS_AVAILABLE:
+        try:
+            raw = redis_client.get(_bulk_report_source_key(report_type, source_id))
+            return json.loads(raw) if raw else None
+        except Exception as exc:
+            logger.warning('Could not read %s report source %s: %s', report_type, source_id, exc)
+    return None
 
 
 def _build_tap_profile_dto(preeq_full_data: dict) -> dict:
@@ -2668,6 +2721,73 @@ def get_cmts_us_rxmer_fibernode_scan():
     return jsonify({"started": True, "scan_id": scan_id})
 
 
+def _summarize_ds_suckouts(modem_results: list[dict], threshold: float) -> list[dict]:
+    """Match the UI's regression-based suckout clusters for persisted PDF data."""
+    successful = [
+        modem for modem in modem_results
+        if modem.get('success') and modem.get('channels')
+    ]
+    if len(successful) < 2:
+        return []
+
+    clusters: dict[int, dict] = {}
+    for modem in successful:
+        channel = modem['channels'][0]
+        amplitudes = channel.get('amplitudes_db') or []
+        n = len(amplitudes)
+        if n < 2:
+            continue
+        sx = n * (n - 1) / 2
+        sy = sum(amplitudes)
+        sxy = sum(index * value for index, value in enumerate(amplitudes))
+        sxx = sum(index * index for index in range(n))
+        denominator = n * sxx - sx * sx
+        slope = (n * sxy - sx * sy) / (denominator or 1)
+        intercept = (sy - slope * sx) / n
+        deltas = [value - (slope * index + intercept) for index, value in enumerate(amplitudes)]
+
+        in_suckout = False
+        minimum_delta = 0.0
+        minimum_index = 0
+        for index in range(n + 1):
+            below = index < n and deltas[index] < -threshold
+            if below and not in_suckout:
+                in_suckout = True
+                minimum_delta = deltas[index]
+                minimum_index = index
+            elif below and deltas[index] < minimum_delta:
+                minimum_delta = deltas[index]
+                minimum_index = index
+            elif not below and in_suckout:
+                in_suckout = False
+                center = channel.get('center_freq_mhz')
+                subcarrier_count = channel.get('subcarrier_count') or n
+                if center is None:
+                    frequency = round(float(minimum_index), 1)
+                else:
+                    frequency = round(float(center) + (minimum_index / subcarrier_count - 0.5) * 192.0, 1)
+                cluster_key = math.floor(frequency / 5.0 + 0.5) * 5
+                cluster = clusters.setdefault(cluster_key, {
+                    'freq_mhz': frequency,
+                    'macs': [],
+                    'depths': [],
+                })
+                cluster['macs'].append(modem.get('mac_address'))
+                cluster['depths'].append(round(-minimum_delta, 1))
+
+    detections = []
+    for cluster in sorted(clusters.values(), key=lambda value: value['freq_mhz']):
+        modem_count = len(cluster['macs'])
+        detections.append({
+            'freq_mhz': cluster['freq_mhz'],
+            'modem_count': modem_count,
+            'max_depth_db': max(cluster['depths']),
+            'verdict': 'Network' if modem_count >= 3 else ('Suspect' if modem_count >= 2 else 'In-home'),
+            'mac_addresses': cluster['macs'],
+        })
+    return detections
+
+
 @pypnm_bp.route('/ds/chan_est/scan', methods=['POST'])
 def ds_chan_est_scan():
     """DS OFDM Channel Estimation Suckout Scan — agent-based.
@@ -2696,6 +2816,12 @@ def ds_chan_est_scan():
     community             = data.get('community')              # CMTS read community
     modem_write_community = data.get('modem_write_community')  # modem SNMP write community
     max_modems            = int(data.get('max_modems', 20))
+    try:
+        threshold = float(data.get('threshold', 3.0))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "threshold must be numeric"}), 400
+    if not math.isfinite(threshold) or not 0 < threshold <= 50:
+        return jsonify({"success": False, "error": "threshold must be between 0 and 50 dB"}), 400
 
     # Resolve CMTS IP + CMTS community from provider if only hostname given
     if not cmts_ip:
@@ -2756,7 +2882,10 @@ def ds_chan_est_scan():
         return jsonify({"success": False,
                         "error": "No eligible modems found"}), 400
 
-    scan_id = data.get('scan_id', '')
+    import uuid as _uuid
+    scan_id = str(data.get('scan_id') or _uuid.uuid4())
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', scan_id):
+        return jsonify({"success": False, "error": "Invalid scan_id"}), 400
     n_total = len(eligible)
     _set_ds_scan_progress(scan_id, total=n_total, completed=0, started=0, pct=0,
                           modem='', action='dispatching modems…')
@@ -2873,8 +3002,6 @@ def ds_chan_est_scan():
                 2, 1, figsize=(14, 7), height_ratios=[3, 1],
                 sharex=True, gridspec_kw={'hspace': 0.08})
 
-            threshold = float(data.get('threshold', 3.0))
-
             for m in ok_modems:
                 for ch in m['channels']:
                     amps = ch.get('amplitudes_db', [])
@@ -2971,8 +3098,49 @@ def ds_chan_est_scan():
     except Exception as plot_err:
         logger.warning(f"DS suckout matplotlib plot failed: {plot_err}", exc_info=True)
 
+    completed_at = time.strftime('%Y-%m-%d %H:%M:%S')
+    compact_modems = []
+    for modem in modem_results:
+        compact_channels = []
+        for channel in modem.get('channels') or []:
+            amplitudes = [value for value in (channel.get('amplitudes_db') or []) if isinstance(value, (int, float))]
+            compact_channels.append({
+                'channel_id': channel.get('channel_id'),
+                'center_freq_mhz': channel.get('center_freq_mhz'),
+                'subcarrier_count': channel.get('subcarrier_count', len(amplitudes)),
+                'min_amplitude_db': round(min(amplitudes), 2) if amplitudes else None,
+                'max_amplitude_db': round(max(amplitudes), 2) if amplitudes else None,
+            })
+        compact_modems.append({
+            'mac_address': modem.get('mac_address'),
+            'ip_address': modem.get('ip_address'),
+            'success': bool(modem.get('success')),
+            'error': modem.get('error'),
+            'channels': compact_channels,
+        })
+    suckout_detections = _summarize_ds_suckouts(modem_results, threshold)
+    report_source = {
+        'success': True,
+        'report_type': 'ds_suckout',
+        'scan_id': scan_id,
+        'metadata': {
+            'cmts_name': cmts_hostname,
+            'cmts_ip': cmts_ip,
+            'fiber_node': data.get('fiber_node'),
+            'threshold_db': threshold,
+            'completed_at': completed_at,
+        },
+        'total_modems': len(eligible),
+        'success_count': success_count,
+        'modems': compact_modems,
+        'detections': suckout_detections,
+        'plot_png_b64': plot_b64,
+    }
+    _store_bulk_report_source('ds_suckout', scan_id, report_source)
+
     return jsonify({
         "success":       True,
+        "scan_id":       scan_id,
         "total_modems":  len(eligible),
         "success_count": success_count,
         "modems":        modem_results,
@@ -3022,7 +3190,10 @@ def ds_fullband_scan():
     community             = data.get('community')
     modem_write_community = data.get('modem_write_community')
     max_modems            = int(data.get('max_modems', 10))
-    scan_id               = data.get('scan_id', '')
+    import uuid as _uuid
+    scan_id               = str(data.get('scan_id') or _uuid.uuid4())
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', scan_id):
+        return jsonify({"success": False, "error": "Invalid scan_id"}), 400
     strict_in_channel     = bool(data.get('strict_in_channel', True))
 
     if not cmts_ip:
@@ -3421,8 +3592,44 @@ def ds_fullband_scan():
     except Exception as plot_err:
         logger.warning(f"Fullband matplotlib plot failed: {plot_err}", exc_info=True)
 
+    completed_at = time.strftime('%Y-%m-%d %H:%M:%S')
+    compact_modems = []
+    for modem in modem_results:
+        frequencies = [value for value in (modem.get('frequencies_mhz') or []) if isinstance(value, (int, float))]
+        amplitudes = [value for value in (modem.get('amplitudes_dbmv') or []) if isinstance(value, (int, float))]
+        compact_modems.append({
+            'mac_address': modem.get('mac_address'),
+            'ip_address': modem.get('ip_address'),
+            'success': bool(modem.get('success')),
+            'error': modem.get('error'),
+            'sample_count': min(len(frequencies), len(amplitudes)),
+            'frequency_start_mhz': round(min(frequencies), 3) if frequencies else None,
+            'frequency_end_mhz': round(max(frequencies), 3) if frequencies else None,
+            'min_amplitude_dbmv': round(min(amplitudes), 2) if amplitudes else None,
+            'max_amplitude_dbmv': round(max(amplitudes), 2) if amplitudes else None,
+        })
+    report_source = {
+        'success': True,
+        'report_type': 'ds_fullband',
+        'scan_id': scan_id,
+        'metadata': {
+            'cmts_name': cmts_hostname,
+            'cmts_ip': cmts_ip,
+            'fiber_node': data.get('fiber_node'),
+            'strict_in_channel': strict_in_channel,
+            'completed_at': completed_at,
+        },
+        'total_modems': len(eligible),
+        'success_count': success_count,
+        'modems': compact_modems,
+        'detections': detections,
+        'plot_png_b64': plot_b64,
+    }
+    _store_bulk_report_source('ds_fullband', scan_id, report_source)
+
     return jsonify({
         "success":       True,
+        "scan_id":       scan_id,
         "total_modems":  len(eligible),
         "success_count": success_count,
         "modems":        modem_results,
@@ -5076,6 +5283,196 @@ def fibernode_report_download(job_id):
     return pnm_report_download(job_id)
 
 
+def _impulse_report_mac(value: object) -> str:
+    return re.sub(r'[^0-9a-f]', '', str(value or '').lower())
+
+
+def _validate_bulk_impulse_report_sources(sources: list[dict]):
+    """Require capture additions to match the base job's explicit missing plan."""
+    if not sources:
+        raise ValueError('At least one stored impulse result is required')
+    base = sources[0]
+    base_modems = base.get('modems') or []
+    base_macs = {
+        _impulse_report_mac(modem.get('mac_address'))
+        for modem in base_modems
+        if _impulse_report_mac(modem.get('mac_address'))
+    }
+    missing_plan = {
+        (mac, state.get('direction'))
+        for modem in base_modems
+        for mac in [_impulse_report_mac(modem.get('mac_address'))]
+        for state in (modem.get('direction_statuses') or [])
+        if mac and state.get('status') == 'missing'
+        and state.get('direction') in {'downstream', 'upstream'}
+    }
+    base_fiber_node = str(base.get('fiber_node') or '').strip()
+    base_topology_date = str(base.get('topology_date') or '').strip()
+    seen_directions = set()
+
+    for source in sources[1:]:
+        direction = source.get('direction')
+        if direction not in {'downstream', 'upstream'}:
+            raise ValueError('Every additional impulse source must contain one direction')
+        if direction in seen_directions:
+            raise ValueError(f'Multiple additional impulse sources were supplied for {direction}')
+        seen_directions.add(direction)
+        if source.get('source') not in (None, 'fresh'):
+            raise ValueError('Additional impulse sources must be fresh missing-file captures')
+
+        source_fiber_node = str(source.get('fiber_node') or '').strip()
+        if base_fiber_node and source_fiber_node and source_fiber_node != base_fiber_node:
+            raise ValueError('Impulse sources belong to different fiber nodes')
+        source_topology_date = str(source.get('topology_date') or '').strip()
+        if base_topology_date and source_topology_date and source_topology_date != base_topology_date:
+            raise ValueError('Impulse sources use different topology snapshots')
+
+        source_macs = {
+            _impulse_report_mac(modem.get('mac_address'))
+            for modem in (source.get('modems') or [])
+            if _impulse_report_mac(modem.get('mac_address'))
+        }
+        target_macs = {
+            _impulse_report_mac(target.get('mac_address'))
+            for target in (source.get('target_snapshot') or source.get('modems') or [])
+            if _impulse_report_mac(target.get('mac_address'))
+        }
+        if not target_macs:
+            raise ValueError('Additional impulse source has no modem targets')
+        if not source_macs.issubset(base_macs) or not target_macs.issubset(base_macs):
+            raise ValueError('Additional impulse source contains a modem outside the base result')
+        if any((mac, direction) not in missing_plan for mac in target_macs):
+            raise ValueError('Additional impulse source does not match the base missing-capture plan')
+
+
+def _merge_bulk_impulse_report_sources(sources: list[dict]) -> dict:
+    """Reproduce the browser's missing-capture merge from server-owned job results."""
+    merged = json.loads(json.dumps(sources[0]))
+    modems = merged.get('modems') or []
+    modem_by_mac = {
+        re.sub(r'[^0-9a-f]', '', str(modem.get('mac_address') or '').lower()): modem
+        for modem in modems
+    }
+    for source in sources[1:]:
+        source_direction = source.get('direction')
+        if source_direction not in {'downstream', 'upstream'}:
+            continue
+        for captured in source.get('modems') or []:
+            mac_key = re.sub(r'[^0-9a-f]', '', str(captured.get('mac_address') or '').lower())
+            modem = modem_by_mac.get(mac_key)
+            if modem is None:
+                continue
+            statuses = modem.setdefault('direction_statuses', [])
+            capture_state = next(
+                (state for state in captured.get('direction_statuses') or []
+                 if state.get('direction') == source_direction),
+                None,
+            )
+            missing_index = next(
+                (index for index, state in enumerate(statuses)
+                 if state.get('direction') == source_direction and state.get('status') == 'missing'),
+                None,
+            )
+            if capture_state is not None and missing_index is not None:
+                statuses[missing_index] = json.loads(json.dumps(capture_state))
+            captured_items = [
+                item for item in captured.get('results') or []
+                if item.get('direction') == source_direction
+            ]
+            if captured_items:
+                modem['results'] = [
+                    item for item in modem.get('results') or []
+                    if item.get('direction') != source_direction
+                ] + json.loads(json.dumps(captured_items))
+            modem.setdefault('warnings', []).extend(captured.get('warnings') or [])
+            modem['success'] = bool(modem.get('results'))
+
+    success_count = sum(1 for modem in modems if modem.get('results'))
+    completed = int(merged.get('completed') or merged.get('total') or len(modems))
+    direction_counts = _impulse_job_direction_counts(modems)
+    merged.update({
+        'success': success_count > 0,
+        'retrieval_mode': (
+            'fresh_agent_catalog_with_missing_capture'
+            if len(sources) > 1 else merged.get('retrieval_mode')
+        ),
+        'success_count': success_count,
+        'failure_count': max(0, completed - success_count),
+        'modems': modems,
+        'source_job_ids': [source.get('job_id') for source in sources],
+        **direction_counts,
+    })
+    return merged
+
+
+@pypnm_bp.route('/bulk-report/start', methods=['POST'])
+def start_bulk_report():
+    """Build a branded PDF exclusively from completed stored bulk-scan data."""
+    import uuid as _uuid
+
+    data = request.get_json(silent=True) or {}
+    report_type = str(data.get('report_type') or '').strip()
+    valid_types = {'bulk_impulse', 'ds_suckout', 'ds_fullband'}
+    if report_type not in valid_types:
+        return jsonify({'success': False, 'error': 'Invalid report_type'}), 400
+
+    if report_type == 'bulk_impulse':
+        raw_ids = data.get('source_ids') or []
+        source_ids = []
+        for raw_id in raw_ids:
+            source_id = str(raw_id or '').strip()
+            if source_id and source_id not in source_ids:
+                source_ids.append(source_id)
+        if not source_ids or len(source_ids) > 10:
+            return jsonify({'success': False, 'error': 'One to ten impulse source_ids are required'}), 400
+        sources = [_get_impulse_job_result(source_id) for source_id in source_ids]
+        missing = [source_id for source_id, source in zip(source_ids, sources) if not isinstance(source, dict)]
+        if missing:
+            return jsonify({'success': False, 'error': 'Impulse result not found or expired'}), 404
+        try:
+            _validate_bulk_impulse_report_sources(sources)
+            source = _merge_bulk_impulse_report_sources(sources)
+        except ValueError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
+        if not source.get('success'):
+            return jsonify({'success': False, 'error': 'Stored impulse jobs contain no completed analysis'}), 400
+        source['report_info'] = data.get('report_info') if isinstance(data.get('report_info'), dict) else {}
+        total_steps = 6
+    else:
+        source_id = str(data.get('source_id') or '').strip()
+        if not source_id:
+            return jsonify({'success': False, 'error': 'source_id required'}), 400
+        source = _get_bulk_report_source(report_type, source_id)
+        if not isinstance(source, dict):
+            return jsonify({'success': False, 'error': 'Completed scan result not found or expired'}), 404
+        if not source.get('success'):
+            return jsonify({'success': False, 'error': 'Stored scan did not complete successfully'}), 400
+        total_steps = 3
+
+    job_id = str(_uuid.uuid4())[:8]
+    _set_report_progress(
+        job_id,
+        status='running', progress=0, total=total_steps,
+        current='Preparing stored scan results...', pdf_path=None, error=None,
+    )
+    _report_threading.Thread(
+        target=_run_bulk_report,
+        args=(job_id, report_type, source),
+        daemon=True,
+    ).start()
+    return jsonify({'success': True, 'job_id': job_id, 'total': total_steps})
+
+
+@pypnm_bp.route('/bulk-report/status/<job_id>', methods=['GET'])
+def bulk_report_status(job_id):
+    return pnm_report_status(job_id)
+
+
+@pypnm_bp.route('/bulk-report/download/<job_id>', methods=['GET'])
+def bulk_report_download(job_id):
+    return pnm_report_download(job_id)
+
+
 @pypnm_bp.route('/pnm-report/status/<job_id>', methods=['GET'])
 def pnm_report_status(job_id):
     with _report_lock:
@@ -5524,7 +5921,7 @@ def _pdf_add_base64_image_page(pdf, title: str, image_data: str) -> bool:
         pdf.set_y(image_y + display_height)
         return True
     except Exception as exc:
-        logger.warning('Fiber Node report image %s could not be embedded: %s', title, exc)
+        logger.warning('Stored report image %s could not be embedded: %s', title, exc)
         return False
     finally:
         if tmp_path:
@@ -5627,7 +6024,7 @@ def _build_fibernode_pdf(job_id: str, scan_result: dict) -> str:
             ('Network-impaired subcarriers', _num(summary.get('pct_network_impaired'), 1, '%')),
             ('In-home modems', _num(summary.get('pct_modems_in_home'), 0, '%')),
             ('Group average RxMER', _num(summary.get('group_avg_db'), 1, ' dB')),
-            ('Compare Pre-EQ ON/OFF', 'ON' if compare_preeq else 'OFF'),
+            ('Pre-EQ comparison', 'ON' if compare_preeq else 'OFF'),
             ('Captured Pre-EQ modes', captured_mode_label),
             ('Group-delay analysis', 'Included' if group_delay else 'Not included'),
         ]
@@ -5710,3 +6107,344 @@ def _build_fibernode_pdf(job_id: str, scan_result: dict) -> str:
         return pdf_path
     finally:
         _cleanup_pdf_brand_assets(brand_tmp_paths)
+
+
+def _run_bulk_report(job_id: str, report_type: str, source: dict):
+    """Background formatter for stored bulk-scan snapshots; never performs measurements."""
+    try:
+        _set_report_progress(job_id, progress=1, current='Formatting stored scan summary...')
+        pdf_path = _build_bulk_report_pdf(job_id, report_type, source)
+        with _report_lock:
+            total = int((_report_jobs.get(job_id) or {}).get('total', 1))
+        _set_report_progress(
+            job_id, progress=total, status='complete', pdf_path=pdf_path, current='Done',
+        )
+    except Exception as exc:
+        logger.error('%s report PDF build failed: %s', report_type, exc, exc_info=True)
+        _set_report_progress(job_id, status='failed', error=str(exc), current='Failed')
+
+
+def _pdf_add_bulk_title_page(pdf, title: str, info_lines: list[tuple[str, object]]):
+    pdf.add_page()
+    pdf.ln(25)
+    pdf.set_font('Helvetica', 'B', 28)
+    pdf.set_text_color(*_PDF_BRAND_PURPLE)
+    pdf.cell(0, 15, _pdf_safe_text(title), align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(5)
+    for label, value in info_lines:
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(*_PDF_BRAND_GRAY)
+        pdf.set_x((pdf.w - 150) / 2)
+        pdf.cell(58, 7, _pdf_safe_text(label), align='R')
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(*_PDF_BRAND_DARK)
+        pdf.cell(92, 7, f'  {_pdf_safe_text(value)}', new_x='LMARGIN', new_y='NEXT')
+
+
+def _report_num(value, decimals=1, suffix='') -> str:
+    try:
+        return f'{float(value):.{decimals}f}{suffix}'
+    except (TypeError, ValueError):
+        return 'N/A'
+
+
+def _render_bulk_impulse_plot(source: dict, direction: str, chart_kind: str) -> str | None:
+    """Render a comparison PNG only from compact vectors in completed impulse jobs."""
+    import base64
+    import io
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    if chart_kind == 'frequency_response':
+        x_key, y_key = 'frequency_mhz', 'magnitude_db'
+        x_label, y_label = 'Frequency (MHz)', 'Magnitude (dB)'
+        title_suffix = 'Frequency-response Comparison'
+    else:
+        x_key, y_key = 'delay_us', 'relative_db'
+        x_label, y_label = 'Delay after main tap (us)', 'Relative amplitude (dB)'
+        title_suffix = 'Detector-windowed Impulse Response'
+
+    series = []
+    for modem in source.get('modems') or []:
+        mac = modem.get('mac_address') or 'Unknown modem'
+        for item in modem.get('results') or []:
+            if item.get('direction') != direction:
+                continue
+            chart = (item.get('chart_data') or {}).get(chart_kind) or {}
+            x_values = chart.get(x_key) or []
+            y_values = chart.get(y_key) or []
+            if x_values and y_values:
+                channel_id = (item.get('analysis') or {}).get('channel_id')
+                series.append((mac, channel_id, x_values, y_values))
+    if not series:
+        return None
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+    for mac, channel_id, x_values, y_values in series:
+        label = f'{mac} ch {channel_id}' if channel_id is not None else str(mac)
+        ax.plot(x_values, y_values, linewidth=0.9, alpha=0.75, label=label)
+    direction_label = 'Downstream' if direction == 'downstream' else 'Upstream'
+    ax.set_title(f'{direction_label} {title_suffix}')
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.grid(True, alpha=0.25)
+    if len(series) <= 14:
+        ax.legend(loc='best', fontsize=7, framealpha=0.8)
+    fig.tight_layout()
+    output = io.BytesIO()
+    fig.savefig(output, format='png', dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    return base64.b64encode(output.getvalue()).decode('ascii')
+
+
+def _build_bulk_impulse_pdf(job_id: str, source: dict) -> str:
+    from datetime import datetime
+
+    report_info = source.get('report_info') or {}
+    fiber_node = source.get('fiber_node') or report_info.get('fiber_node') or 'Unknown Fiber Node'
+    cmts_name = report_info.get('cmts_name') or report_info.get('cmts_ip') or 'Unknown CMTS'
+    source_ids = [value for value in (source.get('source_job_ids') or [source.get('job_id')]) if value]
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    try:
+        _pdf_add_bulk_title_page(pdf, 'Bulk Impulse Response Report', [
+            ('Fiber Node', fiber_node),
+            ('CMTS', cmts_name),
+            ('Completed jobs combined', len(source_ids)),
+            ('Source completion time', source.get('completed_at') or 'Stored job result'),
+            ('Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        ])
+        summary_rows = [
+            ('Modem attempts completed', source.get('completed', source.get('total', 0))),
+            ('Modems with analysis', source.get('success_count', 0)),
+            ('Direction attempts', source.get('direction_attempt_count', 0)),
+            ('Directions analyzed', source.get('analyzed_direction_count', 0)),
+            ('Timed out', source.get('timeout_count', 0)),
+            ('Capture failures', source.get('capture_failed_count', 0)),
+            ('Analysis failures', source.get('analysis_failed_count', 0)),
+            ('Agent unavailable', source.get('agent_unavailable_count', 0)),
+            ('Velocity factor', _report_num(source.get('velocity_factor'), 2)),
+            ('Elapsed', _report_num(source.get('elapsed_s'), 1, ' s')),
+        ]
+        _pdf_add_result_table(pdf, 'Scan Summary', ['Metric', 'Result'], summary_rows, [138.5, 138.5])
+
+        modem_rows = []
+        for modem in source.get('modems') or []:
+            statuses = ', '.join(
+                f"{str(state.get('direction') or '').upper()}: {state.get('status') or 'unknown'}"
+                for state in modem.get('direction_statuses') or []
+            ) or ('Analyzed' if modem.get('success') else 'No data')
+            results = modem.get('results') or []
+            channels = ', '.join(
+                f"{str(item.get('direction') or '').upper()} ch {(item.get('analysis') or {}).get('channel_id', 'N/A')}"
+                for item in results
+            ) or 'None'
+            echo_count = sum(
+                len((((item.get('analysis') or {}).get('echo') or {}).get('report') or {}).get('echoes') or [])
+                for item in results
+            )
+            warnings = ' | '.join(str(value) for value in modem.get('warnings') or [])
+            modem_rows.append((
+                modem.get('mac_address'), statuses, channels, echo_count,
+                warnings or modem.get('error') or '',
+            ))
+        _pdf_add_result_table(
+            pdf, 'Per-Modem Results',
+            ['MAC Address', 'Direction status', 'Channel responses', 'Echoes', 'Warnings / error'],
+            modem_rows, [48, 67, 64, 24, 74],
+        )
+
+        plot_specs = (
+            ('downstream', 'frequency_response', 'Downstream Frequency-response Comparison'),
+            ('downstream', 'impulse_response', 'Downstream Detector-windowed Impulse Response'),
+            ('upstream', 'frequency_response', 'Upstream Frequency-response Comparison'),
+            ('upstream', 'impulse_response', 'Upstream Detector-windowed Impulse Response'),
+        )
+        for index, (direction, chart_kind, title) in enumerate(plot_specs, start=2):
+            _set_report_progress(job_id, progress=index, current=f'Adding {title}...')
+            image_data = _render_bulk_impulse_plot(source, direction, chart_kind)
+            if image_data:
+                _pdf_add_base64_image_page(pdf, title, image_data)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_node = re.sub(r'[^A-Za-z0-9_-]+', '_', str(fiber_node)).strip('_') or 'fiber_node'
+        filename = f'bulk_impulse_report_{safe_node}_{timestamp}.pdf'
+        output_dir = os.environ.get('PNM_REPORT_OUTPUT_DIR', '/app/data')
+        os.makedirs(output_dir, exist_ok=True)
+        pdf_path = os.path.join(output_dir, filename)
+        pdf.output(pdf_path)
+        return pdf_path
+    finally:
+        _cleanup_pdf_brand_assets(brand_tmp_paths)
+
+
+def _build_ds_suckout_pdf(job_id: str, source: dict) -> str:
+    from datetime import datetime
+
+    metadata = source.get('metadata') or {}
+    fiber_node = metadata.get('fiber_node') or 'Unknown Fiber Node'
+    cmts_name = metadata.get('cmts_name') or metadata.get('cmts_ip') or 'Unknown CMTS'
+    modems = source.get('modems') or []
+    detections = source.get('detections') or []
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    try:
+        _pdf_add_bulk_title_page(pdf, 'DS OFDM Suckout Scan Report', [
+            ('Fiber Node', fiber_node),
+            ('CMTS', cmts_name),
+            ('CMTS IP', metadata.get('cmts_ip') or 'N/A'),
+            ('Scan Completed', metadata.get('completed_at') or 'N/A'),
+            ('Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        ])
+        _pdf_add_result_table(pdf, 'Scan Summary', ['Metric', 'Result'], [
+            ('Modems attempted', source.get('total_modems', len(modems))),
+            ('Modems with channel estimates', source.get('success_count', 0)),
+            ('Failed / skipped', max(0, int(source.get('total_modems', len(modems))) - int(source.get('success_count', 0)))),
+            ('Suckout threshold', _report_num(metadata.get('threshold_db'), 1, ' dB below regression')),
+            ('Suckout clusters', len(detections)),
+            ('Network clusters', sum(1 for item in detections if item.get('verdict') == 'Network')),
+        ], [138.5, 138.5])
+
+        detection_rows = [
+            (
+                _report_num(item.get('freq_mhz'), 1, ' MHz'),
+                item.get('modem_count', 0),
+                _report_num(item.get('max_depth_db'), 1, ' dB'),
+                item.get('verdict') or 'N/A',
+                ', '.join(str(value) for value in item.get('mac_addresses') or []),
+            )
+            for item in detections
+        ]
+        _pdf_add_result_table(
+            pdf, 'Detected Suckouts',
+            ['Frequency', 'Affected modems', 'Max depth', 'Verdict', 'MAC addresses'],
+            detection_rows, [42, 42, 38, 38, 117],
+        )
+
+        channel_rows = []
+        failure_rows = []
+        for modem in modems:
+            if not modem.get('success'):
+                failure_rows.append((modem.get('mac_address'), modem.get('ip_address'), modem.get('error') or 'No data'))
+                continue
+            for channel in modem.get('channels') or []:
+                channel_rows.append((
+                    modem.get('mac_address'), modem.get('ip_address'), channel.get('channel_id'),
+                    _report_num(channel.get('center_freq_mhz'), 3, ' MHz'),
+                    channel.get('subcarrier_count', 0),
+                    _report_num(channel.get('min_amplitude_db'), 2, ' dB'),
+                    _report_num(channel.get('max_amplitude_db'), 2, ' dB'),
+                ))
+        _pdf_add_result_table(
+            pdf, 'Per-Modem Channel Summary',
+            ['MAC Address', 'IP Address', 'Channel', 'Center frequency', 'Subcarriers', 'Min amplitude', 'Max amplitude'],
+            channel_rows, [45, 39, 25, 43, 35, 45, 45],
+        )
+        _pdf_add_result_table(
+            pdf, 'Failed / Skipped Modems', ['MAC Address', 'IP Address', 'Error'],
+            failure_rows, [55, 55, 167],
+        )
+        _set_report_progress(job_id, progress=2, current='Adding stored suckout plot...')
+        _pdf_add_base64_image_page(pdf, 'DS OFDM Channel Estimation and Suckout Distribution', source.get('plot_png_b64'))
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_node = re.sub(r'[^A-Za-z0-9_-]+', '_', str(fiber_node)).strip('_') or 'fiber_node'
+        output_dir = os.environ.get('PNM_REPORT_OUTPUT_DIR', '/app/data')
+        os.makedirs(output_dir, exist_ok=True)
+        pdf_path = os.path.join(output_dir, f'ds_suckout_report_{safe_node}_{timestamp}.pdf')
+        pdf.output(pdf_path)
+        return pdf_path
+    finally:
+        _cleanup_pdf_brand_assets(brand_tmp_paths)
+
+
+def _build_ds_fullband_pdf(job_id: str, source: dict) -> str:
+    from datetime import datetime
+
+    metadata = source.get('metadata') or {}
+    fiber_node = metadata.get('fiber_node') or 'Unknown Fiber Node'
+    cmts_name = metadata.get('cmts_name') or metadata.get('cmts_ip') or 'Unknown CMTS'
+    modems = source.get('modems') or []
+    detections = source.get('detections') or []
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    try:
+        _pdf_add_bulk_title_page(pdf, 'DS Fullband Spectrum Scan Report', [
+            ('Fiber Node', fiber_node),
+            ('CMTS', cmts_name),
+            ('CMTS IP', metadata.get('cmts_ip') or 'N/A'),
+            ('Scan Completed', metadata.get('completed_at') or 'N/A'),
+            ('Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        ])
+        _pdf_add_result_table(pdf, 'Scan Summary', ['Metric', 'Result'], [
+            ('Modems attempted', source.get('total_modems', len(modems))),
+            ('Modems with spectrum data', source.get('success_count', 0)),
+            ('Failed / skipped', max(0, int(source.get('total_modems', len(modems))) - int(source.get('success_count', 0)))),
+            ('In-channel suckout filtering', 'Enabled' if metadata.get('strict_in_channel') else 'Disabled'),
+            ('Suckouts detected', sum(1 for item in detections if item.get('type') == 'suckout')),
+            ('LTE ingress detections', sum(1 for item in detections if item.get('type') == 'lte_ingress')),
+            ('Standing-wave detections', sum(1 for item in detections if item.get('type') == 'ripple')),
+        ], [138.5, 138.5])
+
+        detection_rows = []
+        for item in detections:
+            detection_type = item.get('type') or 'unknown'
+            if detection_type == 'ripple':
+                frequency = f"{_report_num(item.get('period_mhz'), 1)} MHz period"
+                detail = f"{_report_num(item.get('estimated_distance_m'), 1)} m; {_report_num(item.get('strength_ratio'), 1)}x noise"
+            else:
+                frequency = f"{item.get('freq_start_mhz', 'N/A')}-{item.get('freq_end_mhz', 'N/A')} MHz"
+                if detection_type == 'suckout':
+                    detail = f"{_report_num(item.get('depth_db'), 1)} dB depth"
+                else:
+                    detail = f"{item.get('band') or 'LTE'}; +{_report_num(item.get('elevation_db'), 1)} dB"
+            detection_rows.append((detection_type, frequency, detail))
+        _pdf_add_result_table(
+            pdf, 'Detections', ['Type', 'Frequency / period', 'Detail'],
+            detection_rows, [55, 85, 137],
+        )
+
+        modem_rows = []
+        failure_rows = []
+        for modem in modems:
+            if not modem.get('success'):
+                failure_rows.append((modem.get('mac_address'), modem.get('ip_address'), modem.get('error') or 'No data'))
+                continue
+            modem_rows.append((
+                modem.get('mac_address'), modem.get('ip_address'), modem.get('sample_count', 0),
+                _report_num(modem.get('frequency_start_mhz'), 1, ' MHz'),
+                _report_num(modem.get('frequency_end_mhz'), 1, ' MHz'),
+                _report_num(modem.get('min_amplitude_dbmv'), 2, ' dBmV'),
+                _report_num(modem.get('max_amplitude_dbmv'), 2, ' dBmV'),
+            ))
+        _pdf_add_result_table(
+            pdf, 'Per-Modem Spectrum Summary',
+            ['MAC Address', 'IP Address', 'Samples', 'Start frequency', 'End frequency', 'Min level', 'Max level'],
+            modem_rows, [45, 39, 27, 43, 43, 40, 40],
+        )
+        _pdf_add_result_table(
+            pdf, 'Failed / Skipped Modems', ['MAC Address', 'IP Address', 'Error'],
+            failure_rows, [55, 55, 167],
+        )
+        _set_report_progress(job_id, progress=2, current='Adding stored fullband plot...')
+        _pdf_add_base64_image_page(pdf, 'DS Fullband Spectrum and Detection Overview', source.get('plot_png_b64'))
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_node = re.sub(r'[^A-Za-z0-9_-]+', '_', str(fiber_node)).strip('_') or 'fiber_node'
+        output_dir = os.environ.get('PNM_REPORT_OUTPUT_DIR', '/app/data')
+        os.makedirs(output_dir, exist_ok=True)
+        pdf_path = os.path.join(output_dir, f'ds_fullband_report_{safe_node}_{timestamp}.pdf')
+        pdf.output(pdf_path)
+        return pdf_path
+    finally:
+        _cleanup_pdf_brand_assets(brand_tmp_paths)
+
+
+def _build_bulk_report_pdf(job_id: str, report_type: str, source: dict) -> str:
+    builders = {
+        'bulk_impulse': _build_bulk_impulse_pdf,
+        'ds_suckout': _build_ds_suckout_pdf,
+        'ds_fullband': _build_ds_fullband_pdf,
+    }
+    builder = builders.get(report_type)
+    if builder is None:
+        raise ValueError(f'Unsupported report type: {report_type}')
+    return builder(job_id, source)

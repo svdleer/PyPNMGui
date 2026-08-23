@@ -50,6 +50,7 @@ createApp({
             reportDownloadUrl: null,
             _reportPollTimer: null,
             _fnScanReportPollTimer: null,
+            _bulkReportPollTimers: {},
             _activeTaskLabel: null,
             _taskGeneration: 0,
             _currentFetchController: null,
@@ -201,6 +202,7 @@ createApp({
             fnImpulseJobId: null,
             fnImpulseProgress: null,
             fnImpulseResult: null,
+            fnImpulseReportJobIds: [],
             fnImpulseChartAvailability: {
                 dsFrequency: false,
                 dsImpulse: false,
@@ -317,6 +319,7 @@ createApp({
             dsScanRunning:   false,
             dsScanProgress:  null,   // { total, completed, pct, modem, action }
             dsScanResult:    null,    // { total_modems, success_count, modems: [...] }
+            dsScanId:        null,
             dsScanThreshold: 3.0,     // dB below regression = suckout
 
             dsScanCollapsed: true,    // collapsed by default
@@ -325,8 +328,15 @@ createApp({
             fbScanRunning:   false,
             fbScanProgress:  null,
             fbScanResult:    null,   // { total_modems, success_count, modems, detections, plot_png_b64 }
+            fbScanId:        null,
             fbScanCollapsed: true,
             fbScanStrictInChannel: true,  // suppress guard-band false positives
+
+            bulkReportStates: {
+                bulk_impulse: { running: false, jobId: null, generation: 0, progressPct: 0, progressLabel: '', downloadUrl: null },
+                ds_suckout: { running: false, jobId: null, generation: 0, progressPct: 0, progressLabel: '', downloadUrl: null },
+                ds_fullband: { running: false, jobId: null, generation: 0, progressPct: 0, progressLabel: '', downloadUrl: null },
+            },
 
             // Charts
             charts: {},
@@ -1121,6 +1131,8 @@ createApp({
             clearInterval(this._fnScanReportPollTimer);
             this._fnScanReportPollTimer = null;
         }
+        Object.values(this._bulkReportPollTimers || {}).forEach(entry => clearInterval(entry?.timer || entry));
+        this._bulkReportPollTimers = {};
         Object.values(this.charts || {}).forEach(chart => {
             try { chart?.destroy(); } catch (_) {}
         });
@@ -5600,6 +5612,12 @@ createApp({
             this.fnScanReportProgressLabel = '';
             this.fnScanReportDownloadUrl = null;
             this.fnImpulseResult       = null;
+            this.fnImpulseReportJobIds = [];
+            this.dsScanResult = null;
+            this.dsScanId = null;
+            this.fbScanResult = null;
+            this.fbScanId = null;
+            this._resetAllBulkReports();
             this._destroyChartSurface('surface-bulk-fn-rxmer');
             this._destroyChartSurface('surface-fn-tap-profile');
             this._destroyFiberNodeImpulseCharts();
@@ -6376,6 +6394,8 @@ createApp({
             const { token, signal } = this._beginUiTask('Fiber Node Impulse Response');
             this.fnImpulseRunning = true;
             this.fnImpulseResult = null;
+            this.fnImpulseReportJobIds = [];
+            this._resetBulkReport('bulk_impulse');
             this._destroyFiberNodeImpulseCharts();
 
             try {
@@ -6388,6 +6408,7 @@ createApp({
                     signal,
                 });
                 if (!result) return;
+                this.fnImpulseReportJobIds = result.job_id ? [result.job_id] : [];
                 this.fnImpulseResult = result;
                 await this.$nextTick();
                 this.renderFiberNodeImpulseCharts();
@@ -6446,6 +6467,11 @@ createApp({
             const { token, signal } = this._beginUiTask('Capture Missing PNM Files');
             this.fnImpulseRunning = true;
             const baseResult = this.fnImpulseResult;
+            const sourceJobIds = [...new Set([
+                ...this.fnImpulseReportJobIds,
+                baseResult?.job_id,
+            ].filter(Boolean))];
+            this._resetBulkReport('bulk_impulse');
             const captureResults = [];
             try {
                 for (const direction of ['downstream', 'upstream']) {
@@ -6460,6 +6486,8 @@ createApp({
                     });
                     if (!result) return;
                     captureResults.push(result);
+                    if (result.job_id && !sourceJobIds.includes(result.job_id)) sourceJobIds.push(result.job_id);
+                    this.fnImpulseReportJobIds = [...sourceJobIds];
                     this.fnImpulseResult = this._mergeFiberNodeImpulseCaptureResults(
                         baseResult,
                         captureResults,
@@ -6782,6 +6810,149 @@ createApp({
             }, 2000);
         },
 
+        _resetBulkReport(reportType) {
+            const entry = this._bulkReportPollTimers?.[reportType];
+            if (entry) clearInterval(entry?.timer || entry);
+            if (this._bulkReportPollTimers) delete this._bulkReportPollTimers[reportType];
+            const state = this.bulkReportStates?.[reportType];
+            if (state) {
+                state.generation = Number(state.generation || 0) + 1;
+                Object.assign(state, {
+                    running: false,
+                    jobId: null,
+                    progressPct: 0,
+                    progressLabel: '',
+                    downloadUrl: null,
+                });
+            }
+        },
+
+        _resetAllBulkReports() {
+            for (const reportType of ['bulk_impulse', 'ds_suckout', 'ds_fullband']) {
+                this._resetBulkReport(reportType);
+            }
+        },
+
+        async generateBulkScanReport(reportType) {
+            const state = this.bulkReportStates?.[reportType];
+            if (!state || state.running) return;
+
+            let payload;
+            if (reportType === 'bulk_impulse') {
+                const sourceIds = [...new Set(this.fnImpulseReportJobIds.filter(Boolean))];
+                if (!sourceIds.length) return;
+                payload = {
+                    report_type: reportType,
+                    source_ids: sourceIds,
+                    report_info: {
+                        fiber_node: this.fnScanFiberNode || this.fnScanDisplayFiberNode,
+                        cmts_name: this.fnScanCmts?.hostname || this.fnScanCmts?.name || this.fnScanCmts?.cmts || '',
+                        cmts_ip: this.fnScanCmtsIp,
+                    },
+                };
+            } else if (reportType === 'ds_suckout') {
+                if (!this.dsScanId) return;
+                payload = { report_type: reportType, source_id: this.dsScanId };
+            } else if (reportType === 'ds_fullband') {
+                if (!this.fbScanId) return;
+                payload = { report_type: reportType, source_id: this.fbScanId };
+            } else {
+                return;
+            }
+
+            this._resetBulkReport(reportType);
+            const generation = state.generation;
+            Object.assign(state, {
+                running: true,
+                progressPct: 0,
+                progressLabel: 'Preparing stored scan results...',
+            });
+            try {
+                const response = await fetch(`${API_BASE}/pypnm/bulk-report/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (state.generation !== generation) return;
+                const data = await response.json();
+                if (state.generation !== generation) return;
+                if (!response.ok || !data.success) throw new Error(data.error || 'Failed to start report');
+                state.jobId = data.job_id;
+                this._pollBulkReportStatus(reportType, data.job_id, generation);
+            } catch (error) {
+                if (state.generation !== generation) return;
+                state.running = false;
+                state.progressLabel = '';
+                this.$toast?.error(`PDF report failed: ${error.message}`);
+            }
+        },
+
+        _pollBulkReportStatus(reportType, jobId, generation) {
+            const state = this.bulkReportStates?.[reportType];
+            if (!state || state.generation !== generation || state.jobId !== jobId) return;
+            const existing = this._bulkReportPollTimers?.[reportType];
+            if (existing) clearInterval(existing?.timer || existing);
+            let consecutiveFailures = 0;
+            const reportLabels = {
+                bulk_impulse: 'Bulk Impulse Response',
+                ds_suckout: 'DS Suckout',
+                ds_fullband: 'DS Fullband',
+            };
+            const isCurrent = () => (
+                state.generation === generation && state.jobId === jobId
+            );
+            const clearCurrentTimer = () => {
+                const entry = this._bulkReportPollTimers?.[reportType];
+                if (entry?.generation !== generation || entry?.jobId !== jobId) return;
+                clearInterval(entry.timer);
+                delete this._bulkReportPollTimers[reportType];
+            };
+            const stopWithError = message => {
+                if (!isCurrent()) return;
+                clearCurrentTimer();
+                state.running = false;
+                state.progressLabel = message;
+                this.$toast?.error(`${reportLabels[reportType]} report failed: ${message}`);
+            };
+            const poll = async () => {
+                if (!isCurrent()) return;
+                try {
+                    const response = await fetch(`${API_BASE}/pypnm/bulk-report/status/${encodeURIComponent(jobId)}`);
+                    if (!isCurrent()) return;
+                    const data = await response.json();
+                    if (!isCurrent()) return;
+                    if (!response.ok || !data.success) {
+                        consecutiveFailures += 1;
+                        if (response.status === 404 || consecutiveFailures >= 5) {
+                            stopWithError(data.error || 'Report job is no longer available');
+                        }
+                        return;
+                    }
+                    consecutiveFailures = 0;
+                    const total = Number(data.total || 1);
+                    const progress = Number(data.progress || 0);
+                    state.progressPct = Math.round(progress * 100 / total);
+                    state.progressLabel = data.current || `${progress}/${total}`;
+                    if (data.status === 'complete') {
+                        clearCurrentTimer();
+                        state.running = false;
+                        state.progressPct = 100;
+                        state.downloadUrl = `${API_BASE}/pypnm/bulk-report/download/${encodeURIComponent(jobId)}`;
+                        this.$toast?.success(`${reportLabels[reportType]} PDF report is ready`);
+                    } else if (data.status === 'failed') {
+                        stopWithError(data.error || 'unknown error');
+                    }
+                } catch (_) {
+                    if (!isCurrent()) return;
+                    consecutiveFailures += 1;
+                    if (consecutiveFailures >= 5) stopWithError('Report status could not be reached');
+                }
+            };
+            const timer = setInterval(poll, 2000);
+            this._bulkReportPollTimers[reportType] = { timer, generation, jobId };
+            poll();
+        },
+
         async abortFnScan() {
             if (!this.fnScanId || !this.fnScanRunning || this.fnScanAbortRequested) return;
             this.fnScanAbortRequested = true;
@@ -6811,6 +6982,8 @@ createApp({
             const { token, signal } = this._beginUiTask('DS Suckout Scan');
             this.dsScanRunning  = true;
             this.dsScanResult   = null;
+            this.dsScanId       = null;
+            this._resetBulkReport('ds_suckout');
             this.dsScanCollapsed = false;   // expand so progress bar is visible
             this.dsScanProgress = { total: 0, started: 0, completed: 0, pct: 0, modem: '', action: 'Discovering modems…' };
             const dsScanId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -6842,6 +7015,8 @@ createApp({
                     community:             this.fnScanCommunity || this.snmpCommunity,
                     modem_write_community: this.snmpCommunityModem,
                     max_modems:            maxDs,
+                    fiber_node:           this.fnScanFiberNode || null,
+                    threshold:            Number(this.dsScanThreshold),
                 };
                 if (selectedModems.length) payload.modems = selectedModems;
                 const resp = await fetch(`${API_BASE}/pypnm/ds/chan_est/scan`, {
@@ -6853,6 +7028,7 @@ createApp({
                 const result = await resp.json();
                 if (!this._isTaskActive(token)) return;
                 if (result.success) {
+                    this.dsScanId = result.scan_id || dsScanId;
                     this.dsScanResult = result;
                     this.$nextTick(() => {
                         this.renderDsOverlayChart();
@@ -6878,6 +7054,8 @@ createApp({
             const fbScanId = 'fb_' + Date.now();
             this.fbScanRunning  = true;
             this.fbScanResult   = null;
+            this.fbScanId       = null;
+            this._resetBulkReport('ds_fullband');
             this.fbScanCollapsed = false;
             this.fbScanProgress = { total: 0, started: 0, completed: 0, pct: 0, modem: '', action: 'Starting fullband scan…' };
 
@@ -6907,6 +7085,7 @@ createApp({
                     modem_write_community: this.snmpCommunityModem,
                     max_modems:            maxFb,
                     strict_in_channel:     this.fbScanStrictInChannel,
+                    fiber_node:           this.fnScanFiberNode || null,
                 };
                 if (selectedModems.length) payload.modems = selectedModems;
                 const resp = await fetch(`${API_BASE}/pypnm/ds/fullband/scan`, {
@@ -6918,6 +7097,7 @@ createApp({
                 const result = await resp.json();
                 if (!this._isTaskActive(token)) return;
                 if (result.success) {
+                    this.fbScanId = result.scan_id || fbScanId;
                     this.fbScanResult = result;
                     this.$nextTick(() => this.renderFullbandOverlayChart());
                 } else {

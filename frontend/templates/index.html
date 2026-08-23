@@ -3330,6 +3330,26 @@
                             <div class="small text-muted mt-1">{{ fnScanReportProgressLabel }}</div>
                         </div>
                     </div>
+                    <!-- Bulk impulse PDF uses only the persisted completed impulse job result(s). -->
+                    <div class="card shadow-sm border-light mb-3">
+                        <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Bulk Impulse Response Report</h5>
+                            <a v-if="bulkReportStates.bulk_impulse.downloadUrl" :href="bulkReportStates.bulk_impulse.downloadUrl" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                            </a>
+                            <button v-else type="button" @click="generateBulkScanReport('bulk_impulse')" class="btn btn-sm btn-outline-danger"
+                                    :disabled="bulkReportStates.bulk_impulse.running || !fnImpulseReportJobIds.length || !fnImpulseResult || !!fnImpulseResult.error"
+                                    title="Available after a completed Bulk Impulse Response scan">
+                                <span v-if="bulkReportStates.bulk_impulse.running" class="spinner-border spinner-border-sm me-1"></span>
+                                <i v-else class="bi bi-file-earmark-pdf me-1"></i>
+                                {{ bulkReportStates.bulk_impulse.running ? bulkReportStates.bulk_impulse.progressLabel : (fnImpulseResult && !fnImpulseResult.error ? 'Generate PDF Report' : 'Complete Scan to Generate PDF') }}
+                            </button>
+                        </div>
+                        <div v-if="bulkReportStates.bulk_impulse.running" class="card-body py-2">
+                            <div class="progress" style="height:4px"><div class="progress-bar bg-danger" :style="{width: bulkReportStates.bulk_impulse.progressPct + '%'}"></div></div>
+                            <div class="small text-muted mt-1">{{ bulkReportStates.bulk_impulse.progressLabel }}</div>
+                        </div>
+                    </div>
                     <div v-if="fnImpulseResult" class="card shadow-sm mb-3 border-success">
                         <div class="card-header bg-success bg-opacity-10 d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <h6 class="mb-0"><i class="bi bi-bezier2 me-1"></i>Fiber-node Impulse Response</h6>
@@ -3640,6 +3660,26 @@
         <!-- DS OFDM Suckout Scan Results -->
         <div v-if="dsScanResult" class="row mt-3">
             <div class="col-12">
+                <!-- DS suckout PDF uses the persisted completed scan snapshot. -->
+                <div class="card shadow-sm border-light mb-3">
+                    <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>DS Suckout Scan Report</h5>
+                        <a v-if="bulkReportStates.ds_suckout.downloadUrl" :href="bulkReportStates.ds_suckout.downloadUrl" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                        </a>
+                        <button v-else type="button" @click="generateBulkScanReport('ds_suckout')" class="btn btn-sm btn-outline-danger"
+                                :disabled="bulkReportStates.ds_suckout.running || !dsScanId || !dsScanResult?.success"
+                                title="Available after a completed DS Suckout scan">
+                            <span v-if="bulkReportStates.ds_suckout.running" class="spinner-border spinner-border-sm me-1"></span>
+                            <i v-else class="bi bi-file-earmark-pdf me-1"></i>
+                            {{ bulkReportStates.ds_suckout.running ? bulkReportStates.ds_suckout.progressLabel : 'Generate PDF Report' }}
+                        </button>
+                    </div>
+                    <div v-if="bulkReportStates.ds_suckout.running" class="card-body py-2">
+                        <div class="progress" style="height:4px"><div class="progress-bar bg-danger" :style="{width: bulkReportStates.ds_suckout.progressPct + '%'}"></div></div>
+                        <div class="small text-muted mt-1">{{ bulkReportStates.ds_suckout.progressLabel }}</div>
+                    </div>
+                </div>
                 <!-- Results -->
                 <div v-if="dsScanResult" class="card shadow-sm">
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
@@ -3772,6 +3812,26 @@
 
         <!-- DS Fullband Spectrum Scan Results -->
         <div v-if="fbScanResult" class="mt-3">
+            <!-- Fullband PDF uses the persisted completed scan snapshot. -->
+            <div class="card shadow-sm border-light mb-3">
+                <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>DS Fullband Scan Report</h5>
+                    <a v-if="bulkReportStates.ds_fullband.downloadUrl" :href="bulkReportStates.ds_fullband.downloadUrl" class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                    </a>
+                    <button v-else type="button" @click="generateBulkScanReport('ds_fullband')" class="btn btn-sm btn-outline-danger"
+                            :disabled="bulkReportStates.ds_fullband.running || !fbScanId || !fbScanResult?.success"
+                            title="Available after a completed DS Fullband scan">
+                        <span v-if="bulkReportStates.ds_fullband.running" class="spinner-border spinner-border-sm me-1"></span>
+                        <i v-else class="bi bi-file-earmark-pdf me-1"></i>
+                        {{ bulkReportStates.ds_fullband.running ? bulkReportStates.ds_fullband.progressLabel : 'Generate PDF Report' }}
+                    </button>
+                </div>
+                <div v-if="bulkReportStates.ds_fullband.running" class="card-body py-2">
+                    <div class="progress" style="height:4px"><div class="progress-bar bg-danger" :style="{width: bulkReportStates.ds_fullband.progressPct + '%'}"></div></div>
+                    <div class="small text-muted mt-1">{{ bulkReportStates.ds_fullband.progressLabel }}</div>
+                </div>
+            </div>
             <div class="card shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center" role="button" @click="fbScanCollapsed = !fbScanCollapsed">
                     <h5 class="mb-0">
