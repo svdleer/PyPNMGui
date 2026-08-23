@@ -2350,18 +2350,25 @@ def get_cmts_us_rxmer_fibernode_scan():
                 # Include ifindex in filename so 2 captures on different channels don't collide
                 unique_filename = f"rxmer_{mac_safe}_{preeq_suffix}_{modem_ifindex}"
 
-                start_resp = req.post(
-                    f"{base_url}/pnm/us/ofdma/rxmer/start",
-                    json={
-                        "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
-                        "cm_mac_address": mac,
-                        "ofdma_ifindex": modem_ifindex,
-                        "pre_eq": pre_eq,
-                        "filename": unique_filename,
-                        "destination_index": 0,
-                    },
-                    timeout=30
-                )
+                try:
+                    start_resp = req.post(
+                        f"{base_url}/pnm/us/ofdma/rxmer/start",
+                        json={
+                            "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
+                            "cm_mac_address": mac,
+                            "ofdma_ifindex": modem_ifindex,
+                            "pre_eq": pre_eq,
+                            "filename": unique_filename,
+                            "destination_index": 0,
+                        },
+                        timeout=PYPNM_OFDMA_TIMEOUT,
+                    )
+                except req.RequestException as exc:
+                    logger.warning(
+                        "Scan: start request failed for %s ifindex=%s (pre_eq=%s): %s",
+                        mac, modem_ifindex, pre_eq, exc,
+                    )
+                    return None
                 start_data = start_resp.json() if start_resp.status_code == 200 else {}
                 if not start_data.get('success'):
                     logger.warning(f"Scan: start failed for {mac} ifindex={modem_ifindex} (pre_eq={pre_eq}): {start_data.get('error')}")
@@ -2372,38 +2379,53 @@ def get_cmts_us_rxmer_fibernode_scan():
                 deadline = time.time() + 90
                 # Keep our filename; the CMTS may report an older internal path.
                 import os as _os
+                ready = False
                 while time.time() < deadline:
                     if _aborted():
                         return None
-                    status_resp = req.get(
-                        f"{base_url}/pnm/us/ofdma/rxmer/status",
-                        params={
-                            "cmts_ip":         cmts_ip,
-                            "community":       community,
-                            "write_community": write_community,
-                            "ofdma_ifindex":   modem_ifindex,
-                        },
-                        timeout=15
-                    )
+                    try:
+                        status_resp = req.get(
+                            f"{base_url}/pnm/us/ofdma/rxmer/status",
+                            params={
+                                "cmts_ip":         cmts_ip,
+                                "community":       community,
+                                "write_community": write_community,
+                                "ofdma_ifindex":   modem_ifindex,
+                            },
+                            timeout=15,
+                        )
+                    except req.RequestException as exc:
+                        logger.warning(
+                            "Scan: status request failed for %s ifindex=%s: %s",
+                            mac, modem_ifindex, exc,
+                        )
+                        time.sleep(1)
+                        continue
                     s = status_resp.json() if status_resp.status_code == 200 else {}
                     if s.get('is_ready') or s.get('meas_status') in (4, 7):
                         # Verify that SAMPLE_READY belongs to this capture.
                         status_fn = _os.path.basename(s.get('filename') or '')
                         if status_fn.startswith(f"rxmer_{mac_safe}_{preeq_suffix}"):
+                            ready = True
                             break  # confirmed our capture is ready
                     if s.get('is_error') or s.get('meas_status') in (5, 6):
                         logger.warning(f"Scan: {mac} status error: {s.get('meas_status_name')}")
                         return None
                     time.sleep(1)  # 1s poll — was 3s, halves scan time
 
-                if unique_filename:
-                    return {
-                        "cm_mac_address":  mac,
-                        "filename":        unique_filename,
-                        "preeq_enabled":   pre_eq,
-                        "ofdma_ifindex":   modem_ifindex,
-                    }
-                return None
+                if not ready:
+                    logger.warning(
+                        "Scan: capture timed out for %s ifindex=%s (pre_eq=%s)",
+                        mac, modem_ifindex, pre_eq,
+                    )
+                    return None
+
+                return {
+                    "cm_mac_address": mac,
+                    "filename": unique_filename,
+                    "preeq_enabled": pre_eq,
+                    "ofdma_ifindex": modem_ifindex,
+                }
 
             # Capture each modem on every registered channel.
             step_done = 0

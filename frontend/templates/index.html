@@ -3317,10 +3317,10 @@
                             </a>
                             <button v-else type="button" @click="generateFnScanReport" class="btn btn-sm btn-outline-danger"
                                     :disabled="fnScanReportRunning || !fnScanId || !fnScanResult || !!fnScanResult.error"
-                                    title="Available after a successful US RxMER Fiber Node scan">
+                                    :title="fnScanResult?.error ? fnScanResult.error : 'Available after a successful US RxMER Fiber Node scan'">
                                 <span v-if="fnScanReportRunning" class="spinner-border spinner-border-sm me-1"></span>
                                 <i v-else class="bi bi-file-earmark-pdf me-1"></i>
-                                {{ fnScanReportRunning ? fnScanReportProgressLabel : (fnScanResult && !fnScanResult.error ? 'Generate PDF Report' : 'Complete Scan to Generate PDF') }}
+                                {{ fnScanReportRunning ? fnScanReportProgressLabel : (fnScanResult?.error ? 'Scan Failed — PDF Unavailable' : (fnScanResult ? 'Generate PDF Report' : 'Complete Scan to Generate PDF')) }}
                             </button>
                         </div>
                         <div v-if="fnScanReportRunning" class="card-body py-2">
