@@ -3434,12 +3434,12 @@ def ds_fullband_scan():
             trans = np.diff(np.concatenate(([0], suckout_mask.astype(int), [0])))
             r_starts = np.where(trans == 1)[0]
             r_ends   = np.where(trans == -1)[0] - 1
-            for rs, re in zip(r_starts, r_ends):
-                if (re - rs + 1) < min_width_pts:
-                    clean_mask[rs:re + 1] = False
+            for region_start, region_end in zip(r_starts, r_ends):
+                if (region_end - region_start + 1) < min_width_pts:
+                    clean_mask[region_start:region_end + 1] = False
                 elif strict_in_channel and occupied_core is not None:
-                    if float(np.mean(occupied_core[rs:re + 1])) < 0.55:
-                        clean_mask[rs:re + 1] = False
+                    if float(np.mean(occupied_core[region_start:region_end + 1])) < 0.55:
+                        clean_mask[region_start:region_end + 1] = False
 
             if np.any(clean_mask):
                 ax_main.fill_between(common_f, median, smoothed,
