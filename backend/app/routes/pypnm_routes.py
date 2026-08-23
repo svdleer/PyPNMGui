@@ -2,7 +2,7 @@
 #
 # Complete PyPNM API integration with plot support
 
-from flask import Blueprint, request, jsonify, send_file, current_app
+from flask import Blueprint, request, jsonify, send_file, current_app, session
 from typing import Dict, Any
 import logging
 import math
@@ -5405,11 +5405,34 @@ def _merge_bulk_impulse_report_sources(sources: list[dict]) -> dict:
     return merged
 
 
+def _queue_stored_bulk_report(
+    report_type: str,
+    source: dict,
+    *,
+    total_steps: int,
+    access_scope: str | None = None,
+) -> tuple[str, int]:
+    """Queue a formatting-only report from an immutable, server-owned source."""
+    import uuid as _uuid
+
+    job_id = _uuid.uuid4().hex
+    _set_report_progress(
+        job_id,
+        status='running', progress=0, total=total_steps,
+        current='Preparing stored analytics results...', pdf_path=None, error=None,
+        report_type=report_type, access_scope=access_scope,
+    )
+    _report_threading.Thread(
+        target=_run_bulk_report,
+        args=(job_id, report_type, source),
+        daemon=True,
+    ).start()
+    return job_id, total_steps
+
+
 @pypnm_bp.route('/bulk-report/start', methods=['POST'])
 def start_bulk_report():
     """Build a branded PDF exclusively from completed stored bulk-scan data."""
-    import uuid as _uuid
-
     data = request.get_json(silent=True) or {}
     report_type = str(data.get('report_type') or '').strip()
     valid_types = {'bulk_impulse', 'ds_suckout', 'ds_fullband'}
@@ -5449,17 +5472,11 @@ def start_bulk_report():
             return jsonify({'success': False, 'error': 'Stored scan did not complete successfully'}), 400
         total_steps = 3
 
-    job_id = str(_uuid.uuid4())[:8]
-    _set_report_progress(
-        job_id,
-        status='running', progress=0, total=total_steps,
-        current='Preparing stored scan results...', pdf_path=None, error=None,
+    job_id, total_steps = _queue_stored_bulk_report(
+        report_type,
+        source,
+        total_steps=total_steps,
     )
-    _report_threading.Thread(
-        target=_run_bulk_report,
-        args=(job_id, report_type, source),
-        daemon=True,
-    ).start()
     return jsonify({'success': True, 'job_id': job_id, 'total': total_steps})
 
 
@@ -5473,12 +5490,27 @@ def bulk_report_download(job_id):
     return pnm_report_download(job_id)
 
 
+def _stored_report_access_error(job: dict):
+    """Preserve feature-specific authorization for shared report job routes."""
+    if job.get('access_scope') != 'network_rxmer_admin':
+        return None
+    if session.get('role') != 'admin':
+        return jsonify({'success': False, 'error': 'Admin role required'}), 403
+    from app.core.feature_flags import is_network_rxmer_analytics_enabled
+    if not is_network_rxmer_analytics_enabled():
+        return jsonify({'success': False, 'error': 'Network RxMER Analytics is disabled'}), 404
+    return None
+
+
 @pypnm_bp.route('/pnm-report/status/<job_id>', methods=['GET'])
 def pnm_report_status(job_id):
     with _report_lock:
         job = _report_jobs.get(job_id)
     if not job:
         return jsonify({'success': False, 'error': 'Job not found'}), 404
+    access_error = _stored_report_access_error(job)
+    if access_error:
+        return access_error
     return jsonify({'success': True, **job})
 
 
@@ -5487,7 +5519,12 @@ def pnm_report_download(job_id):
     import os
     with _report_lock:
         job = _report_jobs.get(job_id)
-    if not job or not job.get('pdf_path'):
+    if not job:
+        return jsonify({'success': False, 'error': 'Report not ready'}), 404
+    access_error = _stored_report_access_error(job)
+    if access_error:
+        return access_error
+    if not job.get('pdf_path'):
         return jsonify({'success': False, 'error': 'Report not ready'}), 404
     pdf_path = job['pdf_path']
     if not os.path.exists(pdf_path):
@@ -6438,11 +6475,210 @@ def _build_ds_fullband_pdf(job_id: str, source: dict) -> str:
         _cleanup_pdf_brand_assets(brand_tmp_paths)
 
 
+def _render_network_rxmer_spectrum_plot(source: dict) -> str | None:
+    """Render the stored Network RxMER spectrum payload as a report PNG."""
+    import base64
+    import io
+    import math as _math
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    spectrum = source.get('spectrum') or {}
+    points = spectrum.get('points') or []
+    filters = source.get('filters') or {}
+    statistic = str(filters.get('statistic') or spectrum.get('statistic') or 'average')
+    series = {
+        'average': ('average_db', 'Average RxMER', '#2563eb'),
+        'best': ('max_db', 'Best RxMER', '#198754'),
+        'worst': ('worst_db', 'Worst RxMER', '#dc3545'),
+    }.get(statistic)
+    if not series or not points:
+        return None
+
+    value_key, series_label, color = series
+    frequencies = []
+    values = []
+    for point in points:
+        try:
+            frequency = float(point.get('frequency_hz')) / 1_000_000.0
+            raw_value = point.get(value_key)
+            value = float(raw_value) if raw_value is not None else float('nan')
+        except (AttributeError, TypeError, ValueError):
+            continue
+        frequencies.append(frequency)
+        values.append(value)
+    if not frequencies or not any(_math.isfinite(value) for value in values):
+        return None
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+    for index, span in enumerate(spectrum.get('channel_spans') or []):
+        try:
+            start = float(span.get('start_frequency_hz')) / 1_000_000.0
+            end = float(span.get('end_frequency_hz')) / 1_000_000.0
+        except (AttributeError, TypeError, ValueError):
+            continue
+        ax.axvspan(
+            min(start, end), max(start, end),
+            color='#0891b2' if index % 2 else '#2563eb', alpha=0.055, linewidth=0,
+        )
+    ax.plot(frequencies, values, color=color, linewidth=1.2, label=series_label)
+    scope_parts = [filters.get('cmts'), filters.get('fiber_node')]
+    scope_label = ' / '.join(str(value) for value in scope_parts if value) or 'Entire job'
+    ax.set_title(f'Network OFDM RxMER Spectrum - {scope_label}')
+    ax.set_xlabel('Frequency (MHz)')
+    ax.set_ylabel('RxMER (dB)')
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc='best', framealpha=0.85)
+    fig.tight_layout()
+    output = io.BytesIO()
+    fig.savefig(output, format='png', dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    return base64.b64encode(output.getvalue()).decode('ascii')
+
+
+def _build_network_rxmer_pdf(job_id: str, source: dict) -> str:
+    """Generate a branded report exclusively from persisted Network RxMER results."""
+    from datetime import datetime
+
+    job = source.get('job') or {}
+    filters = source.get('filters') or {}
+    aggregates = source.get('aggregates') or {}
+    spectrum = source.get('spectrum') or {}
+    modems = source.get('modems') or []
+    scope = job.get('scope') or {}
+    selected_cmts = filters.get('cmts') or ''
+    selected_fiber = filters.get('fiber_node') or ''
+    scope_cmts = ', '.join(str(value) for value in scope.get('cmts') or [])
+    report_scope = selected_fiber or selected_cmts or scope_cmts or 'Entire network'
+    statistic_labels = {
+        'average': 'Average RxMER',
+        'best': 'Best RxMER',
+        'worst': 'Worst RxMER',
+    }
+    statistic = str(filters.get('statistic') or 'average')
+    statistic_label = statistic_labels.get(statistic, 'Average RxMER')
+    public_id = str(job.get('public_id') or source.get('public_id') or 'unknown')
+
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(report_scope)
+    try:
+        _pdf_add_bulk_title_page(pdf, 'Network RxMER Analytics Report', [
+            ('Report Scope', report_scope),
+            ('CMTS Filter', selected_cmts or 'All CMTS'),
+            ('Fiber Node Filter', selected_fiber or 'All fiber nodes'),
+            ('Spectrum Statistic', statistic_label),
+            ('Source Job', public_id),
+            ('Collection Completed', job.get('finished_at') or job.get('updated_at') or 'N/A'),
+            ('Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        ])
+
+        completeness = aggregates.get('completeness') or {}
+        _set_report_progress(job_id, progress=2, current='Adding analytics summaries...')
+        _pdf_add_result_table(pdf, 'Analytics Summary', ['Metric', 'Result'], [
+            ('Job status', job.get('status') or 'N/A'),
+            ('Planned targets', job.get('targets_total', 0)),
+            ('Targets succeeded', job.get('targets_succeeded', 0)),
+            ('Targets partial', job.get('targets_partial', 0)),
+            ('Targets failed', job.get('targets_failed', 0)),
+            ('Channels succeeded', job.get('channels_succeeded', 0)),
+            ('Channels failed', job.get('channels_failed', 0)),
+            ('Matching modems with aggregates', aggregates.get('total_modems', 0)),
+            ('Complete modem results', completeness.get('complete', 0)),
+            ('Partial modem results', completeness.get('partial', 0)),
+            ('Spectrum source modems', spectrum.get('source_modems', 0)),
+            ('Spectrum source channels', spectrum.get('source_channels', 0)),
+            ('Spectrum source samples', spectrum.get('source_samples', 0)),
+            ('Spectrum plotted bins', len(spectrum.get('points') or [])),
+            ('Modem appendix', f"First {len(modems)} matching targets"
+             + (' (additional targets omitted)' if source.get('modems_truncated') else '')),
+        ], [138.5, 138.5])
+
+        average_rows = [
+            (_report_num(item.get('rxmer_db'), 2, ' dB'), item.get('modem_count', 0))
+            for item in aggregates.get('average_rxmer') or []
+        ]
+        best_rows = [
+            (_report_num(item.get('rxmer_db'), 2, ' dB'), item.get('modem_count', 0))
+            for item in aggregates.get('best_subcarrier_rxmer') or []
+        ]
+        _pdf_add_result_table(
+            pdf, 'Average RxMER Distribution', ['RxMER bucket', 'Modems'],
+            average_rows, [138.5, 138.5],
+        )
+        _pdf_add_result_table(
+            pdf, 'Best-Subcarrier RxMER Distribution', ['RxMER bucket', 'Modems'],
+            best_rows, [138.5, 138.5],
+        )
+
+        modem_rows = [
+            (
+                modem.get('mac'), modem.get('cmts'), modem.get('fiber_node'),
+                modem.get('completeness') or modem.get('state'),
+                _report_num(modem.get('avg_db'), 2, ' dB'),
+                _report_num(modem.get('best_db'), 2, ' dB'),
+                _report_num(modem.get('worst_db'), 2, ' dB'),
+                modem.get('valid_channel_count', modem.get('completed_channels', 0)),
+                modem.get('sample_count', 0),
+            )
+            for modem in modems
+        ]
+        _pdf_add_result_table(
+            pdf, 'Per-Modem RxMER Summary',
+            ['MAC Address', 'CMTS', 'Fiber node', 'Completeness', 'Average', 'Best', 'Worst', 'Channels', 'Samples'],
+            modem_rows, [38, 42, 43, 28, 25, 25, 25, 23, 28],
+        )
+
+        def _ranking_rows(items):
+            return [
+                (
+                    index,
+                    _report_num(item.get('frequency_hz') / 1_000_000 if item.get('frequency_hz') is not None else None, 3, ' MHz'),
+                    _report_num(item.get('average_db'), 2, ' dB'),
+                    _report_num(item.get('max_db'), 2, ' dB'),
+                    _report_num(item.get('worst_db'), 2, ' dB'),
+                    item.get('sample_count', 0),
+                )
+                for index, item in enumerate(items or [], start=1)
+            ]
+
+        ranking_headers = ['#', 'Frequency', 'Average', 'Maximum', 'Worst', 'Samples']
+        ranking_widths = [17, 58, 48, 48, 48, 58]
+        _pdf_add_result_table(
+            pdf, 'Best 10 Subcarriers', ranking_headers,
+            _ranking_rows(spectrum.get('best_subcarriers')), ranking_widths,
+        )
+        _pdf_add_result_table(
+            pdf, 'Worst 10 Subcarriers', ranking_headers,
+            _ranking_rows(spectrum.get('worst_subcarriers')), ranking_widths,
+        )
+
+        _set_report_progress(job_id, progress=3, current='Rendering stored RxMER spectrum...')
+        plot_data = _render_network_rxmer_spectrum_plot(source)
+        if not plot_data:
+            raise ValueError('Stored Network RxMER spectrum contains no plottable points')
+        if not _pdf_add_base64_image_page(pdf, 'Network OFDM RxMER Spectrum', plot_data):
+            raise ValueError('Network RxMER spectrum could not be embedded in the PDF')
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_scope = re.sub(r'[^A-Za-z0-9_-]+', '_', report_scope).strip('_') or 'network'
+        output_dir = os.environ.get('PNM_REPORT_OUTPUT_DIR', '/app/data')
+        os.makedirs(output_dir, exist_ok=True)
+        pdf_path = os.path.join(
+            output_dir,
+            f'network_rxmer_report_{safe_scope}_{job_id}_{timestamp}.pdf',
+        )
+        pdf.output(pdf_path)
+        return pdf_path
+    finally:
+        _cleanup_pdf_brand_assets(brand_tmp_paths)
+
+
 def _build_bulk_report_pdf(job_id: str, report_type: str, source: dict) -> str:
     builders = {
         'bulk_impulse': _build_bulk_impulse_pdf,
         'ds_suckout': _build_ds_suckout_pdf,
         'ds_fullband': _build_ds_fullband_pdf,
+        'network_rxmer': _build_network_rxmer_pdf,
     }
     builder = builders.get(report_type)
     if builder is None:

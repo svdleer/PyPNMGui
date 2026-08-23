@@ -6,6 +6,7 @@ No local database access. No business logic.
 """
 
 import os
+import uuid
 
 from flask import Response, jsonify, request, session, stream_with_context
 import requests
@@ -395,6 +396,182 @@ def network_rxmer_materialize_spectrum(public_id):
     if gate:
         return gate
     return _proxy("POST", f"/rxmer-analytics/jobs/{public_id}/spectrum/materialize")
+
+
+def _network_rxmer_pdf_source_get(path: str, *, params=None, timeout=120):
+    """Read one authoritative stored-result payload for PDF formatting."""
+    url = f"{_poller_api_base()}{path}"
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            timeout=(10, timeout),
+        )
+    except requests.Timeout:
+        return None, (jsonify({
+            "status": "error",
+            "message": "PyPNM stored-result request timed out",
+        }), 504)
+    except requests.RequestException:
+        return None, (jsonify({
+            "status": "error",
+            "message": "PyPNM API unavailable",
+        }), 502)
+    try:
+        body = response.json() if response.content else {}
+    except ValueError:
+        body = {"status": "error", "message": "PyPNM returned an invalid response"}
+    if not response.ok:
+        return None, (jsonify(body), response.status_code)
+    if not isinstance(body, dict):
+        return None, (jsonify({
+            "status": "error",
+            "message": "PyPNM returned an invalid stored-result payload",
+        }), 502)
+    return body, None
+
+
+@api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/pdf', methods=['POST'])
+def network_rxmer_pdf_start(public_id):
+    """Queue a branded PDF from completed persisted RxMER analytics only."""
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    try:
+        parsed_id = uuid.UUID(str(public_id))
+    except (ValueError, AttributeError):
+        return jsonify({"status": "error", "message": "Invalid RxMER job ID"}), 400
+    if str(parsed_id) != str(public_id).lower():
+        return jsonify({"status": "error", "message": "Invalid RxMER job ID"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    allowed_fields = {"cmts", "fiber_node", "statistic"}
+    if not isinstance(payload, dict) or set(payload) - allowed_fields:
+        return jsonify({
+            "status": "error",
+            "message": "PDF request accepts only cmts, fiber_node, and statistic filters",
+        }), 400
+    cmts = str(payload.get("cmts") or "").strip()
+    fiber_node = str(payload.get("fiber_node") or "").strip()
+    statistic = str(payload.get("statistic") or "average").strip().lower()
+    if len(cmts) > 128 or len(fiber_node) > 128:
+        return jsonify({"status": "error", "message": "Report filters must not exceed 128 characters"}), 400
+    if statistic not in {"average", "best", "worst"}:
+        return jsonify({"status": "error", "message": "Invalid subcarrier statistic"}), 400
+
+    job_path = f"/rxmer-analytics/jobs/{public_id}"
+    job_response, error = _network_rxmer_pdf_source_get(job_path)
+    if error:
+        return error
+    job = job_response.get("job") or {}
+    allowed_statuses = {"completed", "completed_with_errors", "partial"}
+    if job.get("status") not in allowed_statuses:
+        return jsonify({
+            "status": "error",
+            "message": "PDF reports are available only for completed RxMER jobs",
+        }), 409
+    if int(job.get("channels_succeeded") or 0) <= 0:
+        return jsonify({
+            "status": "error",
+            "message": "The selected RxMER job has no successful channel results",
+        }), 409
+
+    result_params = {}
+    if cmts:
+        result_params["cmts"] = cmts
+    if fiber_node:
+        result_params["fiber_node"] = fiber_node
+    aggregates, error = _network_rxmer_pdf_source_get(
+        f"{job_path}/aggregates",
+        params={**result_params, "bucket_db": "0.5"},
+    )
+    if error:
+        return error
+    modem_payload, error = _network_rxmer_pdf_source_get(
+        f"{job_path}/modems",
+        params={**result_params, "cursor": "0", "limit": "200"},
+    )
+    if error:
+        return error
+    spectrum, error = _network_rxmer_pdf_source_get(
+        f"{job_path}/spectrum",
+        params={**result_params, "max_points": "1600", "statistic": statistic},
+        timeout=600,
+    )
+    if error:
+        return error
+    if spectrum.get("state") != "ready" or not spectrum.get("points"):
+        return jsonify({
+            "status": "error",
+            "message": spectrum.get("message") or "Build the stored RxMER spectrum before generating the PDF",
+        }), 409
+
+    final_job_response, error = _network_rxmer_pdf_source_get(job_path)
+    if error:
+        return error
+    final_job = final_job_response.get("job") or {}
+    stable_fields = (
+        "status", "updated_at", "targets_total", "targets_succeeded",
+        "targets_partial", "targets_failed", "channels_succeeded", "channels_failed",
+    )
+    if any(job.get(field) != final_job.get(field) for field in stable_fields):
+        return jsonify({
+            "status": "error",
+            "message": "RxMER results changed while preparing the report; try again",
+        }), 409
+
+    source = {
+        "success": True,
+        "report_type": "network_rxmer",
+        "public_id": public_id,
+        "filters": {"cmts": cmts, "fiber_node": fiber_node, "statistic": statistic},
+        "job": final_job,
+        "aggregates": aggregates,
+        "modems": modem_payload.get("targets") or [],
+        "modems_truncated": bool(modem_payload.get("has_more")),
+        "spectrum": spectrum,
+    }
+    from app.routes.pypnm_routes import _queue_stored_bulk_report
+    report_id, total = _queue_stored_bulk_report(
+        "network_rxmer",
+        source,
+        total_steps=4,
+        access_scope="network_rxmer_admin",
+    )
+    return jsonify({"status": "success", "report_id": report_id, "total": total})
+
+
+def _network_rxmer_report_job(report_id: str):
+    if len(report_id) != 32 or any(char not in "0123456789abcdef" for char in report_id.lower()):
+        return None
+    from app.routes.pypnm_routes import _report_jobs, _report_lock
+    with _report_lock:
+        job = _report_jobs.get(report_id)
+    if not job or job.get("report_type") != "network_rxmer":
+        return None
+    return job
+
+
+@api_bp.route('/admin/rxmer-analytics/pdf/status/<report_id>', methods=['GET'])
+def network_rxmer_pdf_status(report_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    if not _network_rxmer_report_job(report_id):
+        return jsonify({"success": False, "error": "Report job not found"}), 404
+    from app.routes.pypnm_routes import pnm_report_status
+    return pnm_report_status(report_id)
+
+
+@api_bp.route('/admin/rxmer-analytics/pdf/download/<report_id>', methods=['GET'])
+def network_rxmer_pdf_download(report_id):
+    gate = _require_network_rxmer_analytics()
+    if gate:
+        return gate
+    if not _network_rxmer_report_job(report_id):
+        return jsonify({"success": False, "error": "Report job not found"}), 404
+    from app.routes.pypnm_routes import pnm_report_download
+    return pnm_report_download(report_id)
 
 
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/results', methods=['DELETE'])

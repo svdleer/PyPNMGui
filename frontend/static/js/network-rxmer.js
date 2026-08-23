@@ -16,6 +16,14 @@
     let progressPollCount = 0;
     let spectrumPollTimer = null;
     let spectrumChart = null;
+    const reportableStates = new Set(['completed', 'completed_with_errors', 'partial']);
+    let pdfReportTimer = null;
+    let pdfReportGeneration = 0;
+    let pdfReportJobId = null;
+    let pdfReportDownloadUrl = '';
+    let pdfReportRunning = false;
+    let pdfReportSpectrumReady = false;
+    let pdfReportPollFailures = 0;
     let pendingPlanKey = null;
     let pendingPlanFingerprint = null;
     let planRequestInFlight = false;
@@ -58,9 +66,134 @@
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error(body.detail || body.message || `Request failed (${response.status})`);
+            throw new Error(body.detail || body.message || body.error || `Request failed (${response.status})`);
         }
         return body;
+    }
+
+    function clearPdfReportPolling() {
+        if (pdfReportTimer) window.clearTimeout(pdfReportTimer);
+        pdfReportTimer = null;
+    }
+
+    function updatePdfReportControls() {
+        const generateButton = byId('rxmer-pdf-generate');
+        const downloadLink = byId('rxmer-pdf-download');
+        const canGenerate = Boolean(
+            selectedJobId
+            && reportableStates.has(selectedJobStatus)
+            && pdfReportSpectrumReady
+            && !pdfReportRunning
+        );
+        generateButton.disabled = !canGenerate;
+        if (!selectedJobId || !reportableStates.has(selectedJobStatus)) {
+            generateButton.title = 'Select a completed job with successful RxMER results';
+        } else if (!pdfReportSpectrumReady) {
+            generateButton.title = 'Build or load a ready RxMER spectrum first';
+        } else if (pdfReportRunning) {
+            generateButton.title = 'PDF report generation is in progress';
+        } else {
+            generateButton.title = 'Generate a branded PDF from the displayed stored results';
+        }
+        generateButton.classList.toggle('d-none', Boolean(pdfReportDownloadUrl));
+        downloadLink.classList.toggle('d-none', !pdfReportDownloadUrl);
+        downloadLink.href = pdfReportDownloadUrl || '#';
+    }
+
+    function setPdfReportProgress(percent, label) {
+        const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+        byId('rxmer-pdf-status').classList.remove('d-none');
+        byId('rxmer-pdf-label').textContent = label || 'Preparing stored analytics results…';
+        const progress = byId('rxmer-pdf-progress');
+        progress.style.width = `${safePercent}%`;
+        progress.setAttribute('aria-valuenow', String(safePercent));
+    }
+
+    function resetPdfReport() {
+        clearPdfReportPolling();
+        pdfReportGeneration += 1;
+        pdfReportJobId = null;
+        pdfReportDownloadUrl = '';
+        pdfReportRunning = false;
+        pdfReportSpectrumReady = false;
+        pdfReportPollFailures = 0;
+        byId('rxmer-pdf-status').classList.add('d-none');
+        setPdfReportProgress(0, 'Preparing stored analytics results…');
+        byId('rxmer-pdf-status').classList.add('d-none');
+        updatePdfReportControls();
+    }
+
+    async function pollPdfReport(reportId, generation) {
+        if (generation !== pdfReportGeneration || reportId !== pdfReportJobId) return;
+        try {
+            const report = await request(`/pdf/status/${encodeURIComponent(reportId)}`);
+            if (generation !== pdfReportGeneration || reportId !== pdfReportJobId) return;
+            if (report.status === 'failed') {
+                pdfReportRunning = false;
+                const message = report.error || 'PDF report generation failed';
+                setPdfReportProgress(0, message);
+                updatePdfReportControls();
+                showAlert(message);
+                return;
+            }
+            pdfReportPollFailures = 0;
+            const total = Math.max(1, Number(report.total) || 1);
+            const progress = Math.min(total, Number(report.progress) || 0);
+            const percent = report.status === 'complete' ? 100 : Math.round((progress / total) * 100);
+            setPdfReportProgress(percent, report.current || 'Formatting stored analytics results…');
+            if (report.status === 'complete') {
+                pdfReportRunning = false;
+                pdfReportDownloadUrl = `${apiBase}/pdf/download/${encodeURIComponent(reportId)}`;
+                setPdfReportProgress(100, 'PDF report ready');
+                updatePdfReportControls();
+                return;
+            }
+            pdfReportTimer = window.setTimeout(() => pollPdfReport(reportId, generation), 2000);
+        } catch (error) {
+            if (generation !== pdfReportGeneration || reportId !== pdfReportJobId) return;
+            pdfReportPollFailures += 1;
+            if (pdfReportPollFailures < 5) {
+                pdfReportTimer = window.setTimeout(() => pollPdfReport(reportId, generation), 2000);
+                return;
+            }
+            pdfReportRunning = false;
+            setPdfReportProgress(0, error.message);
+            updatePdfReportControls();
+            showAlert(error.message);
+        }
+    }
+
+    async function generatePdfReport() {
+        if (!selectedJobId || pdfReportRunning || !pdfReportSpectrumReady) return;
+        clearAlert();
+        clearPdfReportPolling();
+        pdfReportGeneration += 1;
+        const generation = pdfReportGeneration;
+        pdfReportRunning = true;
+        pdfReportDownloadUrl = '';
+        pdfReportPollFailures = 0;
+        setPdfReportProgress(0, 'Preparing stored analytics results…');
+        updatePdfReportControls();
+        try {
+            const response = await request(`/jobs/${encodeURIComponent(selectedJobId)}/pdf`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    cmts: resultFilters.cmts || '',
+                    fiber_node: resultFilters.fiberNode || '',
+                    statistic: resultFilters.statistic || 'average',
+                }),
+            });
+            if (generation !== pdfReportGeneration) return;
+            pdfReportJobId = response.report_id;
+            setPdfReportProgress(0, 'PDF report queued…');
+            await pollPdfReport(pdfReportJobId, generation);
+        } catch (error) {
+            if (generation !== pdfReportGeneration) return;
+            pdfReportRunning = false;
+            setPdfReportProgress(0, error.message);
+            updatePdfReportControls();
+            showAlert(error.message);
+        }
     }
 
     function textCell(row, value, className = '') {
@@ -351,6 +484,7 @@
         const error = byId('rxmer-job-error');
         error.textContent = job.error_text || '';
         error.classList.toggle('d-none', !job.error_text);
+        updatePdfReportControls();
     }
 
     function renderHistogram(elementId, bins) {
@@ -477,6 +611,8 @@
         );
         clearSpectrumPolling();
         const points = Array.isArray(payload.points) ? payload.points : [];
+        pdfReportSpectrumReady = payload.state === 'ready' && points.length > 0;
+        updatePdfReportControls();
         if (!points.length) {
             destroySpectrumChart();
             setSpectrumStatus(payload.message || 'No successful channel vectors are available.');
@@ -556,7 +692,10 @@
 
     async function loadSpectrum(forceBuild = false) {
         clearSpectrumPolling();
+        if (forceBuild) resetPdfReport();
         const publicId = selectedJobId;
+        pdfReportSpectrumReady = false;
+        updatePdfReportControls();
         if (!publicId) return;
         if (!terminalStates.has(selectedJobStatus)) {
             destroySpectrumChart();
@@ -668,6 +807,7 @@
     async function selectJob(publicId) {
         clearSpectrumPolling();
         destroySpectrumChart();
+        resetPdfReport();
         selectedJobId = publicId;
         selectedJobStatus = null;
         resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
@@ -883,6 +1023,7 @@
             window.sessionStorage.removeItem(pendingPlanStorageKey);
             showAlert(response.reused ? 'Existing matching plan selected.' : 'Plan created. No collection has started.', 'success');
             button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading plan…';
+            resetPdfReport();
             selectedJobId = response.job.public_id;
             resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
             pendingResultCmts = '';
@@ -917,6 +1058,7 @@
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
             clearSpectrumPolling();
+            resetPdfReport();
         }
         try {
             const response = await request(`/jobs/${encodeURIComponent(publicId)}/results`, {method: 'DELETE'});
@@ -939,6 +1081,7 @@
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
             clearSpectrumPolling();
+            resetPdfReport();
         }
         try {
             const response = await request(`/jobs/${encodeURIComponent(publicId)}`, {method: 'DELETE'});
@@ -968,6 +1111,7 @@
         if (!window.confirm(
             `Start network RxMER collection with ${concurrency} modems in parallel? This will contact every planned modem and capture downstream OFDM RxMER.`
         )) return;
+        resetPdfReport();
         try {
             const response = await request(`/jobs/${encodeURIComponent(selectedJobId)}/start`, {
                 method: 'POST',
@@ -1002,6 +1146,7 @@
             fiberNode: byId('rxmer-filter-fiber').value.trim(),
             statistic: byId('rxmer-filter-statistic').value || 'average',
         };
+        resetPdfReport();
         updateReportLinks();
         await refreshSelectedJob();
     }
@@ -1012,6 +1157,7 @@
         byId('rxmer-filter-fiber').value = '';
         byId('rxmer-filter-statistic').value = 'average';
         resultFilters = {cmts: '', fiberNode: '', statistic: 'average'};
+        resetPdfReport();
         renderResultCmtsMenu();
         updateReportLinks();
         await refreshSelectedJob();
@@ -1037,10 +1183,12 @@
     byId('rxmer-refresh-jobs').addEventListener('click', loadJobs);
     byId('rxmer-start-job').addEventListener('click', startSelectedJob);
     byId('rxmer-cancel-job').addEventListener('click', cancelSelectedJob);
+    byId('rxmer-pdf-generate').addEventListener('click', generatePdfReport);
     byId('rxmer-spectrum-rebuild').addEventListener('click', () => loadSpectrum(true));
     window.addEventListener('pagehide', () => {
         if (pollTimer) window.clearTimeout(pollTimer);
         clearSpectrumPolling();
+        clearPdfReportPolling();
         if (spectrumChart) spectrumChart.destroy();
     });
 
