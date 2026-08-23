@@ -5481,9 +5481,10 @@ def _pdf_add_result_table(pdf, title: str, headers: list, rows: list, widths: li
 
 
 def _pdf_add_base64_image_page(pdf, title: str, image_data: str) -> bool:
-    """Decode and add a stored scan PNG without triggering a new measurement."""
+    """Decode and fit a stored scan PNG on the same page as its heading."""
     import base64
     import tempfile
+    from PIL import Image
 
     if not image_data:
         return False
@@ -5495,9 +5496,32 @@ def _pdf_add_base64_image_page(pdf, title: str, image_data: str) -> bool:
         tmp.write(image_bytes)
         tmp.close()
         tmp_path = tmp.name
+
+        with Image.open(tmp_path) as image:
+            pixel_width, pixel_height = image.size
+        if pixel_width <= 0 or pixel_height <= 0:
+            raise ValueError('Plot image has invalid dimensions')
+
         pdf.add_page()
         _pdf_add_section_heading(pdf, title)
-        pdf.image(tmp_path, x=10, w=277)
+        image_y = pdf.get_y()
+        max_width = pdf.w - 20
+        max_height = pdf.page_break_trigger - image_y
+        scale = min(max_width / pixel_width, max_height / pixel_height)
+        display_width = pixel_width * scale
+        display_height = pixel_height * scale
+        image_x = (pdf.w - display_width) / 2
+
+        # Explicit x/y and dimensions prevent FPDF from automatically moving a
+        # tall image to the next page after the section heading was rendered.
+        pdf.image(
+            tmp_path,
+            x=image_x,
+            y=image_y,
+            w=display_width,
+            h=display_height,
+        )
+        pdf.set_y(image_y + display_height)
         return True
     except Exception as exc:
         logger.warning('Fiber Node report image %s could not be embedded: %s', title, exc)
@@ -5539,6 +5563,32 @@ def _build_fibernode_pdf(job_id: str, scan_result: dict) -> str:
     if not isinstance(ifindices, list):
         ifindices = [ifindices]
 
+    capture_modes = set()
+    capture_sources = list(scan_result.get('captures') or []) + list(analysis.get('captures') or [])
+    for capture in capture_sources:
+        if not isinstance(capture, dict):
+            continue
+        mode = capture.get('preeq_enabled')
+        if isinstance(mode, bool):
+            capture_modes.add(mode)
+
+    metadata_compare = metadata.get('compare_preeq')
+    if isinstance(metadata_compare, str):
+        compare_preeq = metadata_compare.strip().lower() in ('1', 'true', 'yes', 'on')
+    elif metadata_compare is None:
+        compare_preeq = capture_modes == {False, True}
+    else:
+        compare_preeq = bool(metadata_compare)
+
+    if capture_modes == {False, True}:
+        captured_mode_label = 'ON + OFF'
+    elif capture_modes == {True}:
+        captured_mode_label = 'ON only'
+    elif capture_modes == {False}:
+        captured_mode_label = 'OFF only'
+    else:
+        captured_mode_label = 'Not recorded'
+
     pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
     try:
         # Title page: same spacing, typography, and centered metadata as modem reports.
@@ -5577,7 +5627,8 @@ def _build_fibernode_pdf(job_id: str, scan_result: dict) -> str:
             ('Network-impaired subcarriers', _num(summary.get('pct_network_impaired'), 1, '%')),
             ('In-home modems', _num(summary.get('pct_modems_in_home'), 0, '%')),
             ('Group average RxMER', _num(summary.get('group_avg_db'), 1, ' dB')),
-            ('Pre-EQ capture', 'Comparison ON/OFF' if metadata.get('compare_preeq') else ('Enabled' if metadata.get('preeq_enabled', True) else 'Disabled')),
+            ('Compare Pre-EQ ON/OFF', 'ON' if compare_preeq else 'OFF'),
+            ('Captured Pre-EQ modes', captured_mode_label),
             ('Group-delay analysis', 'Included' if group_delay else 'Not included'),
         ]
         _pdf_add_result_table(pdf, 'Scan Summary', ['Metric', 'Result'], summary_rows, [138.5, 138.5])
