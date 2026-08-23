@@ -26,7 +26,15 @@
             <h2 class="mb-1"><i class="bi bi-bar-chart-line me-2"></i>Network RxMER Analytics</h2>
             <p class="text-muted mb-0">Durable downstream OFDM RxMER collection and network-level analysis.</p>
         </div>
-        <button class="btn btn-outline-primary" id="rxmer-refresh-jobs"><i class="bi bi-arrow-clockwise me-1"></i>Refresh jobs</button>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <button class="btn btn-outline-danger" id="rxmer-pdf-generate" type="button" disabled title="Open a completed job with a ready spectrum">
+                <i class="bi bi-file-earmark-pdf me-1"></i>Generate PDF Report
+            </button>
+            <a class="btn btn-danger d-none" id="rxmer-pdf-download" href="#">
+                <i class="bi bi-download me-1"></i>Download PDF Report
+            </a>
+            <button class="btn btn-outline-primary" id="rxmer-refresh-jobs"><i class="bi bi-arrow-clockwise me-1"></i>Refresh jobs</button>
+        </div>
     </div>
 
     <div id="rxmer-alert" class="alert d-none" role="alert"></div>
@@ -131,12 +139,6 @@
                 </div>
                 <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-json" href="#" aria-disabled="true"><i class="bi bi-filetype-json me-1"></i>Summary JSON</a>
                 <a class="btn btn-outline-secondary btn-sm disabled" id="rxmer-report-csv" href="#" aria-disabled="true"><i class="bi bi-filetype-csv me-1"></i>Summary CSV</a>
-                <button class="btn btn-outline-danger btn-sm" id="rxmer-pdf-generate" type="button" disabled title="Select a completed job with a ready spectrum">
-                    <i class="bi bi-file-earmark-pdf me-1"></i>Generate PDF Report
-                </button>
-                <a class="btn btn-danger btn-sm d-none" id="rxmer-pdf-download" href="#">
-                    <i class="bi bi-download me-1"></i>Download PDF Report
-                </a>
                 <button class="btn btn-success btn-sm d-none" id="rxmer-start-job"><i class="bi bi-play-fill me-1"></i>Start collection</button>
                 <button class="btn btn-outline-danger btn-sm d-none" id="rxmer-cancel-job"><i class="bi bi-stop-fill me-1"></i>Cancel</button>
             </div>
