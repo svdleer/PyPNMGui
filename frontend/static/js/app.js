@@ -49,6 +49,7 @@ createApp({
             reportProgressLabel: '',
             reportDownloadUrl: null,
             _reportPollTimer: null,
+            _fnScanReportPollTimer: null,
             _activeTaskLabel: null,
             _taskGeneration: 0,
             _currentFetchController: null,
@@ -216,6 +217,11 @@ createApp({
             fnScanPlantAssessment: null,  // plant vs in-home assessment from /fiberNode/plant-assessment
             fnScanTapPlotImage: null,     // matplotlib PNG from /fiberNode/tap-plot
             fnScanTapProfile: null,       // chart-ready tap coordinates from existing pre-EQ data
+            fnScanReportRunning: false,
+            fnScanReportJobId: null,
+            fnScanReportProgressPct: 0,
+            fnScanReportProgressLabel: '',
+            fnScanReportDownloadUrl: null,
             fnScanModemCount: null,         // Online modem count for selected channel
             fnScanModemCountLoading: false,
             fnScanModemSource: '',          // 'inventory' or 'snmp'
@@ -1111,6 +1117,10 @@ createApp({
             window.removeEventListener('beforeunload', this._pageLeaveHandler);
         }
         this.cancelActiveUiTasks({ silent: true, stopBackend: false });
+        if (this._fnScanReportPollTimer) {
+            clearInterval(this._fnScanReportPollTimer);
+            this._fnScanReportPollTimer = null;
+        }
         Object.values(this.charts || {}).forEach(chart => {
             try { chart?.destroy(); } catch (_) {}
         });
@@ -5567,6 +5577,10 @@ createApp({
 
         // ---- Fiber Node Service Group scan (separate menu) ----
         async selectFnScanCmts(cmts) {
+            if (this._fnScanReportPollTimer) {
+                clearInterval(this._fnScanReportPollTimer);
+                this._fnScanReportPollTimer = null;
+            }
             const resolved = this.findCmtsMatch(cmts?.ip, cmts?.hostname || cmts?.name || cmts?.cmts || '') || cmts;
             this.fnScanCmts           = resolved;
             this.fnScanCmtsIp         = resolved?.ip || cmts?.ip || '';
@@ -5574,11 +5588,17 @@ createApp({
             this.fnScanWriteCommunity = resolved?.community_rw || cmts?.community_rw || this.snmpCommunityRW;
             this.fnScanIfindex        = '';
             this.fnScanFiberNode      = '';
+            this.fnScanId             = null;
             this.fnScanResult         = null;
             this.fnScanImage          = null;
             this.fnScanPlantAssessment = null;
             this.fnScanTapPlotImage   = null;
             this.fnScanTapProfile     = null;
+            this.fnScanReportRunning = false;
+            this.fnScanReportJobId = null;
+            this.fnScanReportProgressPct = 0;
+            this.fnScanReportProgressLabel = '';
+            this.fnScanReportDownloadUrl = null;
             this.fnImpulseResult       = null;
             this._destroyChartSurface('surface-bulk-fn-rxmer');
             this._destroyChartSurface('surface-fn-tap-profile');
@@ -6555,6 +6575,15 @@ createApp({
             this.fnScanPlantAssessment = null;
             this.fnScanTapPlotImage   = null;
             this.fnScanTapProfile     = null;
+            this.fnScanReportRunning = false;
+            this.fnScanReportJobId = null;
+            this.fnScanReportProgressPct = 0;
+            this.fnScanReportProgressLabel = '';
+            this.fnScanReportDownloadUrl = null;
+            if (this._fnScanReportPollTimer) {
+                clearInterval(this._fnScanReportPollTimer);
+                this._fnScanReportPollTimer = null;
+            }
             this.fnScanProgress = {
                 step: 0, total: 0, modem: '', modem_idx: 0, modem_total: 0,
                 phase: 'discovery', phase_current: 0, phase_total: 0,
@@ -6569,6 +6598,7 @@ createApp({
                     body: JSON.stringify({
                         scan_id:             scanId,
                         cmts_ip:             this.fnScanCmtsIp,
+                        cmts_name:           this.fnScanCmts?.hostname || this.fnScanCmts?.name || this.fnScanCmts?.cmts || '',
                         community:           this.fnScanCommunity,
                         write_community:     this.fnScanWriteCommunity || this.fnScanCommunity,
                         ofdma_ifindices:     [parseInt(this.fnScanIfindex), ...this.fnScanExtraIfindices].filter(Boolean),
@@ -6672,6 +6702,84 @@ createApp({
                 this.fnConfigCollapsed = false;  // re-expand config panel when done
                 if (this._activeTaskLabel === 'Fiber Node Scan') this._activeTaskLabel = null;
             }
+        },
+
+        async generateFnScanReport() {
+            if (!this.fnScanId || !this.fnScanResult || this.fnScanResult.error) return;
+            const scanId = this.fnScanId;
+            this.fnScanReportRunning = true;
+            this.fnScanReportJobId = null;
+            this.fnScanReportProgressPct = 0;
+            this.fnScanReportProgressLabel = 'Preparing stored scan results...';
+            this.fnScanReportDownloadUrl = null;
+            try {
+                const response = await fetch(`${API_BASE}/pypnm/fibernode-report/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scan_id: scanId,
+                        report_info: {
+                            fiber_node: this.fnScanFiberNode || this.fnScanDisplayFiberNode,
+                            cmts_name: this.fnScanCmts?.hostname || this.fnScanCmts?.name || this.fnScanCmts?.cmts || '',
+                            cmts_ip: this.fnScanCmtsIp,
+                            ofdma_ifindices: [parseInt(this.fnScanIfindex), ...this.fnScanExtraIfindices.map(value => parseInt(value))].filter(Boolean),
+                        },
+                    }),
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || 'Failed to start report');
+                if (this.fnScanId !== scanId || !this.fnScanResult) return;
+                this.fnScanReportJobId = data.job_id;
+                this._pollFnScanReportStatus();
+            } catch (error) {
+                this.fnScanReportRunning = false;
+                this.fnScanReportProgressLabel = '';
+                this.$toast?.error(`Fiber Node report failed: ${error.message}`);
+            }
+        },
+
+        _pollFnScanReportStatus() {
+            if (this._fnScanReportPollTimer) clearInterval(this._fnScanReportPollTimer);
+            const jobId = this.fnScanReportJobId;
+            let consecutiveFailures = 0;
+            const stopWithError = message => {
+                if (this._fnScanReportPollTimer) clearInterval(this._fnScanReportPollTimer);
+                this._fnScanReportPollTimer = null;
+                this.fnScanReportRunning = false;
+                this.fnScanReportProgressLabel = message;
+                this.$toast?.error(`Fiber Node report failed: ${message}`);
+            };
+            this._fnScanReportPollTimer = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/pypnm/fibernode-report/status/${jobId}`);
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        consecutiveFailures += 1;
+                        if (response.status === 404 || consecutiveFailures >= 5) {
+                            stopWithError(data.error || 'Report job is no longer available');
+                        }
+                        return;
+                    }
+                    consecutiveFailures = 0;
+                    const total = data.total || 1;
+                    const progress = data.progress || 0;
+                    this.fnScanReportProgressPct = Math.round((progress / total) * 100);
+                    this.fnScanReportProgressLabel = data.current || `${progress}/${total}`;
+                    if (data.status === 'complete') {
+                        clearInterval(this._fnScanReportPollTimer);
+                        this._fnScanReportPollTimer = null;
+                        this.fnScanReportRunning = false;
+                        this.fnScanReportProgressPct = 100;
+                        this.fnScanReportDownloadUrl = `${API_BASE}/pypnm/fibernode-report/download/${jobId}`;
+                        this.$toast?.success('Fiber Node RxMER report ready for download');
+                    } else if (data.status === 'failed') {
+                        stopWithError(data.error || 'unknown error');
+                    }
+                } catch (_) {
+                    consecutiveFailures += 1;
+                    if (consecutiveFailures >= 5) stopWithError('Report status could not be reached');
+                }
+            }, 2000);
         },
 
         async abortFnScan() {

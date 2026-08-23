@@ -3398,6 +3398,28 @@
                         <i class="bi bi-exclamation-triangle me-2"></i>{{ fnScanResult.error }}
                     </div>
                     <div v-if="fnScanResult && !fnScanResult.error">
+                        <!-- Branded PDF report generated from this completed scan; no measurements are rerun. -->
+                        <div class="card shadow-sm border-light mb-3">
+                            <div class="card-header pnm-card-header pnm-card-header--downstream d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Fiber Node / Service Group RxMER Report</h5>
+                                <a v-if="fnScanReportDownloadUrl" :href="fnScanReportDownloadUrl" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF Report
+                                </a>
+                                <button v-else type="button" @click="generateFnScanReport" class="btn btn-sm btn-outline-danger"
+                                        :disabled="fnScanReportRunning || !fnScanId">
+                                    <span v-if="fnScanReportRunning" class="spinner-border spinner-border-sm me-1"></span>
+                                    <i v-else class="bi bi-file-earmark-pdf me-1"></i>
+                                    {{ fnScanReportRunning ? fnScanReportProgressLabel : 'Generate PDF Report' }}
+                                </button>
+                            </div>
+                            <div v-if="fnScanReportRunning" class="card-body py-2">
+                                <div class="progress" style="height:4px">
+                                    <div class="progress-bar bg-danger" :style="{width: fnScanReportProgressPct + '%'}"></div>
+                                </div>
+                                <div class="small text-muted mt-1">{{ fnScanReportProgressLabel }}</div>
+                            </div>
+                        </div>
+
                         <!-- Summary badges -->
                         <div class="d-flex flex-wrap gap-3 mb-3">
                             <div class="card border-primary text-center px-3 py-2">

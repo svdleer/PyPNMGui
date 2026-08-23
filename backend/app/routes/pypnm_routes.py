@@ -2191,6 +2191,9 @@ def get_cmts_us_rxmer_fibernode_scan():
 
     max_modems          = int(data.get('max_modems') or 20)
     scan_id             = data.get('scan_id', '')
+    fiber_node          = (data.get('fiber_node') or '').strip()
+    cmts_name           = (data.get('cmts_name') or '').strip()
+    scan_started_at     = time.strftime('%Y-%m-%d %H:%M:%S')
     def _norm_mac(v: str) -> str:
         return ''.join(ch for ch in str(v or '').lower() if ch.isalnum())
 
@@ -2560,6 +2563,19 @@ def get_cmts_us_rxmer_fibernode_scan():
                 "image_data": _image_data,
                 "analysis":   data_resp.json() if data_resp.status_code == 200 else None,
                 "captures":   captures,
+                "metadata": {
+                    "scan_id": scan_id,
+                    "fiber_node": fiber_node,
+                    "cmts_name": cmts_name,
+                    "cmts_ip": cmts_ip,
+                    "ofdma_ifindices": ofdma_ifindices,
+                    "started_at": scan_started_at,
+                    "completed_at": time.strftime('%Y-%m-%d %H:%M:%S'),
+                    "preeq_enabled": bool(preeq_enabled),
+                    "compare_preeq": bool(compare_preeq),
+                    "include_group_delay": bool(include_group_delay),
+                    "max_modems": max_modems,
+                },
             }
 
             # Include group delay data if collected
@@ -4969,6 +4985,75 @@ def start_pnm_report():
     return jsonify({'success': True, 'job_id': job_id, 'total': len(valid)})
 
 
+@pypnm_bp.route('/fibernode-report/start', methods=['POST'])
+def start_fibernode_report():
+    """Build a branded PDF from one completed, stored Fiber Node RxMER scan."""
+    import uuid as _uuid
+
+    data = request.get_json(silent=True) or {}
+    scan_id = (data.get('scan_id') or '').strip()
+    if not scan_id:
+        return jsonify({'success': False, 'error': 'scan_id required'}), 400
+    if not REDIS_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Stored scan results are unavailable'}), 503
+
+    try:
+        raw = redis_client.get(f'scan_result:{scan_id}')
+        result = json.loads(raw) if raw else None
+    except Exception as exc:
+        logger.warning('Fiber Node report could not read scan %s: %s', scan_id, exc)
+        return jsonify({'success': False, 'error': 'Could not read stored scan result'}), 500
+
+    if not isinstance(result, dict):
+        return jsonify({'success': False, 'error': 'Scan result not found or expired'}), 404
+    if not result.get('success'):
+        return jsonify({'success': False, 'error': result.get('error') or 'Scan did not complete successfully'}), 400
+    if not isinstance(result.get('analysis'), dict):
+        return jsonify({'success': False, 'error': 'Completed scan contains no RxMER analysis'}), 400
+
+    # Stored metadata is authoritative. Request metadata only supports scans
+    # created before metadata was added to the persisted result payload.
+    report_info = data.get('report_info') if isinstance(data.get('report_info'), dict) else {}
+    metadata = {
+        'scan_id': scan_id,
+        'fiber_node': report_info.get('fiber_node'),
+        'cmts_name': report_info.get('cmts_name'),
+        'cmts_ip': report_info.get('cmts_ip'),
+        'ofdma_ifindices': report_info.get('ofdma_ifindices') or [],
+    }
+    stored_metadata = result.get('metadata') or {}
+    metadata.update({
+        key: value for key, value in stored_metadata.items()
+        if value not in (None, '', [])
+    })
+    result['metadata'] = metadata
+
+    job_id = str(_uuid.uuid4())[:8]
+    _set_report_progress(
+        job_id,
+        status='running', progress=0, total=4,
+        current='Preparing stored scan results...', pdf_path=None, error=None,
+    )
+    _report_threading.Thread(
+        target=_run_fibernode_report,
+        args=(job_id, result),
+        daemon=True,
+    ).start()
+    return jsonify({'success': True, 'job_id': job_id, 'total': 4})
+
+
+@pypnm_bp.route('/fibernode-report/status/<job_id>', methods=['GET'])
+def fibernode_report_status(job_id):
+    """Return Fiber Node report status using the shared report job store."""
+    return pnm_report_status(job_id)
+
+
+@pypnm_bp.route('/fibernode-report/download/<job_id>', methods=['GET'])
+def fibernode_report_download(job_id):
+    """Download a completed Fiber Node report from the shared report store."""
+    return pnm_report_download(job_id)
+
+
 @pypnm_bp.route('/pnm-report/status/<job_id>', methods=['GET'])
 def pnm_report_status(job_id):
     with _report_lock:
@@ -5138,25 +5223,19 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
         _set_report_progress(job_id, status='failed', error=str(exc), current='Failed')
 
 
-def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: list) -> str:
-    """Generate a management-quality branded PDF from collected measurement plots."""
-    import os
+_PDF_BRAND_PURPLE = (75, 18, 107)    # #4b126b
+_PDF_BRAND_MAGENTA = (142, 31, 120)  # #8e1f78
+_PDF_BRAND_ORANGE = (243, 111, 33)   # #f36f21
+_PDF_BRAND_DARK = (40, 40, 50)
+_PDF_BRAND_GRAY = (120, 120, 130)
+_PDF_WHITE = (255, 255, 255)
+
+
+def _new_branded_pnm_pdf(footer_context: str):
+    """Create the shared branded PDF shell used by modem and Fiber Node reports."""
     import tempfile
-    from datetime import datetime
     from fpdf import FPDF
     from PIL import Image
-
-    # Brand colors (matching modem-header-card gradient: purple → magenta → orange)
-    BRAND_PURPLE = (75, 18, 107)    # #4b126b
-    BRAND_MAGENTA = (142, 31, 120)  # #8e1f78
-    BRAND_ORANGE = (243, 111, 33)   # #f36f21
-    BRAND_DARK = (40, 40, 50)
-    BRAND_GRAY = (120, 120, 130)
-    WHITE = (255, 255, 255)
-
-    logo_path = '/app/frontend/static/images/logo.png'
-
-    # Build gradient bar images with logo composited directly into the header
     import numpy as np
 
     def _make_gradient(w_px, h_px):
@@ -5165,66 +5244,100 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
             t = x / (w_px - 1)
             if t < 0.5:
                 s = t * 2
-                r = int(BRAND_PURPLE[0] + (BRAND_MAGENTA[0] - BRAND_PURPLE[0]) * s)
-                g = int(BRAND_PURPLE[1] + (BRAND_MAGENTA[1] - BRAND_PURPLE[1]) * s)
-                b = int(BRAND_PURPLE[2] + (BRAND_MAGENTA[2] - BRAND_PURPLE[2]) * s)
+                start, end = _PDF_BRAND_PURPLE, _PDF_BRAND_MAGENTA
             else:
                 s = (t - 0.5) * 2
-                r = int(BRAND_MAGENTA[0] + (BRAND_ORANGE[0] - BRAND_MAGENTA[0]) * s)
-                g = int(BRAND_MAGENTA[1] + (BRAND_ORANGE[1] - BRAND_MAGENTA[1]) * s)
-                b = int(BRAND_MAGENTA[2] + (BRAND_ORANGE[2] - BRAND_MAGENTA[2]) * s)
-            arr[:, x] = [r, g, b]
+                start, end = _PDF_BRAND_MAGENTA, _PDF_BRAND_ORANGE
+            arr[:, x] = [int(start[i] + (end[i] - start[i]) * s) for i in range(3)]
         return Image.fromarray(arr, 'RGB')
 
-    # Header gradient with logo baked in
     header_img = _make_gradient(1200, 72)
+    logo_path = os.environ.get('PNM_REPORT_LOGO_PATH', '/app/frontend/static/images/logo.png')
+    if not os.path.exists(logo_path):
+        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'frontend', 'static', 'images', 'logo.png'))
     if os.path.exists(logo_path):
         try:
             logo_img = Image.open(logo_path)
             logo_h = int(72 * 0.7)
             logo_w = int(logo_img.width * (logo_h / logo_img.height))
             logo_resized = logo_img.resize((logo_w, logo_h), Image.LANCZOS)
-            x_pos = 1200 - logo_w - 24
-            y_pos = (72 - logo_h) // 2
+            position = (1200 - logo_w - 24, (72 - logo_h) // 2)
             if logo_resized.mode == 'RGBA':
-                header_img.paste(logo_resized, (x_pos, y_pos), mask=logo_resized.split()[3])
+                header_img.paste(logo_resized, position, mask=logo_resized.split()[3])
             else:
-                header_img.paste(logo_resized, (x_pos, y_pos))
-        except Exception as e:
-            logger.warning(f"Logo composite failed: {e}")
+                header_img.paste(logo_resized, position)
+        except Exception as exc:
+            logger.warning('Logo composite failed: %s', exc)
 
-    _header_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-    header_img.save(_header_tmp.name, 'PNG')
-    _header_tmp.close()
+    header_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+    header_img.save(header_tmp.name, 'PNG')
+    header_tmp.close()
+    footer_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+    _make_gradient(1200, 40).save(footer_tmp.name, 'PNG')
+    footer_tmp.close()
 
-    footer_img = _make_gradient(1200, 40)
-    _footer_tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-    footer_img.save(_footer_tmp.name, 'PNG')
-    _footer_tmp.close()
-
-    class PnmPDF(FPDF):
+    class BrandedPnmPDF(FPDF):
         def header(self):
-            self.image(_header_tmp.name, 0, 0, self.w, 18)
-            self.set_text_color(*WHITE)
+            self.image(header_tmp.name, 0, 0, self.w, 18)
+            self.set_text_color(*_PDF_WHITE)
             self.set_font('Helvetica', 'B', 11)
             self.set_xy(8, 4)
             self.cell(0, 5, 'PNM Measurement Report', new_x='LMARGIN', new_y='NEXT')
             self.set_font('Helvetica', 'I', 7)
             self.set_xy(8, 10)
             self.cell(0, 4, 'Henk-Jan Special Edition')
-            self.set_text_color(*BRAND_DARK)
+            self.set_text_color(*_PDF_BRAND_DARK)
             self.set_y(22)
 
         def footer(self):
-            self.image(_footer_tmp.name, 0, self.h - 10, self.w, 10)
-            self.set_text_color(*WHITE)
+            self.image(footer_tmp.name, 0, self.h - 10, self.w, 10)
+            self.set_text_color(*_PDF_WHITE)
             self.set_font('Helvetica', '', 7)
-            self.set_xy(10, self.h - 10 + 2)
-            self.cell(0, 6, f'{mac_address}  |  {modem_info.get("cmts_name", "")}  |  Page {self.page_no()}/{{nb}}', align='C')
+            self.set_xy(10, self.h - 8)
+            self.cell(0, 6, f'{footer_context}  |  Page {self.page_no()}/{{nb}}', align='C')
 
-    pdf = PnmPDF(orientation='L', format='A4')
+    pdf = BrandedPnmPDF(orientation='L', format='A4')
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=18)
+    return pdf, (header_tmp.name, footer_tmp.name)
+
+
+def _cleanup_pdf_brand_assets(paths):
+    for path in paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _pdf_safe_text(value) -> str:
+    """Return text supported by the built-in Helvetica font."""
+    if value is None or value == '':
+        return 'N/A'
+    return str(value).replace('\u2014', '-').replace('\u2013', '-').encode('latin-1', 'replace').decode('latin-1')
+
+
+def _pdf_add_section_heading(pdf, label: str):
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_text_color(*_PDF_BRAND_PURPLE)
+    pdf.cell(0, 9, _pdf_safe_text(label), new_x='LMARGIN', new_y='NEXT')
+    pdf.set_draw_color(*_PDF_BRAND_PURPLE)
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 100, pdf.get_y())
+    pdf.ln(4)
+
+
+def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: list) -> str:
+    """Generate a management-quality branded PDF from collected measurement plots."""
+    import tempfile
+    from datetime import datetime
+
+    BRAND_PURPLE = _PDF_BRAND_PURPLE
+    BRAND_DARK = _PDF_BRAND_DARK
+    BRAND_GRAY = _PDF_BRAND_GRAY
+    pdf, _brand_tmp_paths = _new_branded_pnm_pdf(
+        f'{mac_address}  |  {modem_info.get("cmts_name", "")}'
+    )
 
     # ── Title page ────────────────────────────────────────────
     pdf.add_page()
@@ -5295,14 +5408,232 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     # ── Save ──────────────────────────────────────────────────
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'pnm_report_{mac_address.replace(":", "")}_{timestamp}.pdf'
-    pdf_path = os.path.join('/app/data', filename)
+    output_dir = os.environ.get('PNM_REPORT_OUTPUT_DIR', '/app/data')
+    os.makedirs(output_dir, exist_ok=True)
+    pdf_path = os.path.join(output_dir, filename)
     pdf.output(pdf_path)
 
     # Cleanup temp gradient images
-    try:
-        os.unlink(_header_tmp.name)
-        os.unlink(_footer_tmp.name)
-    except Exception:
-        pass
+    _cleanup_pdf_brand_assets(_brand_tmp_paths)
 
     return pdf_path
+
+
+def _pdf_fit_cell_text(pdf, value, width: float) -> str:
+    text = _pdf_safe_text(value)
+    available = max(1.0, width - 2.0)
+    if pdf.get_string_width(text) <= available:
+        return text
+    suffix = '...'
+    while text and pdf.get_string_width(text + suffix) > available:
+        text = text[:-1]
+    return text + suffix
+
+
+def _pdf_add_result_table(pdf, title: str, headers: list, rows: list, widths: list):
+    """Add a branded, paginated result table using the report typography."""
+    if not rows:
+        return
+
+    def _start_page(continued=False):
+        pdf.add_page()
+        _pdf_add_section_heading(pdf, f'{title}{" (continued)" if continued else ""}')
+        pdf.set_font('Helvetica', 'B', 8)
+        pdf.set_text_color(*_PDF_WHITE)
+        pdf.set_fill_color(*_PDF_BRAND_PURPLE)
+        for heading, width in zip(headers, widths):
+            pdf.cell(width, 7, _pdf_fit_cell_text(pdf, heading, width), border=0, fill=True, align='C')
+        pdf.ln(7)
+
+    _start_page()
+    pdf.set_font('Helvetica', '', 8)
+    for index, row in enumerate(rows):
+        if pdf.get_y() > pdf.h - 20:
+            _start_page(continued=True)
+            pdf.set_font('Helvetica', '', 8)
+        pdf.set_text_color(*_PDF_BRAND_DARK)
+        pdf.set_fill_color(247, 247, 250) if index % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+        for value, width in zip(row, widths):
+            pdf.cell(width, 6.5, _pdf_fit_cell_text(pdf, value, width), border='B', fill=True)
+        pdf.ln(6.5)
+
+
+def _pdf_add_base64_image_page(pdf, title: str, image_data: str) -> bool:
+    """Decode and add a stored scan PNG without triggering a new measurement."""
+    import base64
+    import tempfile
+
+    if not image_data:
+        return False
+    tmp_path = None
+    try:
+        encoded = image_data.split(',', 1)[-1] if ',' in image_data else image_data
+        image_bytes = base64.b64decode(encoded, validate=True)
+        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        tmp.write(image_bytes)
+        tmp.close()
+        tmp_path = tmp.name
+        pdf.add_page()
+        _pdf_add_section_heading(pdf, title)
+        pdf.image(tmp_path, x=10, w=277)
+        return True
+    except Exception as exc:
+        logger.warning('Fiber Node report image %s could not be embedded: %s', title, exc)
+        return False
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _run_fibernode_report(job_id: str, scan_result: dict):
+    """Build a PDF exclusively from a completed Redis-backed scan payload."""
+    try:
+        _set_report_progress(job_id, progress=1, current='Formatting scan summary...')
+        pdf_path = _build_fibernode_pdf(job_id, scan_result)
+        _set_report_progress(job_id, progress=4, status='complete', pdf_path=pdf_path, current='Done')
+    except Exception as exc:
+        logger.error('Fiber Node report PDF build failed: %s', exc, exc_info=True)
+        _set_report_progress(job_id, status='failed', error=str(exc), current='Failed')
+
+
+def _build_fibernode_pdf(job_id: str, scan_result: dict) -> str:
+    """Generate the Fiber Node RxMER report with the modem report's exact branding."""
+    from datetime import datetime
+
+    metadata = scan_result.get('metadata') or {}
+    analysis = scan_result.get('analysis') or {}
+    summary = analysis.get('summary') or {}
+    assessments = analysis.get('modem_assessments') or []
+    group_delay = scan_result.get('group_delay') or []
+    plant = scan_result.get('plant_assessment') or {}
+    plant_stats = plant.get('fn_stats') or {}
+    fiber_node = metadata.get('fiber_node') or 'Unknown Fiber Node'
+    cmts_name = metadata.get('cmts_name') or metadata.get('cmts_ip') or 'Unknown CMTS'
+    cmts_ip = metadata.get('cmts_ip') or 'N/A'
+    ifindices = metadata.get('ofdma_ifindices') or []
+    if not isinstance(ifindices, list):
+        ifindices = [ifindices]
+
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    try:
+        # Title page: same spacing, typography, and centered metadata as modem reports.
+        pdf.add_page()
+        pdf.ln(25)
+        pdf.set_font('Helvetica', 'B', 28)
+        pdf.set_text_color(*_PDF_BRAND_PURPLE)
+        pdf.cell(0, 15, 'Fiber Node / Service Group RxMER Report', align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(5)
+        info_lines = [
+            ('Fiber Node', fiber_node),
+            ('CMTS', cmts_name),
+            ('CMTS IP', cmts_ip),
+            ('OFDMA ifIndex', ', '.join(str(value) for value in ifindices) or 'N/A'),
+            ('Scan Completed', metadata.get('completed_at') or 'N/A'),
+            ('Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+            ('Modems', summary.get('num_modems', len(assessments))),
+        ]
+        for label, value in info_lines:
+            pdf.set_font('Helvetica', '', 10)
+            pdf.set_text_color(*_PDF_BRAND_GRAY)
+            pdf.set_x((pdf.w - 140) / 2)
+            pdf.cell(55, 7, _pdf_safe_text(label), align='R')
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.set_text_color(*_PDF_BRAND_DARK)
+            pdf.cell(85, 7, f'  {_pdf_safe_text(value)}', new_x='LMARGIN', new_y='NEXT')
+
+        def _num(value, decimals=1, suffix=''):
+            try:
+                return f'{float(value):.{decimals}f}{suffix}'
+            except (TypeError, ValueError):
+                return 'N/A'
+
+        summary_rows = [
+            ('Modems analyzed', summary.get('num_modems', len(assessments))),
+            ('Network-impaired subcarriers', _num(summary.get('pct_network_impaired'), 1, '%')),
+            ('In-home modems', _num(summary.get('pct_modems_in_home'), 0, '%')),
+            ('Group average RxMER', _num(summary.get('group_avg_db'), 1, ' dB')),
+            ('Pre-EQ capture', 'Comparison ON/OFF' if metadata.get('compare_preeq') else ('Enabled' if metadata.get('preeq_enabled', True) else 'Disabled')),
+            ('Group-delay analysis', 'Included' if group_delay else 'Not included'),
+        ]
+        _pdf_add_result_table(pdf, 'Scan Summary', ['Metric', 'Result'], summary_rows, [138.5, 138.5])
+
+        modem_rows = []
+        for modem in assessments:
+            delta = modem.get('delta_from_group_avg_db')
+            preeq_delta = modem.get('preeq_delta_avg_db')
+            modem_rows.append((
+                modem.get('cm_mac_address') or modem.get('mac_address'),
+                _num(modem.get('rxmer_avg_db'), 1, ' dB'),
+                _num(delta, 1, ' dB'),
+                modem.get('unique_bad_subcarriers', 'N/A'),
+                _num(preeq_delta, 1, ' dB') if preeq_delta is not None else 'N/A',
+                modem.get('assessment') or 'N/A',
+            ))
+        _pdf_add_result_table(
+            pdf, 'Per-Modem Assessment',
+            ['MAC Address', 'Avg RxMER', 'Delta vs group', 'Bad subcarriers', 'Pre-EQ Delta', 'Assessment'],
+            modem_rows, [48, 36, 42, 45, 42, 64],
+        )
+
+        delay_rows = []
+        for modem in group_delay:
+            channels = modem.get('channels') or [{}]
+            for channel in channels:
+                delay_rows.append((
+                    modem.get('cm_mac_address'), channel.get('us_ifindex'),
+                    _num(channel.get('mtc_dB'), 1), _num(channel.get('nmter_dB'), 1),
+                    _num(channel.get('delay_pp_us'), 3), _num(channel.get('delay_rms_us'), 3),
+                    _num(channel.get('pre_main_cable_ft'), 0, ' ft'),
+                    _num(channel.get('post_main_cable_ft'), 0, ' ft'),
+                ))
+        _pdf_add_result_table(
+            pdf, 'Group Delay Analysis',
+            ['MAC Address', 'US ifIndex', 'MTC dB', 'NMTER dB', 'GD P-P us', 'GD RMS us', 'Pre-main', 'Post-main'],
+            delay_rows, [45, 28, 30, 34, 34, 34, 36, 36],
+        )
+
+        if plant.get('success'):
+            plant_summary_rows = [
+                ('Plant issue detected', 'Yes' if plant_stats.get('plant_issue_detected') else 'No'),
+                ('Modems assessed', plant_stats.get('modem_count', 'N/A')),
+                ('Plant-impaired', _num(plant_stats.get('pct_modems_plant'), 0, '%')),
+                ('In-home', _num(plant_stats.get('pct_modems_in_home'), 0, '%')),
+                ('Fiber Node median GD P-P', _num(plant_stats.get('fn_median_gd_pp_us'), 3, ' us')),
+                ('Fiber Node median NMTER', _num(plant_stats.get('fn_median_nmter_dB'), 1, ' dB')),
+            ]
+            _pdf_add_result_table(pdf, 'Plant vs In-Home Summary', ['Metric', 'Result'], plant_summary_rows, [138.5, 138.5])
+            verdict_rows = []
+            for verdict in plant.get('modem_verdicts') or []:
+                verdict_rows.append((
+                    verdict.get('mac'), verdict.get('verdict'),
+                    _num((verdict.get('confidence') or 0) * 100, 0, '%'),
+                    _num(verdict.get('tap_similarity_to_fn_median'), 2),
+                    _num(verdict.get('gd_deviation_from_fn_median_us'), 3),
+                    _num(verdict.get('nmter_dB'), 1),
+                    verdict.get('unique_bad_subcarrier_count', 'N/A'),
+                    verdict.get('shared_bad_subcarrier_count', 'N/A'),
+                ))
+            _pdf_add_result_table(
+                pdf, 'Plant vs In-Home Per-Modem Verdicts',
+                ['MAC Address', 'Verdict', 'Confidence', 'Tap similarity', 'GD deviation us', 'NMTER dB', 'Unique bad SC', 'Shared bad SC'],
+                verdict_rows, [43, 34, 31, 35, 36, 31, 34, 33],
+            )
+
+        _set_report_progress(job_id, progress=2, current='Adding RxMER plots...')
+        _pdf_add_base64_image_page(pdf, 'Fiber Node RxMER Overlay', scan_result.get('image_data'))
+        _set_report_progress(job_id, progress=3, current='Adding tap profile...')
+        _pdf_add_base64_image_page(pdf, 'Pre-EQ Tap Distance Profile', scan_result.get('tap_plot_image'))
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_node = re.sub(r'[^A-Za-z0-9_-]+', '_', str(fiber_node)).strip('_') or 'fiber_node'
+        filename = f'fibernode_rxmer_report_{safe_node}_{timestamp}.pdf'
+        output_dir = os.environ.get('PNM_REPORT_OUTPUT_DIR', '/app/data')
+        os.makedirs(output_dir, exist_ok=True)
+        pdf_path = os.path.join(output_dir, filename)
+        pdf.output(pdf_path)
+        return pdf_path
+    finally:
+        _cleanup_pdf_brand_assets(brand_tmp_paths)
