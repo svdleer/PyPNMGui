@@ -16,6 +16,7 @@ from io import BytesIO
 import json
 
 # Import spectrum plotter for generating matplotlib plots
+from app.core.auth_providers import is_authenticated_session
 from app.core.spectrum_plotter import generate_spectrum_plot_from_data
 from app.core.constellation_plotter import generate_constellation_plots_from_data
 
@@ -5492,10 +5493,13 @@ def bulk_report_download(job_id):
 
 def _stored_report_access_error(job: dict):
     """Preserve feature-specific authorization for shared report job routes."""
-    if job.get('access_scope') != 'network_rxmer_admin':
+    if job.get('access_scope') not in {
+        'network_rxmer_admin',
+        'network_rxmer_authenticated',
+    }:
         return None
-    if session.get('role') != 'admin':
-        return jsonify({'success': False, 'error': 'Admin role required'}), 403
+    if not is_authenticated_session(session):
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
     from app.core.feature_flags import is_network_rxmer_analytics_enabled
     if not is_network_rxmer_analytics_enabled():
         return jsonify({'success': False, 'error': 'Network RxMER Analytics is disabled'}), 404

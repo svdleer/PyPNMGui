@@ -420,7 +420,7 @@ def admin_set_network_rxmer_analytics_enabled():
 
 
 @auth_bp.route("/network-rxmer", methods=["GET"])
-@admin_required
+@login_required
 def network_rxmer_analytics_page():
     if not is_network_rxmer_analytics_enabled():
         abort(404)
@@ -428,7 +428,7 @@ def network_rxmer_analytics_page():
         "network_rxmer.html",
         base_path=current_app.config.get("APP_ROOT", ""),
         auth_username=session.get("username", ""),
-        auth_role=session.get("role", "admin"),
+        auth_role=session.get("role", "user"),
     )
 
 

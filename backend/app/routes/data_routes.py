@@ -11,6 +11,7 @@ import uuid
 from flask import Response, jsonify, request, session, stream_with_context
 import requests
 
+from app.core.auth_providers import is_authenticated_session
 from app.core.feature_flags import is_network_rxmer_analytics_enabled, is_cm_bulk_reset_enabled, is_custom_snmp_enabled
 from . import api_bp
 
@@ -224,9 +225,8 @@ def run_poller_scheduler_once():
 
 
 def _require_network_rxmer_analytics():
-    gate = _require_admin()
-    if gate:
-        return gate
+    if not is_authenticated_session(session):
+        return jsonify({"status": "error", "message": "Authentication required"}), 401
     if not is_network_rxmer_analytics_enabled():
         return jsonify({"status": "error", "message": "Network RxMER Analytics is disabled"}), 404
     return None
@@ -536,7 +536,7 @@ def network_rxmer_pdf_start(public_id):
         "network_rxmer",
         source,
         total_steps=4,
-        access_scope="network_rxmer_admin",
+        access_scope="network_rxmer_authenticated",
     )
     return jsonify({"status": "success", "report_id": report_id, "total": total})
 
