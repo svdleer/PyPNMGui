@@ -807,7 +807,9 @@ def get_modems():
                 message = response.get('message') or 'CPE inventory search failed'
                 logger.warning('PyPNM CPE inventory search failed: %s', message)
                 return jsonify({'status': 'error', 'message': message}), 503
-            modems = filter_ignored_modems(response.get('modems') or [])
+            # CPE matches are authoritative. Do not hide them based on the
+            # linked modem's IP address matching MODEM_IGNORE_CIDRS.
+            modems = response.get('modems') or []
             return jsonify({
                 'status': 'success',
                 'modems': modems,
