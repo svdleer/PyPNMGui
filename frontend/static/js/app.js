@@ -296,7 +296,6 @@ createApp({
             },
             _enrichBatch1Refreshed: false,  // one-time full refresh after first ~200 enriched
             _metadataRefreshTriggeredByCmts: {},
-            _forceNextLiveRefreshByCmts: {},
             channelStatsLoading: false,
             channelStatsError: null,
             channelStatsProgress: {
@@ -3601,13 +3600,9 @@ createApp({
                     return this._mergeModemPreservingCmts(row, {});
                 };
 
-                const cmtsKey = String(this.selectedCmts || '').trim();
-                const forcePreviewRefresh = !!this._forceNextLiveRefreshByCmts[cmtsKey];
-                if (forcePreviewRefresh && cmtsKey) delete this._forceNextLiveRefreshByCmts[cmtsKey];
-
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, forcePreviewRefresh), 180000);
+                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, false), 180000);
 
                 if (preview.status !== 'success') {
                     this.showError('Failed to get modems', preview.message || 'Unknown error');
@@ -3926,8 +3921,6 @@ createApp({
                 const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/clear`, { method: 'POST' });
                 const data = await response.json();
                 if (data.status === 'success') {
-                    const cmtsKey = String(this.selectedCmts || '').trim();
-                    if (cmtsKey) this._forceNextLiveRefreshByCmts[cmtsKey] = true;
                     this.modems = [];
                     this.liveModemSource = '';
                     this.showSuccess('Cache Cleared', data.message || `Cache cleared for ${this.selectedCmts}`);

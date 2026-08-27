@@ -1647,25 +1647,6 @@ def clear_cmts_modem_cache(cmts_name):
     except Exception as e:
         logger.warning(f"API cache clear error: {e}")
 
-    # 3. Clear PyPNM MySQL inventory rows for this CMTS scope
-    try:
-        import requests
-        pypnm_url = os.environ.get('PYPNM_BASE_URL', os.environ.get('PYPNM_API_URL', 'http://localhost:8000'))
-        payload = {"cmts": cmts_name}
-        cmts_info = CMTSProvider.get_cmts_by_hostname(cmts_name)
-        cmts_ip = None
-        if cmts_info:
-            cmts_ip = cmts_info.get('IPAddress') or cmts_info.get('ip') or cmts_info.get('ip_address')
-        if cmts_ip:
-            payload["cmts_ip"] = cmts_ip
-        inv_resp = requests.post(f"{pypnm_url}/api/admin/inventory/modems/clear", json=payload, timeout=8)
-        if inv_resp.status_code == 200:
-            inv_data = inv_resp.json() if inv_resp.content else {}
-            deleted = int(inv_data.get('deleted') or 0)
-            cleared.append(f"Inventory rows ({deleted} deleted)")
-    except Exception as e:
-        logger.warning(f"Inventory cache clear error: {e}")
-
     msg = f"Cleared cache for {cmts_name}: {', '.join(cleared)}" if cleared else f"No cache found for {cmts_name}"
     logger.info(msg)
     return jsonify({"status": "success", "message": msg})
