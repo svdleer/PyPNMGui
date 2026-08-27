@@ -4,6 +4,7 @@
 
     const root = document.getElementById('cm-bulk-reset-app');
     const basePath = (root && root.dataset.basePath) || '';
+    const topologyScopesEnabled = Boolean(root) && root.dataset.topologyScopesEnabled === 'true';
     const apiBase = `${basePath}/api/admin/cm-reset`;
 
     function byId(id) { return document.getElementById(id); }
@@ -34,10 +35,13 @@
     const fileWrap = byId('scope-file-wrap');
 
     function updateScopeUI() {
+        if (!topologyScopesEnabled && scopeType.value === 'fiber_node') {
+            scopeType.value = 'single';
+        }
         const type = scopeType.value;
         singleWrap.classList.toggle('d-none', type !== 'single');
         cmtsWrap.classList.toggle('d-none', type !== 'cmts' && type !== 'fiber_node');
-        fnWrap.classList.toggle('d-none', type !== 'fiber_node');
+        fnWrap.classList.toggle('d-none', !topologyScopesEnabled || type !== 'fiber_node');
         fileWrap.classList.toggle('d-none', type !== 'file');
     }
     scopeType.addEventListener('change', updateScopeUI);
@@ -59,6 +63,11 @@
     byId('reset-cmts').addEventListener('change', async function () {
         const cmts = this.value;
         const fnSel = byId('reset-fiber-node');
+        if (!topologyScopesEnabled) {
+            fnSel.innerHTML = '<option value="">Topology scopes disabled</option>';
+            fnSel.disabled = true;
+            return;
+        }
         if (!cmts) {
             fnSel.innerHTML = '<option value="">Select CMTS first</option>';
             fnSel.disabled = true;
@@ -80,6 +89,9 @@
 
     byId('reset-plan-btn').addEventListener('click', async function () {
         const type = scopeType.value;
+        if (type === 'fiber_node' && !topologyScopesEnabled) {
+            return alert('Fiber Node scope is disabled by the administrator');
+        }
         let scope = { type };
 
         if (type === 'single') {
@@ -157,7 +169,7 @@
                     <td><small>${job.scheduled_start ? new Date(job.scheduled_start).toLocaleString() : '—'}</small></td>
                     <td><small>${job.created_at ? new Date(job.created_at).toLocaleString() : '—'}</small></td>
                     <td>
-                        ${job.status === 'planned' ? `<button class="btn btn-sm btn-success reset-start-btn" data-id="${job.public_id}" data-total="${job.targets_total}"><i class="bi bi-play-fill"></i></button>` : ''}
+                        ${job.status === 'planned' && (topologyScopesEnabled || String(job.scope_type || '').toLowerCase() !== 'fiber_node') ? `<button class="btn btn-sm btn-success reset-start-btn" data-id="${job.public_id}" data-total="${job.targets_total}"><i class="bi bi-play-fill"></i></button>` : ''}
                         ${job.status === 'running' ? `<button class="btn btn-sm btn-outline-danger reset-cancel-btn" data-id="${job.public_id}"><i class="bi bi-stop-fill"></i></button>` : ''}
                         ${['completed', 'completed_with_errors', 'failed', 'cancelled', 'planned'].includes(job.status) ? `<button class="btn btn-sm btn-outline-secondary reset-delete-btn" data-id="${job.public_id}"><i class="bi bi-trash"></i></button>` : ''}
                     </td>

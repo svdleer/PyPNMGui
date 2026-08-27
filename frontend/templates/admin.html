@@ -182,7 +182,7 @@
         <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
             <div>
                 <div class="fw-semibold">Bulk cable modem reset tool (maintenance window 01:00–06:00)</div>
-                <div class="small text-muted">Adds the admin CM Reset page and menu entry. Supports single, CMTS-wide, fiber-node, or file-upload scope.</div>
+                <div class="small text-muted">Adds the admin CM Reset page and menu entry. Supports single, CMTS-wide, and file-upload scope; Fiber Node scope is controlled separately below.</div>
             </div>
             <form method="post" action="[[ base_path ]]/admin/features/cm-bulk-reset">
                 <input type="hidden" name="enabled" value="[[ 'false' if cm_bulk_reset_enabled else 'true' ]]">
@@ -205,13 +205,36 @@
         <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
             <div>
                 <div class="fw-semibold">Custom per-modem SNMP query tool with OID templates</div>
-                <div class="small text-muted">Query arbitrary MIB objects across modems by CMTS or fiber-node scope. Results exportable as CSV/JSON.</div>
+                <div class="small text-muted">Query arbitrary MIB objects across modems by CMTS or all-network scope; Fiber Node scope is controlled separately below. Results exportable as CSV/JSON.</div>
             </div>
             <form method="post" action="[[ base_path ]]/admin/features/custom-snmp">
                 <input type="hidden" name="enabled" value="[[ 'false' if custom_snmp_enabled else 'true' ]]">
                 <button type="submit" class="btn btn-sm [[ 'btn-outline-danger' if custom_snmp_enabled else 'btn-primary' ]]">
                     <i class="bi [[ 'bi-toggle-off' if custom_snmp_enabled else 'bi-toggle-on' ]] me-1"></i>
                     [[ 'Disable' if custom_snmp_enabled else 'Enable' ]]
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Topology-dependent Scope Feature -->
+    <div class="card border-warning mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong><i class="bi bi-diagram-3 me-2"></i>Topology-dependent Scopes</strong>
+            <span class="badge [[ 'bg-success' if topology_scopes_enabled else 'bg-secondary' ]]">
+                Fiber Node options: [[ 'Enabled' if topology_scopes_enabled else 'Disabled' ]]
+            </span>
+        </div>
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <div class="fw-semibold">Fiber Node planning, filtering, and execution scopes</div>
+                <div class="small text-muted">Controls only topology-dependent Fiber Node options in Network RxMER, CM Reset, and Custom SNMP. All non-topology functions remain available.</div>
+            </div>
+            <form method="post" action="[[ base_path ]]/admin/features/topology-scopes">
+                <input type="hidden" name="enabled" value="[[ 'false' if topology_scopes_enabled else 'true' ]]">
+                <button type="submit" class="btn btn-sm [[ 'btn-outline-danger' if topology_scopes_enabled else 'btn-primary' ]]">
+                    <i class="bi [[ 'bi-toggle-off' if topology_scopes_enabled else 'bi-toggle-on' ]] me-1"></i>
+                    [[ 'Disable' if topology_scopes_enabled else 'Enable' ]]
                 </button>
             </form>
         </div>

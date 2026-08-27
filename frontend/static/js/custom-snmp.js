@@ -4,6 +4,7 @@
 
     const root = document.getElementById('custom-snmp-app');
     const basePath = (root && root.dataset.basePath) || '';
+    const topologyScopesEnabled = Boolean(root) && root.dataset.topologyScopesEnabled === 'true';
     const apiBase = `${basePath}/api/admin/custom-snmp`;
 
     function byId(id) { return document.getElementById(id); }
@@ -194,9 +195,12 @@
     const fnWrap = byId('snmp-fn-wrap');
 
     function updateScopeUI() {
+        if (!topologyScopesEnabled && scopeType.value === 'fiber_node') {
+            scopeType.value = 'cmts';
+        }
         const type = scopeType.value;
         cmtsWrap.classList.toggle('d-none', type === 'all_network');
-        fnWrap.classList.toggle('d-none', type !== 'fiber_node');
+        fnWrap.classList.toggle('d-none', !topologyScopesEnabled || type !== 'fiber_node');
     }
     scopeType.addEventListener('change', updateScopeUI);
 
@@ -212,6 +216,11 @@
     byId('snmp-cmts').addEventListener('change', async function () {
         const cmts = this.value;
         const fnSel = byId('snmp-fiber-node');
+        if (!topologyScopesEnabled) {
+            fnSel.innerHTML = '<option value="">Topology scopes disabled</option>';
+            fnSel.disabled = true;
+            return;
+        }
         if (!cmts) { fnSel.innerHTML = '<option value="">Select CMTS</option>'; fnSel.disabled = true; return; }
         fnSel.disabled = false;
         fnSel.innerHTML = '<option value="">Loading...</option>';
@@ -229,6 +238,9 @@
         if (!oids.length) return alert('Add at least one OID');
 
         const type = scopeType.value;
+        if (type === 'fiber_node' && !topologyScopesEnabled) {
+            return alert('Fiber Node scope is disabled by the administrator');
+        }
         const scope = { type };
         if (type === 'cmts') {
             const cmts = byId('snmp-cmts').value;
@@ -280,7 +292,7 @@
                     <td>${progressHtml}</td>
                     <td><small>${job.created_at ? new Date(job.created_at).toLocaleString() : '—'}</small></td>
                     <td>
-                        ${job.status === 'planned' ? `<button class="btn btn-sm btn-success snmp-start-btn" data-id="${job.public_id}"><i class="bi bi-play-fill"></i></button>` : ''}
+                        ${job.status === 'planned' && (topologyScopesEnabled || String(job.scope_type || '').toLowerCase() !== 'fiber_node') ? `<button class="btn btn-sm btn-success snmp-start-btn" data-id="${job.public_id}"><i class="bi bi-play-fill"></i></button>` : ''}
                         ${job.status === 'running' ? `<button class="btn btn-sm btn-outline-danger snmp-cancel-btn" data-id="${job.public_id}"><i class="bi bi-stop-fill"></i></button>` : ''}
                         ${['completed','completed_with_errors','failed','planned'].includes(job.status) ? `<button class="btn btn-sm btn-outline-secondary snmp-delete-btn" data-id="${job.public_id}"><i class="bi bi-trash"></i></button>` : ''}
                     </td>

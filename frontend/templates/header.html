@@ -33,25 +33,28 @@
                         <i class="bi bi-diagram-3 me-1"></i>[[ t('nav.fiber_node') ]]
                     </a>
                 </li>
-                <li class="nav-item" {% if not network_rxmer_analytics_enabled %}title="Disabled until topology-dependent features are enabled by an administrator"{% endif %}>
-                    <a class="nav-link {% if request.endpoint == 'auth.network_rxmer_analytics_page' %}active{% endif %} {% if not network_rxmer_analytics_enabled %}disabled text-muted{% endif %}"
-                       {% if network_rxmer_analytics_enabled %}href="[[ base_path ]]/network-rxmer"{% else %}href="#" aria-disabled="true" tabindex="-1"{% endif %}>
+                {% if network_rxmer_analytics_enabled %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'auth.network_rxmer_analytics_page' %}active{% endif %}" href="[[ base_path ]]/network-rxmer">
                         <i class="bi bi-bar-chart-line me-1"></i>Network RxMER
                     </a>
                 </li>
+                {% endif %}
                 {% if auth_role == 'admin' %}
-                <li class="nav-item" {% if not cm_bulk_reset_enabled %}title="Disabled until topology-dependent features are enabled by an administrator"{% endif %}>
-                    <a class="nav-link {% if request.endpoint == 'auth.cm_bulk_reset_page' %}active{% endif %} {% if not cm_bulk_reset_enabled %}disabled text-muted{% endif %}"
-                       {% if cm_bulk_reset_enabled %}href="[[ base_path ]]/cm-bulk-reset"{% else %}href="#" aria-disabled="true" tabindex="-1"{% endif %}>
+                {% if cm_bulk_reset_enabled %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'auth.cm_bulk_reset_page' %}active{% endif %}" href="[[ base_path ]]/cm-bulk-reset">
                         <i class="bi bi-arrow-repeat me-1"></i>CM Reset
                     </a>
                 </li>
-                <li class="nav-item" {% if not custom_snmp_enabled %}title="Disabled until topology-dependent features are enabled by an administrator"{% endif %}>
-                    <a class="nav-link {% if request.endpoint == 'auth.custom_snmp_page' %}active{% endif %} {% if not custom_snmp_enabled %}disabled text-muted{% endif %}"
-                       {% if custom_snmp_enabled %}href="[[ base_path ]]/custom-snmp"{% else %}href="#" aria-disabled="true" tabindex="-1"{% endif %}>
+                {% endif %}
+                {% if custom_snmp_enabled %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'auth.custom_snmp_page' %}active{% endif %}" href="[[ base_path ]]/custom-snmp">
                         <i class="bi bi-terminal me-1"></i>Custom SNMP
                     </a>
                 </li>
+                {% endif %}
                 {% endif %}
                 {% if enable_topology %}
                 <li class="nav-item">

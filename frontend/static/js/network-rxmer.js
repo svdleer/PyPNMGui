@@ -5,6 +5,7 @@
     if (!root) return;
 
     const basePath = root.dataset.basePath || '';
+    const topologyScopesEnabled = root.dataset.topologyScopesEnabled === 'true';
     const apiBase = `${basePath}/api/admin/rxmer-analytics`;
     const terminalStates = new Set(['completed', 'completed_with_errors', 'partial', 'failed', 'cancelled', 'interrupted']);
     const startableStates = new Set(['planned', 'interrupted', 'failed']);
@@ -175,13 +176,16 @@
         setPdfReportProgress(0, 'Preparing stored analytics results…');
         updatePdfReportControls();
         try {
+            const filters = {
+                cmts: resultFilters.cmts || '',
+                statistic: resultFilters.statistic || 'average',
+            };
+            if (topologyScopesEnabled && resultFilters.fiberNode) {
+                filters.fiber_node = resultFilters.fiberNode;
+            }
             const response = await request(`/jobs/${encodeURIComponent(selectedJobId)}/pdf`, {
                 method: 'POST',
-                body: JSON.stringify({
-                    cmts: resultFilters.cmts || '',
-                    fiber_node: resultFilters.fiberNode || '',
-                    statistic: resultFilters.statistic || 'average',
-                }),
+                body: JSON.stringify(filters),
             });
             if (generation !== pdfReportGeneration) return;
             pdfReportJobId = response.report_id;
@@ -312,7 +316,9 @@
     function filteredQuery(extra = {}) {
         const params = new URLSearchParams(extra);
         if (resultFilters.cmts) params.set('cmts', resultFilters.cmts);
-        if (resultFilters.fiberNode) params.set('fiber_node', resultFilters.fiberNode);
+        if (topologyScopesEnabled && resultFilters.fiberNode) {
+            params.set('fiber_node', resultFilters.fiberNode);
+        }
         params.set('statistic', resultFilters.statistic || 'average');
         return params.toString();
     }
@@ -478,8 +484,17 @@
         progress.style.width = `${percent}%`;
         progress.textContent = `${percent}%`;
         progress.setAttribute('aria-valuenow', String(percent));
-        byId('rxmer-start-job').classList.toggle('d-none', !startableStates.has(job.status));
-        byId('rxmer-concurrency').disabled = !startableStates.has(job.status);
+        const canStart = startableStates.has(job.status)
+            && (
+                topologyScopesEnabled
+                || !job.scope
+                || (
+                    job.scope.type !== 'fiber_node'
+                    && !(job.scope.fiber_nodes || []).length
+                )
+            );
+        byId('rxmer-start-job').classList.toggle('d-none', !canStart);
+        byId('rxmer-concurrency').disabled = !canStart;
         byId('rxmer-cancel-job').classList.toggle('d-none', !cancellableStates.has(job.status));
         const error = byId('rxmer-job-error');
         error.textContent = job.error_text || '';
@@ -901,14 +916,18 @@
         const select = byId('rxmer-plan-fiber');
         const help = byId('rxmer-plan-fiber-help');
         const cmts = selectedCmts();
-        const enabled = byId('rxmer-scope-type').value === 'cmts' && cmts.length > 0;
+        const enabled = topologyScopesEnabled
+            && byId('rxmer-scope-type').value === 'cmts'
+            && cmts.length > 0;
         const loadVersion = ++planningFiberLoadVersion;
         if (!enabled) {
             planningFiberOptions = [];
             setPlanningFiberOptions([]);
             select.disabled = true;
             field.hidden = true;
-            help.textContent = 'Select a CMTS to load persisted fiber nodes.';
+            help.textContent = topologyScopesEnabled
+                ? 'Select a CMTS to load persisted fiber nodes.'
+                : 'Fiber Node planning is disabled by the administrator.';
             return;
         }
 
@@ -958,7 +977,10 @@
         if (publicId !== selectedJobId) return;
         jobCmtsOptions = enrichCmtsOptions(response.cmts || [], metadata);
         renderResultCmtsMenu();
-        populateDatalist('rxmer-job-fiber-options', response.fiber_nodes || []);
+        populateDatalist(
+            'rxmer-job-fiber-options',
+            topologyScopesEnabled ? (response.fiber_nodes || []) : [],
+        );
     }
 
     async function createPlan(event) {
@@ -973,10 +995,10 @@
             return;
         }
         const scope = {type: scopeType, cmts};
-        const fiberNode = scopeType === 'cmts'
+        const fiberNode = topologyScopesEnabled && scopeType === 'cmts'
             ? byId('rxmer-plan-fiber').value.trim()
             : '';
-        if (fiberNode) scope.fiber_nodes = [fiberNode];
+        if (topologyScopesEnabled && fiberNode) scope.fiber_nodes = [fiberNode];
 
         const modemCountValue = byId('rxmer-plan-modem-count').value;
         const planPayload = {
@@ -1143,7 +1165,9 @@
     async function applyResultFilters() {
         resultFilters = {
             cmts: pendingResultCmts,
-            fiberNode: byId('rxmer-filter-fiber').value.trim(),
+            fiberNode: topologyScopesEnabled
+                ? byId('rxmer-filter-fiber').value.trim()
+                : '',
             statistic: byId('rxmer-filter-statistic').value || 'average',
         };
         resetPdfReport();

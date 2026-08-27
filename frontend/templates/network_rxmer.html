@@ -20,7 +20,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-3 pb-4 rxmer-shell" id="network-rxmer-app" data-base-path="[[ base_path ]]">
+<div class="container-fluid px-3 pb-4 rxmer-shell" id="network-rxmer-app"
+     data-base-path="[[ base_path ]]"
+     data-topology-scopes-enabled="[[ 'true' if topology_scopes_enabled else 'false' ]]">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="mb-1"><i class="bi bi-bar-chart-line me-2"></i>Network RxMER Analytics</h2>
@@ -189,9 +191,9 @@
                                 </ul>
                             </div>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-3{% if not topology_scopes_enabled %} d-none{% endif %}">
                             <label class="form-label small mb-1" for="rxmer-filter-fiber">Fiber node</label>
-                            <input class="form-control form-control-sm" id="rxmer-filter-fiber" list="rxmer-job-fiber-options" placeholder="All fiber nodes" autocomplete="off">
+                            <input class="form-control form-control-sm" id="rxmer-filter-fiber" list="rxmer-job-fiber-options" placeholder="All fiber nodes" autocomplete="off" {% if not topology_scopes_enabled %}disabled{% endif %}>
                             <datalist id="rxmer-job-fiber-options"></datalist>
                         </div>
                         <div class="col-md-3">

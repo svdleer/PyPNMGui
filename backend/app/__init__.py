@@ -27,6 +27,7 @@ from app.core.feature_flags import (
     is_network_rxmer_analytics_enabled,
     is_cm_bulk_reset_enabled,
     is_custom_snmp_enabled,
+    is_topology_scopes_enabled,
 )
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, get_messages, normalize_locale, translate
 
@@ -197,6 +198,7 @@ def create_app():
             'network_rxmer_analytics_enabled': is_network_rxmer_analytics_enabled(),
             'cm_bulk_reset_enabled': is_cm_bulk_reset_enabled(),
             'custom_snmp_enabled': is_custom_snmp_enabled(),
+            'topology_scopes_enabled': is_topology_scopes_enabled(),
             'ui_skin': app.config.get('UI_SKIN', 'classic'),
             'brand_enabled': app.config.get('BRAND_ENABLED', False),
             'logo_available': os.path.isfile(os.path.join(app.static_folder, 'images', 'logo.png')),

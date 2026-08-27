@@ -12,13 +12,50 @@ from flask import Response, jsonify, request, session, stream_with_context
 import requests
 
 from app.core.auth_providers import is_authenticated_session
-from app.core.feature_flags import is_network_rxmer_analytics_enabled, is_cm_bulk_reset_enabled, is_custom_snmp_enabled
+from app.core.feature_flags import (
+    is_network_rxmer_analytics_enabled,
+    is_cm_bulk_reset_enabled,
+    is_custom_snmp_enabled,
+    is_topology_scopes_enabled,
+)
 from . import api_bp
 
 
 def _require_admin():
     if session.get("role") != "admin":
         return jsonify({"status": "error", "message": "Admin role required"}), 403
+    return None
+
+
+def _require_topology_scopes():
+    """Reject only requests that attempt to use topology-dependent Fiber Node data."""
+    if is_topology_scopes_enabled():
+        return None
+
+    def has_value(value):
+        if value is None:
+            return False
+        if isinstance(value, (list, tuple, set)):
+            return any(has_value(item) for item in value)
+        return bool(str(value).strip())
+
+    uses_topology = request.path.rstrip("/").endswith("/options/fiber-nodes")
+    uses_topology = uses_topology or has_value(request.args.getlist("fiber_node"))
+
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        uses_topology = uses_topology or has_value(payload.get("fiber_node"))
+        scope = payload.get("scope")
+        if isinstance(scope, dict):
+            scope_type = str(scope.get("type") or "").strip().lower()
+            uses_topology = uses_topology or scope_type == "fiber_node"
+            uses_topology = uses_topology or has_value(scope.get("fiber_nodes"))
+
+    if uses_topology:
+        return jsonify({
+            "status": "error",
+            "message": "Topology-dependent Fiber Node scopes are disabled",
+        }), 404
     return None
 
 
@@ -50,6 +87,68 @@ def _proxy(method: str, path: str, *, payload=None, params=None, timeout=None):
     except requests.RequestException:
         return jsonify({"status": "error", "message": "PyPNM API unavailable"}), 502
     return jsonify(resp.json() if resp.content else {"status": "success"}), resp.status_code
+
+
+def _get_pypnm_json(path: str, *, params=None, timeout=None):
+    """Fetch one PyPNM JSON object for local authorization or response filtering."""
+    request_timeout = timeout or int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "30"))
+    try:
+        response = requests.get(
+            f"{_poller_api_base()}{path}",
+            params=params,
+            timeout=request_timeout,
+            verify=False,
+        )
+    except requests.Timeout:
+        return None, (jsonify({
+            "status": "error",
+            "message": "PyPNM request timed out",
+        }), 504)
+    except requests.RequestException:
+        return None, (jsonify({
+            "status": "error",
+            "message": "PyPNM API unavailable",
+        }), 502)
+
+    try:
+        body = response.json() if response.content else {}
+    except ValueError:
+        body = {"status": "error", "message": "PyPNM returned an invalid response"}
+    if not response.ok:
+        return None, (jsonify(body), response.status_code)
+    if not isinstance(body, dict):
+        return None, (jsonify({
+            "status": "error",
+            "message": "PyPNM returned an invalid response",
+        }), 502)
+    return body, None
+
+
+def _require_non_topology_job(path: str):
+    """Fail closed when starting a persisted Fiber Node-scoped job while disabled."""
+    if is_topology_scopes_enabled():
+        return None
+
+    body, error = _get_pypnm_json(path)
+    if error:
+        return error
+    job = body.get("job")
+    if not isinstance(job, dict):
+        return jsonify({
+            "status": "error",
+            "message": "Unable to verify the persisted job scope",
+        }), 502
+
+    scope = job.get("scope")
+    scope = scope if isinstance(scope, dict) else {}
+    scope_type = str(job.get("scope_type") or scope.get("type") or "").strip().lower()
+    uses_topology = scope_type == "fiber_node" or bool(scope.get("fiber_nodes"))
+    if uses_topology:
+        return jsonify({
+            "status": "error",
+            "message": "This Fiber Node job cannot be started while topology scopes are disabled",
+        }), 404
+    return None
 
 
 def _stream_proxy(path: str, *, params=None):
@@ -229,7 +328,7 @@ def _require_network_rxmer_analytics():
         return jsonify({"status": "error", "message": "Authentication required"}), 401
     if not is_network_rxmer_analytics_enabled():
         return jsonify({"status": "error", "message": "Network RxMER Analytics is disabled"}), 404
-    return None
+    return _require_topology_scopes()
 
 
 @api_bp.route('/admin/rxmer-analytics/capabilities', methods=['GET'])
@@ -296,7 +395,16 @@ def network_rxmer_job(public_id):
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/options', methods=['GET'])
 def network_rxmer_job_options(public_id):
     gate = _require_network_rxmer_analytics()
-    return gate or _proxy("GET", f"/rxmer-analytics/jobs/{public_id}/options")
+    if gate:
+        return gate
+    path = f"/rxmer-analytics/jobs/{public_id}/options"
+    if is_topology_scopes_enabled():
+        return _proxy("GET", path)
+    body, error = _get_pypnm_json(path)
+    if error:
+        return error
+    body.pop("fiber_nodes", None)
+    return jsonify(body)
 
 
 @api_bp.route('/admin/rxmer-analytics/jobs/<public_id>/modems', methods=['GET'])
@@ -591,6 +699,9 @@ def network_rxmer_start(public_id):
     gate = _require_network_rxmer_analytics()
     if gate:
         return gate
+    scope_gate = _require_non_topology_job(f"/rxmer-analytics/jobs/{public_id}")
+    if scope_gate:
+        return scope_gate
     return _proxy(
         "POST",
         f"/rxmer-analytics/jobs/{public_id}/start",
@@ -613,7 +724,7 @@ def _require_cm_bulk_reset():
         return gate
     if not is_cm_bulk_reset_enabled():
         return jsonify({"status": "error", "message": "CM Bulk Reset is disabled"}), 404
-    return None
+    return _require_topology_scopes()
 
 
 @api_bp.route('/admin/cm-reset/capabilities', methods=['GET'])
@@ -668,6 +779,9 @@ def cm_reset_start(public_id):
     gate = _require_cm_bulk_reset()
     if gate:
         return gate
+    scope_gate = _require_non_topology_job(f"/cm-reset/jobs/{public_id}")
+    if scope_gate:
+        return scope_gate
     return _proxy(
         "POST",
         f"/cm-reset/jobs/{public_id}/start",
@@ -705,7 +819,7 @@ def _require_custom_snmp():
         return gate
     if not is_custom_snmp_enabled():
         return jsonify({"status": "error", "message": "Custom SNMP is disabled"}), 404
-    return None
+    return _require_topology_scopes()
 
 
 @api_bp.route('/admin/custom-snmp/capabilities', methods=['GET'])
@@ -780,6 +894,9 @@ def custom_snmp_start(public_id):
     gate = _require_custom_snmp()
     if gate:
         return gate
+    scope_gate = _require_non_topology_job(f"/custom-snmp/jobs/{public_id}")
+    if scope_gate:
+        return scope_gate
     return _proxy("POST", f"/custom-snmp/jobs/{public_id}/start", payload=request.get_json(silent=True) or {})
 
 

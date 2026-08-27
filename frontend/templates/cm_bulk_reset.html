@@ -13,7 +13,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid py-3" id="cm-bulk-reset-app" data-base-path="[[ base_path ]]">
+<div class="container-fluid py-3" id="cm-bulk-reset-app"
+     data-base-path="[[ base_path ]]"
+     data-topology-scopes-enabled="[[ 'true' if topology_scopes_enabled else 'false' ]]">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>CM Bulk Reset</h4>
         <span class="badge bg-warning text-dark">Admin Only</span>
@@ -38,7 +40,7 @@
                     <select class="form-select form-select-sm" id="reset-scope-type">
                         <option value="single">Single modem (MAC)</option>
                         <option value="cmts">Entire CMTS</option>
-                        <option value="fiber_node">Fiber node</option>
+                        <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Fiber node{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
                         <option value="file">Upload MAC file</option>
                     </select>
                 </div>

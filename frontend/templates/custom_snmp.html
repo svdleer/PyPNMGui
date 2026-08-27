@@ -10,7 +10,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid py-3" id="custom-snmp-app" data-base-path="[[ base_path ]]">
+<div class="container-fluid py-3" id="custom-snmp-app"
+     data-base-path="[[ base_path ]]"
+     data-topology-scopes-enabled="[[ 'true' if topology_scopes_enabled else 'false' ]]">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-terminal me-2"></i>Custom SNMP Query</h4>
         <span class="badge bg-warning text-dark">Admin Only</span>
@@ -28,7 +30,7 @@
                             <label class="form-label small fw-bold">Type</label>
                             <select class="form-select form-select-sm" id="snmp-scope-type">
                                 <option value="cmts">CMTS</option>
-                                <option value="fiber_node">Fiber node</option>
+                                <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Fiber node{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
                                 <option value="all_network">All network</option>
                             </select>
                         </div>

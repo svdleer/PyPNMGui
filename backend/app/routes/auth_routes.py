@@ -15,9 +15,11 @@ from app.core.feature_flags import (
     NETWORK_RXMER_ANALYTICS_SETTING,
     CM_BULK_RESET_SETTING,
     CUSTOM_SNMP_SETTING,
+    TOPOLOGY_SCOPES_SETTING,
     is_network_rxmer_analytics_enabled,
     is_cm_bulk_reset_enabled,
     is_custom_snmp_enabled,
+    is_topology_scopes_enabled,
 )
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale, translate
 
@@ -395,6 +397,7 @@ def admin_page():
         network_rxmer_analytics_enabled=is_network_rxmer_analytics_enabled(),
         cm_bulk_reset_enabled=is_cm_bulk_reset_enabled(),
         custom_snmp_enabled=is_custom_snmp_enabled(),
+        topology_scopes_enabled=is_topology_scopes_enabled(),
         data_store_backend="PyPNM",
         data_store_error=data_store_error,
     )
@@ -475,6 +478,25 @@ def admin_set_custom_snmp_enabled():
             updated_by=session.get("username") or "admin",
         )
         flash(f"Custom SNMP {'enabled' if enabled else 'disabled'}", "success")
+    except Exception as exc:
+        flash(f"Feature toggle failed: {exc}", "danger")
+    return redirect(_prefixed(url_for("auth.admin_page")))
+
+
+@auth_bp.route("/admin/features/topology-scopes", methods=["POST"])
+@admin_required
+def admin_set_topology_scopes_enabled():
+    enabled = request.form.get("enabled") == "true"
+    try:
+        auth_db.set_setting(
+            TOPOLOGY_SCOPES_SETTING,
+            "true" if enabled else "false",
+            updated_by=session.get("username") or "admin",
+        )
+        flash(
+            f"Topology-dependent scopes {'enabled' if enabled else 'disabled'}",
+            "success",
+        )
     except Exception as exc:
         flash(f"Feature toggle failed: {exc}", "danger")
     return redirect(_prefixed(url_for("auth.admin_page")))
