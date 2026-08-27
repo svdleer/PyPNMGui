@@ -5554,7 +5554,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
     mac_address = data['mac_address']
     modem_ip = data['modem_ip']
     community = data.get('community', 'private')
-    tftp_ip = data.get('tftp_ip') or os.environ.get('TFTP_IPV4', '212.178.218.234')
+    tftp_ip = data.get('tftp_ip') or get_tftp_for_cm()
     modem_info = data.get('modem_info') or {}
 
     client = PyPNMClient()
@@ -5580,7 +5580,7 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             elif mtype == 'histogram':
                 result = client.get_histogram(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'constellation':
-                result = client.get_constellation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_constellation_display(mac_address, modem_ip, tftp_ip, community, output_type='archive')
             elif mtype == 'modulation_profile':
                 result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, community)
             elif mtype == 'impulse_response':
