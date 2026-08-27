@@ -10,19 +10,20 @@ LAB_SSH_HOST = os.environ.get('LAB_SSH_HOST', 'access-engineering.nl')
 LAB_SSH_PORT = int(os.environ.get('LAB_SSH_PORT', '65001'))
 LAB_SSH_USER = os.environ.get('LAB_SSH_USER', 'svdleer')
 
-# SNMP Communities from environment
-SNMP_COMMUNITY_ARRIS = os.environ.get('SNMP_COMMUNITY_ARRIS', 'public')
-SNMP_COMMUNITY_CASA = os.environ.get('SNMP_COMMUNITY_CASA', 'public')
-SNMP_WRITE_COMMUNITY_ARRIS = os.environ.get('SNMP_WRITE_COMMUNITY_ARRIS', SNMP_COMMUNITY_ARRIS)
-SNMP_WRITE_COMMUNITY_CASA = os.environ.get('SNMP_WRITE_COMMUNITY_CASA', SNMP_COMMUNITY_CASA)
-CM_RW_COMMUNITY = os.environ.get('CM_RW_COMMUNITY', 'z1gg0m0n1t0r1ng')  # Read-Write community for modem SNMP SET
-SNMP_COMMUNITY_CISCO = os.environ.get('SNMP_COMMUNITY_CISCO', 'public')
-SNMP_WRITE_COMMUNITY_CISCO = os.environ.get('SNMP_WRITE_COMMUNITY_CISCO', SNMP_COMMUNITY_CISCO)
-SNMP_COMMUNITY_COMMSCOPE = os.environ.get('SNMP_COMMUNITY_COMMSCOPE', 'public')
-SNMP_WRITE_COMMUNITY_COMMSCOPE = os.environ.get('SNMP_WRITE_COMMUNITY_COMMSCOPE', SNMP_COMMUNITY_COMMSCOPE)
+# SNMP communities are optional and environment-only. Read and write
+# credentials remain independent.
+SNMP_COMMUNITY_ARRIS = os.environ.get('SNMP_COMMUNITY_ARRIS')
+SNMP_COMMUNITY_CASA = os.environ.get('SNMP_COMMUNITY_CASA')
+SNMP_WRITE_COMMUNITY_ARRIS = os.environ.get('SNMP_WRITE_COMMUNITY_ARRIS')
+SNMP_WRITE_COMMUNITY_CASA = os.environ.get('SNMP_WRITE_COMMUNITY_CASA')
+CM_RW_COMMUNITY = os.environ.get('CM_RW_COMMUNITY')  # Read-write community for modem SNMP SET
+SNMP_COMMUNITY_CISCO = os.environ.get('SNMP_COMMUNITY_CISCO')
+SNMP_WRITE_COMMUNITY_CISCO = os.environ.get('SNMP_WRITE_COMMUNITY_CISCO')
+SNMP_COMMUNITY_COMMSCOPE = os.environ.get('SNMP_COMMUNITY_COMMSCOPE')
+SNMP_WRITE_COMMUNITY_COMMSCOPE = os.environ.get('SNMP_WRITE_COMMUNITY_COMMSCOPE')
 
-# Modem SNMP communities (for direct modem access requiring SET operations)
-CM_SNMP_COMMUNITY = os.environ.get('CM_SNMP_COMMUNITY', 'z1gg0m0n1t0r1ng')
+# Modem SNMP community for direct modem access.
+CM_SNMP_COMMUNITY = os.environ.get('CM_SNMP_COMMUNITY')
 
 LAB_CMTS_SYSTEMS = [
     {
@@ -190,6 +191,15 @@ LAB_CMTS_SYSTEMS = [
         'location': 'LAB-ASD-GT0003'
     }
 ]
+
+# Omit unconfigured or empty credentials from the runtime LAB inventory.
+for _cmts in LAB_CMTS_SYSTEMS:
+    for _community_key in ('snmp_community', 'write_community'):
+        _community_value = _cmts.get(_community_key)
+        if _community_value is None or (
+            isinstance(_community_value, str) and not _community_value.strip()
+        ):
+            _cmts.pop(_community_key, None)
 
 # LAB mode - direct SNMP access via SSH to access-engineering.nl
 LAB_MODE = True

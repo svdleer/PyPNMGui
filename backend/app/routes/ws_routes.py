@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import time
 from collections import deque
 
@@ -20,6 +21,51 @@ except ImportError:
 _utsc_sessions = {}
 
 
+def _non_empty_community(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _first_community(*values):
+    for value in values:
+        resolved = _non_empty_community(value)
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _cmts_inventory(cmts_ip):
+    if not cmts_ip:
+        return {}
+    try:
+        from app.core.cmts_provider import CMTSProvider
+        return CMTSProvider.get_cmts_by_ip(cmts_ip) or {}
+    except Exception:
+        return {}
+
+
+def _resolve_cmts_read_community(cmts_ip, explicit=None):
+    cmts = _cmts_inventory(cmts_ip)
+    return _first_community(
+        explicit,
+        cmts.get('snmp_community'),
+        os.environ.get('CMTS_COMMUNITY'),
+        os.environ.get('CMTS_SNMP_COMMUNITY'),
+    )
+
+
+def _resolve_cmts_write_community(cmts_ip, explicit=None):
+    cmts = _cmts_inventory(cmts_ip)
+    return _first_community(
+        explicit,
+        cmts.get('write_community'),
+        os.environ.get('CMTS_WRITE_COMMUNITY'),
+    )
+
+
 def start_utsc_via_pypnm(
     cmts_ip,
     rf_port_ifindex,
@@ -29,6 +75,9 @@ def start_utsc_via_pypnm(
     trigger_mode=2,
 ):
     """Start UTSC through PyPNM, the sole owner of remote execution."""
+    write_community = _non_empty_community(write_community)
+    if write_community is None:
+        return {'success': False, 'error': 'CMTS write community is not configured'}
     try:
         from app.core.pypnm_client import PyPNMClient
 
@@ -36,7 +85,7 @@ def start_utsc_via_pypnm(
             cmts_ip=cmts_ip,
             rf_port_ifindex=int(rf_port_ifindex),
             community=community,
-            write_community=write_community or community,
+            write_community=write_community,
             cfg_index=int(cfg_index),
             trigger_mode=int(trigger_mode),
         )
@@ -56,6 +105,9 @@ def stop_utsc_via_pypnm(
     cfg_index=1,
 ):
     """Stop UTSC through PyPNM using the row returned by start/configure."""
+    write_community = _non_empty_community(write_community)
+    if write_community is None:
+        return {'success': False, 'error': 'CMTS write community is not configured'}
     try:
         from app.core.pypnm_client import PyPNMClient
 
@@ -63,7 +115,7 @@ def stop_utsc_via_pypnm(
             cmts_ip=cmts_ip,
             rf_port_ifindex=int(rf_port_ifindex),
             community=community,
-            write_community=write_community or community,
+            write_community=write_community,
             cfg_index=int(cfg_index),
         )
         if not result.get('success'):
@@ -125,8 +177,8 @@ def init_websocket(app):
         rf_port = request.args.get('rf_port')
         cfg_index = int(request.args.get('cfg_index', 0))
         cmts_ip = request.args.get('cmts_ip')
-        community = request.args.get('community', 'public')
-        write_community = request.args.get('write_community', community)
+        community = _resolve_cmts_read_community(cmts_ip)
+        write_community = _resolve_cmts_write_community(cmts_ip)
         externally_started = request.args.get('live', '').lower() in {'1', 'true', 'yes', 'on'}
         vendor = _vendor_hint(cmts_ip)
         mac_clean = mac_address.replace(':', '').replace('-', '').lower()

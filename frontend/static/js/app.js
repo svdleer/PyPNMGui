@@ -78,8 +78,8 @@ createApp({
             searchHouseNumber: '',
             customerIdPrefix: 'RES-',
             topologySuggestions: [],
-            snmpCommunity: 'public',
-            snmpCommunityRW: 'private',
+            snmpCommunity: '',
+            snmpCommunityRW: '',
             snmpCommunityModem: '',
             selectedCmts: '',
             selectedInterface: '',
@@ -1267,6 +1267,20 @@ createApp({
     methods: {
         // ============== Utility Methods ==============
 
+        _hasCredential(value) {
+            return typeof value === 'string' && value.trim().length > 0;
+        },
+
+        _firstCredential(...values) {
+            return values.find(value => this._hasCredential(value)) || '';
+        },
+
+        _credentialFields(fields) {
+            return Object.fromEntries(
+                Object.entries(fields || {}).filter(([, value]) => this._hasCredential(value))
+            );
+        },
+
         _validVelocityFactor(value) {
             const velocityFactor = Number(value);
             if (!Number.isFinite(velocityFactor)) return null;
@@ -1747,7 +1761,12 @@ createApp({
                 const discoverResp = await fetch(`${API_BASE}/pypnm/cmts/ofdma/discover/${encodeURIComponent(macAddress)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cmts_ip: cmtsIp, community: this.fnScanCommunity || this.snmpCommunity }),
+                    body: JSON.stringify({
+                        cmts_ip: cmtsIp,
+                        ...this._credentialFields({
+                            community: this._firstCredential(this.fnScanCommunity, this.snmpCommunity),
+                        }),
+                    }),
                 });
                 if (discoverResp.ok) {
                     const discover = await discoverResp.json();
@@ -1763,7 +1782,12 @@ createApp({
                 const response = await fetch(`${API_BASE}/pypnm/upstream/interfaces/${encodeURIComponent(macAddress)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cmts_ip: cmtsIp, community: this.fnScanCommunity || this.snmpCommunity }),
+                    body: JSON.stringify({
+                        cmts_ip: cmtsIp,
+                        ...this._credentialFields({
+                            community: this._firstCredential(this.fnScanCommunity, this.snmpCommunity),
+                        }),
+                    }),
                 });
                 if (!response.ok) return null;
                 const result = await response.json();
@@ -2880,14 +2904,14 @@ createApp({
             try {
                 const response = await fetch(`${API_BASE}/pypnm/config`);
                 const data = await response.json();
-                if (data.snmpCommunity) this.snmpCommunity = data.snmpCommunity;
-                if (data.snmpCommunityRW) this.snmpCommunityRW = data.snmpCommunityRW;
-                if (data.snmpCommunityModem) this.snmpCommunityModem = data.snmpCommunityModem;
+                if (this._hasCredential(data.snmpCommunity)) this.snmpCommunity = data.snmpCommunity;
+                if (this._hasCredential(data.snmpCommunityRW)) this.snmpCommunityRW = data.snmpCommunityRW;
+                if (this._hasCredential(data.snmpCommunityModem)) this.snmpCommunityModem = data.snmpCommunityModem;
                 // Pre-populate fiber node scan communities from config
-                if (data.snmpCommunity)   this.fnScanCommunity = data.snmpCommunity;
-                if (data.snmpCommunityRW) this.fnScanWriteCommunity = data.snmpCommunityRW;
+                if (this._hasCredential(data.snmpCommunity))   this.fnScanCommunity = data.snmpCommunity;
+                if (this._hasCredential(data.snmpCommunityRW)) this.fnScanWriteCommunity = data.snmpCommunityRW;
             } catch (e) {
-                console.warn(`Could not load server config, using defaults`, e);
+                console.warn(`Could not load server config`, e);
             }
         },
         
@@ -3204,9 +3228,10 @@ createApp({
             for (const [canonicalName, group] of groupsByCmts.entries()) {
                 try {
                     const params = new URLSearchParams({
-                        community: this.snmpCommunity,
                         limit: String(CM_MODEM_LIMIT),
                     });
+                    const community = this._firstCredential(this.snmpCommunity);
+                    if (community) params.set('community', community);
                     const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(canonicalName)}/modems?${params.toString()}`);
                     const data = await response.json();
                     if (data?.status !== 'success' || !Array.isArray(data.modems)) continue;
@@ -3327,8 +3352,8 @@ createApp({
                     );
                 }
 
-                this.fnScanCommunity = this.fnScanCommunity || this.snmpCommunity;
-                this.fnScanWriteCommunity = this.fnScanWriteCommunity || this.snmpCommunityRW;
+                this.fnScanCommunity = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
+                this.fnScanWriteCommunity = this._firstCredential(this.fnScanWriteCommunity, this.snmpCommunityRW);
                 this.fnScanUseModemSelector = true;
                 this.fnScanSelectedModemMacs = this.selectedModem?.mac_address ? [this.selectedModem.mac_address] : [];
                 this.fnScanIfindex = '';
@@ -3366,8 +3391,8 @@ createApp({
                 const selectedCmts = this.findCmtsMatch(scanCmtsIp, selectedCmtsName);
                 this.fnScanCmts = selectedCmts || { name: selectedCmtsName || scanCmtsIp, ip: scanCmtsIp };
                 this.fnScanCmtsIp = scanCmtsIp;
-                this.fnScanCommunity = this.fnScanCommunity || this.snmpCommunity;
-                this.fnScanWriteCommunity = this.fnScanWriteCommunity || this.snmpCommunityRW;
+                this.fnScanCommunity = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
+                this.fnScanWriteCommunity = this._firstCredential(this.fnScanWriteCommunity, this.snmpCommunityRW);
                 this.fnScanUseModemSelector = true;
                 this.fnScanSelectedModemMacs = selected.map(m => m.mac_address);
                 const selectedMac = this.selectedModem?.mac_address || '';
@@ -4031,8 +4056,8 @@ createApp({
                 ip: resolvedCmtsIp,
             };
             this.fnScanCmtsIp = resolvedCmtsIp;
-            this.fnScanCommunity = this.fnScanCommunity || this.snmpCommunity;
-            this.fnScanWriteCommunity = this.fnScanWriteCommunity || this.snmpCommunityRW;
+            this.fnScanCommunity = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
+            this.fnScanWriteCommunity = this._firstCredential(this.fnScanWriteCommunity, this.snmpCommunityRW);
             const selectedModemFn = String(m.fiber_node || m.fibernode || '').trim();
             this.fnScanTopologyBridgeNodeId = selectedModemFn.includes('.') ? selectedModemFn : this.fnScanTopologyBridgeNodeId;
 
@@ -4513,9 +4538,14 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem || 'private',
                         cmts_ip: this.selectedModem.cmts_ip,
-                        cmts_community: this.selectedModem.cmts_community || this.snmpCommunity,
+                        ...this._credentialFields({
+                            community: this.snmpCommunityModem,
+                            cmts_community: this._firstCredential(
+                                this.selectedModem.cmts_community,
+                                this.snmpCommunity,
+                            ),
+                        }),
                         // Full CMTS stats: button-driven so latency is acceptable.
                         // Needed for OFDM Stats tab (IUC codewords, profile speed, partial reason).
                         cmts_stats: true,
@@ -4916,8 +4946,13 @@ createApp({
                         mac_address: this.selectedModem.mac_address,
                         modem_ip: this.selectedModem.ip_address || this.selectedModem.modem_ip,
                         cmts_ip: this.selectedModem.cmts_ip,
-                        community: this.snmpCommunityModem || 'private',
-                        write_community: this.snmpCommunityRW || this.snmpCommunityModem || 'private',
+                        ...this._credentialFields({
+                            cmts_community: this._firstCredential(
+                                this.selectedModem.cmts_community,
+                                this.snmpCommunity,
+                            ),
+                            cmts_write_community: this.snmpCommunityRW,
+                        }),
                         ofdma_ifindex: this.selectedModem.ofdma_ifindex || (this.ofdmaChannels && this.ofdmaChannels[0] && this.ofdmaChannels[0].ifindex) || null,
                         ofdma_channels: (this.upstreamInterfaces.ofdmaChannels || []).map(ch => ch.ifindex || ch.ofdma_ifindex).filter(Boolean),
                         measurements: this.reportMeasurements,
@@ -5071,8 +5106,8 @@ createApp({
                         repeat_period_ms: this.utscConfig.repeatPeriodMs,
                         freerun_duration_ms: this.utscConfig.freerunDurationMs,
                         runtime: this.utscConfig.runtime,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     })
                 });
                 
@@ -5132,8 +5167,8 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         cfg_index: cfgIndexForStart,
                         trigger_mode: this.utscConfig.triggerMode || 2,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     }),
                     signal,
                 });
@@ -5180,8 +5215,8 @@ createApp({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         cfg_index: this.utscConfig.cfgIndex || 1,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     })
                 });
                 
@@ -5208,8 +5243,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     }),
                     signal: this._currentFetchController?.signal,
                 });
@@ -5299,8 +5334,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW,
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW }),
                         pre_eq: this.usRxmerConfig.preEq,
                         filename: this.comparePreEqMode
                             ? (this.usRxmerComparePhase === 1 ? this.usRxmerFilenameOn : this.usRxmerFilenameOff)
@@ -5336,8 +5371,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     }),
                     signal: this._currentFetchController?.signal,
                 });
@@ -5389,8 +5424,8 @@ createApp({
                         cmts_ip: this.selectedModem.cmts_ip,
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         filename: this.utscLastFilename,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW,
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW }),
                         include_plot: true  // Single-shot: include matplotlib plot
                     })
                 });
@@ -5422,8 +5457,8 @@ createApp({
                     body: JSON.stringify({
                         cmts_ip: this.selectedModem.cmts_ip,
                         ofdma_ifindex: this.usRxmerConfig.ofdmaIfindex,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     }),
                     signal: this._currentFetchController?.signal,
                 });
@@ -5596,8 +5631,8 @@ createApp({
             const resolved = this.findCmtsMatch(cmts?.ip, cmts?.hostname || cmts?.name || cmts?.cmts || '') || cmts;
             this.fnScanCmts           = resolved;
             this.fnScanCmtsIp         = resolved?.ip || cmts?.ip || '';
-            this.fnScanCommunity      = resolved?.community || cmts?.community || this.snmpCommunity;
-            this.fnScanWriteCommunity = resolved?.community_rw || cmts?.community_rw || this.snmpCommunityRW;
+            this.fnScanCommunity      = this._firstCredential(resolved?.community, cmts?.community, this.snmpCommunity);
+            this.fnScanWriteCommunity = this._firstCredential(resolved?.community_rw, cmts?.community_rw, this.snmpCommunityRW);
             this.fnScanIfindex        = '';
             this.fnScanFiberNode      = '';
             this.fnScanId             = null;
@@ -5632,13 +5667,17 @@ createApp({
         },
 
         async loadFnScanChannels(refresh = false) {
-            if (!this.fnScanCmtsIp || !this.fnScanCommunity) return;
+            if (!this.fnScanCmtsIp) return;
             this.fnScanChannelsLoading = true;
             try {
                 const r = await fetch(`${API_BASE}/pypnm/cmts/ofdma/channels`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cmts_ip: this.fnScanCmtsIp, community: this.fnScanCommunity, refresh })
+                    body: JSON.stringify({
+                        cmts_ip: this.fnScanCmtsIp,
+                        refresh,
+                        ...this._credentialFields({ community: this.fnScanCommunity }),
+                    })
                 });
                 const d = await r.json();
                 if (d.success) {
@@ -5860,7 +5899,15 @@ createApp({
                 // (vendor/firmware/sysDescr per modem) is too slow on large CMTSes.
                 // Only append refresh=true when explicitly requested (liveSnmp) to avoid
                 // triggering a full SNMP walk on every fiber node selection.
-                const q = `community=${encodeURIComponent(this.fnScanCommunity || this.snmpCommunity)}&limit=${CM_MODEM_LIMIT}&enrich=false&allow_partial=true${liveSnmp ? '&refresh=true' : ''}`;
+                const params = new URLSearchParams({
+                    limit: String(CM_MODEM_LIMIT),
+                    enrich: 'false',
+                    allow_partial: 'true',
+                });
+                const community = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
+                if (community) params.set('community', community);
+                if (liveSnmp) params.set('refresh', 'true');
+                const q = params.toString();
 
                 let resp = await fetch(`${API_BASE}/cmts/${encodeURIComponent(cmtsRef)}/modems?${q}`);
                 if (resp.status === 404) {
@@ -5972,12 +6019,12 @@ createApp({
         },
 
         async loadFnModemCount(forceSnmp = false) {
-            if (!this.fnScanCmtsIp || !this.fnScanCommunity || !this.fnScanIfindex) return;
+            if (!this.fnScanCmtsIp || !this.fnScanIfindex) return;
             this.fnScanModemCountLoading = true;
             try {
                 const payload = {
                     cmts_ip:       this.fnScanCmtsIp,
-                    community:     this.fnScanCommunity,
+                    ...this._credentialFields({ community: this.fnScanCommunity }),
                     ofdma_ifindex: parseInt(this.fnScanIfindex),
                     max_modems:    500,
                 };
@@ -6544,8 +6591,8 @@ createApp({
         },
 
         async scanFiberNodeGroup() {
-            if (!this.fnScanCmtsIp || !this.fnScanCommunity) {
-                this.$toast?.error('CMTS IP and community required');
+            if (!this.fnScanCmtsIp) {
+                this.$toast?.error('CMTS IP required');
                 return;
             }
 
@@ -6627,8 +6674,10 @@ createApp({
                         scan_id:             scanId,
                         cmts_ip:             this.fnScanCmtsIp,
                         cmts_name:           this.fnScanCmts?.hostname || this.fnScanCmts?.name || this.fnScanCmts?.cmts || '',
-                        community:           this.fnScanCommunity,
-                        write_community:     this.fnScanWriteCommunity || this.fnScanCommunity,
+                        ...this._credentialFields({
+                            community: this.fnScanCommunity,
+                            write_community: this.fnScanWriteCommunity,
+                        }),
                         ofdma_ifindices:     [parseInt(this.fnScanIfindex), ...this.fnScanExtraIfindices].filter(Boolean),
                         fiber_node:          this.fnScanFiberNode || null,
                         preeq_enabled:       this.fnScanPreEq,
@@ -7012,8 +7061,10 @@ createApp({
                     scan_id:               dsScanId,
                     cmts_hostname:         this.fnScanCmts?.name || this.fnScanCmts?.hostname,
                     cmts_ip:               this.fnScanCmtsIp,
-                    community:             this.fnScanCommunity || this.snmpCommunity,
-                    modem_write_community: this.snmpCommunityModem,
+                    ...this._credentialFields({
+                        community: this._firstCredential(this.fnScanCommunity, this.snmpCommunity),
+                    }),
+                    ...this._credentialFields({ modem_write_community: this.snmpCommunityModem }),
                     max_modems:            maxDs,
                     fiber_node:           this.fnScanFiberNode || null,
                     threshold:            Number(this.dsScanThreshold),
@@ -7081,8 +7132,10 @@ createApp({
                     scan_id:               fbScanId,
                     cmts_hostname:         this.fnScanCmts?.name || this.fnScanCmts?.hostname,
                     cmts_ip:               this.fnScanCmtsIp,
-                    community:             this.fnScanCommunity || this.snmpCommunity,
-                    modem_write_community: this.snmpCommunityModem,
+                    ...this._credentialFields({
+                        community: this._firstCredential(this.fnScanCommunity, this.snmpCommunity),
+                    }),
+                    ...this._credentialFields({ modem_write_community: this.snmpCommunityModem }),
                     max_modems:            maxFb,
                     strict_in_channel:     this.fbScanStrictInChannel,
                     fiber_node:           this.fnScanFiberNode || null,
@@ -7299,8 +7352,8 @@ createApp({
             // Pass live=1 if UTSC is already running to skip WebSocket re-configuration
             const liveParam = this.runningUtsc ? '&live=1' : '';
             const cfgParams = `&center_freq_hz=${this.utscConfig.centerFreqMhz * 1000000}&span_hz=${this.utscConfig.spanMhz * 1000000}&num_bins=${this.utscConfig.numBins}&output_format=${this.utscConfig.outputFormat}&window=${this.utscConfig.window}&runtime=${this.utscConfig.runtime}&cfg_index=${this.utscConfig.cfgIndex || 0}`;
-            const communityParam = this.snmpCommunityRW ? `&community=${encodeURIComponent(this.snmpCommunityRW)}` : '';
-            iframe.src = `${BASE_PATH}/spectrum-analyzer?mac=${encodeURIComponent(mac)}&rfport=${this.utscConfig.rfPortIfindex || ''}&cmts=${encodeURIComponent(this.selectedModem.cmts_ip || '')}${liveParam}${cfgParams}${communityParam}`;
+            // Credentials are resolved server-side; never place them in iframe or WebSocket URLs.
+            iframe.src = `${BASE_PATH}/spectrum-analyzer?mac=${encodeURIComponent(mac)}&rfport=${this.utscConfig.rfPortIfindex || ''}&cmts=${encodeURIComponent(this.selectedModem.cmts_ip || '')}${liveParam}${cfgParams}`;
             
             // Listen for 'buffering_complete' from iframe to hide waiting overlay
             const bufferListener = (event) => {
@@ -7445,8 +7498,8 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         cfg_index: this.utscConfig.cfgIndex || 0,
                         trigger_mode: this.utscConfig.triggerMode || 2,
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     })
                 });
                 
@@ -7506,8 +7559,8 @@ createApp({
                         rf_port_ifindex: this.utscConfig.rfPortIfindex,
                         filename: this.utscLastFilename,
                         vendor: this.selectedModem.vendor || '',
-                        community: this.snmpCommunity,
-                        write_community: this.snmpCommunityRW
+                        ...this._credentialFields({ community: this.snmpCommunity }),
+                        ...this._credentialFields({ write_community: this.snmpCommunityRW })
                     })
                 });
                 
@@ -7690,7 +7743,7 @@ createApp({
                     direction: this.impulseDirection,
                     velocity_factor: velocityFactor,
                     modem_ip: this.selectedModem.ip_address,
-                    community: this.snmpCommunityModem,
+                    ...this._credentialFields({ community: this.snmpCommunityModem }),
                 };
                 const response = await fetch(
                     `${API_BASE}/pypnm/impulse-response/${encodeURIComponent(this.selectedModem.mac_address)}/analyze`,
@@ -7755,7 +7808,7 @@ createApp({
             try {
                 const payload = {
                     modem_ip: this.selectedModem.ip_address,
-                    community: this.snmpCommunityModem,
+                    ...this._credentialFields({ community: this.snmpCommunityModem }),
                     output_type: this.pnmOutputType
                 };
 
@@ -7963,9 +8016,9 @@ createApp({
                 const response = await fetch(`${API_BASE}/pypnm/modem/${this.selectedModem.mac_address}/event-log`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         modem_ip: this.selectedModem.ip_address,
-                        community: this.snmpCommunityModem
+                        ...this._credentialFields({ community: this.snmpCommunityModem }),
                     })
                 });
                 

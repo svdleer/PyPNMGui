@@ -334,24 +334,59 @@ def abort_fibernode_scan():
     return jsonify({"success": True, "scan_id": scan_id})
 
 
+def _non_empty_community(value):
+    """Preserve configured values exactly while treating blank strings as absent."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _first_community(*values):
+    for value in values:
+        resolved = _non_empty_community(value)
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _add_community_fields(payload: dict, **communities) -> dict:
+    """Add only resolved community values to an outbound payload or params dict."""
+    for key, value in communities.items():
+        resolved = _non_empty_community(value)
+        if resolved is not None:
+            payload[key] = resolved
+    return payload
+
+
 def get_default_community():
-    """Get default SNMP community for modems based on mode."""
-    return os.environ.get('MODEM_COMMUNITY', os.environ.get('CM_SNMP_COMMUNITY', 'private'))
+    """Get the configured SNMP read community for modems."""
+    return _first_community(
+        os.environ.get('MODEM_COMMUNITY'),
+        os.environ.get('CM_SNMP_COMMUNITY'),
+    )
 
 
 def get_default_write_community():
-    """Get default SNMP write community for modem PNM operations (SET)."""
-    return os.environ.get('MODEM_WRITE_COMMUNITY', 'private')
+    """Get the configured SNMP write community for modem PNM operations."""
+    return _first_community(
+        os.environ.get('MODEM_WRITE_COMMUNITY'),
+        os.environ.get('CM_RW_COMMUNITY'),
+    )
 
 
 def get_cmts_community():
-    """Get default SNMP read community for CMTS operations."""
-    return os.environ.get('CMTS_COMMUNITY', 'public')
+    """Get the configured fallback SNMP read community for CMTS operations."""
+    return _first_community(
+        os.environ.get('CMTS_COMMUNITY'),
+        os.environ.get('CMTS_SNMP_COMMUNITY'),
+    )
 
 
 def get_cmts_write_community():
-    """Get default SNMP write community for CMTS operations."""
-    return os.environ.get('CMTS_WRITE_COMMUNITY', 'private')
+    """Get the configured fallback SNMP write community for CMTS operations."""
+    return _first_community(os.environ.get('CMTS_WRITE_COMMUNITY'))
 
 
 def get_alternate_tftp():
@@ -364,27 +399,31 @@ def get_tftp_for_cm() -> str:
     return get_alternate_tftp()
 
 
-def get_community_for_cmts(cmts_ip: str) -> str:
-    """Return SNMP read community for a CMTS IP, looked up from config."""
+def get_community_for_cmts(cmts_ip: str):
+    """Return CMTS read community using inventory, then environment fallbacks."""
     from app.core.cmts_provider import CMTSProvider
     try:
         cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-        if cmts and cmts.get('snmp_community'):
-            return cmts['snmp_community']
+        inventory_community = _non_empty_community(
+            (cmts or {}).get('snmp_community')
+        )
+        if inventory_community is not None:
+            return inventory_community
     except Exception:
         pass
     return get_cmts_community()
 
 
-def get_write_community_for_cmts(cmts_ip: str) -> str:
-    """Return SNMP write community for a CMTS IP, looked up from config."""
+def get_write_community_for_cmts(cmts_ip: str):
+    """Return CMTS write community using inventory, then its write-only fallback."""
     from app.core.cmts_provider import CMTSProvider
     try:
         cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-        if cmts and cmts.get('write_community'):
-            return cmts['write_community']
-        if cmts and cmts.get('snmp_community'):
-            return cmts['snmp_community']
+        inventory_community = _non_empty_community(
+            (cmts or {}).get('write_community')
+        )
+        if inventory_community is not None:
+            return inventory_community
     except Exception:
         pass
     return get_cmts_write_community()
@@ -407,7 +446,7 @@ def modem_event_log(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', get_default_community())
+    community = _first_community(data.get('community'), get_default_community())
     
     if not modem_ip:
         return jsonify({"status": "error", "message": "modem_ip required"}), 400
@@ -463,7 +502,7 @@ def modem_pre_eq(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community', get_default_write_community())
+    community = _first_community(data.get('community'), get_default_write_community())
     tftp_ip = data.get('tftp_ip', get_tftp_for_cm())
     
     if not modem_ip:
@@ -517,7 +556,7 @@ def pnm_measurement(measurement_type, mac_address):
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
     # Use write community for PNM operations that require SET
-    community = data.get('community', get_default_write_community())
+    community = _first_community(data.get('community'), get_default_write_community())
     # CM PNM operations (modem-side) always use alternate TFTP —
     # modems upload to a server reachable from the modem subnet.
     tftp_ip = data.get('tftp_ip', get_tftp_for_cm())
@@ -569,14 +608,26 @@ def pnm_measurement(measurement_type, mac_address):
                     "message": "cmts_ip and rf_port_ifindex required for UTSC"
                 }), 400
             
-            # UTSC is CMTS-side — use CMTS write community, not modem community
-            cmts_write = get_write_community_for_cmts(cmts_ip)
+            # UTSC is CMTS-side — keep read and write credentials independent.
+            cmts_read = _first_community(
+                data.get('community'),
+                get_community_for_cmts(cmts_ip),
+            )
+            cmts_write = _first_community(
+                data.get('write_community'),
+                get_write_community_for_cmts(cmts_ip),
+            )
 
             # Stop any existing UTSC measurement before starting a new one
             try:
                 logger.info(f"Stopping any existing UTSC on {cmts_ip} port {rf_port_ifindex}")
                 import time as _time
-                client.stop_utsc(cmts_ip, rf_port_ifindex, cmts_write)
+                client.stop_utsc(
+                    cmts_ip=cmts_ip,
+                    rf_port_ifindex=rf_port_ifindex,
+                    community=cmts_read,
+                    write_community=cmts_write,
+                )
                 _time.sleep(0.5)  # Brief delay to ensure stop completes
             except Exception as e:
                 logger.warning(f"Failed to stop existing UTSC (may not be running): {e}")
@@ -590,7 +641,8 @@ def pnm_measurement(measurement_type, mac_address):
             result = client.configure_utsc(
                 cmts_ip=cmts_ip,
                 rf_port_ifindex=rf_port_ifindex,
-                community=cmts_write,
+                community=cmts_read,
+                write_community=cmts_write,
                 trigger_mode=trigger_mode,
                 center_freq_hz=center_freq_hz,
                 span_hz=span_hz,
@@ -607,8 +659,11 @@ def pnm_measurement(measurement_type, mac_address):
                 # Start the capture — use cfg_index returned by configure (probed index)
                 resolved_cfg_index = result.get('cfg_index', 0)
                 start_result = client.start_utsc(
-                    cmts_ip, rf_port_ifindex, cmts_write,
-                    cfg_index=resolved_cfg_index
+                    cmts_ip=cmts_ip,
+                    rf_port_ifindex=rf_port_ifindex,
+                    community=cmts_read,
+                    write_community=cmts_write,
+                    cfg_index=resolved_cfg_index,
                 )
                 if not start_result.get('success'):
                     result = start_result
@@ -960,9 +1015,12 @@ def channel_stats(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = data.get('community') or get_default_community()
+    community = _first_community(data.get('community'), get_default_community())
     cmts_ip = data.get('cmts_ip')
-    cmts_community = data.get('cmts_community') or get_cmts_community()
+    cmts_community = _first_community(
+        data.get('cmts_community'),
+        get_community_for_cmts(cmts_ip),
+    )
     # Full stats by default for GUI completeness.
     # Clients can explicitly set cmts_stats=false for lean mode.
     cmts_stats = bool(data.get('cmts_stats', True))
@@ -994,12 +1052,12 @@ def channel_stats(mac_address):
     payload = {
         'mac_address': mac_address,
         'modem_ip': modem_ip,
-        'community': community,
         'cmts_stats': cmts_stats,
         'experimental_compact_walk': experimental_compact_walk,
         'cmts_task_timeout_s': cmts_task_timeout_s,
         'skip_connectivity_check': True,  # modem is known online from enrichment; skip redundant 5s snmp_get
     }
+    _add_community_fields(payload, community=community)
 
     if cm_index is not None:
         payload['cm_index'] = cm_index
@@ -1007,7 +1065,7 @@ def channel_stats(mac_address):
     # Add CMTS info for fiber node lookup if available
     if cmts_ip:
         payload['cmts_ip'] = cmts_ip
-        payload['cmts_community'] = cmts_community
+        _add_community_fields(payload, cmts_community=cmts_community)
     
     result = client._post('/cm/channel-stats', payload)
 
@@ -1513,7 +1571,10 @@ def discover_rf_port(mac_address):
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', get_cmts_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
@@ -1560,7 +1621,10 @@ def get_upstream_interfaces(mac_address):
 
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', get_cmts_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
 
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
@@ -1707,7 +1771,10 @@ def get_upstream_interfaces(mac_address):
             try:
                 channel_list = client._get(
                     "/pnm/us/ofdma/rxmer/channel/list",
-                    params={"cmts_ip": cmts_ip, "community": community},
+                    params=_add_community_fields(
+                        {"cmts_ip": cmts_ip},
+                        community=community,
+                    ),
                     request_timeout=65,
                 )
                 all_channels = channel_list.get("channels") or []
@@ -1841,7 +1908,10 @@ def discover_modem_ofdma(mac_address):
     
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', get_cmts_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
@@ -1891,8 +1961,14 @@ def start_cmts_us_rxmer(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
 
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1941,8 +2017,14 @@ def get_cmts_us_rxmer_status(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"success": False, "error": "cmts_ip and ofdma_ifindex required"}), 400
@@ -1978,8 +2060,14 @@ def get_cmts_us_rxmer_data(mac_address):
 
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
 
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip required"}), 400
@@ -2130,7 +2218,10 @@ def get_cmts_ofdma_channels():
 
     data = request.get_json() or {}
     cmts_ip   = data.get('cmts_ip')
-    community = data.get('community', 'public')
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     refresh   = data.get('refresh', False)
 
     if not cmts_ip:
@@ -2138,7 +2229,10 @@ def get_cmts_ofdma_channels():
 
     try:
         base_url = get_pypnm_api_url()
-        params = {"cmts_ip": cmts_ip, "community": community}
+        params = _add_community_fields(
+            {"cmts_ip": cmts_ip},
+            community=community,
+        )
         if refresh:
             params["refresh"] = "true"
         r = req.get(
@@ -2176,7 +2270,10 @@ def get_cmts_ofdma_channel_modems():
 
     data = request.get_json() or {}
     cmts_ip       = data.get('cmts_ip')
-    community     = data.get('community', 'public')
+    community     = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     ofdma_ifindex = data.get('ofdma_ifindex')
     max_modems    = data.get('max_modems', 100)
     force_snmp    = bool(data.get('force_snmp', False))
@@ -2188,10 +2285,10 @@ def get_cmts_ofdma_channel_modems():
         base_url = get_pypnm_api_url()
         params = {
             "cmts_ip":       cmts_ip,
-            "community":     community,
             "ofdma_ifindex": int(ofdma_ifindex),
             "max_modems":    int(max_modems),
         }
+        _add_community_fields(params, community=community)
         if force_snmp:
             params["force_snmp"] = "true"
         r = req.get(
@@ -2237,8 +2334,14 @@ def get_cmts_us_rxmer_fibernode_scan():
 
     data = request.get_json() or {}
     cmts_ip             = data.get('cmts_ip')
-    community           = data.get('community', 'public')
-    write_community     = data.get('write_community', community)
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     preeq_enabled       = data.get('preeq_enabled', True)
     compare_preeq       = data.get('compare_preeq', False)
     include_group_delay = data.get('include_group_delay', False)
@@ -2335,12 +2438,14 @@ def get_cmts_us_rxmer_fibernode_scan():
                     )
                     modem_resp = req.get(
                         f"{base_url}/pnm/us/ofdma/rxmer/channel/modems",
-                        params={
-                            "cmts_ip":       cmts_ip,
-                            "community":     community,
-                            "ofdma_ifindex": ifidx,
-                            "max_modems":    max_modems,
-                        },
+                        params=_add_community_fields(
+                            {
+                                "cmts_ip":       cmts_ip,
+                                "ofdma_ifindex": ifidx,
+                                "max_modems":    max_modems,
+                            },
+                            community=community,
+                        ),
                         timeout=60
                     )
                     if modem_resp.status_code != 200:
@@ -2408,7 +2513,11 @@ def get_cmts_us_rxmer_fibernode_scan():
                     start_resp = req.post(
                         f"{base_url}/pnm/us/ofdma/rxmer/start",
                         json={
-                            "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
+                            "cmts": _add_community_fields(
+                                {"cmts_ip": cmts_ip},
+                                community=community,
+                                write_community=write_community,
+                            ),
                             "cm_mac_address": mac,
                             "ofdma_ifindex": modem_ifindex,
                             "pre_eq": pre_eq,
@@ -2440,12 +2549,14 @@ def get_cmts_us_rxmer_fibernode_scan():
                     try:
                         status_resp = req.get(
                             f"{base_url}/pnm/us/ofdma/rxmer/status",
-                            params={
-                                "cmts_ip":         cmts_ip,
-                                "community":       community,
-                                "write_community": write_community,
-                                "ofdma_ifindex":   modem_ifindex,
-                            },
+                            params=_add_community_fields(
+                                {
+                                    "cmts_ip":         cmts_ip,
+                                    "ofdma_ifindex":   modem_ifindex,
+                                },
+                                community=community,
+                                write_community=write_community,
+                            ),
                             timeout=15,
                         )
                     except req.RequestException as exc:
@@ -2544,7 +2655,11 @@ def get_cmts_us_rxmer_fibernode_scan():
                         preeq_resp = req.post(
                             f"{base_url}/pnm/us/ofdma/rxmer/preeq",
                             json={
-                                "cmts": {"cmts_ip": cmts_ip, "community": community, "write_community": write_community},
+                                "cmts": _add_community_fields(
+                                {"cmts_ip": cmts_ip},
+                                community=community,
+                                write_community=write_community,
+                            ),
                                 "cm_mac_address": mac,
                             },
                             timeout=150,   # EqData walk can take 60-120 s on large CMTSes
@@ -2831,11 +2946,17 @@ def ds_chan_est_scan():
                     if cmts_hostname else None)
         if cmts_rec:
             cmts_ip   = cmts_rec.get('IPAddress')
-            community = community or cmts_rec.get('snmp_community')
+            community = _first_community(
+                community,
+                cmts_rec.get('snmp_community'),
+            )
 
-    community             = community or get_default_community()
+    community = _first_community(community, get_community_for_cmts(cmts_ip))
     # Modem write community (PNM SNMP SETs) is always separate from CMTS community
-    modem_write_community = modem_write_community or get_default_write_community()
+    modem_write_community = _first_community(
+        modem_write_community,
+        get_default_write_community(),
+    )
 
     if not cmts_ip:
         return jsonify({"success": False,
@@ -3151,12 +3272,13 @@ def ds_chan_est_scan():
 
 @pypnm_bp.route('/config', methods=['GET'])
 def get_config():
-    """Return frontend configuration from environment variables."""
-    return jsonify({
-        'snmpCommunity': get_cmts_community(),
-        'snmpCommunityRW': get_cmts_write_community(),
-        'snmpCommunityModem': get_default_community(),
-    })
+    """Return configured frontend communities without empty placeholders."""
+    return jsonify(_add_community_fields(
+        {},
+        snmpCommunity=get_cmts_community(),
+        snmpCommunityRW=get_cmts_write_community(),
+        snmpCommunityModem=get_default_community(),
+    ))
 
 
 # ================================================================
@@ -3203,10 +3325,16 @@ def ds_fullband_scan():
                     if cmts_hostname else None)
         if cmts_rec:
             cmts_ip   = cmts_rec.get('IPAddress')
-            community = community or cmts_rec.get('snmp_community')
+            community = _first_community(
+                community,
+                cmts_rec.get('snmp_community'),
+            )
 
-    community             = community or get_default_community()
-    modem_write_community = modem_write_community or get_default_write_community()
+    community = _first_community(community, get_community_for_cmts(cmts_ip))
+    modem_write_community = _first_community(
+        modem_write_community,
+        get_default_write_community(),
+    )
 
     if not cmts_ip:
         return jsonify({"success": False, "error": "cmts_ip or cmts_hostname required"}), 400
@@ -3729,8 +3857,14 @@ def configure_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     logger.info(
         f"=== UTSC CONFIGURE === MAC: {mac_address} cmts_ip={cmts_ip} "
         f"rf_port_ifindex={rf_port_ifindex} communities=<redacted>"
@@ -3854,8 +3988,14 @@ def start_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     
     # Optional overrides (use correct defaults if not provided)
     trigger_mode = data.get('trigger_mode', 2)  # FreeRunning
@@ -3888,8 +4028,14 @@ def stop_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     cfg_index = int(data.get('cfg_index', 1) or 1)
     
     if not cmts_ip or not rf_port_ifindex:
@@ -3935,8 +4081,14 @@ def clear_utsc(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
@@ -3965,8 +4117,14 @@ def get_utsc_status(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     rf_port_ifindex = data.get('rf_port_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip or not rf_port_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and rf_port_ifindex required"}), 400
@@ -4005,8 +4163,14 @@ def start_us_rxmer(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', get_cmts_community())
-    write_community = data.get('write_community', get_cmts_write_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
+    write_community = _first_community(
+        data.get('write_community'),
+        get_write_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
@@ -4014,12 +4178,13 @@ def start_us_rxmer(mac_address):
     try:
         client = PyPNMClient()
         # PyPNM detects the CMTS vendor and owns destination provisioning.
+        cmts_payload = _add_community_fields(
+            {"cmts_ip": cmts_ip},
+            community=community,
+            write_community=write_community,
+        )
         result = client._post("/pnm/us/ofdma/rxmer/start", {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community,
-            },
+            "cmts": cmts_payload,
             "ofdma_ifindex": ofdma_ifindex,
             "cm_mac_address": mac_address,
             "pre_eq": data.get('pre_eq', True),
@@ -4054,18 +4219,24 @@ def get_us_rxmer_status(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', get_cmts_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip or not ofdma_ifindex:
         return jsonify({"status": "error", "message": "cmts_ip and ofdma_ifindex required"}), 400
     
     try:
         client = PyPNMClient()
-        result = client._post("/pnm/us/rxmer/status", {
-            "cmts_ip": cmts_ip,
-            "ofdma_ifindex": ofdma_ifindex,
-            "community": community
-        })
+        status_payload = _add_community_fields(
+            {
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+            },
+            community=community,
+        )
+        result = client._post("/pnm/us/rxmer/status", status_payload)
         
         if not result or result.get('status') == 'error':
             error_msg = result.get('error', result.get('message', 'Status check failed')) if result else 'No response'
@@ -4201,19 +4372,25 @@ def get_us_rxmer_data(mac_address):
     data = request.get_json() or {}
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', get_cmts_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     
     if not cmts_ip:
         return jsonify({"status": "error", "message": "cmts_ip required"}), 400
     
     try:
         client = PyPNMClient()
-        result = client._post("/pnm/us/rxmer/data", {
-            "cmts_ip": cmts_ip,
-            "ofdma_ifindex": ofdma_ifindex,
-            "filename": data.get('filename'),
-            "community": community
-        })
+        data_payload = _add_community_fields(
+            {
+                "cmts_ip": cmts_ip,
+                "ofdma_ifindex": ofdma_ifindex,
+                "filename": data.get('filename'),
+            },
+            community=community,
+        )
+        result = client._post("/pnm/us/rxmer/data", data_payload)
         
         if not result or result.get('status') == 'error':
             error_msg = result.get('error', result.get('message', 'Data retrieval failed')) if result else 'No response'
@@ -4253,7 +4430,10 @@ def get_us_rxmer_plot(mac_address):
     full_filename = data.get('filename')  # Optional: may be ignored by agent path
     cmts_ip = data.get('cmts_ip')
     ofdma_ifindex = data.get('ofdma_ifindex')
-    community = data.get('community', get_cmts_community())
+    community = _first_community(
+        data.get('community'),
+        get_community_for_cmts(cmts_ip),
+    )
     
     logger.info(f"US RxMER plot request for {mac_address}, filename: {full_filename}")
     
@@ -4265,12 +4445,17 @@ def get_us_rxmer_plot(mac_address):
         # Source of truth for modem-side US RxMER is the agent-backed data endpoint.
         # Avoid file-based /getCapture path that can fail when files are not local.
         client = PyPNMClient()
-        data_resp = client._post("/pnm/us/rxmer/data", {
-            "cmts_ip": cmts_ip,
-            "ofdma_ifindex": ofdma_ifindex,
-            "filename": full_filename,
-            "community": community,
-        })
+        data_resp = client._post(
+            "/pnm/us/rxmer/data",
+            _add_community_fields(
+                {
+                    "cmts_ip": cmts_ip,
+                    "ofdma_ifindex": ofdma_ifindex,
+                    "filename": full_filename,
+                },
+                community=community,
+            ),
+        )
 
         if not data_resp or data_resp.get('status') == 'error' or not data_resp.get('success'):
             error_msg = (data_resp or {}).get('error') or (data_resp or {}).get('message') or 'Data retrieval failed'
@@ -4837,7 +5022,10 @@ def analyze_impulse_response(mac_address):
         mac_address=mac_address,
         modem_ip=modem_ip,
         direction=direction,
-        community=data.get('community') or get_default_write_community(),
+        community=_first_community(
+            data.get('community'),
+            get_default_write_community(),
+        ),
         tftp_ip=data.get('tftp_ip') or get_tftp_for_cm(),
         velocity_factor=velocity_factor,
     )
@@ -4887,7 +5075,7 @@ def start_fibernode_impulse_job():
     concurrency = max(1, min(int(data.get('concurrency') or 3), 5))
     # Fiber impulse is modem-side PNM. Resolve its configured modem community
     # server-side; never reuse the CMTS scan/write community from the browser.
-    community = get_default_community() if source == 'fresh' else ''
+    community = get_default_write_community() if source == 'fresh' else ''
     tftp_ip = (data.get('tftp_ip') or get_tftp_for_cm()) if source == 'fresh' else ''
     topology_date = data.get('topology_date')
     fiber_node = data.get('fiber_node')
@@ -5178,7 +5366,9 @@ def start_pnm_report():
         "mac_address": "aa:bb:cc:dd:ee:ff",
         "modem_ip": "10.x.x.x",
         "cmts_ip": "172.x.x.x",
-        "community": "private",
+        "modem_write_community": "optional modem write override",
+        "cmts_community": "optional CMTS read override",
+        "cmts_write_community": "optional CMTS write override",
         "measurements": ["rxmer", "spectrum", "channel_estimation", ...],
         "modem_info": { "fiber_node": "...", "cmts_name": "..." }
     }
@@ -5553,7 +5743,10 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
 
     mac_address = data['mac_address']
     modem_ip = data['modem_ip']
-    community = data.get('community', 'private')
+    modem_write_community = _first_community(
+        data.get('modem_write_community'),
+        get_default_write_community(),
+    )
     tftp_ip = data.get('tftp_ip') or get_tftp_for_cm()
     modem_info = data.get('modem_info') or {}
 
@@ -5568,23 +5761,23 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             result = None
             pngs = []
             if mtype == 'rxmer':
-                result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'spectrum':
-                result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'channel_estimation':
-                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'us_pre_eq':
-                result = client.get_us_ofdma_pre_equalization(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_us_ofdma_pre_equalization(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'fec_summary':
-                result = client.get_fec_summary(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_fec_summary(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'histogram':
-                result = client.get_histogram(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_histogram(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'constellation':
-                result = client.get_constellation_display(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_constellation_display(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'modulation_profile':
-                result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, community)
+                result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, modem_write_community)
             elif mtype == 'impulse_response':
-                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, community, output_type='archive')
+                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'us_rxmer':
                 # CMTS-based US OFDMA RxMER — capture all active OFDMA channels
                 import time as _time
@@ -5595,13 +5788,23 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                     single = data.get('ofdma_ifindex') or modem_info.get('ofdma_ifindex')
                     if single:
                         ofdma_channels = [single]
-                _cmts_comm = get_cmts_community()
-                _cmts_wcomm = get_cmts_write_community()
+                _cmts_comm = _first_community(
+                    data.get('cmts_community'),
+                    get_community_for_cmts(cmts_ip),
+                )
+                _cmts_wcomm = _first_community(
+                    data.get('cmts_write_community'),
+                    get_write_community_for_cmts(cmts_ip),
+                )
                 if cmts_ip and ofdma_channels:
                     for ch_idx, ofdma_ifindex in enumerate(ofdma_channels):
                         filename = f'usrxmer_{mac_address.replace(":", "")}_{ch_idx}'
                         start_result = client._post("/pnm/us/ofdma/rxmer/start", {
-                            "cmts": {"cmts_ip": cmts_ip, "community": _cmts_comm, "write_community": _cmts_wcomm},
+                            "cmts": _add_community_fields(
+                                {"cmts_ip": cmts_ip},
+                                community=_cmts_comm,
+                                write_community=_cmts_wcomm,
+                            ),
                             "ofdma_ifindex": int(ofdma_ifindex),
                             "cm_mac_address": mac_address,
                             "pre_eq": True,
@@ -5613,23 +5816,36 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                             ready = False
                             for _ in range(60):
                                 _time.sleep(3)
-                                status_result = client._get("/pnm/us/ofdma/rxmer/status", params={
-                                    "cmts_ip": cmts_ip,
-                                    "ofdma_ifindex": ofdma_ifindex,
-                                    "community": _cmts_comm,
-                                    "write_community": _cmts_wcomm,
-                                }, request_timeout=15)
+                                status_result = client._get(
+                                    "/pnm/us/ofdma/rxmer/status",
+                                    params=_add_community_fields(
+                                        {
+                                            "cmts_ip": cmts_ip,
+                                            "ofdma_ifindex": ofdma_ifindex,
+                                        },
+                                        community=_cmts_comm,
+                                        write_community=_cmts_wcomm,
+                                    ),
+                                    request_timeout=15,
+                                )
                                 if status_result and status_result.get('is_ready'):
                                     ready = True
                                     break
                             if ready:
-                                data_result = client._post("/pnm/us/ofdma/rxmer/getCaptureAndData", {
-                                    "filename": actual_filename,
-                                    "cmts_ip": cmts_ip,
-                                    "ofdma_ifindex": int(ofdma_ifindex),
-                                    "community": _cmts_comm,
-                                    "write_community": _cmts_wcomm,
-                                }, request_timeout=120)
+                                capture_payload = _add_community_fields(
+                                    {
+                                        "filename": actual_filename,
+                                        "cmts_ip": cmts_ip,
+                                        "ofdma_ifindex": int(ofdma_ifindex),
+                                    },
+                                    community=_cmts_comm,
+                                    write_community=_cmts_wcomm,
+                                )
+                                data_result = client._post(
+                                    "/pnm/us/ofdma/rxmer/getCaptureAndData",
+                                    capture_payload,
+                                    request_timeout=120,
+                                )
                                 if data_result and data_result.get('success'):
                                     png_b64 = data_result.get('image_base64')
                                     if png_b64:

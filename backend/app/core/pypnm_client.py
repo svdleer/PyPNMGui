@@ -46,6 +46,34 @@ def _redact_payload(value: Any) -> Any:
     return value
 
 
+def _community_fields(
+    community: Optional[str] = None,
+    write_community: Optional[str] = None,
+) -> Dict[str, str]:
+    """Build credential fields while preserving explicit non-empty values."""
+    fields: Dict[str, str] = {}
+    if community is not None and (
+        not isinstance(community, str) or community.strip()
+    ):
+        fields["community"] = community
+    if write_community is not None and (
+        not isinstance(write_community, str) or write_community.strip()
+    ):
+        fields["write_community"] = write_community
+    return fields
+
+
+def _snmp_fields(
+    community: Optional[str],
+    version_key: str = "snmpV2C",
+) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """Build an optional SNMP block containing a non-blank credential."""
+    community_fields = _community_fields(community)
+    if not community_fields:
+        return {}
+    return {"snmp": {version_key: community_fields}}
+
+
 MAX_CM_MODEM_LIMIT = 50000
 
 
@@ -99,7 +127,7 @@ class PyPNMClient:
         self,
         mac_address: str,
         ip_address: str,
-        snmp_community: str = "private",
+        snmp_community: Optional[str] = None,
         tftp_ipv4: Optional[str] = None,
         tftp_ipv6: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -112,11 +140,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {
-                    "snmpV2C": {
-                        "community": snmp_community
-                    }
-                }
+                **_snmp_fields(snmp_community),
             }
         }
         
@@ -368,44 +392,6 @@ class PyPNMClient:
             logger.error(f"Failed to get agents: {e}")
             return {"agents": [], "error": str(e)}
     
-    def send_agent_task(self, agent_id: str, command: str, params: Dict[str, Any], 
-                       timeout: float = 60.0) -> Dict[str, Any]:
-        """
-        Send a task to a specific agent via PyPNM API.
-        
-        This is for CMTS operations that need to go through an agent.
-        
-        Endpoint: POST /api/agents/{agent_id}/task
-        
-        Args:
-            agent_id: The agent ID (e.g., 'pypnm-agent-lab')
-            command: The command to execute (e.g., 'pnm_us_get_interfaces', 'cmts_get_modem_info')
-            params: Command parameters
-            timeout: Task timeout in seconds
-            
-        Returns:
-            Task result from agent
-        """
-        url = f"{self.config.base_url}/api/agents/{agent_id}/task"
-        try:
-            logger.info(f"Sending agent task: {command} to {agent_id}")
-            response = self.session.post(
-                url,
-                params={"command": command, "timeout": timeout},
-                json=params,
-                timeout=timeout + 10  # HTTP timeout slightly longer than task timeout
-            )
-            response.raise_for_status()
-            result = response.json()
-            logger.info(f"Agent task result: success={result.get('success', False)}")
-            return result
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"Agent task HTTP error: {e}")
-            return {"success": False, "error": f"HTTP error: {e.response.status_code}"}
-        except Exception as e:
-            logger.error(f"Agent task failed: {e}")
-            return {"success": False, "error": str(e)}
-    
     def get_first_agent_id(self) -> Optional[str]:
         """Get the ID of the first available agent."""
         agents = self.get_agents()
@@ -417,7 +403,7 @@ class PyPNMClient:
     # ============== System Information Endpoints ==============
     
     def get_sys_descr(self, mac_address: str, ip_address: str, 
-                     community: str = "private") -> Dict[str, Any]:
+                     community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get cable modem system description.
         
@@ -428,7 +414,7 @@ class PyPNMClient:
         return self._post("/system/sysDescr", payload)
     
     def get_uptime(self, mac_address: str, ip_address: str, 
-                  community: str = "private") -> Dict[str, Any]:
+                  community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get cable modem uptime.
         
@@ -440,7 +426,7 @@ class PyPNMClient:
     # ============== Event Log Endpoints ==============
     
     def get_event_log(self, mac_address: str, ip_address: str, 
-                     community: str = "private") -> Dict[str, Any]:
+                     community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get cable modem event log.
         
@@ -452,7 +438,7 @@ class PyPNMClient:
     # ============== DOCSIS 3.0 Channel Stats ==============
     
     def get_ds_scqam_stats(self, mac_address: str, ip_address: str, 
-                          community: str = "private") -> Dict[str, Any]:
+                          community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get downstream SC-QAM channel statistics.
         
@@ -462,7 +448,7 @@ class PyPNMClient:
         return self._post("/docs/if30/ds/scqam/chan/stats", payload)
     
     def get_us_atdma_stats(self, mac_address: str, ip_address: str, 
-                          community: str = "private") -> Dict[str, Any]:
+                          community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get upstream ATDMA channel statistics.
         
@@ -474,7 +460,7 @@ class PyPNMClient:
     # ============== DOCSIS 3.1 Channel Stats ==============
     
     def get_ds_ofdm_stats(self, mac_address: str, ip_address: str, 
-                         community: str = "private") -> Dict[str, Any]:
+                         community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get downstream OFDM channel statistics.
         
@@ -484,7 +470,7 @@ class PyPNMClient:
         return self._post("/docs/if31/ds/ofdm/chan/stats", payload)
     
     def get_us_ofdma_stats(self, mac_address: str, ip_address: str, 
-                          community: str = "private") -> Dict[str, Any]:
+                          community: Optional[str] = None) -> Dict[str, Any]:
         """
         Get upstream OFDMA channel statistics.
         
@@ -534,7 +520,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json"
     ) -> Dict[str, Any]:
@@ -550,7 +536,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                **_snmp_fields(community),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -572,7 +558,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json",
         last_segment_center_freq_hz: int = 0,
@@ -590,7 +576,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmp_v2c": {"community": community}},
+                **_snmp_fields(community, "snmp_v2c"),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -623,7 +609,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json",
         velocity_factor: float = 0.87,
@@ -637,7 +623,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                **_snmp_fields(community),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -660,7 +646,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         channel_ids: Optional[list] = None,
     ) -> Dict[str, Any]:
         """
@@ -675,7 +661,7 @@ class PyPNMClient:
         payload: Dict[str, Any] = {
             "modem_ip":   ip_address,
             "mac_address": mac_address,
-            "community":  community,
+            **_community_fields(community),
             "tftp_server": tftp_ipv4,
         }
         if channel_ids:
@@ -687,7 +673,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json"
     ) -> Dict[str, Any]:
@@ -699,7 +685,7 @@ class PyPNMClient:
         payload = {
             "mac_address": mac_address,
             "modem_ip": ip_address,
-            "community": community,
+            **_community_fields(community),
             "tftp_server": tftp_ipv4,
         }
         return self._post("/pnm/ds/modulation-profile", payload)
@@ -709,7 +695,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         fec_summary_type: int = 2,
         output_type: str = "json"
@@ -726,7 +712,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                **_snmp_fields(community),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -752,7 +738,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         sample_duration: int = 30,
         output_type: str = "json"
@@ -766,7 +752,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                **_snmp_fields(community),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -791,7 +777,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json"
     ) -> Dict[str, Any]:
@@ -804,7 +790,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                **_snmp_fields(community),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -831,7 +817,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json",
         velocity_factor: float = 0.87,
@@ -846,7 +832,7 @@ class PyPNMClient:
             "cable_modem": {
                 "mac_address": mac_address,
                 "ip_address": ip_address,
-                "snmp": {"snmpV2C": {"community": community}},
+                **_snmp_fields(community),
                 "pnm_parameters": {
                     "tftp": {
                         "ipv4": tftp_ipv4,
@@ -871,7 +857,7 @@ class PyPNMClient:
         mac_address: str,
         ip_address: str,
         tftp_ipv4: str,
-        community: str = "private",
+        community: Optional[str] = None,
         interval_minutes: int = 5,
         duration_hours: int = 24
     ) -> Dict[str, Any]:
@@ -912,7 +898,7 @@ class PyPNMClient:
     def discover_rf_ports(
         self,
         cmts_ip: str,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         cm_mac_address: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -923,15 +909,15 @@ class PyPNMClient:
 
         Returns RF ports and their configurations.
         """
-        params = {"cmts_ip": cmts_ip, "community": community,
-                  "write_community": write_community or community}
+        params = {"cmts_ip": cmts_ip, **_community_fields(community),
+                  **_community_fields(write_community=write_community)}
         return self._get("/pnm/us/utsc/ports", params, request_timeout=90)
 
     def discover_modem_rf_port(
         self,
         cmts_ip: str,
         cm_mac_address: str,
-        community: str = "public",
+        community: Optional[str] = None,
         ofdma_ifindex: Optional[int] = None,
         cm_index: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -947,7 +933,7 @@ class PyPNMClient:
         """
         payload = {
             "cmts_ip": cmts_ip,
-            "community": community,
+            **_community_fields(community),
             "cm_mac_address": cm_mac_address
         }
         if ofdma_ifindex is not None:
@@ -966,7 +952,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         cm_mac_address: str,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -979,8 +965,8 @@ class PyPNMClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "cm_mac_address": cm_mac_address
         }
@@ -990,7 +976,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         dest_ip: str,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         dest_path: str = "./",
         index: int = 1,
@@ -1026,8 +1012,8 @@ class PyPNMClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "dest_ip": dest_ip,
             "dest_path": dest_path,
@@ -1040,7 +1026,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         cfg_index: int = 1,
     ) -> Dict[str, Any]:
@@ -1052,8 +1038,8 @@ class PyPNMClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "rf_port_ifindex": rf_port_ifindex,
             "cfg_index": cfg_index,
@@ -1064,7 +1050,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         cfg_index: int = 1,
     ) -> Dict[str, Any]:
@@ -1078,8 +1064,8 @@ class PyPNMClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "rf_port_ifindex": rf_port_ifindex,
             "cfg_index": cfg_index,
@@ -1090,7 +1076,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "private",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         trigger_mode: int = 2,
         center_freq_hz: int = 30000000,
@@ -1117,8 +1103,8 @@ class PyPNMClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "rf_port_ifindex": rf_port_ifindex,
             "cfg_index": cfg_index,
@@ -1151,7 +1137,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "private",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         cfg_index: int = 0,  # 0 = auto-probe by TriggerMode (required for Casa)
         trigger_mode: int = 2
@@ -1164,8 +1150,8 @@ class PyPNMClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community or community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "rf_port_ifindex": rf_port_ifindex,
             "cfg_index": cfg_index,
@@ -1177,7 +1163,7 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         cfg_index: int = 1
     ) -> Dict[str, Any]:
@@ -1186,8 +1172,8 @@ class PyPNMClient:
 
         Endpoint: GET /pnm/us/utsc/status
         """
-        params = {"cmts_ip": cmts_ip, "community": community,
-                  "write_community": write_community or community,
+        params = {"cmts_ip": cmts_ip, **_community_fields(community),
+                  **_community_fields(write_community=write_community),
                   "rf_port_ifindex": rf_port_ifindex, "cfg_index": cfg_index}
         return self._get("/pnm/us/utsc/status", params)
 
@@ -1195,13 +1181,13 @@ class PyPNMClient:
         self,
         cmts_ip: str,
         rf_port_ifindex: int,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         cfg_index: int = 1
     ) -> Dict[str, Any]:
         """Get current UTSC configuration for an RF port."""
-        params = {"cmts_ip": cmts_ip, "community": community,
-                  "write_community": write_community or community,
+        params = {"cmts_ip": cmts_ip, **_community_fields(community),
+                  **_community_fields(write_community=write_community),
                   "rf_port_ifindex": rf_port_ifindex, "cfg_index": cfg_index}
         return self._get("/pnm/us/utsc/config", params)
 
@@ -1268,7 +1254,7 @@ class PyPNMClient:
     def get_bulk_destinations(
         self,
         cmts_ip: str,
-        community: str = "public",
+        community: Optional[str] = None,
         write_community: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -1276,8 +1262,8 @@ class PyPNMClient:
 
         Endpoint: GET /pnm/us/bulk-destination
         """
-        params = {"cmts_ip": cmts_ip, "community": community,
-                  "write_community": write_community or community}
+        params = {"cmts_ip": cmts_ip, **_community_fields(community),
+                  **_community_fields(write_community=write_community)}
         return self._get("/pnm/us/bulk-destination", params)
     
     def get_upstream_spectrum_capture(
@@ -1285,7 +1271,7 @@ class PyPNMClient:
         cmts_ip: str,
         rf_port_ifindex: int,
         tftp_ipv4: str,
-        community: str = "public",
+        community: Optional[str] = None,
         tftp_ipv6: Optional[str] = None,
         output_type: str = "json",
         trigger_mode: int = 2,
@@ -1330,7 +1316,7 @@ class PyPNMClient:
             "cmts": {
                 "cmts_ip": cmts_ip,
                 "rf_port_ifindex": rf_port_ifindex,
-                "community": community
+                **_community_fields(community)
             },
             "tftp": {
                 "ipv4": tftp_ipv4 if tftp_ipv4 else None,
@@ -1364,11 +1350,11 @@ class PyPNMClient:
     def get_cmts_modems(
         self,
         cmts_ip: str,
-        community: str = "public",
+        community: Optional[str] = None,
         limit: Optional[int] = None,
         enrich: bool = False,
         refresh: bool = False,
-        modem_community: str = os.environ.get('MODEM_COMMUNITY', 'private'),
+        modem_community: Optional[str] = None,
         cmts_hostname: str = "",
         request_timeout: int = 330,
     ) -> Dict[str, Any]:
@@ -1392,13 +1378,15 @@ class PyPNMClient:
 
         payload = {
             "cmts_ip": cmts_ip,
-            "community": community,
+            **_community_fields(community),
             "limit": limit,
             "enrich": enrich,
             "refresh": refresh,
-            "modem_community": modem_community,
             "cmts_hostname": cmts_hostname,
         }
+        modem_community_fields = _community_fields(modem_community)
+        if modem_community_fields:
+            payload["modem_community"] = modem_community_fields["community"]
 
         try:
             response = self._post("/cmts/modems/query", payload, request_timeout=request_timeout)

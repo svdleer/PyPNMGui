@@ -43,7 +43,10 @@ def _run_modem_job(job_id: str, cmts_ip: str, cmts_name: str,
             modems = result.get('modems', [])
             for m in modems:
                 m['cmts_ip'] = cmts_ip
-                m['cmts_community'] = community
+                if community is not None:
+                    m['cmts_community'] = community
+                else:
+                    m.pop('cmts_community', None)
             with _modem_jobs_lock:
                 _modem_jobs[job_id].update({
                     'status': 'done',
@@ -107,14 +110,37 @@ def _inventory_freshness_seconds() -> int:
 # Default TFTP server (same as pypnm_routes.py)
 DEFAULT_TFTP_IP = os.environ.get('TFTP_IPV4', '127.0.0.1')
 
+def _non_empty_community(value):
+    """Return a configured community while preserving non-empty values exactly."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _first_community(*values):
+    for value in values:
+        resolved = _non_empty_community(value)
+        if resolved is not None:
+            return resolved
+    return None
+
+
 def get_default_community():
-    """Get default SNMP community for modems."""
-    return os.environ.get('MODEM_COMMUNITY', os.environ.get('CM_SNMP_COMMUNITY', 'private'))
+    """Get the configured SNMP read community for modems."""
+    return _first_community(
+        os.environ.get('MODEM_COMMUNITY'),
+        os.environ.get('CM_SNMP_COMMUNITY'),
+    )
 
 
 def get_cmts_community():
-    """Get default SNMP community for CMTS operations."""
-    return os.environ.get('CMTS_COMMUNITY', os.environ.get('CMTS_SNMP_COMMUNITY', 'public'))
+    """Get the configured fallback SNMP read community for CMTS operations."""
+    return _first_community(
+        os.environ.get('CMTS_COMMUNITY'),
+        os.environ.get('CMTS_SNMP_COMMUNITY'),
+    )
 
 
 # Redis for caching modem data
@@ -1323,10 +1349,17 @@ def get_cmts_modems(cmts_name):
             "message": f"CMTS '{cmts_name}' not found"
         }), 404
 
-    community = request.args.get('community', get_cmts_community())
+    community = _first_community(
+        request.args.get('community'),
+        cmts.get('snmp_community'),
+        get_cmts_community(),
+    )
     limit = _bounded_modem_limit(request.args.get('limit', _cm_modem_limit_default()))
     enrich = request.args.get('enrich', 'false').lower() == 'true'
-    modem_community = request.args.get('modem_community') or get_default_community()
+    modem_community = _first_community(
+        request.args.get('modem_community'),
+        get_default_community(),
+    )
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
 
     try:
@@ -1344,7 +1377,10 @@ def get_cmts_modems(cmts_name):
             for modem in prepared:
                 modem['cmts'] = canonical_name
                 modem['cmts_ip'] = cmts_ip
-                modem['cmts_community'] = community
+                if community is not None:
+                    modem['cmts_community'] = community
+                else:
+                    modem.pop('cmts_community', None)
             _augment_modems_with_topology_fields(prepared, cmts_name=canonical_name)
             return prepared
 
@@ -1469,15 +1505,18 @@ def get_cmts_modems(cmts_name):
         # Live base discovery is reserved for refresh=true or genuinely absent
         # persisted inventory. Forward refresh so PyPNM owns that policy.
         client = PyPNMClient()
-        result = client.get_cmts_modems(
-            cmts_ip=cmts_ip,
-            community=community,
-            limit=limit,
-            enrich=enrich,
-            refresh=force_refresh,
-            modem_community=modem_community,
-            cmts_hostname=canonical_name,
-        )
+        live_query = {
+            'cmts_ip': cmts_ip,
+            'limit': limit,
+            'enrich': enrich,
+            'refresh': force_refresh,
+            'cmts_hostname': canonical_name,
+        }
+        if community is not None:
+            live_query['community'] = community
+        if modem_community is not None:
+            live_query['modem_community'] = modem_community
+        result = client.get_cmts_modems(**live_query)
 
         if result.get('success'):
             rows = _prepare_rows(result.get('modems') or [])

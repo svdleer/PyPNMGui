@@ -166,7 +166,6 @@ const paramRuntime = parseInt(urlParams.get('runtime')) || 60;
 const parsedCfgIndex = Number.parseInt(urlParams.get('cfg_index'), 10);
 const paramCfgIndex = Number.isNaN(parsedCfgIndex) ? 0 : parsedCfgIndex;
 const paramLive = urlParams.get('live') || '';
-const paramCommunity = urlParams.get('community') || '';
 
 // Connect WebSocket via GUI (/ws/utsc/<mac>) — same host as the page
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -179,11 +178,11 @@ function updateWsUrl() {
         rf_port: paramRfPort || '',
         cfg_index: String(paramCfgIndex),
         cmts_ip: paramCmts || '',
-        community: paramCommunity || 'private',
         live: paramLive === '1' ? '1' : '0',
         refresh: '500',
         duration: String(paramRuntime || 60)
     });
+    // Credentials are resolved server-side and never appear in browser URLs.
     // WS uses top-level /ws/ path (separate Apache Location block)
     document.getElementById('wsInput').value = `${wsProtocol}//${wsHost}/ws/utsc/${mac}?${qs}`;
 }
@@ -533,7 +532,6 @@ function connectWebSocket() {
     ws.send(JSON.stringify({
       cmts_ip: cmtsIp,
       rf_port_ifindex: rfPort,
-      community: paramCommunity || 'private',
       mac_address: mac,
       interval_ms: 500,
       skip_configure: skipConfigure,
@@ -567,8 +565,7 @@ window.addEventListener('beforeunload', () => {
     const data = JSON.stringify({
       cmts_ip: paramCmts,
       rf_port_ifindex: parseInt(paramRfPort),
-      cfg_index: paramCfgIndex || 1,
-      community: paramCommunity || 'private'
+      cfg_index: paramCfgIndex || 1
     });
     navigator.sendBeacon(stopUrl, new Blob([data], {type: 'application/json'}));
   }

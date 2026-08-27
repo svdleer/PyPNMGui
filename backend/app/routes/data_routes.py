@@ -59,6 +59,28 @@ def _require_topology_scopes():
     return None
 
 
+def _normalize_modem_community_payload(payload, *, write=False):
+    """Copy a payload and add an optional direction-specific modem community."""
+    normalized = dict(payload) if isinstance(payload, dict) else {}
+    if "community" in normalized:
+        community = normalized.get("community")
+        if isinstance(community, str) and community.strip():
+            return normalized
+        normalized.pop("community", None)
+
+    env_names = (
+        ("MODEM_WRITE_COMMUNITY", "CM_RW_COMMUNITY")
+        if write
+        else ("MODEM_COMMUNITY", "CM_SNMP_COMMUNITY")
+    )
+    for env_name in env_names:
+        configured = os.environ.get(env_name)
+        if configured is not None and configured.strip():
+            normalized["community"] = configured
+            break
+    return normalized
+
+
 def _poller_api_base() -> str:
     explicit = (os.environ.get("PYPNM_POLLER_API_BASE") or "").strip()
     if explicit:
@@ -705,7 +727,10 @@ def network_rxmer_start(public_id):
     return _proxy(
         "POST",
         f"/rxmer-analytics/jobs/{public_id}/start",
-        payload=request.get_json(silent=True) or {"max_concurrency": 10},
+        payload=_normalize_modem_community_payload(
+            request.get_json(silent=True) or {"max_concurrency": 10},
+            write=True,
+        ),
     )
 
 
@@ -897,7 +922,11 @@ def custom_snmp_start(public_id):
     scope_gate = _require_non_topology_job(f"/custom-snmp/jobs/{public_id}")
     if scope_gate:
         return scope_gate
-    return _proxy("POST", f"/custom-snmp/jobs/{public_id}/start", payload=request.get_json(silent=True) or {})
+    return _proxy(
+        "POST",
+        f"/custom-snmp/jobs/{public_id}/start",
+        payload=_normalize_modem_community_payload(request.get_json(silent=True) or {}),
+    )
 
 
 @api_bp.route('/admin/custom-snmp/jobs/<public_id>/cancel', methods=['POST'])
@@ -936,7 +965,11 @@ def custom_snmp_verify_oid():
     gate = _require_custom_snmp()
     if gate:
         return gate
-    return _proxy("POST", "/custom-snmp/verify-oid", payload=request.get_json(silent=True) or {})
+    return _proxy(
+        "POST",
+        "/custom-snmp/verify-oid",
+        payload=_normalize_modem_community_payload(request.get_json(silent=True) or {}),
+    )
 
 
 @api_bp.route('/admin/custom-snmp/mib-search', methods=['GET'])

@@ -46,7 +46,7 @@ class Config:
     PYPNM_API_TIMEOUT = int(os.environ.get('PYPNM_API_TIMEOUT', '30'))
     
     # Default SNMP Configuration
-    DEFAULT_SNMP_COMMUNITY = os.environ.get('DEFAULT_SNMP_COMMUNITY', 'private')
+    DEFAULT_SNMP_COMMUNITY = os.environ.get('DEFAULT_SNMP_COMMUNITY')
     DEFAULT_SNMP_VERSION = 'v2c'
     DEFAULT_SNMP_TIMEOUT = 5
     DEFAULT_SNMP_RETRIES = 3

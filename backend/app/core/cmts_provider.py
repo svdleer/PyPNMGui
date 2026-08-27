@@ -77,16 +77,23 @@ class CMTSProvider:
         # LAB MODE: Return static config
         if LAB_MODE:
             logger.debug("LAB MODE: Returning CMTS from config_lab.py")
-            # Convert LAB config format to appdb format
-            return [{
-                'HostName': cmts['name'],
-                'IPAddress': cmts['ip'],
-                'Vendor': cmts.get('vendor', 'Casa'),
-                'Type': cmts.get('type', 'CCAP'),
-                'Alias': cmts.get('location', ''),
-                'snmp_community': cmts.get('snmp_community', 'public'),
-                'write_community': cmts.get('write_community', cmts.get('snmp_community', 'private')),
-            } for cmts in LAB_CMTS_SYSTEMS]
+            # Convert LAB config format to appdb format without injecting
+            # unconfigured credentials or coupling write access to read access.
+            records = []
+            for cmts in LAB_CMTS_SYSTEMS:
+                record = {
+                    'HostName': cmts['name'],
+                    'IPAddress': cmts['ip'],
+                    'Vendor': cmts.get('vendor', 'Casa'),
+                    'Type': cmts.get('type', 'CCAP'),
+                    'Alias': cmts.get('location', ''),
+                }
+                for key in ('snmp_community', 'write_community'):
+                    value = cmts.get(key)
+                    if value is not None and (not isinstance(value, str) or value.strip()):
+                        record[key] = value
+                records.append(record)
+            return records
         
         current_time = time.time()
         

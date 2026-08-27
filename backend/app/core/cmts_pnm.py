@@ -29,6 +29,23 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _community_fields(
+    community: Optional[str] = None,
+    write_community: Optional[str] = None,
+) -> Dict[str, str]:
+    """Build credential fields while preserving explicit non-empty values."""
+    fields: Dict[str, str] = {}
+    if community is not None and (
+        not isinstance(community, str) or community.strip()
+    ):
+        fields["community"] = community
+    if write_community is not None and (
+        not isinstance(write_community, str) or write_community.strip()
+    ):
+        fields["write_community"] = write_community
+    return fields
+
+
 def get_pypnm_api_url() -> str:
     """Get PyPNM API base URL from environment."""
     return os.environ.get('PYPNM_API_URL', os.environ.get('PYPNM_BASE_URL', 'http://172.17.0.1:8000'))
@@ -40,7 +57,7 @@ class UsOfdmaRxMerConfig:
     cmts_ip: str
     ofdma_ifindex: int
     cm_mac_address: str
-    community: str = "private"
+    community: Optional[str] = None
     write_community: Optional[str] = None
     filename: str = "us_rxmer"
     pre_eq: bool = True
@@ -122,7 +139,7 @@ class CmtsPnmClient:
         self,
         cmts_ip: str,
         cm_mac: str,
-        community: str = "private",
+        community: Optional[str] = None,
         write_community: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -140,8 +157,8 @@ class CmtsPnmClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "cm_mac_address": cm_mac
         }
@@ -167,8 +184,8 @@ class CmtsPnmClient:
         payload = {
             "cmts": {
                 "cmts_ip": config.cmts_ip,
-                "community": config.community,
-                "write_community": config.write_community
+                **_community_fields(config.community),
+                **_community_fields(write_community=config.write_community)
             },
             "ofdma_ifindex": config.ofdma_ifindex,
             "cm_mac_address": config.cm_mac_address,
@@ -194,7 +211,7 @@ class CmtsPnmClient:
         self,
         cmts_ip: str,
         ofdma_ifindex: int,
-        community: str = "private",
+        community: Optional[str] = None,
         write_community: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -213,10 +230,8 @@ class CmtsPnmClient:
         params = {
             "cmts_ip": cmts_ip,
             "ofdma_ifindex": ofdma_ifindex,
-            "community": community,
+            **_community_fields(community, write_community),
         }
-        if write_community:
-            params["write_community"] = write_community
 
         result = self._get("/pnm/us/ofdma/rxmer/status", params=params)
         
@@ -229,7 +244,7 @@ class CmtsPnmClient:
     def get_bulk_destinations(
         self,
         cmts_ip: str,
-        community: str = "private",
+        community: Optional[str] = None,
         write_community: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -246,8 +261,8 @@ class CmtsPnmClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             }
         }
         
@@ -257,7 +272,7 @@ class CmtsPnmClient:
         self,
         cmts_ip: str,
         tftp_ip: str,
-        community: str = "private",
+        community: Optional[str] = None,
         write_community: Optional[str] = None,
         port: int = 69,
         local_store: bool = True,
@@ -283,8 +298,8 @@ class CmtsPnmClient:
         payload = {
             "cmts": {
                 "cmts_ip": cmts_ip,
-                "community": community,
-                "write_community": write_community
+                **_community_fields(community),
+                **_community_fields(write_community=write_community)
             },
             "tftp_ip": tftp_ip,
             "port": port,
@@ -303,7 +318,7 @@ class CmtsPnmClient:
 def discover_modem_ofdma_sync(
     cmts_ip: str,
     cm_mac: str,
-    community: str = "private"
+    community: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Synchronous wrapper for OFDMA discovery.
@@ -323,7 +338,7 @@ def start_us_rxmer_sync(config: UsOfdmaRxMerConfig) -> Dict[str, Any]:
 def get_us_rxmer_status_sync(
     cmts_ip: str,
     ofdma_ifindex: int,
-    community: str = "private",
+    community: Optional[str] = None,
     write_community: Optional[str] = None
 ) -> Dict[str, Any]:
     """

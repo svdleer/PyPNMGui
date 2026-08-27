@@ -8,9 +8,7 @@
         "version": {
             "2c": {
                 "enable": true,
-                "retries": 3,
-                "read_community": "public",
-                "write_community": "private"
+                "retries": 3
             },
             "3": {
                 "enable": false,
