@@ -141,6 +141,28 @@ class AuthDB:
         finally:
             conn.close()
 
+    def ensure_settings(self, defaults, created_by="system-default"):
+        """Insert missing settings without overwriting persisted choices."""
+        items = list((defaults or {}).items())
+        if not items:
+            return 0
+        now = self._now()
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.executemany(
+                "INSERT IGNORE INTO app_settings "
+                "(setting_key, setting_value, updated_by, created_at, updated_at) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                [
+                    (setting_key, str(setting_value), created_by, now, now)
+                    for setting_key, setting_value in items
+                ],
+            )
+            return cur.rowcount
+        finally:
+            conn.close()
+
     def ensure_bootstrap_admin(self):
         """Create the first internal administrator exactly once across workers."""
         conn = self._connect()

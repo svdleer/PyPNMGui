@@ -22,7 +22,12 @@ import os
 
 from app.core.auth_db import auth_db
 from app.core.auth_providers import auth_template_context, get_auth_registry, local_user_id, session_matches_active_provider
-from app.core.feature_flags import is_network_rxmer_analytics_enabled, is_cm_bulk_reset_enabled, is_custom_snmp_enabled
+from app.core.feature_flags import (
+    FEATURE_FLAG_DEFAULTS,
+    is_network_rxmer_analytics_enabled,
+    is_cm_bulk_reset_enabled,
+    is_custom_snmp_enabled,
+)
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, get_messages, normalize_locale, translate
 
 def create_app():
@@ -123,8 +128,14 @@ def create_app():
     for provider in auth_registry.providers:
         provider.configure_app(app)
 
-    # Initialize auth storage and bootstrap admin account.
+    # Initialize auth storage, persisted feature defaults, and bootstrap admin account.
     auth_db.init_db()
+    try:
+        seeded_feature_settings = auth_db.ensure_settings(FEATURE_FLAG_DEFAULTS)
+        if seeded_feature_settings:
+            app.logger.info("Seeded %s missing feature setting(s)", seeded_feature_settings)
+    except Exception as exc:
+        app.logger.error("Feature setting seed failed; defaults remain disabled: %s", exc)
     if active_auth_provider.is_internal:
         auth_db.ensure_bootstrap_admin()
     try:

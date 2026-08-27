@@ -1,13 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 
 from app.core.auth_db import auth_db
 
 logger = logging.getLogger(__name__)
-NETWORK_RXMER_ANALYTICS_SETTING = "network_rxmer_analytics_enabled"
-CM_BULK_RESET_SETTING = "cm_bulk_reset_enabled"
-CUSTOM_SNMP_SETTING = "custom_snmp_enabled"
+
+_IS_LAB = (
+    os.environ.get("FLASK_ENV") == "lab"
+    or os.environ.get("PYPNM_MODE") == "lab"
+)
+_SETTING_PREFIX = "lab." if _IS_LAB else ""
+
+
+def _setting_key(name: str) -> str:
+    return f"{_SETTING_PREFIX}{name}"
+
+
+NETWORK_RXMER_ANALYTICS_SETTING = _setting_key("network_rxmer_analytics_enabled")
+CM_BULK_RESET_SETTING = _setting_key("cm_bulk_reset_enabled")
+CUSTOM_SNMP_SETTING = _setting_key("custom_snmp_enabled")
+FEATURE_FLAG_DEFAULTS = {
+    NETWORK_RXMER_ANALYTICS_SETTING: "false",
+    CM_BULK_RESET_SETTING: "false",
+    CUSTOM_SNMP_SETTING: "false",
+}
 
 
 def is_network_rxmer_analytics_enabled() -> bool:
