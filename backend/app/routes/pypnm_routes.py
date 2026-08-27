@@ -5736,6 +5736,12 @@ def _new_branded_pnm_pdf(footer_context: str):
     _make_gradient(1200, 40).save(footer_tmp.name, 'PNG')
     footer_tmp.close()
 
+    report_edition = (
+        'Ronald Bron Special Edition'
+        if os.environ.get('FLASK_ENV') == 'lab' or os.environ.get('PYPNM_MODE') == 'lab'
+        else 'Henk-Jan Special Edition'
+    )
+
     class BrandedPnmPDF(FPDF):
         def header(self):
             self.image(header_tmp.name, 0, 0, self.w, 18)
@@ -5745,7 +5751,7 @@ def _new_branded_pnm_pdf(footer_context: str):
             self.cell(0, 5, 'PNM Measurement Report', new_x='LMARGIN', new_y='NEXT')
             self.set_font('Helvetica', 'I', 7)
             self.set_xy(8, 10)
-            self.cell(0, 4, 'Henk-Jan Special Edition')
+            self.cell(0, 4, report_edition)
             self.set_text_color(*_PDF_BRAND_DARK)
             self.set_y(22)
 
