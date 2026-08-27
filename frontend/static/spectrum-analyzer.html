@@ -101,7 +101,7 @@
     </label>
 
     <label class="small">Zoom:
-      <button id="zoomOut">Reset</button>
+      <button id="zoomOut" disabled>Reset</button>
     </label>
   </div>
 </header>
@@ -119,7 +119,7 @@
 
 <main>
   <div id="canvasWrap">
-    <div id="specChartWrap"><canvas id="specCanvas" data-no-auto-export="true" aria-label="Interactive live return-path spectrum trace"></canvas></div>
+    <div id="specChartWrap"><canvas id="specCanvas" data-no-auto-export="true" data-no-auto-zoom-action="true" aria-label="Interactive live return-path spectrum trace"></canvas></div>
     <canvas id="waterfallCanvas" aria-label="Live return-path spectrum waterfall"></canvas>
     <div id="waterfallLegend" aria-label="Waterfall color legend"><span>low</span><i></i><span>high</span></div>
     <div id="status">Status: idle</div>
@@ -143,7 +143,9 @@
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="./js/chart-theme.js?v=3"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="./js/chart-theme.js?v=4"></script>
 <script>
 // Detect iframe embedding and add class to hide controls
 if (window.self !== window.top) {
@@ -204,10 +206,6 @@ let decayRate = 0.992;
 let scaleMode = 'auto';
 let impulseOn = true;
 
-// zoom window
-let viewStart = 0;
-let viewEnd   = null; // null = full
-
 // Waterfall
 let wfRows = 240;
 let wfBuffer = [];
@@ -215,6 +213,7 @@ let wfBuffer = [];
 const statusEl = document.getElementById('status');
 const cursorEl = document.getElementById('cursor');
 const infoEl   = document.getElementById('info');
+const zoomResetButton = document.getElementById('zoomOut');
 
 // ===== Canvas setup =====
 const specCanvas = document.getElementById('specCanvas');
@@ -222,39 +221,52 @@ const wfCanvas   = document.getElementById('waterfallCanvas');
 const wctx = wfCanvas.getContext('2d');
 let dpr = window.devicePixelRatio || 1;
 const darkGrid = 'rgba(159,176,255,0.12)';
-const specChart = new Chart(specCanvas, {
-  type: 'line',
-  data: { datasets: [
-    {label:'Live', data:[], parsing:false, borderColor:'#8cc8ff', borderWidth:1.4, pointRadius:0},
-    {label:'Max hold', data:[], parsing:false, borderColor:'#ffc878', borderDash:[6,4], borderWidth:1.2, pointRadius:0},
-    {label:'Freeze A', data:[], parsing:false, borderColor:'#00ffa0', borderWidth:1, pointRadius:0},
-    {label:'Freeze B', data:[], parsing:false, borderColor:'#ff64b4', borderWidth:1, pointRadius:0},
-    {label:'Impulse >6 dB', data:[], parsing:false, showLine:false, pointRadius:3, pointBackgroundColor:'#ff3b30'}
-  ]},
-  options: {
-    responsive:true, maintainAspectRatio:false, animation:false, parsing:false, normalized:true,
-    interaction:{mode:'nearest',axis:'x',intersect:false},
-    plugins:{
-      title:{display:false},
-      legend:{display:true,position:'top',labels:{color:'#dfe7ff'}},
-      tooltip:{callbacks:{
-        title:items=>items.length?`${Number(items[0].parsed.x).toFixed(3)} MHz`:'',
-        label:item=>`${item.dataset.label}: ${Number(item.parsed.y).toFixed(2)} dBmV/MHz`
-      }}
-    },
-    scales:{
-      x:{type:'linear',title:{display:true,text:'Frequency (MHz)',color:'#b8c5e8'},ticks:{color:'#b8c5e8',maxTicksLimit:8},grid:{color:darkGrid},border:{color:'#516184'}},
-      y:{title:{display:true,text:'Level (dBmV/MHz)',color:'#b8c5e8'},ticks:{color:'#b8c5e8'},grid:{color:darkGrid},border:{color:'#516184'}}
+let specChart = null;
+let spectrumDomainKey = '';
+function createSpecChart() {
+  if (specChart || !bins.length) return specChart;
+  const fullMinMhz = freqStart / 1e6;
+  const fullMaxMhz = (freqStart + freqStep * (bins.length - 1)) / 1e6;
+  specChart = new Chart(specCanvas, {
+    type: 'line',
+    data: { datasets: [
+      {label:'Live', data:[], parsing:false, borderColor:'#8cc8ff', borderWidth:1.4, pointRadius:0},
+      {label:'Max hold', data:[], parsing:false, borderColor:'#ffc878', borderDash:[6,4], borderWidth:1.2, pointRadius:0},
+      {label:'Freeze A', data:[], parsing:false, borderColor:'#00ffa0', borderWidth:1, pointRadius:0},
+      {label:'Freeze B', data:[], parsing:false, borderColor:'#ff64b4', borderWidth:1, pointRadius:0},
+      {label:'Impulse >6 dB', data:[], parsing:false, showLine:false, pointRadius:3, pointBackgroundColor:'#ff3b30'}
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false, animation:false, parsing:false, normalized:true,
+      interaction:{mode:'nearest',axis:'x',intersect:false},
+      plugins:{
+        title:{display:false},
+        legend:{display:true,position:'top',labels:{color:'#dfe7ff'}},
+        tooltip:{callbacks:{
+          title:items=>items.length?`${Number(items[0].parsed.x).toFixed(3)} MHz`:'',
+          label:item=>`${item.dataset.label}: ${Number(item.parsed.y).toFixed(2)} dBmV/MHz`
+        }}
+      },
+      scales:{
+        x:{type:'linear',min:fullMinMhz,max:fullMaxMhz,title:{display:true,text:'Frequency (MHz)',color:'#b8c5e8'},ticks:{color:'#b8c5e8',maxTicksLimit:8},grid:{color:darkGrid},border:{color:'#516184'}},
+        y:{title:{display:true,text:'Level (dBmV/MHz)',color:'#b8c5e8'},ticks:{color:'#b8c5e8'},grid:{color:darkGrid},border:{color:'#516184'}}
+      }
     }
-  }
-});
+  });
+  const canResetZoom = typeof specChart.resetZoom === 'function';
+  zoomResetButton.disabled = !canResetZoom;
+  zoomResetButton.title = canResetZoom
+    ? 'Reset the spectrum to its full frequency range'
+    : 'Zoom controls unavailable because the zoom plugin did not load';
+  return specChart;
+}
 function resize(){
   dpr = window.devicePixelRatio || 1;
   const r = wfCanvas.getBoundingClientRect();
   wfCanvas.width  = Math.round(r.width * dpr);
   wfCanvas.height = Math.round(r.height * dpr);
   wctx.setTransform(dpr,0,0,dpr,0,0);
-  specChart.resize();
+  specChart?.resize();
   if(bins.length > 0) { draw(); drawWaterfall(); }
 }
 window.addEventListener('resize', resize);
@@ -349,8 +361,6 @@ function handleMessage(msg){
   freqStart = msg.freq_start_hz || freqStart;
   freqStep  = msg.freq_step_hz  || freqStep;
 
-  if(viewEnd === null){ viewStart = 0; viewEnd = bins.length-1; }
-
   if(maxHold.length !== bins.length) maxHold = bins.slice();
 
   if(holdMode === 'max'){
@@ -383,12 +393,17 @@ function handleMessage(msg){
 // ===== Chart.js line trace (updated in place) =====
 function draw(){
   if(!bins.length) return;
-  const lo = Math.max(0, viewStart);
-  const hi = Math.min(bins.length - 1, viewEnd ?? bins.length - 1);
+  const domainKey = `${bins.length}:${freqStart}:${freqStep}`;
+  if(specChart && spectrumDomainKey && spectrumDomainKey !== domainKey){
+    specChart.destroy();
+    specChart = null;
+  }
+  spectrumDomainKey = domainKey;
+  if(!createSpecChart()) return;
   const pointsFor = values => {
     if(!Array.isArray(values)) return [];
     const points=[];
-    for(let index=lo;index<=hi;index++){
+    for(let index=0;index<Math.min(values.length,bins.length);index++){
       const y=Number(values[index]);
       if(Number.isFinite(y)) points.push({x:(freqStart+index*freqStep)/1e6,y});
     }
@@ -401,7 +416,7 @@ function draw(){
   const freezeBPoints=showFreeze?pointsFor(freezeB):[];
   const impulsePoints=[];
   if(impulseOn){
-    for(let index=Math.max(1,lo);index<Math.min(hi,bins.length-1);index++){
+    for(let index=1;index<bins.length-1;index++){
       const value=Number(bins[index]);
       const neighborAverage=(Number(bins[index-1])+Number(bins[index+1]))/2;
       if(value-neighborAverage>6) impulsePoints.push({x:(freqStart+index*freqStep)/1e6,y:value});
@@ -423,8 +438,6 @@ function draw(){
     const pad=(maxV-minV)*0.08||1;
     minV-=pad;maxV+=pad;
   }
-  specChart.options.scales.x.min=(freqStart+lo*freqStep)/1e6;
-  specChart.options.scales.x.max=(freqStart+hi*freqStep)/1e6;
   specChart.options.scales.y.min=minV;
   specChart.options.scales.y.max=maxV;
   specChart.update('none');
@@ -463,12 +476,11 @@ function drawWaterfall(){
 
 // ===== Cursor + Zoom =====
 specCanvas.addEventListener('mousemove', e=>{
-  if(!bins.length) return;
+  if(!bins.length || !specChart) return;
   const rect=specCanvas.getBoundingClientRect();
-  const area=specChart.chartArea;
   const cssX=e.clientX-rect.left;
-  const ratio=Math.max(0,Math.min(1,(cssX-area.left)/Math.max(1,area.right-area.left)));
-  const idx=Math.max(viewStart,Math.min(viewEnd,Math.round(viewStart+ratio*(viewEnd-viewStart))));
+  const frequencyMhz=specChart.scales.x.getValueForPixel(cssX);
+  const idx=Math.max(0,Math.min(bins.length-1,Math.round((frequencyMhz*1e6-freqStart)/freqStep)));
   const f=(freqStart+idx*freqStep)/1e6;
   const v=Number(bins[idx]);
   cursorEl.textContent=`${f.toFixed(3)} MHz\n${v.toFixed(2)} dBmV/MHz\nBin ${idx}`;
@@ -484,19 +496,7 @@ waterfallCanvas.addEventListener('mousemove', e=>{
   cursorEl.textContent=`Waterfall ${frequency.toFixed(3)} MHz\n${Number.isFinite(value)?value.toFixed(2):'—'} dBmV/MHz\n${row===0?'latest':`${row} frames ago`}`;
 });
 
-// mouse wheel zoom
-specCanvas.addEventListener('wheel', e=>{
-  e.preventDefault();
-  const span=viewEnd-viewStart;
-  const center=viewStart+span/2;
-  const factor=e.deltaY>0?1.2:0.8;
-  let newSpan=Math.max(50,Math.min(bins.length,span*factor));
-  viewStart=Math.max(0,Math.floor(center-newSpan/2));
-  viewEnd=Math.min(bins.length-1,Math.floor(center+newSpan/2));
-  draw();
-});
-
-document.getElementById('zoomOut').onclick=()=>{ viewStart=0; viewEnd=bins.length-1; draw(); };
+zoomResetButton.onclick=()=>specChart?.resetZoom?.();
 
 // ===== Controls =====
 document.getElementById('resetMax').onclick=()=>{ maxHold=bins.slice(); draw(); };
