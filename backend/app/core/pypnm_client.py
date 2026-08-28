@@ -66,12 +66,16 @@ def _community_fields(
 def _snmp_fields(
     community: Optional[str],
     version_key: str = "snmpV2C",
-) -> Dict[str, Dict[str, Dict[str, str]]]:
-    """Build an optional SNMP block containing a non-blank credential."""
+) -> Dict[str, Dict[str, Dict[str, Optional[str]]]]:
+    """Build the required SNMP envelope, delegating null communities to PyPNM."""
     community_fields = _community_fields(community)
-    if not community_fields:
-        return {}
-    return {"snmp": {version_key: community_fields}}
+    return {
+        "snmp": {
+            version_key: {
+                "community": community_fields.get("community"),
+            }
+        }
+    }
 
 
 MAX_CM_MODEM_LIMIT = 50000
