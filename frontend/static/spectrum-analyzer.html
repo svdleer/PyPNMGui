@@ -512,6 +512,19 @@ document.getElementById('exportWaterfall').onclick=()=>window.PyPnmCharts?.downl
 
 // ===== WebSocket =====
 let ws=null;
+let credentialOverrides={};
+
+window.addEventListener('message', event => {
+  if (event.origin !== window.location.origin) return;
+  const data = event.data || {};
+  if (data.type !== 'spectrum_credentials') return;
+  credentialOverrides = {
+    ...(typeof data.community === 'string' && data.community.trim()
+      ? {community: data.community} : {}),
+    ...(typeof data.write_community === 'string' && data.write_community.trim()
+      ? {write_community: data.write_community} : {})
+  };
+});
 
 function connectWebSocket() {
   const url=wsInput.value.trim();
@@ -533,6 +546,7 @@ function connectWebSocket() {
       cmts_ip: cmtsIp,
       rf_port_ifindex: rfPort,
       mac_address: mac,
+      ...credentialOverrides,
       interval_ms: 500,
       skip_configure: skipConfigure,
       center_freq_hz: paramCenterFreq,

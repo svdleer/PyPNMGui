@@ -400,33 +400,13 @@ def get_tftp_for_cm() -> str:
 
 
 def get_community_for_cmts(cmts_ip: str):
-    """Return CMTS read community using inventory, then environment fallbacks."""
-    from app.core.cmts_provider import CMTSProvider
-    try:
-        cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-        inventory_community = _non_empty_community(
-            (cmts or {}).get('snmp_community')
-        )
-        if inventory_community is not None:
-            return inventory_community
-    except Exception:
-        pass
-    return get_cmts_community()
+    """Let the CMTS agent resolve its role-specific read credential."""
+    return None
 
 
 def get_write_community_for_cmts(cmts_ip: str):
-    """Return CMTS write community using inventory, then its write-only fallback."""
-    from app.core.cmts_provider import CMTSProvider
-    try:
-        cmts = CMTSProvider.get_cmts_by_ip(cmts_ip)
-        inventory_community = _non_empty_community(
-            (cmts or {}).get('write_community')
-        )
-        if inventory_community is not None:
-            return inventory_community
-    except Exception:
-        pass
-    return get_cmts_write_community()
+    """Let the CMTS agent resolve its role-specific write credential."""
+    return None
 
 
 # ============== Compatibility Routes ==============
@@ -2945,11 +2925,7 @@ def ds_chan_est_scan():
         cmts_rec = (CMTSProvider.get_cmts_by_hostname(cmts_hostname)
                     if cmts_hostname else None)
         if cmts_rec:
-            cmts_ip   = cmts_rec.get('IPAddress')
-            community = _first_community(
-                community,
-                cmts_rec.get('snmp_community'),
-            )
+            cmts_ip = cmts_rec.get('IPAddress')
 
     community = _first_community(community, get_community_for_cmts(cmts_ip))
     # Modem write community (PNM SNMP SETs) is always separate from CMTS community
@@ -3272,11 +3248,9 @@ def ds_chan_est_scan():
 
 @pypnm_bp.route('/config', methods=['GET'])
 def get_config():
-    """Return configured frontend communities without empty placeholders."""
+    """Return only explicit modem configuration needed by the frontend."""
     return jsonify(_add_community_fields(
         {},
-        snmpCommunity=get_cmts_community(),
-        snmpCommunityRW=get_cmts_write_community(),
         snmpCommunityModem=get_default_community(),
     ))
 
@@ -3324,11 +3298,7 @@ def ds_fullband_scan():
         cmts_rec = (CMTSProvider.get_cmts_by_hostname(cmts_hostname)
                     if cmts_hostname else None)
         if cmts_rec:
-            cmts_ip   = cmts_rec.get('IPAddress')
-            community = _first_community(
-                community,
-                cmts_rec.get('snmp_community'),
-            )
+            cmts_ip = cmts_rec.get('IPAddress')
 
     community = _first_community(community, get_community_for_cmts(cmts_ip))
     modem_write_community = _first_community(

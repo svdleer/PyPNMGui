@@ -37,33 +37,14 @@ def _first_community(*values):
     return None
 
 
-def _cmts_inventory(cmts_ip):
-    if not cmts_ip:
-        return {}
-    try:
-        from app.core.cmts_provider import CMTSProvider
-        return CMTSProvider.get_cmts_by_ip(cmts_ip) or {}
-    except Exception:
-        return {}
-
-
 def _resolve_cmts_read_community(cmts_ip, explicit=None):
-    cmts = _cmts_inventory(cmts_ip)
-    return _first_community(
-        explicit,
-        cmts.get('snmp_community'),
-        os.environ.get('CMTS_COMMUNITY'),
-        os.environ.get('CMTS_SNMP_COMMUNITY'),
-    )
+    """Preserve only a deliberate override; otherwise defer to the CMTS agent."""
+    return _non_empty_community(explicit)
 
 
 def _resolve_cmts_write_community(cmts_ip, explicit=None):
-    cmts = _cmts_inventory(cmts_ip)
-    return _first_community(
-        explicit,
-        cmts.get('write_community'),
-        os.environ.get('CMTS_WRITE_COMMUNITY'),
-    )
+    """Preserve only a deliberate override; otherwise defer to the CMTS agent."""
+    return _non_empty_community(explicit)
 
 
 def start_utsc_via_pypnm(
@@ -76,8 +57,6 @@ def start_utsc_via_pypnm(
 ):
     """Start UTSC through PyPNM, the sole owner of remote execution."""
     write_community = _non_empty_community(write_community)
-    if write_community is None:
-        return {'success': False, 'error': 'CMTS write community is not configured'}
     try:
         from app.core.pypnm_client import PyPNMClient
 
@@ -106,8 +85,6 @@ def stop_utsc_via_pypnm(
 ):
     """Stop UTSC through PyPNM using the row returned by start/configure."""
     write_community = _non_empty_community(write_community)
-    if write_community is None:
-        return {'success': False, 'error': 'CMTS write community is not configured'}
     try:
         from app.core.pypnm_client import PyPNMClient
 
@@ -231,6 +208,22 @@ def init_websocket(app):
                 'refresh_ms': refresh_ms,
                 'duration_s': duration_s,
             }))
+
+            # The browser sends one initial JSON configuration message. Preserve
+            # deliberate credential overrides there without exposing them in URLs;
+            # omitted or blank values continue to resolve on the CMTS agent.
+            try:
+                initial_raw = ws.receive(timeout=5)
+                initial_config = json.loads(initial_raw) if initial_raw else {}
+                if isinstance(initial_config, dict):
+                    community = _resolve_cmts_read_community(
+                        cmts_ip, initial_config.get('community')
+                    )
+                    write_community = _resolve_cmts_write_community(
+                        cmts_ip, initial_config.get('write_community')
+                    )
+            except Exception as exc:
+                logger.debug("No usable UTSC WebSocket initial config: %s", exc)
 
             # Housekeeping executes in PyPNM and is restricted to aged UTSC files.
             cleanup = client.housekeeping_utsc_files(

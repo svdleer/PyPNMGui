@@ -2903,12 +2903,7 @@ createApp({
             try {
                 const response = await fetch(`${API_BASE}/pypnm/config`);
                 const data = await response.json();
-                if (this._hasCredential(data.snmpCommunity)) this.snmpCommunity = data.snmpCommunity;
-                if (this._hasCredential(data.snmpCommunityRW)) this.snmpCommunityRW = data.snmpCommunityRW;
                 if (this._hasCredential(data.snmpCommunityModem)) this.snmpCommunityModem = data.snmpCommunityModem;
-                // Pre-populate fiber node scan communities from config
-                if (this._hasCredential(data.snmpCommunity))   this.fnScanCommunity = data.snmpCommunity;
-                if (this._hasCredential(data.snmpCommunityRW)) this.fnScanWriteCommunity = data.snmpCommunityRW;
             } catch (e) {
                 console.warn(`Could not load server config`, e);
             }
@@ -7345,7 +7340,18 @@ createApp({
             // Pass live=1 if UTSC is already running to skip WebSocket re-configuration
             const liveParam = this.runningUtsc ? '&live=1' : '';
             const cfgParams = `&center_freq_hz=${this.utscConfig.centerFreqMhz * 1000000}&span_hz=${this.utscConfig.spanMhz * 1000000}&num_bins=${this.utscConfig.numBins}&output_format=${this.utscConfig.outputFormat}&window=${this.utscConfig.window}&runtime=${this.utscConfig.runtime}&cfg_index=${this.utscConfig.cfgIndex || 0}`;
-            // Credentials are resolved server-side; never place them in iframe or WebSocket URLs.
+            // Deliberate operator overrides are transferred to the same-origin
+            // iframe via postMessage, never exposed in iframe or WebSocket URLs.
+            iframe.addEventListener('load', () => {
+                const credentials = this._credentialFields({
+                    community: this.snmpCommunity,
+                    write_community: this.snmpCommunityRW,
+                });
+                iframe.contentWindow?.postMessage(
+                    { type: 'spectrum_credentials', ...credentials },
+                    window.location.origin,
+                );
+            }, { once: true });
             iframe.src = `${BASE_PATH}/spectrum-analyzer?mac=${encodeURIComponent(mac)}&rfport=${this.utscConfig.rfPortIfindex || ''}&cmts=${encodeURIComponent(this.selectedModem.cmts_ip || '')}${liveParam}${cfgParams}`;
             
             // Listen for 'buffering_complete' from iframe to hide waiting overlay
