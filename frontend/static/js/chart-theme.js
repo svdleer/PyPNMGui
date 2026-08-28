@@ -11,7 +11,7 @@
         colors.blue, colors.red, colors.green, colors.orange, colors.purple,
         colors.cyan, '#d946ef', '#84cc16', '#0f766e', '#9f1239'
     ]);
-    const zoomInstructions = 'Ctrl + wheel or pinch to zoom; drag to pan; Shift + drag for box zoom';
+    const zoomInstructions = 'Drag to select and zoom; Shift + drag to pan; Ctrl + wheel or pinch to zoom';
     const safeName = value => String(value || 'pypnm-chart').toLowerCase()
         .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'pypnm-chart';
     const saveBlob = (blob, name) => {
@@ -63,6 +63,7 @@
                 enabled: currentPan.enabled ?? true,
                 mode,
                 threshold: 8,
+                modifierKey: 'shift',
                 ...currentPan,
             },
             zoom: {
@@ -80,10 +81,11 @@
                 },
                 drag: {
                     enabled: true,
-                    modifierKey: 'shift',
-                    backgroundColor: 'rgba(37,99,235,0.12)',
-                    borderColor: 'rgba(37,99,235,0.75)',
-                    borderWidth: 1,
+                    modifierKey: null,
+                    threshold: 8,
+                    backgroundColor: 'rgba(37,99,235,0.20)',
+                    borderColor: 'rgba(37,99,235,0.95)',
+                    borderWidth: 2,
                     ...(currentZoom.drag || {}),
                 },
             },

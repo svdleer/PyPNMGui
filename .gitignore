@@ -96,3 +96,7 @@ topology/
 
 # Local deploy artifacts
 deploy/
+
+# Generated semantic review PR artifacts
+/semantic-review/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-pr-local.md
+/semantic-review/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-pr-uncommitted.md
