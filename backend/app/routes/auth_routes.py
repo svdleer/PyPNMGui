@@ -45,7 +45,18 @@ def _poller_api_request(method: str, path: str, *, payload=None, params=None) ->
     timeout = int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "20"))
     url = f"{_poller_api_base()}{path}"
     resp = requests.request(method=method, url=url, json=payload, params=params, timeout=timeout, verify=False)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        try:
+            error_payload = resp.json()
+        except Exception:
+            error_payload = None
+        if isinstance(error_payload, dict):
+            detail = error_payload.get("detail") or error_payload.get("message")
+            if detail:
+                raise RuntimeError(str(detail)) from exc
+        raise
     try:
         return resp.json() if resp.content else {"status": "success"}
     except Exception:
@@ -574,13 +585,19 @@ def admin_run_poller_setting(poller_id):
     try:
         run_resp = _poller_api_request("POST", f"/poller-settings/{int(poller_id)}/run", payload={"source": "admin-ui"})
         job_id = run_resp.get("job_id") or "?"
-        if run_resp.get("state") == "already_active":
+        state = run_resp.get("state")
+        if state == "already_active":
             flash(
                 f"Poller {poller_id} already has active job {job_id}",
                 "warning",
             )
-        else:
+        elif state == "queued":
             flash(f"Run queued for poller {poller_id} (job {job_id})", "success")
+        else:
+            flash(
+                f"Run not queued for poller {poller_id} (state: {state or 'unknown'})",
+                "warning",
+            )
     except Exception as exc:
         flash(f"Queue run failed: {exc}", "danger")
     return redirect(_prefixed(url_for("auth.admin_page")))
