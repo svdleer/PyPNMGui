@@ -812,15 +812,16 @@
                 <div class="card-header bg-white"><strong>Create User</strong></div>
                 <div class="card-body">
                     <form method="post" action="[[ base_path ]]/admin/users/create" class="row g-2">
-                        <div class="col-md-4"><input class="form-control" name="username" placeholder="username" required></div>
-                        <div class="col-md-3">
+                        <div class="col-md-3"><input class="form-control" name="username" placeholder="username" required></div>
+                        <div class="col-md-3"><input class="form-control" name="name" placeholder="name (optional)" maxlength="128"></div>
+                        <div class="col-md-2">
                             <select class="form-select" name="role">
                                 <option value="user">user</option>
                                 <option value="viewer">viewer</option>
                                 <option value="admin">admin</option>
                             </select>
                         </div>
-                        <div class="col-md-4"><input class="form-control" type="password" name="password" placeholder="password (min 8)" minlength="8" required></div>
+                        <div class="col-md-3"><input class="form-control" type="password" name="password" placeholder="password (min 8)" minlength="8" required></div>
                         <div class="col-md-1 d-flex align-items-center"><button class="btn btn-primary btn-sm icon-btn" type="submit" title="Create user"><i class="bi bi-save"></i></button></div>
                     </form>
                 </div>
@@ -831,7 +832,7 @@
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-sm mb-0 align-middle users-table">
-                            <thead><tr><th>User</th><th>Role/Status</th><th>Password</th></tr></thead>
+                            <thead><tr><th>User</th><th>Name / Role / Status</th><th>Password</th></tr></thead>
                             <tbody>
                                 {% for u in users %}
                                 <tr>
@@ -843,6 +844,7 @@
                                     </td>
                                     <td>
                                         <form method="post" action="[[ base_path ]]/admin/users/[[ u.id ]]/update" class="user-role-form">
+                                            <input class="form-control form-control-sm" name="name" value="[[ u.name or '' ]]" placeholder="name (optional)" maxlength="128" style="max-width:180px;">
                                             <select class="form-select form-select-sm" name="role" style="max-width:120px;" {% if u.role == 'admin' %}disabled{% endif %}>
                                                 <option value="user" {% if u.role == 'user' %}selected{% endif %}>user</option>
                                                 <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>viewer</option>
@@ -852,11 +854,7 @@
                                                 <input class="form-check-input" type="checkbox" name="is_active" {% if u.is_active %}checked{% endif %} {% if u.role == 'admin' %}disabled{% endif %}>
                                                 <span>active</span>
                                             </label>
-                                            {% if u.role == 'admin' %}
-                                                <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Locked</button>
-                                            {% else %}
-                                                <button class="btn btn-outline-primary btn-sm" type="submit">Save</button>
-                                            {% endif %}
+                                            <button class="btn btn-outline-primary btn-sm" type="submit">Save</button>
                                         </form>
                                     </td>
                                     <td>

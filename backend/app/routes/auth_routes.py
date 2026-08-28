@@ -169,6 +169,7 @@ def _login_response(*, emergency_local: bool = False):
     session["user_id"] = user["id"]
     session["auth_source"] = "internal"
     session["username"] = user["username"]
+    session["name"] = str(user.get("name") or "").strip()
     session["role"] = user["role"]
     session["locale"] = normalize_locale(user.get("language_preference") or DEFAULT_LOCALE)
 
@@ -716,11 +717,15 @@ def admin_create_user():
         return redirect(_prefixed(url_for("auth.admin_page")))
 
     username = (request.form.get("username") or "").strip()
+    name = (request.form.get("name") or "").strip()
     role = (request.form.get("role") or "user").strip()
     password = request.form.get("password") or ""
 
     if not username:
         flash("Username is required", "danger")
+        return redirect(_prefixed(url_for("auth.admin_page")))
+    if len(name) > 128:
+        flash("Name must not exceed 128 characters", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
     if role not in {"admin", "user", "viewer"}:
         flash("Invalid role", "danger")
@@ -730,7 +735,13 @@ def admin_create_user():
         return redirect(_prefixed(url_for("auth.admin_page")))
 
     try:
-        auth_db.create_user(username=username, password=password, role=role, is_active=True)
+        auth_db.create_user(
+            username=username,
+            password=password,
+            role=role,
+            is_active=True,
+            name=name,
+        )
         flash(f"User '{username}' created", "success")
     except Exception as exc:
         flash(f"Create user failed: {exc}", "danger")
@@ -750,18 +761,25 @@ def admin_update_user(user_id):
         flash("User not found", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
 
-    role = (request.form.get("role") or user["role"]).strip()
-    is_active = request.form.get("is_active") == "on"
+    name = (request.form.get("name") or "").strip()
+    if len(name) > 128:
+        flash("Name must not exceed 128 characters", "danger")
+        return redirect(_prefixed(url_for("auth.admin_page")))
+
+    # Admin role/status are immutable, but their optional name remains editable.
+    if user["role"] == "admin":
+        role = "admin"
+        is_active = bool(user.get("is_active"))
+    else:
+        role = (request.form.get("role") or user["role"]).strip()
+        is_active = request.form.get("is_active") == "on"
     if role not in {"admin", "user", "viewer"}:
         flash("Invalid role", "danger")
         return redirect(_prefixed(url_for("auth.admin_page")))
 
-    # Hard-protect admin accounts: no disable/demotion from UI.
-    if user["role"] == "admin" and (role != "admin" or not is_active):
-        flash("Admin accounts cannot be disabled or demoted", "danger")
-        return redirect(_prefixed(url_for("auth.admin_page")))
-
-    auth_db.update_user(user_id=user_id, role=role, is_active=is_active)
+    auth_db.update_user(user_id=user_id, role=role, is_active=is_active, name=name)
+    if local_user_id(session) == user_id:
+        session["name"] = name
     flash(f"User '{user['username']}' updated", "success")
     return redirect(_prefixed(url_for("auth.admin_page")))
 
@@ -877,6 +895,7 @@ def admin_o365_debug():
             current_user_claims = {
                 "user_id": session.get("user_id", ""),
                 "username": session.get("username", ""),
+                "name": session.get("name", ""),
                 "email": session.get("email", ""),
                 "role": session.get("role", ""),
                 "locale": session.get("locale", ""),
@@ -921,6 +940,7 @@ def admin_export_sql():
         "CREATE TABLE IF NOT EXISTS `users` (",
         "  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,",
         "  `username` VARCHAR(64) NOT NULL UNIQUE,",
+        "  `name` VARCHAR(128) NULL,",
         "  `password_hash` VARCHAR(255) NOT NULL,",
         "  `role` VARCHAR(16) NOT NULL,",
         "  `language_preference` VARCHAR(16) NOT NULL DEFAULT 'en-US',",
@@ -928,6 +948,11 @@ def admin_export_sql():
         "  `created_at` DATETIME NOT NULL,",
         "  `updated_at` DATETIME NOT NULL",
         ");",
+        "SET @pypnm_users_name_exists = (SELECT COUNT(*) FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'users' AND `COLUMN_NAME` = 'name');",
+        "SET @pypnm_users_name_sql = IF(@pypnm_users_name_exists = 0, 'ALTER TABLE `users` ADD COLUMN `name` VARCHAR(128) NULL AFTER `username`', 'SELECT 1');",
+        "PREPARE pypnm_users_name_stmt FROM @pypnm_users_name_sql;",
+        "EXECUTE pypnm_users_name_stmt;",
+        "DEALLOCATE PREPARE pypnm_users_name_stmt;",
         "",
         "CREATE TABLE IF NOT EXISTS `api_keys` (",
         "  `id` BIGINT PRIMARY KEY AUTO_INCREMENT,",
@@ -947,8 +972,8 @@ def admin_export_sql():
     if users:
         lines.append("-- Users")
         for u in users:
-            cols = "(`username`, `password_hash`, `role`, `language_preference`, `is_active`, `created_at`, `updated_at`)"
-            vals = ", ".join(_esc(u.get(c)) for c in ("username", "password_hash", "role", "language_preference", "is_active", "created_at", "updated_at"))
+            cols = "(`username`, `name`, `password_hash`, `role`, `language_preference`, `is_active`, `created_at`, `updated_at`)"
+            vals = ", ".join(_esc(u.get(c)) for c in ("username", "name", "password_hash", "role", "language_preference", "is_active", "created_at", "updated_at"))
             lines.append(f"INSERT IGNORE INTO `users` {cols} VALUES ({vals});")
         lines.append("")
 
@@ -978,6 +1003,7 @@ def auth_me():
             "user": {
                 "id": session.get("user_id"),
                 "username": session.get("username"),
+                "name": session.get("name") or "",
                 "role": session.get("role"),
                 "auth_source": session.get("auth_source") or "internal",
                 "locale": normalize_locale(session.get("locale") or DEFAULT_LOCALE),

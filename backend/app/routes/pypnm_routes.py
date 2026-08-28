@@ -2,7 +2,7 @@
 #
 # Complete PyPNM API integration with plot support
 
-from flask import Blueprint, request, jsonify, send_file, current_app, session
+from flask import Blueprint, request, jsonify, send_file, current_app, session, has_request_context
 from typing import Dict, Any
 import logging
 import math
@@ -27,6 +27,39 @@ PYPNM_OFDMA_TIMEOUT = int(os.environ.get('PYPNM_OFDMA_TIMEOUT', '120'))
 DEFAULT_VELOCITY_FACTOR = 0.87
 MIN_VELOCITY_FACTOR = 0.50
 MAX_VELOCITY_FACTOR = 1.00
+
+
+def _normalize_report_user_name(value: object) -> str:
+    """Normalize a human name for the compact PDF header."""
+    return " ".join(str(value or "").split())[:128]
+
+
+def _request_report_user_name() -> str:
+    """Resolve identity while the request context is available."""
+    if not has_request_context():
+        return ""
+
+    name = _normalize_report_user_name(session.get("name"))
+    if name:
+        return name
+
+    # Existing O365 sessions may predate the canonical top-level name.
+    claims = session.get("user")
+    if not isinstance(claims, dict):
+        return ""
+    name = _normalize_report_user_name(claims.get("name"))
+    if name:
+        return name
+    return _normalize_report_user_name(
+        " ".join(
+            value
+            for value in (
+                str(claims.get("given_name") or "").strip(),
+                str(claims.get("family_name") or "").strip(),
+            )
+            if value
+        )
+    )
 
 
 def _parse_velocity_factor(value: object) -> float:
@@ -5345,6 +5378,7 @@ def start_pnm_report():
     """
     import uuid as _uuid
     data = request.get_json() or {}
+    data['_report_user_name'] = _request_report_user_name()
     mac_address = data.get('mac_address')
     modem_ip = data.get('modem_ip')
     measurements = data.get('measurements') or []
@@ -5400,6 +5434,9 @@ def start_fibernode_report():
         return jsonify({'success': False, 'error': result.get('error') or 'Scan did not complete successfully'}), 400
     if not isinstance(result.get('analysis'), dict):
         return jsonify({'success': False, 'error': 'Completed scan contains no RxMER analysis'}), 400
+
+    result = dict(result)
+    result['_report_user_name'] = _request_report_user_name()
 
     # Stored metadata is authoritative. Request metadata only supports scans
     # created before metadata was added to the persisted result payload.
@@ -5576,6 +5613,8 @@ def _queue_stored_bulk_report(
     """Queue a formatting-only report from an immutable, server-owned source."""
     import uuid as _uuid
 
+    source = dict(source)
+    source['_report_user_name'] = _request_report_user_name()
     job_id = _uuid.uuid4().hex
     _set_report_progress(
         job_id,
@@ -5862,7 +5901,13 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
     _set_report_progress(job_id, progress=len(measurements), current='Building PDF...')
 
     try:
-        pdf_path = _build_pnm_pdf(job_id, mac_address, modem_info, collected_plots)
+        pdf_path = _build_pnm_pdf(
+            job_id,
+            mac_address,
+            modem_info,
+            collected_plots,
+            data.get('_report_user_name'),
+        )
         _set_report_progress(job_id, status='complete', pdf_path=pdf_path, current='Done')
     except Exception as exc:
         logger.error(f"PNM report PDF build failed: {exc}", exc_info=True)
@@ -5877,7 +5922,7 @@ _PDF_BRAND_GRAY = (120, 120, 130)
 _PDF_WHITE = (255, 255, 255)
 
 
-def _new_branded_pnm_pdf(footer_context: str):
+def _new_branded_pnm_pdf(footer_context: str, report_user_name: str | None = None):
     """Create the shared branded PDF shell used by modem and Fiber Node reports."""
     import tempfile
     from fpdf import FPDF
@@ -5922,11 +5967,8 @@ def _new_branded_pnm_pdf(footer_context: str):
     _make_gradient(1200, 40).save(footer_tmp.name, 'PNG')
     footer_tmp.close()
 
-    report_edition = (
-        'Ronald Bron Special Edition'
-        if os.environ.get('FLASK_ENV') == 'lab' or os.environ.get('PYPNM_MODE') == 'lab'
-        else 'Henk-Jan Special Edition'
-    )
+    normalized_name = _normalize_report_user_name(report_user_name)
+    report_edition = f"{normalized_name}'s Special Edition" if normalized_name else ""
 
     class BrandedPnmPDF(FPDF):
         def header(self):
@@ -5935,9 +5977,10 @@ def _new_branded_pnm_pdf(footer_context: str):
             self.set_font('Helvetica', 'B', 11)
             self.set_xy(8, 4)
             self.cell(0, 5, 'PNM Measurement Report', new_x='LMARGIN', new_y='NEXT')
-            self.set_font('Helvetica', 'I', 7)
-            self.set_xy(8, 10)
-            self.cell(0, 4, report_edition)
+            if report_edition:
+                self.set_font('Helvetica', 'I', 7)
+                self.set_xy(8, 10)
+                self.cell(0, 4, _pdf_safe_text(report_edition))
             self.set_text_color(*_PDF_BRAND_DARK)
             self.set_y(22)
 
@@ -5979,7 +6022,13 @@ def _pdf_add_section_heading(pdf, label: str):
     pdf.ln(4)
 
 
-def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: list) -> str:
+def _build_pnm_pdf(
+    job_id: str,
+    mac_address: str,
+    modem_info: dict,
+    sections: list,
+    report_user_name: str | None = None,
+) -> str:
     """Generate a management-quality branded PDF from collected measurement plots."""
     import tempfile
     from datetime import datetime
@@ -5988,7 +6037,8 @@ def _build_pnm_pdf(job_id: str, mac_address: str, modem_info: dict, sections: li
     BRAND_DARK = _PDF_BRAND_DARK
     BRAND_GRAY = _PDF_BRAND_GRAY
     pdf, _brand_tmp_paths = _new_branded_pnm_pdf(
-        f'{mac_address}  |  {modem_info.get("cmts_name", "")}'
+        f'{mac_address}  |  {modem_info.get("cmts_name", "")}',
+        report_user_name,
     )
 
     # ── Title page ────────────────────────────────────────────
@@ -6219,7 +6269,10 @@ def _build_fibernode_pdf(job_id: str, scan_result: dict) -> str:
     else:
         captured_mode_label = 'Not recorded'
 
-    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(
+        f'{fiber_node}  |  {cmts_name}',
+        scan_result.get('_report_user_name'),
+    )
     try:
         # Title page: same spacing, typography, and centered metadata as modem reports.
         pdf.add_page()
@@ -6438,7 +6491,10 @@ def _build_bulk_impulse_pdf(job_id: str, source: dict) -> str:
     fiber_node = source.get('fiber_node') or report_info.get('fiber_node') or 'Unknown Fiber Node'
     cmts_name = report_info.get('cmts_name') or report_info.get('cmts_ip') or 'Unknown CMTS'
     source_ids = [value for value in (source.get('source_job_ids') or [source.get('job_id')]) if value]
-    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(
+        f'{fiber_node}  |  {cmts_name}',
+        source.get('_report_user_name'),
+    )
     try:
         _pdf_add_bulk_title_page(pdf, 'Bulk Impulse Response Report', [
             ('Fiber Node', fiber_node),
@@ -6519,7 +6575,10 @@ def _build_ds_suckout_pdf(job_id: str, source: dict) -> str:
     cmts_name = metadata.get('cmts_name') or metadata.get('cmts_ip') or 'Unknown CMTS'
     modems = source.get('modems') or []
     detections = source.get('detections') or []
-    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(
+        f'{fiber_node}  |  {cmts_name}',
+        source.get('_report_user_name'),
+    )
     try:
         _pdf_add_bulk_title_page(pdf, 'DS OFDM Suckout Scan Report', [
             ('Fiber Node', fiber_node),
@@ -6598,7 +6657,10 @@ def _build_ds_fullband_pdf(job_id: str, source: dict) -> str:
     cmts_name = metadata.get('cmts_name') or metadata.get('cmts_ip') or 'Unknown CMTS'
     modems = source.get('modems') or []
     detections = source.get('detections') or []
-    pdf, brand_tmp_paths = _new_branded_pnm_pdf(f'{fiber_node}  |  {cmts_name}')
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(
+        f'{fiber_node}  |  {cmts_name}',
+        source.get('_report_user_name'),
+    )
     try:
         _pdf_add_bulk_title_page(pdf, 'DS Fullband Spectrum Scan Report', [
             ('Fiber Node', fiber_node),
@@ -6756,7 +6818,10 @@ def _build_network_rxmer_pdf(job_id: str, source: dict) -> str:
     statistic_label = statistic_labels.get(statistic, 'Average RxMER')
     public_id = str(job.get('public_id') or source.get('public_id') or 'unknown')
 
-    pdf, brand_tmp_paths = _new_branded_pnm_pdf(report_scope)
+    pdf, brand_tmp_paths = _new_branded_pnm_pdf(
+        report_scope,
+        source.get('_report_user_name'),
+    )
     try:
         _pdf_add_bulk_title_page(pdf, 'Network RxMER Analytics Report', [
             ('Report Scope', report_scope),

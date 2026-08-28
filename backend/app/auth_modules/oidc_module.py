@@ -111,6 +111,20 @@ def _claims_username(claims: dict[str, Any]) -> str:
     return "oidc-user"
 
 
+def _claims_display_name(claims: dict[str, Any]) -> str:
+    name = str(claims.get("name") or "").strip()
+    if name:
+        return name
+    return " ".join(
+        value
+        for value in (
+            str(claims.get("given_name") or "").strip(),
+            str(claims.get("family_name") or "").strip(),
+        )
+        if value
+    )
+
+
 def _claims_locale(claims: dict[str, Any]) -> str:
     return normalize_locale(claims.get("locale") or claims.get("lang") or DEFAULT_LOCALE)
 
@@ -316,6 +330,7 @@ def oidc_callback():
     session["user_id"] = f"oidc:{subject}"
     session["auth_source"] = "oidc"
     session["username"] = _claims_username(claims)
+    session["name"] = _claims_display_name(claims)
     session["role"] = _claims_role(claims)
     session["email"] = str(claims.get("email") or claims.get("preferred_username") or "").strip()
     session["locale"] = _claims_locale(claims)

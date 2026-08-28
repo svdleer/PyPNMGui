@@ -48,6 +48,7 @@ class AuthDB:
                 CREATE TABLE IF NOT EXISTS users (
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     username VARCHAR(64) NOT NULL UNIQUE,
+                    name VARCHAR(128) NULL,
                     password_hash VARCHAR(255) NOT NULL,
                     role VARCHAR(16) NOT NULL,
                     language_preference VARCHAR(16) NOT NULL DEFAULT 'en-US',
@@ -84,13 +85,22 @@ class AuthDB:
                 )
                 """
             )
-            try:
-                cur.execute(
-                    "ALTER TABLE users ADD COLUMN language_preference "
-                    "VARCHAR(16) NOT NULL DEFAULT 'en-US'"
-                )
-            except Exception:
-                pass
+            def _add_user_column(statement):
+                try:
+                    cur.execute(statement)
+                except Exception as exc:
+                    # MySQL error 1060 means this idempotent migration already ran.
+                    if not exc.args or exc.args[0] != 1060:
+                        raise
+
+            _add_user_column(
+                "ALTER TABLE users ADD COLUMN language_preference "
+                "VARCHAR(16) NOT NULL DEFAULT 'en-US'"
+            )
+            _add_user_column(
+                "ALTER TABLE users ADD COLUMN name VARCHAR(128) NULL "
+                "AFTER username"
+            )
         finally:
             conn.close()
 
@@ -223,33 +233,49 @@ class AuthDB:
         return user
 
     def list_users(self):
-        users = self._fetchall("SELECT id, username, role, language_preference, is_active, created_at, updated_at FROM users ORDER BY username")
+        users = self._fetchall(
+            "SELECT id, username, name, role, language_preference, is_active, "
+            "created_at, updated_at FROM users ORDER BY username"
+        )
         return users
 
-    def create_user(self, username, password, role="user", is_active=True):
+    def create_user(self, username, password, role="user", is_active=True, name=None):
         now = self._now()
         password_hash = generate_password_hash(password)
+        normalized_name = str(name or "").strip() or None
         conn = self._connect()
         try:
             cur = conn.cursor()
             cur.execute(
                 "INSERT INTO users "
-                "(username, password_hash, role, language_preference, is_active, created_at, updated_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (username, password_hash, role, "en-US", 1 if is_active else 0, now, now),
+                "(username, name, password_hash, role, language_preference, "
+                "is_active, created_at, updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    username,
+                    normalized_name,
+                    password_hash,
+                    role,
+                    "en-US",
+                    1 if is_active else 0,
+                    now,
+                    now,
+                ),
             )
             return cur.lastrowid
         finally:
             conn.close()
 
-    def update_user(self, user_id, role, is_active):
+    def update_user(self, user_id, role, is_active, name=None):
         now = self._now()
+        normalized_name = str(name or "").strip() or None
         conn = self._connect()
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE users SET role=%s, is_active=%s, updated_at=%s WHERE id=%s",
-                (role, 1 if is_active else 0, now, user_id),
+                "UPDATE users SET name=%s, role=%s, is_active=%s, "
+                "updated_at=%s WHERE id=%s",
+                (normalized_name, role, 1 if is_active else 0, now, user_id),
             )
         finally:
             conn.close()
