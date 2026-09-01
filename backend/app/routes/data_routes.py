@@ -315,6 +315,104 @@ def enrichment_progress():
     return _proxy("GET", "/inventory/enrichment-progress", params={"cmts": cmts} if cmts else None)
 
 
+# ── Inventory summary (vendor / model / firmware counts) ─────
+
+
+@api_bp.route('/admin/inventory-summary', methods=['GET'])
+def inventory_summary():
+    gate = _require_admin()
+    if gate:
+        return gate
+
+    cmts_filter = (request.args.get("cmts") or "").strip().lower()
+    try:
+        top_n = max(1, min(int(request.args.get("top_n", 25)), 100))
+    except (TypeError, ValueError):
+        top_n = 25
+
+    # ── Try Redis first ──────────────────────────────────────
+    try:
+        from app.routes.api_routes import (
+            redis_client,
+            REDIS_AVAILABLE,
+            _cache_remaining_ttl,
+        )
+        import json as _json
+        import collections as _collections
+
+        if REDIS_AVAILABLE and redis_client:
+            vendor_counts: dict = _collections.Counter()
+            model_counts: dict = _collections.Counter()
+            firmware_counts: dict = _collections.Counter()
+            docsis_counts: dict = _collections.Counter()
+            total = 0
+            enriched = 0
+            last_updated_ts = None
+
+            keys = list(redis_client.scan_iter(match="modems:*", count=500))
+            for key in keys:
+                raw = redis_client.get(key)
+                if not raw:
+                    continue
+                payload = _json.loads(raw)
+                if _cache_remaining_ttl(payload) <= 0:
+                    continue
+                modems = payload.get("modems") or []
+                # Apply optional CMTS filter
+                if cmts_filter:
+                    cmts_val = str(payload.get("cmts") or "").strip().lower()
+                    if cmts_val and cmts_val != cmts_filter:
+                        continue
+                for m in modems:
+                    if not isinstance(m, dict):
+                        continue
+                    total += 1
+                    v = str(m.get("vendor") or "").strip() or "(unknown)"
+                    mo = str(m.get("model") or "").strip() or "(unknown)"
+                    fw = str(m.get("software_version") or m.get("firmware") or "").strip() or "(unknown)"
+                    dv = str(m.get("docsis_version") or "").strip() or "(unknown)"
+                    vendor_counts[v] += 1
+                    model_counts[mo] += 1
+                    firmware_counts[fw] += 1
+                    docsis_counts[dv] += 1
+                    if (
+                        v.lower() not in ("", "unknown", "n/a", "(unknown)")
+                        and fw.lower() not in ("", "unknown", "n/a", "(unknown)")
+                    ):
+                        enriched += 1
+                ts_raw = payload.get("collected_at") or payload.get("cache_written_at")
+                if ts_raw:
+                    if last_updated_ts is None or str(ts_raw) > str(last_updated_ts):
+                        last_updated_ts = ts_raw
+
+            if total > 0:
+                def _top(counter, n):
+                    return [
+                        {"value": k, "count": v}
+                        for k, v in counter.most_common(n)
+                    ]
+                return jsonify({
+                    "status": "success",
+                    "source": "redis",
+                    "total": total,
+                    "enriched": enriched,
+                    "enriched_pct": round(enriched / total * 100, 1) if total else 0.0,
+                    "last_updated": str(last_updated_ts or ""),
+                    "vendors": _top(vendor_counts, top_n),
+                    "models": _top(model_counts, top_n),
+                    "firmwares": _top(firmware_counts, top_n),
+                    "docsis_versions": _top(docsis_counts, top_n),
+                })
+    except Exception:
+        pass
+
+    # ── Fall through to MySQL via PyPNM ──────────────────────
+    params = {"top_n": top_n}
+    if cmts_filter:
+        params["cmts"] = cmts_filter
+    return _proxy("GET", "/inventory/summary", params=params)
+
+
 # ── Scheduler control ────────────────────────────────────────
 
 

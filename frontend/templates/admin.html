@@ -266,6 +266,11 @@
                 <i class="bi bi-cone-striped"></i> Maintenance
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="inventory-tap-tab" data-bs-toggle="tab" data-bs-target="#inventory-tap-pane" type="button" role="tab" aria-controls="inventory-tap-pane" aria-selected="false">
+                <i class="bi bi-table"></i> Inventory
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -943,6 +948,83 @@
     </div>
         </div> <!-- End API Keys Tab -->
 
+        <!-- INVENTORY TAP -->
+        <div class="tab-pane fade" id="inventory-tap-pane" role="tabpanel" aria-labelledby="inventory-tap-tab">
+    <div class="row g-3">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex align-items-center gap-2 flex-wrap">
+                    <strong><i class="bi bi-table me-1"></i>Inventory Summary</strong>
+                    <span id="inv-source-chip" class="chip" style="background:#e2e8f0;color:#334155">—</span>
+                    <span id="inv-total-chip" class="chip" style="background:#dbeafe;color:#1e40af">— modems</span>
+                    <span id="inv-enriched-chip" class="chip" style="background:#dcfce7;color:#166534">— enriched</span>
+                    <span class="small text-muted ms-auto" id="inv-updated">—</span>
+                    <button id="inv-refresh-btn" class="btn btn-outline-primary btn-sm icon-btn" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="card-body">
+                    <div class="row g-2 mb-3 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small text-muted mb-1">Filter vendor / model / firmware</label>
+                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted mb-1">CMTS</label>
+                            <input id="inv-filter-cmts" class="form-control form-control-sm" placeholder="all CMTS">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small text-muted mb-1">Top N</label>
+                            <select id="inv-top-n" class="form-select form-select-sm">
+                                <option value="10">10</option>
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
+                        </div>
+                    </div>
+                    <div id="inv-error" class="alert alert-danger py-2 d-none"></div>
+                    <div class="row g-3" id="inv-tables">
+                        <!-- vendor -->
+                        <div class="col-md-6 col-xl-3">
+                            <div class="fw-semibold small mb-1"><i class="bi bi-building me-1"></i>Vendor</div>
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th class="small">Vendor</th><th class="small text-end">Count</th></tr></thead>
+                                <tbody id="inv-vendor-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                        <!-- model -->
+                        <div class="col-md-6 col-xl-3">
+                            <div class="fw-semibold small mb-1"><i class="bi bi-cpu me-1"></i>Model</div>
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th class="small">Model</th><th class="small text-end">Count</th></tr></thead>
+                                <tbody id="inv-model-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                        <!-- firmware -->
+                        <div class="col-md-6 col-xl-3">
+                            <div class="fw-semibold small mb-1"><i class="bi bi-file-earmark-code me-1"></i>Firmware</div>
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th class="small">Firmware</th><th class="small text-end">Count</th></tr></thead>
+                                <tbody id="inv-firmware-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                        <!-- docsis -->
+                        <div class="col-md-6 col-xl-3">
+                            <div class="fw-semibold small mb-1"><i class="bi bi-router me-1"></i>DOCSIS</div>
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th class="small">Version</th><th class="small text-end">Count</th></tr></thead>
+                                <tbody id="inv-docsis-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+        </div>
+
         <!-- MAINTENANCE TAB -->
         <div class="tab-pane fade" id="maintenance-pane" role="tabpanel" aria-labelledby="maintenance-tab">
     <div class="row g-3">
@@ -1526,6 +1608,107 @@
     }
 
     renderJobsPage();
+
+    // ── Inventory tap ──────────────────────────────────────────
+    (() => {
+        const invUrl = '[[ base_path ]]/api/admin/inventory-summary';
+        let invLoaded = false;
+
+        const byInvId = (id) => document.getElementById(id);
+        const sourceChip = byInvId('inv-source-chip');
+        const totalChip = byInvId('inv-total-chip');
+        const enrichedChip = byInvId('inv-enriched-chip');
+        const updatedEl = byInvId('inv-updated');
+        const errorEl = byInvId('inv-error');
+        const filterText = byInvId('inv-filter-text');
+        const filterCmts = byInvId('inv-filter-cmts');
+        const topNEl = byInvId('inv-top-n');
+
+        const fmtTs = (raw) => {
+            if (!raw) return '—';
+            try {
+                const dt = new Date(String(raw).includes('T') ? raw : raw + 'Z');
+                if (isNaN(dt.getTime())) return String(raw);
+                return dt.toLocaleString(undefined, { hour12: false });
+            } catch (_) { return String(raw); }
+        };
+
+        const renderTable = (tbodyId, rows, filterQ) => {
+            const tbody = byInvId(tbodyId);
+            if (!tbody) return;
+            const q = (filterQ || '').trim().toLowerCase();
+            const filtered = q
+                ? (rows || []).filter(r => String(r.value || '').toLowerCase().includes(q))
+                : (rows || []);
+            if (!filtered.length) {
+                tbody.innerHTML = '<tr><td colspan="2" class="text-muted small">No data</td></tr>';
+                return;
+            }
+            tbody.innerHTML = filtered.map(r =>
+                `<tr><td class="small">${String(r.value ?? '').replace(/</g,'&lt;')}</td><td class="small text-end">${Number(r.count).toLocaleString()}</td></tr>`
+            ).join('');
+        };
+
+        let _lastData = null;
+
+        const applyFilter = () => {
+            if (!_lastData) return;
+            const q = (filterText?.value || '').trim().toLowerCase();
+            renderTable('inv-vendor-body', _lastData.vendors, q);
+            renderTable('inv-model-body', _lastData.models, q);
+            renderTable('inv-firmware-body', _lastData.firmwares, q);
+            renderTable('inv-docsis-body', _lastData.docsis_versions, '');
+        };
+
+        const loadInvSummary = async () => {
+            if (errorEl) errorEl.classList.add('d-none');
+            const cmts = (filterCmts?.value || '').trim();
+            const topN = topNEl?.value || '25';
+            const params = new URLSearchParams({ top_n: topN });
+            if (cmts) params.set('cmts', cmts);
+            try {
+                const resp = await fetch(`${invUrl}?${params}`, { credentials: 'same-origin' });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                if (data.status !== 'success') throw new Error(data.message || 'Error');
+                _lastData = data;
+                const src = String(data.source || 'mysql');
+                if (sourceChip) {
+                    sourceChip.textContent = src;
+                    sourceChip.style.background = src === 'redis' ? '#fef9c3' : '#dbeafe';
+                    sourceChip.style.color = src === 'redis' ? '#92400e' : '#1e40af';
+                }
+                if (totalChip) totalChip.textContent = `${Number(data.total || 0).toLocaleString()} modems`;
+                if (enrichedChip) {
+                    const pct = Number(data.enriched_pct || 0).toFixed(1);
+                    enrichedChip.textContent = `${Number(data.enriched || 0).toLocaleString()} enriched (${pct}%)`;
+                }
+                if (updatedEl) updatedEl.textContent = `updated ${fmtTs(data.last_updated)}`;
+                applyFilter();
+            } catch (err) {
+                if (errorEl) {
+                    errorEl.textContent = `Inventory summary failed: ${err?.message || err}`;
+                    errorEl.classList.remove('d-none');
+                }
+            }
+        };
+
+        filterText?.addEventListener('input', applyFilter);
+        byInvId('inv-refresh-btn')?.addEventListener('click', loadInvSummary);
+        byInvId('inv-apply-btn')?.addEventListener('click', loadInvSummary);
+
+        // Load when the tab is first activated
+        const invTabBtn = document.getElementById('inventory-tap-tab');
+        invTabBtn?.addEventListener('shown.bs.tab', () => {
+            if (!invLoaded) { invLoaded = true; loadInvSummary(); }
+        });
+        // If the tab is already active on page load (from localStorage)
+        if (invTabBtn?.classList.contains('active')) {
+            invLoaded = true;
+            loadInvSummary();
+        }
+    })();
+
 })();
 </script>
 {% endblock %}
