@@ -315,6 +315,14 @@ def enrichment_progress():
     return _proxy("GET", "/inventory/enrichment-progress", params={"cmts": cmts} if cmts else None)
 
 
+@api_bp.route('/admin/inventory/snapshots', methods=['GET'])
+def inventory_snapshots():
+    gate = _require_admin()
+    if gate:
+        return gate
+    return _proxy("GET", "/inventory/snapshots/current")
+
+
 # ── Inventory summary (vendor / model / firmware counts) ─────
 
 
