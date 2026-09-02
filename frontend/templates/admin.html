@@ -963,14 +963,22 @@
                 </div>
                 <div class="card-body">
                     <div class="row g-2 mb-3 align-items-end">
-                        <div class="col-md-5">
-                            <label class="form-label small text-muted mb-1">Filter known values</label>
-                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris, sagemcom">
+                        <div class="col-md-4">
+                            <label class="form-label small text-muted mb-1">Filter vendor / model / firmware</label>
+                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris">
                         </div>
-                        <div class="col-md-5">
+                        <div class="col-md-3">
                             <label class="form-label small text-muted mb-1">CMTS</label>
-                            <input id="inv-filter-cmts" class="form-control form-control-sm" placeholder="all CMTSes" list="inv-cmts-list" autocomplete="off">
-                            <datalist id="inv-cmts-list"></datalist>
+                            <input id="inv-filter-cmts" class="form-control form-control-sm" placeholder="all CMTS">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small text-muted mb-1">Top N</label>
+                            <select id="inv-top-n" class="form-select form-select-sm">
+                                <option value="10">10</option>
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
                         </div>
                         <div class="col-md-2">
                             <button id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
@@ -1648,7 +1656,6 @@
     // ── Inventory tap ──────────────────────────────────────────
     (() => {
         const invUrl = '[[ base_path ]]/api/admin/inventory-summary';
-        const snapshotsUrl = '[[ base_path ]]/api/admin/inventory/snapshots';
         let invLoaded = false;
 
         const byInvId = (id) => document.getElementById(id);
@@ -1659,7 +1666,7 @@
         const errorEl = byInvId('inv-error');
         const filterText = byInvId('inv-filter-text');
         const filterCmts = byInvId('inv-filter-cmts');
-        const cmtsDatalist = byInvId('inv-cmts-list');
+        const topNEl = byInvId('inv-top-n');
 
         const fmtTs = (raw) => {
             if (!raw) return '—';
@@ -1678,7 +1685,7 @@
                 ? (rows || []).filter(r => String(r.value || '').toLowerCase().includes(q))
                 : (rows || []);
             if (!filtered.length) {
-                tbody.innerHTML = '<tr><td colspan="2" class="text-muted small fst-italic">No enriched data yet — identity enrichment runs after each CPE refresh</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="2" class="text-muted small">No data</td></tr>';
                 return;
             }
             tbody.innerHTML = filtered.map(r =>
@@ -1700,7 +1707,8 @@
         const loadInvSummary = async () => {
             if (errorEl) errorEl.classList.add('d-none');
             const cmts = (filterCmts?.value || '').trim();
-            const params = new URLSearchParams({ top_n: 25 });
+            const topN = topNEl?.value || '25';
+            const params = new URLSearchParams({ top_n: topN });
             if (cmts) params.set('cmts', cmts);
             try {
                 const resp = await fetch(`${invUrl}?${params}`, { credentials: 'same-origin' });
@@ -1733,36 +1741,15 @@
         byInvId('inv-refresh-btn')?.addEventListener('click', loadInvSummary);
         byInvId('inv-apply-btn')?.addEventListener('click', loadInvSummary);
 
-        const loadCmtsOptions = async () => {
-            if (!cmtsDatalist) return;
-            try {
-                const resp = await fetch(snapshotsUrl, { credentials: 'same-origin' });
-                if (!resp.ok) return;
-                const data = await resp.json();
-                const snapshots = data.snapshots || [];
-                const names = [...new Set(
-                    snapshots.flatMap(s => [s.cmts, s.cmts_ip].filter(Boolean))
-                )].sort();
-                cmtsDatalist.innerHTML = names
-                    .map(n => `<option value="${String(n).replace(/"/g,'&quot;')}">`)
-                    .join('');
-            } catch (_) {}
-        };
-
         // Load when the tab is first activated
         const invTabBtn = document.getElementById('inventory-tap-tab');
         invTabBtn?.addEventListener('shown.bs.tab', () => {
-            if (!invLoaded) {
-                invLoaded = true;
-                loadInvSummary();
-                loadCmtsOptions();
-            }
+            if (!invLoaded) { invLoaded = true; loadInvSummary(); }
         });
         // If the tab is already active on page load (from localStorage)
         if (invTabBtn?.classList.contains('active')) {
             invLoaded = true;
             loadInvSummary();
-            loadCmtsOptions();
         }
     })();
 
