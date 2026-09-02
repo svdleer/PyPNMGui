@@ -386,53 +386,23 @@ def inventory_summary():
                         last_updated_ts = ts_raw
 
             if total > 0:
-                # Only trust the Redis summary when it covers most of the
-                # known CMTS inventory. With a specific CMTS filter the
-                # cache is either hit-or-miss so a single matching key is
-                # sufficient. Without a filter, require that Redis holds at
-                # least 80% of the known snapshot count so we never show a
-                # tiny fraction of the full inventory as if it were complete.
-                redis_is_representative = bool(cmts_filter)
-                if not redis_is_representative:
-                    try:
-                        from app.core.pypnm_client import PyPNMClient
-                        snap_resp = PyPNMClient().get_inventory_snapshots(request_timeout=5)
-                        known_cmts_count = len(snap_resp.get("snapshots") or [])
-                        # Count distinct CMTS names across all warm keys
-                        distinct_cmts = set()
-                        for key in keys:
-                            raw2 = redis_client.get(key)
-                            if not raw2:
-                                continue
-                            p2 = _json.loads(raw2)
-                            if _cache_remaining_ttl(p2) > 0:
-                                name = str(p2.get("cmts") or "").strip().lower()
-                                if name:
-                                    distinct_cmts.add(name)
-                        if known_cmts_count > 0:
-                            coverage = len(distinct_cmts) / known_cmts_count
-                            redis_is_representative = coverage >= 0.80
-                    except Exception:
-                        redis_is_representative = False
-
-                if redis_is_representative:
-                    def _top(counter, n):
-                        return [
-                            {"value": k, "count": v}
-                            for k, v in counter.most_common(n)
-                        ]
-                    return jsonify({
-                        "status": "success",
-                        "source": "redis",
-                        "total": total,
-                        "enriched": enriched,
-                        "enriched_pct": round(enriched / total * 100, 1) if total else 0.0,
-                        "last_updated": str(last_updated_ts or ""),
-                        "vendors": _top(vendor_counts, top_n),
-                        "models": _top(model_counts, top_n),
-                        "firmwares": _top(firmware_counts, top_n),
-                        "docsis_versions": _top(docsis_counts, top_n),
-                    })
+                def _top(counter, n):
+                    return [
+                        {"value": k, "count": v}
+                        for k, v in counter.most_common(n)
+                    ]
+                return jsonify({
+                    "status": "success",
+                    "source": "redis",
+                    "total": total,
+                    "enriched": enriched,
+                    "enriched_pct": round(enriched / total * 100, 1) if total else 0.0,
+                    "last_updated": str(last_updated_ts or ""),
+                    "vendors": _top(vendor_counts, top_n),
+                    "models": _top(model_counts, top_n),
+                    "firmwares": _top(firmware_counts, top_n),
+                    "docsis_versions": _top(docsis_counts, top_n),
+                })
     except Exception:
         pass
 
