@@ -856,47 +856,6 @@ class PyPNMClient:
 
     # ============== Multi-RxMER (Long-term monitoring) ==============
     
-    def start_multi_rxmer(
-        self,
-        mac_address: str,
-        ip_address: str,
-        tftp_ipv4: str,
-        community: Optional[str] = None,
-        interval_minutes: int = 5,
-        duration_hours: int = 24
-    ) -> Dict[str, Any]:
-        """
-        Start multi-RxMER capture (long-term monitoring).
-        
-        Endpoint: POST /advance/multi/rxmer/start
-        
-        Returns operation_id for status checking.
-        """
-        payload = self._build_cable_modem_request(
-            mac_address, ip_address, community, tftp_ipv4
-        )
-        
-        payload["interval_minutes"] = interval_minutes
-        payload["duration_hours"] = duration_hours
-        
-        return self._post("/advance/multi/rxmer/start", payload)
-    
-    def get_multi_rxmer_status(self, operation_id: str) -> Dict[str, Any]:
-        """
-        Check status of multi-RxMER operation.
-        
-        Endpoint: GET /advance/multi/rxmer/status/{operation_id}
-        """
-        url = f"{self.config.base_url}/advance/multi/rxmer/status/{operation_id}"
-        
-        try:
-            response = self.session.get(url, timeout=self.config.timeout)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Error getting multi-RxMER status: {e}")
-            return {"status": "error", "message": str(e)}
-    
     # ============== Upstream PNM (CMTS-side via PyPNM API) ==============
     
     def discover_rf_ports(
@@ -1270,87 +1229,6 @@ class PyPNMClient:
                   **_community_fields(write_community=write_community)}
         return self._get("/pnm/us/bulk-destination", params)
     
-    def get_upstream_spectrum_capture(
-        self,
-        cmts_ip: str,
-        rf_port_ifindex: int,
-        tftp_ipv4: str,
-        community: Optional[str] = None,
-        tftp_ipv6: Optional[str] = None,
-        output_type: str = "json",
-        trigger_mode: int = 2,
-        center_freq_hz: int = 30000000,
-        span_hz: int = 80000000,
-        num_bins: int = 800,
-        filename: str = "utsc_capture",
-        cm_mac: Optional[str] = None,
-        logical_ch_ifindex: Optional[int] = None,
-        repeat_period_ms: int = 400,       # 400ms: satisfies Casa 100ms floor + 120s/300files
-        freerun_duration_ms: int = 120000,  # 120s: Casa minimum (is_freerun_trigger_valid)
-        trigger_count: Optional[int] = None  # None = omit from payload, fixes E6000 freerun bug
-    ) -> Dict[str, Any]:
-        """
-        Trigger CMTS-based Upstream Triggered Spectrum Capture (UTSC).
-        
-        Endpoint: POST /pnm/us/spectrumAnalyzer/getCapture
-        
-        UTSC is CMTS-based, not modem-based. Configures and initiates spectrum
-        capture on CMTS using RF port ifIndex.
-        
-        Args:
-            cmts_ip: CMTS IP address
-            rf_port_ifindex: RF port ifIndex (e.g., 843071491 for cable-upstream)
-            tftp_ipv4: TFTP server IP for file upload
-            community: SNMP write community 
-            trigger_mode: 2=FreeRunning, 6=CM MAC trigger
-            center_freq_hz: Center frequency in Hz (default: 30 MHz)
-            span_hz: Frequency span in Hz (default: 80 MHz)
-            num_bins: Number of FFT bins (default: 800)
-            filename: Output filename (CMTS adds timestamp)
-            cm_mac: Cable modem MAC (required if trigger_mode=6)
-            logical_ch_ifindex: Logical channel ifIndex (optional for trigger_mode=6)
-            repeat_period_ms: Milliseconds between captures (default: 3000 = 3 seconds)
-            freerun_duration_ms: Total duration for free-running mode (default: 300000 = 5 minutes)
-            trigger_count: Number of captures to take (default: 20)
-        
-        Returns UTSC spectrum data for upstream channels (5-85 MHz typical).
-        Files saved to TFTP with timestamp: {filename}_YYYY-MM-DD_HH.MM.SS.mmm
-        """
-        payload = {
-            "cmts": {
-                "cmts_ip": cmts_ip,
-                "rf_port_ifindex": rf_port_ifindex,
-                **_community_fields(community)
-            },
-            "tftp": {
-                "ipv4": tftp_ipv4 if tftp_ipv4 else None,
-                "ipv6": tftp_ipv6 if tftp_ipv6 else None
-            },
-            "trigger": {
-                "cm_mac": cm_mac,
-                "logical_ch_ifindex": logical_ch_ifindex
-            } if cm_mac else {},
-            "capture_parameters": {
-                "trigger_mode": trigger_mode,
-                "center_freq_hz": center_freq_hz,
-                "span_hz": span_hz,
-                "num_bins": num_bins,
-                "filename": filename,
-                "repeat_period_ms": repeat_period_ms,
-                "freerun_duration_ms": freerun_duration_ms,
-                **({} if trigger_count is None else {"trigger_count": trigger_count})  # Omit if None - E6000 bug workaround
-            },
-            "analysis": {
-                "output_type": output_type
-            }
-        }
-        logger.info(
-            "UTSC payload trigger_count=%s: %s",
-            "OMITTED" if trigger_count is None else trigger_count,
-            _redact_payload(payload),
-        )
-        return self._post("/pnm/us/utsc/data", payload)
-    
     def get_cmts_modems(
         self,
         cmts_ip: str,
@@ -1358,7 +1236,6 @@ class PyPNMClient:
         limit: Optional[int] = None,
         enrich: bool = False,
         refresh: bool = False,
-        modem_community: Optional[str] = None,
         cmts_hostname: str = "",
         request_timeout: int = 330,
     ) -> Dict[str, Any]:
@@ -1369,8 +1246,7 @@ class PyPNMClient:
             cmts_ip: CMTS IP address
             community: CMTS SNMP community
             limit: Maximum number of modems to return
-            enrich: Whether to enrich modem data with additional info
-            modem_community: SNMP community for individual modems
+            enrich: Whether to enrich inventory with CMTS-side interface data
             cmts_hostname: ISW hostname (stored in MySQL inventory)
         
         Returns:
@@ -1388,9 +1264,6 @@ class PyPNMClient:
             "refresh": refresh,
             "cmts_hostname": cmts_hostname,
         }
-        modem_community_fields = _community_fields(modem_community)
-        if modem_community_fields:
-            payload["modem_community"] = modem_community_fields["community"]
 
         try:
             response = self._post("/cmts/modems/query", payload, request_timeout=request_timeout)

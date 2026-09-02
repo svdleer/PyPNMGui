@@ -7,7 +7,7 @@
 CMTS PNM Module for Upstream OFDMA RxMER
 
 This module provides CMTS-side PNM operations by calling the PyPNM API.
-The PyPNM API uses pysnmp for direct CMTS SNMP communication.
+PyPNM routes device operations through capability-matched agents.
 
 Key features:
 - Discover modem's OFDMA channel ifIndex on CMTS
@@ -71,8 +71,8 @@ class CmtsPnmClient:
     """
     Client for CMTS PNM operations via PyPNM API.
     
-    Calls PyPNM API endpoints for CMTS SNMP operations.
-    PyPNM API runs in a separate container with pysnmp installed.
+    Calls PyPNM API endpoints for CMTS operations.
+    PyPNM routes device communication through capability-matched agents.
     """
     
     def __init__(self, timeout: int = 60):

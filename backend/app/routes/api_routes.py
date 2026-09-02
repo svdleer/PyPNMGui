@@ -28,16 +28,23 @@ _modem_jobs: dict = {}
 _modem_jobs_lock = threading.Lock()
 
 
-def _run_modem_job(job_id: str, cmts_ip: str, cmts_name: str,
-                   community: str, limit: int, enrich: bool,
-                   modem_community: str):
+def _run_modem_job(
+    job_id: str,
+    cmts_ip: str,
+    cmts_name: str,
+    community: str,
+    limit: int,
+    enrich: bool,
+):
     """Run in a background thread. Calls PyPNM and updates the job store."""
     _log = logging.getLogger(__name__)
     try:
         client = PyPNMClient()
         result = client.get_cmts_modems(
-            cmts_ip=cmts_ip, community=community,
-            limit=limit, enrich=enrich, modem_community=modem_community
+            cmts_ip=cmts_ip,
+            community=community,
+            limit=limit,
+            enrich=enrich,
         )
         if result.get('success'):
             modems = result.get('modems', [])
@@ -125,14 +132,6 @@ def _first_community(*values):
         if resolved is not None:
             return resolved
     return None
-
-
-def get_default_community():
-    """Get the configured SNMP read community for modems."""
-    return _first_community(
-        os.environ.get('MODEM_COMMUNITY'),
-        os.environ.get('CM_SNMP_COMMUNITY'),
-    )
 
 
 def get_cmts_community():
@@ -1403,10 +1402,6 @@ def get_cmts_modems(cmts_name):
     )
     limit = _bounded_modem_limit(request.args.get('limit', _cm_modem_limit_default()))
     enrich = request.args.get('enrich', 'false').lower() == 'true'
-    modem_community = _first_community(
-        request.args.get('modem_community'),
-        get_default_community(),
-    )
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
 
     try:
@@ -1561,8 +1556,6 @@ def get_cmts_modems(cmts_name):
         }
         if community is not None:
             live_query['community'] = community
-        if modem_community is not None:
-            live_query['modem_community'] = modem_community
         result = client.get_cmts_modems(**live_query)
 
         if result.get('success'):

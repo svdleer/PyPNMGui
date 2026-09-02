@@ -201,6 +201,5 @@ for _cmts in LAB_CMTS_SYSTEMS:
         ):
             _cmts.pop(_community_key, None)
 
-# LAB mode - direct SNMP access via SSH to access-engineering.nl
+# LAB mode uses static CMTS inventory; device operations still go through PyPNM.
 LAB_MODE = True
-DIRECT_SSH_ACCESS = True

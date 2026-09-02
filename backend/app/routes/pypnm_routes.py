@@ -1890,14 +1890,15 @@ def get_upstream_interfaces(mac_address):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# ============== PyPNM pysnmp-based CMTS Operations ==============
+# ============== PyPNM agent-backed CMTS Operations ==============
 
 @pypnm_bp.route('/cmts/ofdma/discover/<mac_address>', methods=['POST'])
 def discover_modem_ofdma(mac_address):
     """
-    Discover modem's OFDMA channel on CMTS using PyPNM pysnmp.
+    Discover modem's OFDMA channel on CMTS through the PyPNM API and agent.
     
-    This endpoint uses PyPNM's Snmp_v2c class for direct CMTS SNMP queries.
+    This endpoint calls PyPNM, which routes CMTS operations through a
+    capability-matched agent.
     Returns the OFDMA ifIndex needed for US RxMER measurements.
     
     POST body:
@@ -1955,7 +1956,7 @@ def discover_modem_ofdma(mac_address):
 @pypnm_bp.route('/cmts/ofdma/rxmer/start/<mac_address>', methods=['POST'])
 def start_cmts_us_rxmer(mac_address):
     """
-    Start US OFDMA RxMER measurement on CMTS using PyPNM pysnmp.
+    Start US OFDMA RxMER measurement on CMTS through the PyPNM API and agent.
     
     POST body:
     {
@@ -2013,7 +2014,7 @@ def start_cmts_us_rxmer(mac_address):
 @pypnm_bp.route('/cmts/ofdma/rxmer/status/<mac_address>', methods=['POST'])
 def get_cmts_us_rxmer_status(mac_address):
     """
-    Get US OFDMA RxMER measurement status from CMTS using PyPNM pysnmp.
+    Get US OFDMA RxMER measurement status from CMTS through the PyPNM API and agent.
     
     POST body:
     {

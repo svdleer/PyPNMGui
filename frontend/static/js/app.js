@@ -1601,7 +1601,7 @@ createApp({
         },
 
         queueSelectedModemEnrichment(rows, options = {}) {
-            if (!this.enrichModems || !this.hasCmAgent) return 0;
+            if (!this.enrichModems || !this.hasCmtsAgent) return 0;
             const maxBatch = Math.max(1, Math.min(Number(options.maxBatch || 20), 20));
             const scope = options.scope || 'selected modems';
             const fallbackCmts = options.cmts || this.selectedCmts || this.fnScanCmtsIp || '';
@@ -4360,7 +4360,11 @@ createApp({
                         } catch(_) {}
                         return;
                     }
-                    if (req.status === 'failed') return;
+                    if (['failed', 'timed_out', 'cancelled'].includes(req.status)) {
+                        this.modemRefreshError = req.error_text
+                            || `Refresh ${String(req.status).replace('_', ' ')}`;
+                        return;
+                    }
                 } catch (e) {
                     console.warn('Refresh status poll failed:', e);
                     this.modemRefreshStatus = 'failed';

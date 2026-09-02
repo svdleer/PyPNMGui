@@ -15,15 +15,6 @@ flask-sock>=0.7.0
 matplotlib>=3.8.0
 numpy>=1.26.0
 
-# TFTP client for deleting UTSC files
-tftpy>=0.8.0
-
-# SNMP for UTSC RF port discovery and CMTS operations
-pysnmp>=6.0.0
-
-# PyPNM library for CMTS PNM operations (US OFDMA RxMER)
-pypnm
-
 # Swagger/OpenAPI documentation
 
 # Optional dependencies
