@@ -963,23 +963,14 @@
                 </div>
                 <div class="card-body">
                     <div class="row g-2 mb-3 align-items-end">
-                        <div class="col-md-4">
+                        <div class="col-md-5">
                             <label class="form-label small text-muted mb-1">Filter known values</label>
                             <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris, sagemcom">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-5">
                             <label class="form-label small text-muted mb-1">CMTS</label>
-                            <input id="inv-filter-cmts" class="form-control form-control-sm" placeholder="all CCAPs" list="inv-cmts-list" autocomplete="off">
+                            <input id="inv-filter-cmts" class="form-control form-control-sm" placeholder="all CMTSes" list="inv-cmts-list" autocomplete="off">
                             <datalist id="inv-cmts-list"></datalist>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label small text-muted mb-1">Area</label>
-                            <select id="inv-filter-area" class="form-select form-select-sm">
-                                <option value="">All areas</option>
-                                <option value="fziggo">fZiggo</option>
-                                <option value="fupc">fUPC</option>
-                                <option value="vfz">VFZ</option>
-                            </select>
                         </div>
                         <div class="col-md-2">
                             <button id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
@@ -1668,7 +1659,6 @@
         const errorEl = byInvId('inv-error');
         const filterText = byInvId('inv-filter-text');
         const filterCmts = byInvId('inv-filter-cmts');
-        const filterArea = byInvId('inv-filter-area');
         const cmtsDatalist = byInvId('inv-cmts-list');
 
         const fmtTs = (raw) => {
@@ -1710,10 +1700,8 @@
         const loadInvSummary = async () => {
             if (errorEl) errorEl.classList.add('d-none');
             const cmts = (filterCmts?.value || '').trim();
-            const area = (filterArea?.value || '').trim().toLowerCase();
             const params = new URLSearchParams({ top_n: 25 });
             if (cmts) params.set('cmts', cmts);
-            if (area) params.set('area', area);
             try {
                 const resp = await fetch(`${invUrl}?${params}`, { credentials: 'same-origin' });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1753,10 +1741,8 @@
                 const data = await resp.json();
                 const snapshots = data.snapshots || [];
                 const names = [...new Set(
-                    snapshots
-                        .map(s => String(s.cmts || '').trim())
-                        .filter(name => name && name.toUpperCase().includes('CCAP'))
-                )].sort((a, b) => a.localeCompare(b));
+                    snapshots.flatMap(s => [s.cmts, s.cmts_ip].filter(Boolean))
+                )].sort();
                 cmtsDatalist.innerHTML = names
                     .map(n => `<option value="${String(n).replace(/"/g,'&quot;')}">`)
                     .join('');

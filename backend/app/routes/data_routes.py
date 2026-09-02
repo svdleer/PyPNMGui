@@ -8,17 +8,16 @@ No local database access. No business logic.
 import os
 import uuid
 
-import requests
 from flask import Response, jsonify, request, session, stream_with_context
+import requests
 
 from app.core.auth_providers import is_authenticated_session
 from app.core.feature_flags import (
+    is_network_rxmer_analytics_enabled,
     is_cm_bulk_reset_enabled,
     is_custom_snmp_enabled,
-    is_network_rxmer_analytics_enabled,
     is_topology_scopes_enabled,
 )
-
 from . import api_bp
 
 
@@ -333,157 +332,122 @@ def inventory_summary():
     if gate:
         return gate
 
-    cmts_filter_raw = (request.args.get("cmts") or "").strip()
-    area_filter = (request.args.get("area") or "").strip().lower()
-    if area_filter not in {"", "fziggo", "fupc", "vfz"}:
-        return jsonify({
-            "status": "error",
-            "message": f"Unsupported inventory area: {area_filter}",
-        }), 400
+    cmts_filter = (request.args.get("cmts") or "").strip().lower()
     try:
         top_n = max(1, min(int(request.args.get("top_n", 25)), 100))
     except (TypeError, ValueError):
         top_n = 25
 
-    # A filtered CMTS can use one exact cache key. Never scan all full modem
-    # payloads to build a fleet summary: that transfers and decodes millions
-    # of rows in Python and alias keys can double-count the same CMTS.
-    if cmts_filter_raw and not area_filter:
-        try:
-            import collections as _collections
+    # ── Try Redis first ──────────────────────────────────────
+    try:
+        from app.routes.api_routes import (
+            redis_client,
+            REDIS_AVAILABLE,
+            _cache_remaining_ttl,
+        )
+        import json as _json
+        import collections as _collections
 
-            from app.routes.api_routes import (
-                REDIS_AVAILABLE,
-                _inventory_revision_map,
-                _read_modem_cache,
-                filter_ignored_modems,
-                redis_client,
-            )
+        if REDIS_AVAILABLE and redis_client:
+            vendor_counts: dict = _collections.Counter()
+            model_counts: dict = _collections.Counter()
+            firmware_counts: dict = _collections.Counter()
+            docsis_counts: dict = _collections.Counter()
+            total = 0
+            enriched = 0
+            last_updated_ts = None
 
-            if REDIS_AVAILABLE and redis_client:
-                revisions = _inventory_revision_map()
-                cache_keys = list(dict.fromkeys([
-                    f"modems:{cmts_filter_raw}",
-                    f"modems:{cmts_filter_raw.lower()}",
-                ]))
-                requested_ref = cmts_filter_raw.lower()
-                payload = None
-                payload_modems = []
-                for cache_key in cache_keys:
-                    candidate = _read_modem_cache(cache_key, revisions)
-                    if not candidate:
+            keys = list(redis_client.scan_iter(match="modems:*", count=500))
+            for key in keys:
+                raw = redis_client.get(key)
+                if not raw:
+                    continue
+                payload = _json.loads(raw)
+                if _cache_remaining_ttl(payload) <= 0:
+                    continue
+                modems = payload.get("modems") or []
+                # Apply optional CMTS filter
+                if cmts_filter:
+                    cmts_val = str(payload.get("cmts") or "").strip().lower()
+                    if cmts_val and cmts_val != cmts_filter:
                         continue
+                for m in modems:
+                    if not isinstance(m, dict):
+                        continue
+                    total += 1
+                    v = str(m.get("vendor") or "").strip() or "(unknown)"
+                    mo = str(m.get("model") or "").strip() or "(unknown)"
+                    fw = str(m.get("software_version") or m.get("firmware") or "").strip() or "(unknown)"
+                    dv = str(m.get("docsis_version") or "").strip() or "(unknown)"
+                    vendor_counts[v] += 1
+                    model_counts[mo] += 1
+                    firmware_counts[fw] += 1
+                    docsis_counts[dv] += 1
+                    if (
+                        v.lower() not in ("", "unknown", "n/a", "(unknown)")
+                        and fw.lower() not in ("", "unknown", "n/a", "(unknown)")
+                    ):
+                        enriched += 1
+                ts_raw = payload.get("collected_at") or payload.get("cache_written_at")
+                if ts_raw:
+                    if last_updated_ts is None or str(ts_raw) > str(last_updated_ts):
+                        last_updated_ts = ts_raw
 
-                    candidate_modems = [
-                        modem
-                        for modem in filter_ignored_modems(
-                            candidate.get("modems") or []
-                        )
-                        if isinstance(modem, dict)
-                    ]
+            if total > 0:
+                # Only trust the Redis summary when it covers most of the
+                # known CMTS inventory. With a specific CMTS filter the
+                # cache is either hit-or-miss so a single matching key is
+                # sufficient. Without a filter, require that Redis holds at
+                # least 80% of the known snapshot count so we never show a
+                # tiny fraction of the full inventory as if it were complete.
+                redis_is_representative = bool(cmts_filter)
+                if not redis_is_representative:
                     try:
-                        authoritative_row_count = int(candidate["row_count"])
-                    except (KeyError, TypeError, ValueError):
-                        continue
+                        from app.core.pypnm_client import PyPNMClient
+                        snap_resp = PyPNMClient().get_inventory_snapshots(request_timeout=5)
+                        known_cmts_count = len(snap_resp.get("snapshots") or [])
+                        # Count distinct CMTS names across all warm keys
+                        distinct_cmts = set()
+                        for key in keys:
+                            raw2 = redis_client.get(key)
+                            if not raw2:
+                                continue
+                            p2 = _json.loads(raw2)
+                            if _cache_remaining_ttl(p2) > 0:
+                                name = str(p2.get("cmts") or "").strip().lower()
+                                if name:
+                                    distinct_cmts.add(name)
+                        if known_cmts_count > 0:
+                            coverage = len(distinct_cmts) / known_cmts_count
+                            redis_is_representative = coverage >= 0.80
+                    except Exception:
+                        redis_is_representative = False
 
-                    payload_cmts = str(candidate.get("cmts") or "").strip().lower()
-                    payload_cmts_ips = {
-                        str(modem.get("cmts_ip") or "").strip().lower()
-                        for modem in candidate_modems
-                        if str(modem.get("cmts_ip") or "").strip()
-                    }
-                    scope_matches = (
-                        requested_ref == payload_cmts
-                        or requested_ref in payload_cmts_ips
-                    )
-                    complete_generation = (
-                        candidate.get("complete") is True
-                        and candidate.get("truncated") is not True
-                        and 0 <= authoritative_row_count <= len(candidate_modems)
-                    )
-                    if scope_matches and complete_generation:
-                        payload = candidate
-                        payload_modems = candidate_modems
-                        break
-
-                if payload is not None:
-                    placeholders = {
-                        "", "unknown", "n/a", "na", "none", "null", "-", "(unknown)",
-                    }
-                    enriched_placeholders = {"", "unknown", "n/a"}
-
-                    def _meaningful(value):
-                        text = str(value or "").strip()
-                        return "" if text.lower() in placeholders else text
-
-                    vendor_counts = _collections.Counter()
-                    model_counts = _collections.Counter()
-                    firmware_counts = _collections.Counter()
-                    docsis_counts = _collections.Counter()
-                    total = 0
-                    enriched = 0
-                    for modem in payload_modems:
-                        total += 1
-                        vendor_text = str(modem.get("vendor") or "").strip()
-                        model_text = str(modem.get("model") or "").strip()
-                        firmware_text = str(
-                            modem.get("software_version")
-                            or modem.get("firmware")
-                            or ""
-                        ).strip()
-                        vendor = _meaningful(vendor_text)
-                        model = _meaningful(model_text)
-                        firmware = _meaningful(firmware_text)
-                        docsis = _meaningful(modem.get("docsis_version"))
-                        if vendor:
-                            vendor_counts[vendor] += 1
-                        if model:
-                            model_counts[model] += 1
-                        if firmware:
-                            firmware_counts[firmware] += 1
-                        if docsis:
-                            docsis_counts[docsis] += 1
-                        if (
-                            vendor_text.lower() not in enriched_placeholders
-                            and (
-                                bool(firmware_text)
-                                or model_text.lower() not in enriched_placeholders
-                            )
-                        ):
-                            enriched += 1
-
-                    def _top(counter):
+                if redis_is_representative:
+                    def _top(counter, n):
                         return [
-                            {"value": value, "count": count}
-                            for value, count in counter.most_common(top_n)
+                            {"value": k, "count": v}
+                            for k, v in counter.most_common(n)
                         ]
-
                     return jsonify({
                         "status": "success",
                         "source": "redis",
                         "total": total,
                         "enriched": enriched,
                         "enriched_pct": round(enriched / total * 100, 1) if total else 0.0,
-                        "last_updated": str(
-                            payload.get("collected_at")
-                            or payload.get("cache_written_at")
-                            or ""
-                        ),
-                        "area": None,
-                        "vendors": _top(vendor_counts),
-                        "models": _top(model_counts),
-                        "firmwares": _top(firmware_counts),
-                        "docsis_versions": _top(docsis_counts),
+                        "last_updated": str(last_updated_ts or ""),
+                        "vendors": _top(vendor_counts, top_n),
+                        "models": _top(model_counts, top_n),
+                        "firmwares": _top(firmware_counts, top_n),
+                        "docsis_versions": _top(docsis_counts, top_n),
                     })
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-    # Fleet and area summaries use the authoritative one-scan MySQL aggregate.
+    # ── Fall through to MySQL via PyPNM ──────────────────────
     params = {"top_n": top_n}
-    if cmts_filter_raw:
-        params["cmts"] = cmts_filter_raw
-    if area_filter:
-        params["area"] = area_filter
+    if cmts_filter:
+        params["cmts"] = cmts_filter
     return _proxy("GET", "/inventory/summary", params=params)
 
 
