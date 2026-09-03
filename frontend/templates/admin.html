@@ -1010,7 +1010,7 @@
                             <button type="button" id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
                         </div>
                     </div>
-                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Scope changes take effect on Apply or Refresh.</div>
+                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Scope changes update both sections automatically; Apply retries the current scope.</div>
                     <div id="inv-error" class="alert alert-danger py-2 d-none" role="alert"></div>
                     <div class="row g-3" id="inv-tables">
                         <div class="col-md-6 col-xl-3">
@@ -1069,7 +1069,7 @@
                                 <option value="firmware">Firmware</option>
                             </select>
                         </div>
-                        <div class="col-md-2 small text-muted">Apply or Refresh updates both sections.</div>
+                        <div class="col-md-2 small text-muted">Selections update both sections automatically.</div>
                     </div>
                     <div id="inv-history-error" class="alert alert-danger py-2 d-none" role="alert"></div>
                     <div id="inv-history-state" class="small text-muted mb-2">Loading history…</div>
@@ -1752,6 +1752,8 @@
         let lastSummary = null;
         let historyChart = null;
         let requestGeneration = 0;
+        let scopeReloadTimer = null;
+        let snapshotsNeedRefresh = false;
 
         const areaLabels = {
             all: 'All areas',
@@ -1925,7 +1927,10 @@
                     option.classList.add('active');
                     option.setAttribute('aria-selected', 'true');
                 }
-                option.addEventListener('click', () => selectCcap(value, label));
+                option.addEventListener('click', () => {
+                    selectCcap(value, label);
+                    scheduleScopeReload();
+                });
                 ccapOptions.appendChild(option);
             };
 
@@ -1940,13 +1945,16 @@
             filterCcapOptions();
         };
 
-        const loadSnapshots = async () => {
+        const loadSnapshots = async (expectedGeneration) => {
+            if (expectedGeneration !== requestGeneration) return false;
+            snapshotsNeedRefresh = true;
             if (ccapStatus) {
                 ccapStatus.className = 'small text-muted mt-1';
                 ccapStatus.textContent = 'Loading persisted CCAP choices…';
             }
             try {
                 const body = await fetchJson(snapshotsUrl);
+                if (expectedGeneration !== requestGeneration) return false;
                 const merged = new Map();
                 (Array.isArray(body.snapshots) ? body.snapshots : []).forEach((raw) => {
                     const item = normalizeSnapshot(raw);
@@ -1961,14 +1969,18 @@
                 });
                 snapshots = Array.from(merged.values()).sort((a, b) => a.label.localeCompare(b.label));
                 renderCcapOptions();
+                snapshotsNeedRefresh = false;
+                return true;
             } catch (error) {
-                snapshots = [];
-                selectCcap('', 'All CCAPs');
-                renderCcapOptions();
+                if (expectedGeneration !== requestGeneration) return false;
                 if (ccapStatus) {
                     ccapStatus.className = 'small text-warning mt-1';
-                    ccapStatus.textContent = `CCAP choices unavailable; All CCAPs remains usable (${error?.message || error}).`;
+                    ccapStatus.textContent = snapshots.length
+                        ? `CCAP choices refresh failed; keeping the current selection (${error?.message || error}).`
+                        : `CCAP choices unavailable; All CCAPs remains usable (${error?.message || error}).`;
                 }
+                snapshotsNeedRefresh = false;
+                return true;
             }
         };
 
@@ -2149,11 +2161,30 @@
             if (generation === requestGeneration) setLoadButtonsDisabled(false);
         };
 
-        const refreshInventory = async () => {
+        const scheduleScopeReload = () => {
+            if (!initialized) return;
+            if (scopeReloadTimer !== null) window.clearTimeout(scopeReloadTimer);
             const generation = ++requestGeneration;
             setLoadButtonsDisabled(true);
-            await loadSnapshots();
-            if (generation !== requestGeneration) return;
+            scopeReloadTimer = window.setTimeout(async () => {
+                scopeReloadTimer = null;
+                if (snapshotsNeedRefresh) {
+                    const applied = await loadSnapshots(generation);
+                    if (!applied || generation !== requestGeneration) return;
+                }
+                await loadSummaryAndHistory(generation);
+            }, 150);
+        };
+
+        const refreshInventory = async () => {
+            if (scopeReloadTimer !== null) {
+                window.clearTimeout(scopeReloadTimer);
+                scopeReloadTimer = null;
+            }
+            const generation = ++requestGeneration;
+            setLoadButtonsDisabled(true);
+            const applied = await loadSnapshots(generation);
+            if (!applied || generation !== requestGeneration) return;
             await loadSummaryAndHistory(generation);
         };
 
@@ -2170,7 +2201,12 @@
         areaSelect?.addEventListener('change', () => {
             if (ccapSearch) ccapSearch.value = '';
             renderCcapOptions();
+            scheduleScopeReload();
         });
+        topNEl?.addEventListener('change', scheduleScopeReload);
+        historyStart?.addEventListener('change', scheduleScopeReload);
+        historyEnd?.addEventListener('change', scheduleScopeReload);
+        historyDimension?.addEventListener('change', scheduleScopeReload);
         filterText?.addEventListener('input', applyTextFilter);
         ccapSearch?.addEventListener('input', filterCcapOptions);
         ccapSearch?.addEventListener('keydown', (event) => {
@@ -2194,7 +2230,13 @@
                 ccapSearch.focus();
             }
         });
-        applyButton?.addEventListener('click', () => { loadSummaryAndHistory(); });
+        applyButton?.addEventListener('click', () => {
+            if (scopeReloadTimer !== null) {
+                window.clearTimeout(scopeReloadTimer);
+                scopeReloadTimer = null;
+            }
+            loadSummaryAndHistory();
+        });
         refreshButton?.addEventListener('click', refreshInventory);
 
         const invTabBtn = byInvId('inventory-tap-tab');
