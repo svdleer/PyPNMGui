@@ -129,6 +129,13 @@
         .queue-age-ok { color: #475569; }
         .queue-age-warn { color: #b45309; font-weight: 600; }
         .queue-age-danger { color: #b91c1c; font-weight: 700; }
+        .inventory-ccap-menu { width: min(28rem, 90vw); max-height: 22rem; overflow: hidden; }
+        .inventory-ccap-options { max-height: 16rem; overflow-y: auto; }
+        .inventory-ccap-option[hidden] { display: none !important; }
+        .inventory-chart-wrap { height: 340px; min-height: 280px; position: relative; }
+        @media (max-width: 767.98px) {
+            .inventory-chart-wrap { height: 300px; }
+        }
     </style>
 {% endblock %}
 
@@ -948,7 +955,7 @@
     </div>
         </div> <!-- End API Keys Tab -->
 
-        <!-- INVENTORY TAP -->
+        <!-- INVENTORY TAB -->
         <div class="tab-pane fade" id="inventory-tap-pane" role="tabpanel" aria-labelledby="inventory-tap-tab">
     <div class="row g-3">
         <div class="col-12">
@@ -959,20 +966,39 @@
                     <span id="inv-total-chip" class="chip" style="background:#dbeafe;color:#1e40af">— modems</span>
                     <span id="inv-enriched-chip" class="chip" style="background:#dcfce7;color:#166534">— enriched</span>
                     <span class="small text-muted ms-auto" id="inv-updated">—</span>
-                    <button id="inv-refresh-btn" class="btn btn-outline-primary btn-sm icon-btn" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button type="button" id="inv-refresh-btn" class="btn btn-outline-primary btn-sm icon-btn" title="Refresh summary and history"><i class="bi bi-arrow-clockwise"></i></button>
                 </div>
                 <div class="card-body">
-                    <div class="row g-2 mb-3 align-items-end">
+                    <div class="row g-2 mb-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted mb-1" for="inv-area">Area</label>
+                            <select id="inv-area" class="form-select form-select-sm">
+                                <option value="all" selected>All areas</option>
+                                <option value="vfz">VFZ</option>
+                                <option value="fziggo">fZiggo</option>
+                                <option value="fupc">fUPC</option>
+                            </select>
+                        </div>
                         <div class="col-md-4">
-                            <label class="form-label small text-muted mb-1">Filter vendor / model / firmware</label>
-                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris">
+                            <label class="form-label small text-muted mb-1" for="inv-ccap-toggle">CCAP</label>
+                            <div class="dropdown" id="inv-ccap-dropdown">
+                                <button id="inv-ccap-toggle" class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start d-flex justify-content-between align-items-center" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                                    <span id="inv-ccap-label" class="text-truncate">All CCAPs</span>
+                                </button>
+                                <div class="dropdown-menu inventory-ccap-menu p-2" aria-labelledby="inv-ccap-toggle">
+                                    <label class="visually-hidden" for="inv-ccap-search">Search CCAPs</label>
+                                    <input id="inv-ccap-search" type="search" class="form-control form-control-sm mb-2" placeholder="Search name or IP" autocomplete="off">
+                                    <div id="inv-ccap-options" class="inventory-ccap-options" role="listbox" aria-label="CCAP choices"></div>
+                                </div>
+                            </div>
+                            <div id="inv-ccap-status" class="small text-muted mt-1">CCAP choices load when this tab opens.</div>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label small text-muted mb-1">CMTS</label>
-                            <input id="inv-filter-cmts" class="form-control form-control-sm" placeholder="all CMTS">
+                            <label class="form-label small text-muted mb-1" for="inv-filter-text">Filter vendor / model / firmware</label>
+                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris">
                         </div>
-                        <div class="col-md-2">
-                            <label class="form-label small text-muted mb-1">Top N</label>
+                        <div class="col-md-1">
+                            <label class="form-label small text-muted mb-1" for="inv-top-n">Top N</label>
                             <select id="inv-top-n" class="form-select form-select-sm">
                                 <option value="10">10</option>
                                 <option value="25" selected>25</option>
@@ -980,13 +1006,13 @@
                                 <option value="100">100</option>
                             </select>
                         </div>
-                        <div class="col-md-2">
-                            <button id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
+                        <div class="col-md-1">
+                            <button type="button" id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
                         </div>
                     </div>
-                    <div id="inv-error" class="alert alert-danger py-2 d-none"></div>
+                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Scope changes take effect on Apply or Refresh.</div>
+                    <div id="inv-error" class="alert alert-danger py-2 d-none" role="alert"></div>
                     <div class="row g-3" id="inv-tables">
-                        <!-- vendor -->
                         <div class="col-md-6 col-xl-3">
                             <div class="fw-semibold small mb-1"><i class="bi bi-building me-1"></i>Vendor</div>
                             <table class="table table-sm table-hover mb-0">
@@ -994,7 +1020,6 @@
                                 <tbody id="inv-vendor-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
                             </table>
                         </div>
-                        <!-- model -->
                         <div class="col-md-6 col-xl-3">
                             <div class="fw-semibold small mb-1"><i class="bi bi-cpu me-1"></i>Model</div>
                             <table class="table table-sm table-hover mb-0">
@@ -1002,7 +1027,6 @@
                                 <tbody id="inv-model-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
                             </table>
                         </div>
-                        <!-- firmware -->
                         <div class="col-md-6 col-xl-3">
                             <div class="fw-semibold small mb-1"><i class="bi bi-file-earmark-code me-1"></i>Firmware</div>
                             <table class="table table-sm table-hover mb-0">
@@ -1010,7 +1034,6 @@
                                 <tbody id="inv-firmware-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
                             </table>
                         </div>
-                        <!-- docsis -->
                         <div class="col-md-6 col-xl-3">
                             <div class="fw-semibold small mb-1"><i class="bi bi-router me-1"></i>DOCSIS</div>
                             <table class="table table-sm table-hover mb-0">
@@ -1019,6 +1042,41 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm mt-3">
+                <div class="card-header bg-white d-flex align-items-center gap-2 flex-wrap">
+                    <strong><i class="bi bi-graph-up me-1"></i>Inventory History</strong>
+                    <span id="inv-history-source" class="chip" style="background:#e2e8f0;color:#334155">—</span>
+                    <span id="inv-history-scope" class="small text-muted ms-auto">All areas · All CCAPs</span>
+                </div>
+                <div class="card-body">
+                    <div class="row g-2 mb-3 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted mb-1" for="inv-history-start">Start date</label>
+                            <input id="inv-history-start" class="form-control form-control-sm" type="date">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted mb-1" for="inv-history-end">End date</label>
+                            <input id="inv-history-end" class="form-control form-control-sm" type="date">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small text-muted mb-1" for="inv-history-dimension">Dimension</label>
+                            <select id="inv-history-dimension" class="form-select form-select-sm">
+                                <option value="model" selected>Modem model</option>
+                                <option value="vendor">Vendor</option>
+                                <option value="firmware">Firmware</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 small text-muted">Apply or Refresh updates both sections.</div>
+                    </div>
+                    <div id="inv-history-error" class="alert alert-danger py-2 d-none" role="alert"></div>
+                    <div id="inv-history-state" class="small text-muted mb-2">Loading history…</div>
+                    <div id="inv-history-chart-wrap" class="inventory-chart-wrap d-none">
+                        <canvas id="inv-history-chart" aria-label="Inventory history by selected dimension"></canvas>
+                    </div>
+                    <div id="inv-history-coverage" class="small text-muted mt-2"></div>
                 </div>
             </div>
         </div>
@@ -1653,104 +1711,495 @@
         }, 10000);
     }
 
-    // ── Inventory tap ──────────────────────────────────────────
+    // ── Inventory tab ──────────────────────────────────────────
     (() => {
-        const invUrl = '[[ base_path ]]/api/admin/inventory-summary';
-        let invLoaded = false;
-
+        const summaryUrl = '[[ base_path ]]/api/admin/inventory-summary';
+        const snapshotsUrl = '[[ base_path ]]/api/admin/inventory/snapshots';
+        const historyUrl = '[[ base_path ]]/api/admin/inventory-history';
         const byInvId = (id) => document.getElementById(id);
+
         const sourceChip = byInvId('inv-source-chip');
         const totalChip = byInvId('inv-total-chip');
         const enrichedChip = byInvId('inv-enriched-chip');
         const updatedEl = byInvId('inv-updated');
-        const errorEl = byInvId('inv-error');
+        const summaryError = byInvId('inv-error');
         const filterText = byInvId('inv-filter-text');
-        const filterCmts = byInvId('inv-filter-cmts');
+        const areaSelect = byInvId('inv-area');
         const topNEl = byInvId('inv-top-n');
+        const ccapDropdown = byInvId('inv-ccap-dropdown');
+        const ccapToggle = byInvId('inv-ccap-toggle');
+        const ccapLabel = byInvId('inv-ccap-label');
+        const ccapSearch = byInvId('inv-ccap-search');
+        const ccapOptions = byInvId('inv-ccap-options');
+        const ccapStatus = byInvId('inv-ccap-status');
+        const historyStart = byInvId('inv-history-start');
+        const historyEnd = byInvId('inv-history-end');
+        const historyDimension = byInvId('inv-history-dimension');
+        const historyError = byInvId('inv-history-error');
+        const historyState = byInvId('inv-history-state');
+        const historyCoverage = byInvId('inv-history-coverage');
+        const historySource = byInvId('inv-history-source');
+        const historyScope = byInvId('inv-history-scope');
+        const historyWrap = byInvId('inv-history-chart-wrap');
+        const historyCanvas = byInvId('inv-history-chart');
+        const applyButton = byInvId('inv-apply-btn');
+        const refreshButton = byInvId('inv-refresh-btn');
+
+        let initialized = false;
+        let snapshots = [];
+        let selectedCmts = '';
+        let selectedCmtsLabel = 'All CCAPs';
+        let lastSummary = null;
+        let historyChart = null;
+        let requestGeneration = 0;
+
+        const areaLabels = {
+            all: 'All areas',
+            vfz: 'VFZ',
+            fziggo: 'fZiggo',
+            fupc: 'fUPC',
+        };
+
+        const localDateValue = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+        const today = new Date();
+        today.setHours(12, 0, 0, 0);
+        const firstDay = new Date(today);
+        firstDay.setDate(firstDay.getDate() - 29);
+        if (historyEnd) historyEnd.value = localDateValue(today);
+        if (historyStart) historyStart.value = localDateValue(firstDay);
+
+        const fetchJson = async (url) => {
+            const response = await fetch(url, { credentials: 'same-origin' });
+            let body = null;
+            try { body = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(body?.message || `HTTP ${response.status}`);
+            if (!body || body.status !== 'success') throw new Error(body?.message || 'Invalid response');
+            return body;
+        };
 
         const fmtTs = (raw) => {
             if (!raw) return '—';
             try {
-                const dt = new Date(String(raw).includes('T') ? raw : raw + 'Z');
-                if (isNaN(dt.getTime())) return String(raw);
-                return dt.toLocaleString(undefined, { hour12: false });
+                const value = String(raw);
+                const normalized = /Z|[+-]\d{2}:?\d{2}$/.test(value)
+                    ? value
+                    : `${value.replace(' ', 'T')}Z`;
+                const date = new Date(normalized);
+                if (Number.isNaN(date.getTime())) return value;
+                return date.toLocaleString(undefined, { hour12: false });
             } catch (_) { return String(raw); }
         };
 
-        const renderTable = (tbodyId, rows, filterQ) => {
+        const setAlert = (element, message) => {
+            if (!element) return;
+            element.textContent = message || '';
+            element.classList.toggle('d-none', !message);
+        };
+
+        const setTableState = (message) => {
+            ['inv-vendor-body', 'inv-model-body', 'inv-firmware-body', 'inv-docsis-body'].forEach((id) => {
+                const tbody = byInvId(id);
+                if (!tbody) return;
+                tbody.replaceChildren();
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 2;
+                cell.className = 'text-muted small';
+                cell.textContent = message;
+                row.appendChild(cell);
+                tbody.appendChild(row);
+            });
+        };
+
+        const renderTable = (tbodyId, rows, query) => {
             const tbody = byInvId(tbodyId);
             if (!tbody) return;
-            const q = (filterQ || '').trim().toLowerCase();
-            const filtered = q
-                ? (rows || []).filter(r => String(r.value || '').toLowerCase().includes(q))
-                : (rows || []);
+            tbody.replaceChildren();
+            const q = String(query || '').trim().toLowerCase();
+            const filtered = (Array.isArray(rows) ? rows : []).filter((row) => (
+                !q || String(row?.value ?? '').toLowerCase().includes(q)
+            ));
             if (!filtered.length) {
-                tbody.innerHTML = '<tr><td colspan="2" class="text-muted small">No data</td></tr>';
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 2;
+                cell.className = 'text-muted small';
+                cell.textContent = 'No data';
+                row.appendChild(cell);
+                tbody.appendChild(row);
                 return;
             }
-            tbody.innerHTML = filtered.map(r =>
-                `<tr><td class="small">${String(r.value ?? '').replace(/</g,'&lt;')}</td><td class="small text-end">${Number(r.count).toLocaleString()}</td></tr>`
-            ).join('');
+            filtered.forEach((item) => {
+                const row = document.createElement('tr');
+                const valueCell = document.createElement('td');
+                valueCell.className = 'small';
+                valueCell.textContent = String(item?.value ?? '');
+                const countCell = document.createElement('td');
+                countCell.className = 'small text-end';
+                const count = Number(item?.count);
+                countCell.textContent = Number.isFinite(count) ? count.toLocaleString() : '0';
+                row.append(valueCell, countCell);
+                tbody.appendChild(row);
+            });
         };
 
-        let _lastData = null;
-
-        const applyFilter = () => {
-            if (!_lastData) return;
-            const q = (filterText?.value || '').trim().toLowerCase();
-            renderTable('inv-vendor-body', _lastData.vendors, q);
-            renderTable('inv-model-body', _lastData.models, q);
-            renderTable('inv-firmware-body', _lastData.firmwares, q);
-            renderTable('inv-docsis-body', _lastData.docsis_versions, q);
+        const applyTextFilter = () => {
+            if (!lastSummary) return;
+            const query = filterText?.value || '';
+            renderTable('inv-vendor-body', lastSummary.vendors, query);
+            renderTable('inv-model-body', lastSummary.models, query);
+            renderTable('inv-firmware-body', lastSummary.firmwares, query);
+            renderTable('inv-docsis-body', lastSummary.docsis_versions, query);
         };
 
-        const loadInvSummary = async () => {
-            if (errorEl) errorEl.classList.add('d-none');
-            const cmts = (filterCmts?.value || '').trim();
-            const topN = topNEl?.value || '25';
-            const params = new URLSearchParams({ top_n: topN });
-            if (cmts) params.set('cmts', cmts);
+        const normalizeSnapshot = (snapshot) => {
+            if (!snapshot || typeof snapshot !== 'object') return null;
+            const name = String(snapshot.cmts || '').trim();
+            const ip = String(snapshot.cmts_ip || '').trim();
+            const value = ip || name;
+            if (!value) return null;
+            const rawArea = String(snapshot.area || 'unknown').trim().toLowerCase();
+            const area = ['fziggo', 'fupc', 'vfz'].includes(rawArea) ? rawArea : 'unknown';
+            return {
+                value,
+                label: name && ip && name !== ip ? `${name} (${ip})` : (name || ip),
+                areas: new Set([area]),
+            };
+        };
+
+        const snapshotMatchesArea = (snapshot, area) => {
+            if (area === 'all') return true;
+            if (area === 'vfz') {
+                return snapshot.areas.has('vfz') || snapshot.areas.has('fziggo') || snapshot.areas.has('fupc');
+            }
+            return snapshot.areas.has(area);
+        };
+
+        const hideCcapDropdown = () => {
+            if (window.bootstrap && ccapToggle) {
+                bootstrap.Dropdown.getOrCreateInstance(ccapToggle).hide();
+            }
+        };
+
+        const selectCcap = (value, label) => {
+            selectedCmts = value;
+            selectedCmtsLabel = label;
+            if (ccapLabel) ccapLabel.textContent = label;
+            ccapOptions?.querySelectorAll('.inventory-ccap-option').forEach((option) => {
+                const isSelected = option.dataset.value === value;
+                option.classList.toggle('active', isSelected);
+                option.setAttribute('aria-selected', String(isSelected));
+            });
+            hideCcapDropdown();
+        };
+
+        const filterCcapOptions = () => {
+            const query = String(ccapSearch?.value || '').trim().toLowerCase();
+            ccapOptions?.querySelectorAll('.inventory-ccap-option').forEach((option) => {
+                option.hidden = Boolean(query) && !String(option.textContent || '').toLowerCase().includes(query);
+            });
+        };
+
+        const renderCcapOptions = () => {
+            if (!ccapOptions) return;
+            ccapOptions.replaceChildren();
+            const area = areaSelect?.value || 'all';
+            const available = snapshots.filter((snapshot) => snapshotMatchesArea(snapshot, area));
+            if (selectedCmts && !available.some((snapshot) => snapshot.value === selectedCmts)) {
+                selectCcap('', 'All CCAPs');
+            }
+
+            const addOption = (value, label) => {
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.className = 'dropdown-item small inventory-ccap-option';
+                option.setAttribute('role', 'option');
+                option.dataset.value = value;
+                option.textContent = label;
+                if (value === selectedCmts) {
+                    option.classList.add('active');
+                    option.setAttribute('aria-selected', 'true');
+                }
+                option.addEventListener('click', () => selectCcap(value, label));
+                ccapOptions.appendChild(option);
+            };
+
+            addOption('', 'All CCAPs');
+            available.forEach((snapshot) => addOption(snapshot.value, snapshot.label));
+            if (ccapStatus) {
+                ccapStatus.className = 'small text-muted mt-1';
+                ccapStatus.textContent = snapshots.length
+                    ? `${available.length} CCAP${available.length === 1 ? '' : 's'} available for ${areaLabels[area]}.`
+                    : 'All CCAPs is available; no persisted choices loaded.';
+            }
+            filterCcapOptions();
+        };
+
+        const loadSnapshots = async () => {
+            if (ccapStatus) {
+                ccapStatus.className = 'small text-muted mt-1';
+                ccapStatus.textContent = 'Loading persisted CCAP choices…';
+            }
             try {
-                const resp = await fetch(`${invUrl}?${params}`, { credentials: 'same-origin' });
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const data = await resp.json();
-                if (data.status !== 'success') throw new Error(data.message || 'Error');
-                _lastData = data;
-                const src = String(data.source || 'mysql');
-                if (sourceChip) {
-                    sourceChip.textContent = src;
-                    sourceChip.style.background = src === 'redis' ? '#fef9c3' : '#dbeafe';
-                    sourceChip.style.color = src === 'redis' ? '#92400e' : '#1e40af';
-                }
-                if (totalChip) totalChip.textContent = `${Number(data.total || 0).toLocaleString()} modems`;
-                if (enrichedChip) {
-                    const pct = Number(data.enriched_pct || 0).toFixed(1);
-                    enrichedChip.textContent = `${Number(data.enriched || 0).toLocaleString()} enriched (${pct}%)`;
-                }
-                if (updatedEl) updatedEl.textContent = `updated ${fmtTs(data.last_updated)}`;
-                applyFilter();
-            } catch (err) {
-                if (errorEl) {
-                    errorEl.textContent = `Inventory summary failed: ${err?.message || err}`;
-                    errorEl.classList.remove('d-none');
+                const body = await fetchJson(snapshotsUrl);
+                const merged = new Map();
+                (Array.isArray(body.snapshots) ? body.snapshots : []).forEach((raw) => {
+                    const item = normalizeSnapshot(raw);
+                    if (!item) return;
+                    const existing = merged.get(item.value);
+                    if (existing) {
+                        item.areas.forEach((area) => existing.areas.add(area));
+                        if (item.label.length > existing.label.length) existing.label = item.label;
+                    } else {
+                        merged.set(item.value, item);
+                    }
+                });
+                snapshots = Array.from(merged.values()).sort((a, b) => a.label.localeCompare(b.label));
+                renderCcapOptions();
+            } catch (error) {
+                snapshots = [];
+                selectCcap('', 'All CCAPs');
+                renderCcapOptions();
+                if (ccapStatus) {
+                    ccapStatus.className = 'small text-warning mt-1';
+                    ccapStatus.textContent = `CCAP choices unavailable; All CCAPs remains usable (${error?.message || error}).`;
                 }
             }
         };
 
-        filterText?.addEventListener('input', applyFilter);
-        byInvId('inv-refresh-btn')?.addEventListener('click', loadInvSummary);
-        byInvId('inv-apply-btn')?.addEventListener('click', loadInvSummary);
-
-        // Load when the tab is first activated
-        const invTabBtn = document.getElementById('inventory-tap-tab');
-        invTabBtn?.addEventListener('shown.bs.tab', () => {
-            if (!invLoaded) { invLoaded = true; loadInvSummary(); }
+        const captureScope = () => ({
+            area: areaSelect?.value || 'all',
+            cmts: selectedCmts,
+            cmtsLabel: selectedCmtsLabel,
+            topN: topNEl?.value || '25',
+            start: historyStart?.value || '',
+            end: historyEnd?.value || '',
+            dimension: historyDimension?.value || 'model',
         });
-        // If the tab is already active on page load (from localStorage)
-        if (invTabBtn?.classList.contains('active')) {
-            invLoaded = true;
-            loadInvSummary();
-        }
+
+        const scopeParams = (scope) => {
+            const params = new URLSearchParams({ area: scope.area, top_n: scope.topN });
+            if (scope.cmts) params.set('cmts', scope.cmts);
+            return params;
+        };
+
+        const clearSummary = (message) => {
+            lastSummary = null;
+            if (sourceChip) sourceChip.textContent = '—';
+            if (totalChip) totalChip.textContent = '— modems';
+            if (enrichedChip) enrichedChip.textContent = '— enriched';
+            if (updatedEl) updatedEl.textContent = '—';
+            setTableState(message);
+        };
+
+        const loadSummary = async (scope, generation) => {
+            if (generation !== requestGeneration) return;
+            setAlert(summaryError, '');
+            clearSummary('Loading…');
+            try {
+                const body = await fetchJson(`${summaryUrl}?${scopeParams(scope)}`);
+                if (generation !== requestGeneration) return;
+                lastSummary = body;
+                const source = String(body.source || 'mysql');
+                if (sourceChip) {
+                    sourceChip.textContent = source;
+                    sourceChip.style.background = source === 'redis' ? '#fef9c3' : '#dbeafe';
+                    sourceChip.style.color = source === 'redis' ? '#92400e' : '#1e40af';
+                }
+                if (totalChip) totalChip.textContent = `${Number(body.total || 0).toLocaleString()} modems`;
+                if (enrichedChip) {
+                    const pct = Number(body.enriched_pct || 0).toFixed(1);
+                    enrichedChip.textContent = `${Number(body.enriched || 0).toLocaleString()} enriched (${pct}%)`;
+                }
+                if (updatedEl) updatedEl.textContent = `updated ${fmtTs(body.last_updated)}`;
+                applyTextFilter();
+            } catch (error) {
+                if (generation !== requestGeneration) return;
+                clearSummary('Summary unavailable');
+                setAlert(summaryError, `Inventory summary failed: ${error?.message || error}`);
+                throw error;
+            }
+        };
+
+        const destroyHistoryChart = () => {
+            if (historyChart) {
+                historyChart.destroy();
+                historyChart = null;
+            }
+            historyWrap?.querySelectorAll('.pypnm-chart-actions').forEach((toolbar) => toolbar.remove());
+            historyWrap?.classList.add('d-none');
+        };
+
+        const clearHistory = (message) => {
+            destroyHistoryChart();
+            if (historyState) historyState.textContent = message;
+            if (historyCoverage) historyCoverage.textContent = '';
+            if (historySource) historySource.textContent = '—';
+        };
+
+        const renderCoverage = (coverage) => {
+            if (!historyCoverage) return;
+            const rows = Array.isArray(coverage) ? coverage : [];
+            const counts = rows.map((row) => Number(row?.cmts_count)).filter(Number.isFinite);
+            if (!counts.length) {
+                historyCoverage.textContent = 'Coverage details are unavailable for this range.';
+                return;
+            }
+            const min = Math.min(...counts);
+            const max = Math.max(...counts);
+            historyCoverage.textContent = `Coverage: ${rows.length} date${rows.length === 1 ? '' : 's'}; ${min === max ? min : `${min}–${max}`} CCAP${max === 1 ? '' : 's'} represented per day.`;
+        };
+
+        const renderHistory = (body) => {
+            destroyHistoryChart();
+            const labels = Array.isArray(body.labels) ? body.labels : [];
+            const rawSeries = Array.isArray(body.series) ? body.series : [];
+            if (!body.has_data || !labels.length || !rawSeries.length) {
+                if (historyState) historyState.textContent = 'No inventory history is available for this scope and date range.';
+                renderCoverage(body.coverage);
+                return;
+            }
+            if (!window.Chart || !historyCanvas) {
+                throw new Error('Chart.js is unavailable');
+            }
+
+            const isSyntheticOther = (series) => series?.is_other === true;
+            const orderedSeries = [
+                ...rawSeries.filter((series) => !isSyntheticOther(series)),
+                ...rawSeries.filter(isSyntheticOther),
+            ];
+            const fallbackColors = ['#2563eb', '#dc3545', '#198754', '#f59e0b', '#8b5cf6', '#0891b2', '#d946ef', '#84cc16'];
+            const colors = window.PyPnmCharts?.seriesColors || fallbackColors;
+            const datasets = orderedSeries.map((series, index) => ({
+                label: isSyntheticOther(series) ? 'Other (remaining)' : String(series?.value ?? ''),
+                data: Array.isArray(series?.data) ? series.data : [],
+                borderColor: colors[index % colors.length],
+                backgroundColor: colors[index % colors.length],
+                borderWidth: 2,
+                pointRadius: 1.5,
+                pointHoverRadius: 4,
+                fill: false,
+                tension: 0.15,
+            }));
+
+            historyWrap?.classList.remove('d-none');
+            historyChart = new Chart(historyCanvas, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'nearest', intersect: false },
+                    plugins: {
+                        title: { display: false },
+                        legend: { display: true, position: 'bottom' },
+                        tooltip: { enabled: true },
+                    },
+                    scales: {
+                        x: { type: 'category', ticks: { maxTicksLimit: 12 } },
+                        y: { beginAtZero: true, ticks: { precision: 0 } },
+                    },
+                },
+            });
+            if (historyState) historyState.textContent = `${datasets.length} series across ${labels.length} date${labels.length === 1 ? '' : 's'}.`;
+            renderCoverage(body.coverage);
+        };
+
+        const loadHistory = async (scope, generation) => {
+            if (generation !== requestGeneration) return;
+            setAlert(historyError, '');
+            clearHistory('Loading history…');
+            if (historyScope) historyScope.textContent = `${areaLabels[scope.area]} · ${scope.cmtsLabel}`;
+            const params = scopeParams(scope);
+            params.set('dimension', scope.dimension);
+            if (scope.start) params.set('start', scope.start);
+            if (scope.end) params.set('end', scope.end);
+            try {
+                const body = await fetchJson(`${historyUrl}?${params}`);
+                if (generation !== requestGeneration) return;
+                if (historySource) historySource.textContent = String(body.source || 'mysql');
+                renderHistory(body);
+            } catch (error) {
+                if (generation !== requestGeneration) return;
+                clearHistory('History unavailable');
+                setAlert(historyError, `Inventory history failed: ${error?.message || error}`);
+                throw error;
+            }
+        };
+
+        const setLoadButtonsDisabled = (disabled) => {
+            if (applyButton) applyButton.disabled = disabled;
+            if (refreshButton) refreshButton.disabled = disabled;
+        };
+
+        const loadSummaryAndHistory = async (generation = ++requestGeneration) => {
+            if (generation !== requestGeneration) return;
+            const scope = captureScope();
+            setLoadButtonsDisabled(true);
+            await Promise.allSettled([
+                loadSummary(scope, generation),
+                loadHistory(scope, generation),
+            ]);
+            if (generation === requestGeneration) setLoadButtonsDisabled(false);
+        };
+
+        const refreshInventory = async () => {
+            const generation = ++requestGeneration;
+            setLoadButtonsDisabled(true);
+            await loadSnapshots();
+            if (generation !== requestGeneration) return;
+            await loadSummaryAndHistory(generation);
+        };
+
+        const initializeInventory = async () => {
+            if (initialized) {
+                historyChart?.resize();
+                return;
+            }
+            initialized = true;
+            renderCcapOptions();
+            await refreshInventory();
+        };
+
+        areaSelect?.addEventListener('change', () => {
+            if (ccapSearch) ccapSearch.value = '';
+            renderCcapOptions();
+        });
+        filterText?.addEventListener('input', applyTextFilter);
+        ccapSearch?.addEventListener('input', filterCcapOptions);
+        ccapSearch?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                const firstVisible = Array.from(ccapOptions?.querySelectorAll('.inventory-ccap-option') || [])
+                    .find((option) => !option.hidden);
+                if (firstVisible) {
+                    event.preventDefault();
+                    firstVisible.click();
+                }
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                hideCcapDropdown();
+                ccapToggle?.focus();
+            }
+        });
+        ccapDropdown?.addEventListener('shown.bs.dropdown', () => {
+            if (ccapSearch) {
+                ccapSearch.value = '';
+                filterCcapOptions();
+                ccapSearch.focus();
+            }
+        });
+        applyButton?.addEventListener('click', () => { loadSummaryAndHistory(); });
+        refreshButton?.addEventListener('click', refreshInventory);
+
+        const invTabBtn = byInvId('inventory-tap-tab');
+        invTabBtn?.addEventListener('shown.bs.tab', initializeInventory);
+        if (invTabBtn?.classList.contains('active')) initializeInventory();
     })();
 
 })();
