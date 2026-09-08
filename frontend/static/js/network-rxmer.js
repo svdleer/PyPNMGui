@@ -217,7 +217,7 @@
         }));
     }
 
-    function loadIndexCmtsMetadata() {
+    function loadIndexCmtsMetadata({required = false} = {}) {
         if (!indexCmtsPromise) {
             indexCmtsPromise = fetch(`${basePath}/api/cmts`, {credentials: 'same-origin'})
                 .then((response) => response.ok ? response.json() : Promise.reject(new Error('CMTS list unavailable')))
@@ -225,13 +225,13 @@
                     name: String(cmts.HostName || '').trim(),
                     ip: String(cmts.IPAddress || '').trim(),
                     vendor: String(cmts.Vendor || '').trim(),
-                })).filter((cmts) => cmts.name))
-                .catch((error) => {
-                    console.warn('Index CMTS metadata unavailable:', error);
-                    return [];
-                });
+                })).filter((cmts) => cmts.name));
         }
-        return indexCmtsPromise;
+        if (required) return indexCmtsPromise;
+        return indexCmtsPromise.catch((error) => {
+            console.warn('Index CMTS metadata unavailable:', error);
+            return [];
+        });
     }
 
     function isAllowedCcapHostname(value) {
@@ -958,11 +958,8 @@
 
     async function loadCmtsOptions() {
         try {
-            const [response, metadata] = await Promise.all([
-                request('/options/cmts?limit=5000'),
-                loadIndexCmtsMetadata(),
-            ]);
-            planningCmtsOptions = enrichCmtsOptions(response.cmts || [], metadata);
+            const metadata = await loadIndexCmtsMetadata({required: true});
+            planningCmtsOptions = metadata.filter((cmts) => isAllowedCcapHostname(cmts.name));
             renderPlanningCmtsMenu();
         } catch (error) {
             showAlert(error.message);
