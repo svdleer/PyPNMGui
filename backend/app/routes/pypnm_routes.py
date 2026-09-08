@@ -89,10 +89,18 @@ try:
     import redis
     REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
     REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    REDIS_CONNECT_TIMEOUT = float(os.environ.get('REDIS_CONNECT_TIMEOUT', '2'))
+    REDIS_SOCKET_TIMEOUT = float(os.environ.get('REDIS_SOCKET_TIMEOUT', '2'))
+    redis_client = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        decode_responses=True,
+        socket_connect_timeout=REDIS_CONNECT_TIMEOUT,
+        socket_timeout=REDIS_SOCKET_TIMEOUT,
+    )
     redis_client.ping()
     REDIS_AVAILABLE = True
-except:
+except Exception:
     redis_client = None
     REDIS_AVAILABLE = False
 
@@ -5338,8 +5346,97 @@ def cancel_fibernode_impulse_job(job_id):
 
 import threading as _report_threading
 
-_report_jobs: dict = {}  # job_id -> {status, progress, total, current, pdf_path, error}
+_REPORT_JOB_TTL_SECONDS = int(os.environ.get('PNM_REPORT_JOB_TTL_SECONDS', '86400'))
+_REPORT_JOB_REDIS_PREFIX = 'pypnm:report_job:'
+_REPORT_TERMINAL_WRITE_ATTEMPTS = 3
 _report_lock = _report_threading.Lock()
+
+
+class _ReportJobStore(dict[str, dict]):
+    """Process-local report state mirrored to Redis for multi-worker access."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._dirty_job_ids: set[str] = set()
+
+    @staticmethod
+    def _redis_key(job_id: str) -> str:
+        return f'{_REPORT_JOB_REDIS_PREFIX}{job_id}'
+
+    def _local_snapshot(self, job_id: str):
+        with _report_lock:
+            job = super().get(job_id)
+            snapshot = dict(job) if isinstance(job, dict) else None
+            return snapshot, job_id in self._dirty_job_ids
+
+    def _persist(self, job_id: str, job: dict, attempts: int = 1) -> bool:
+        if not REDIS_AVAILABLE:
+            return False
+        last_error = None
+        for attempt in range(attempts):
+            try:
+                redis_client.set(
+                    self._redis_key(job_id),
+                    json.dumps(job),
+                    ex=_REPORT_JOB_TTL_SECONDS,
+                )
+                return True
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < attempts:
+                    time.sleep(0.1 * (attempt + 1))
+        logger.warning('Unable to persist shared report job %s: %s', job_id, last_error)
+        return False
+
+    def _mark_persisted(self, job_id: str, revision: int) -> None:
+        with _report_lock:
+            current = super().get(job_id) or {}
+            if current.get('_report_revision') == revision:
+                self._dirty_job_ids.discard(job_id)
+
+    def get(self, job_id: str, default=None):
+        local, dirty = self._local_snapshot(job_id)
+
+        # Never let stale shared state overwrite a newer local update whose
+        # Redis write failed. Retry that snapshot before serving local fallback.
+        if local is not None and dirty:
+            if self._persist(job_id, local, attempts=2):
+                self._mark_persisted(job_id, local.get('_report_revision', 0))
+            return local
+
+        if REDIS_AVAILABLE:
+            try:
+                raw = redis_client.get(self._redis_key(job_id))
+                if raw:
+                    shared = json.loads(raw)
+                    if isinstance(shared, dict):
+                        local_revision = (local or {}).get('_report_revision', 0)
+                        shared_revision = shared.get('_report_revision', 0)
+                        if local is not None and local_revision > shared_revision:
+                            return local
+                        with _report_lock:
+                            super().__setitem__(job_id, shared)
+                        return dict(shared)
+            except Exception as exc:
+                logger.warning('Unable to read shared report job %s: %s', job_id, exc)
+        return local if local is not None else default
+
+    def update_job(self, job_id: str, fields: dict) -> None:
+        with _report_lock:
+            job = dict(super().get(job_id, {}))
+            job.update(fields)
+            job['_report_revision'] = int(job.get('_report_revision', 0)) + 1
+            super().__setitem__(job_id, job)
+            self._dirty_job_ids.add(job_id)
+            snapshot = dict(job)
+
+        is_terminal = fields.get('status') in {'complete', 'failed'}
+        attempts = _REPORT_TERMINAL_WRITE_ATTEMPTS if is_terminal else 1
+        if self._persist(job_id, snapshot, attempts=attempts):
+            self._mark_persisted(job_id, snapshot['_report_revision'])
+
+
+_report_jobs = _ReportJobStore()
 
 _REPORT_MEASUREMENT_LABELS = {
     'rxmer': 'Downstream OFDM RxMER per Subcarrier',
@@ -5356,10 +5453,7 @@ _REPORT_MEASUREMENT_LABELS = {
 
 
 def _set_report_progress(job_id, **kwargs):
-    with _report_lock:
-        if job_id not in _report_jobs:
-            _report_jobs[job_id] = {}
-        _report_jobs[job_id].update(kwargs)
+    _report_jobs.update_job(job_id, kwargs)
 
 
 @pypnm_bp.route('/pnm-report/start', methods=['POST'])
@@ -5708,8 +5802,7 @@ def _stored_report_access_error(job: dict):
 
 @pypnm_bp.route('/pnm-report/status/<job_id>', methods=['GET'])
 def pnm_report_status(job_id):
-    with _report_lock:
-        job = _report_jobs.get(job_id)
+    job = _report_jobs.get(job_id)
     if not job:
         return jsonify({'success': False, 'error': 'Job not found'}), 404
     access_error = _stored_report_access_error(job)
@@ -5721,8 +5814,7 @@ def pnm_report_status(job_id):
 @pypnm_bp.route('/pnm-report/download/<job_id>', methods=['GET'])
 def pnm_report_download(job_id):
     import os
-    with _report_lock:
-        job = _report_jobs.get(job_id)
+    job = _report_jobs.get(job_id)
     if not job:
         return jsonify({'success': False, 'error': 'Report not ready'}), 404
     access_error = _stored_report_access_error(job)
@@ -6401,8 +6493,8 @@ def _run_bulk_report(job_id: str, report_type: str, source: dict):
     try:
         _set_report_progress(job_id, progress=1, current='Formatting stored scan summary...')
         pdf_path = _build_bulk_report_pdf(job_id, report_type, source)
-        with _report_lock:
-            total = int((_report_jobs.get(job_id) or {}).get('total', 1))
+        job = _report_jobs.get(job_id) or {}
+        total = int(job.get('total', 1))
         _set_report_progress(
             job_id, progress=total, status='complete', pdf_path=pdf_path, current='Done',
         )
