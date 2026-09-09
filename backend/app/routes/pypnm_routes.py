@@ -5452,6 +5452,18 @@ _REPORT_MEASUREMENT_LABELS = {
 }
 
 
+def _pnm_report_plot_matches(measurement_type: str, plot_name: str) -> bool:
+    """Split channel-estimation plots into frequency- and time-domain sections."""
+    if measurement_type not in {'channel_estimation', 'impulse_response'}:
+        return True
+
+    normalized_name = str(plot_name or '').lower()
+    is_impulse_response = 'ifft' in normalized_name or 'impulse' in normalized_name
+    if measurement_type == 'impulse_response':
+        return is_impulse_response
+    return not is_impulse_response
+
+
 def _set_report_progress(job_id, **kwargs):
     _report_jobs.update_job(job_id, kwargs)
 
@@ -5854,6 +5866,8 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
 
     client = PyPNMClient()
     collected_plots = []  # list of (measurement_label, [png_bytes, ...])
+    channel_estimation_archive = None
+    channel_estimation_archive_loaded = False
 
     for idx, mtype in enumerate(measurements):
         label = _REPORT_MEASUREMENT_LABELS.get(mtype, mtype)
@@ -5866,8 +5880,17 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'spectrum':
                 result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
-            elif mtype == 'channel_estimation':
-                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
+            elif mtype in {'channel_estimation', 'impulse_response'}:
+                if not channel_estimation_archive_loaded:
+                    channel_estimation_archive_loaded = True
+                    channel_estimation_archive = client.get_channel_estimation(
+                        mac_address,
+                        modem_ip,
+                        tftp_ip,
+                        modem_write_community,
+                        output_type='archive',
+                    )
+                result = channel_estimation_archive
             elif mtype == 'us_pre_eq':
                 result = client.get_us_ofdma_pre_equalization(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'fec_summary':
@@ -5878,8 +5901,6 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 result = client.get_constellation_display(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'modulation_profile':
                 result = client.get_modulation_profile(mac_address, modem_ip, tftp_ip, modem_write_community)
-            elif mtype == 'impulse_response':
-                result = client.get_channel_estimation(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype == 'us_rxmer':
                 # CMTS-based US OFDMA RxMER — capture all active OFDMA channels
                 import time as _time
@@ -5959,18 +5980,23 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             else:
                 continue
 
-            # Extract PNG images from result
-            # Extract PNG images from result (if not already handled by us_rxmer branch)
+            # Extract PNG images from result (if not already handled by us_rxmer).
             if isinstance(result, bytes):
                 if result[:2] == b'PK':  # ZIP
                     with zipfile.ZipFile(io.BytesIO(result), 'r') as zf:
                         for name in sorted(zf.namelist()):
-                            if name.lower().endswith('.png'):
+                            if (
+                                name.lower().endswith('.png')
+                                and _pnm_report_plot_matches(mtype, name)
+                            ):
                                 pngs.append(zf.read(name))
                 elif result[:2] == b'\x1f\x8b':  # tar.gz
                     with tarfile.open(fileobj=io.BytesIO(result), mode='r:gz') as tf:
-                        for member in tf.getmembers():
-                            if member.name.lower().endswith('.png'):
+                        for member in sorted(tf.getmembers(), key=lambda item: item.name):
+                            if (
+                                member.name.lower().endswith('.png')
+                                and _pnm_report_plot_matches(mtype, member.name)
+                            ):
                                 f = tf.extractfile(member)
                                 if f:
                                     pngs.append(f.read())
@@ -5980,7 +6006,17 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
                 if not plots and isinstance(result.get('data'), dict):
                     plots = result['data'].get('plots') or []
                 for p in plots:
-                    if p.get('data'):
+                    plot_name = (
+                        p.get('name')
+                        or p.get('filename')
+                        or p.get('path')
+                        or p.get('title')
+                        or ''
+                    )
+                    if (
+                        p.get('data')
+                        and _pnm_report_plot_matches(mtype, plot_name)
+                    ):
                         pngs.append(base64.b64decode(p['data']))
 
             collected_plots.append((label, pngs))
