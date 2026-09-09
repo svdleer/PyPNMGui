@@ -133,8 +133,20 @@
         .inventory-ccap-options { max-height: 16rem; overflow-y: auto; }
         .inventory-ccap-option[hidden] { display: none !important; }
         .inventory-chart-wrap { height: 340px; min-height: 280px; position: relative; }
+        .inventory-distribution-chart { height: 230px; min-height: 210px; position: relative; overflow: hidden; }
+        .inventory-summary-panel { min-width: 0; overflow: hidden; }
+        .inventory-summary-table-wrap { max-height: 17rem; overflow: auto; }
+        .inventory-summary-table { width: 100%; table-layout: fixed; }
+        .inventory-summary-table th:first-child,
+        .inventory-summary-table td:first-child { width: 75%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .inventory-modem-table-wrap { width: 100%; max-height: 38rem; overflow: auto; }
+        .inventory-modem-table { min-width: 1120px; table-layout: fixed; }
+        .inventory-modem-table th,
+        .inventory-modem-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+        .inventory-modem-table .inv-wrap-cell { white-space: normal; overflow-wrap: anywhere; }
         @media (max-width: 767.98px) {
             .inventory-chart-wrap { height: 300px; }
+            .inventory-distribution-chart { height: 210px; }
         }
     </style>
 {% endblock %}
@@ -994,8 +1006,8 @@
                             <div id="inv-ccap-status" class="small text-muted mt-1">CCAP choices load when this tab opens.</div>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label small text-muted mb-1" for="inv-filter-text">Filter vendor / model / firmware</label>
-                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="e.g. arris">
+                            <label class="form-label small text-muted mb-1" for="inv-filter-text">Search inventory identity</label>
+                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="MAC, IP, vendor, model, software…">
                         </div>
                         <div class="col-md-1">
                             <label class="form-label small text-muted mb-1" for="inv-top-n">Top N</label>
@@ -1010,37 +1022,105 @@
                             <button type="button" id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
                         </div>
                     </div>
-                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Scope changes update both sections automatically; Apply retries the current scope.</div>
+                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Scope changes reload current distributions, inventory rows, and history; Apply retries the current scope.</div>
                     <div id="inv-error" class="alert alert-danger py-2 d-none" role="alert"></div>
                     <div class="row g-3" id="inv-tables">
                         <div class="col-md-6 col-xl-3">
-                            <div class="fw-semibold small mb-1"><i class="bi bi-building me-1"></i>Vendor</div>
-                            <table class="table table-sm table-hover mb-0">
-                                <thead><tr><th class="small">Vendor</th><th class="small text-end">Count</th></tr></thead>
-                                <tbody id="inv-vendor-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
-                            </table>
+                            <div class="inventory-summary-panel border rounded p-2 h-100">
+                                <div class="fw-semibold small mb-1"><i class="bi bi-building me-1"></i>Vendor</div>
+                                <div class="inventory-distribution-chart"><canvas id="inv-vendor-chart" data-no-auto-zoom="true" aria-label="Current vendor distribution"></canvas></div>
+                                <div class="table-responsive inventory-summary-table-wrap mt-2">
+                                    <table class="table table-sm table-hover mb-0 inventory-summary-table">
+                                        <thead><tr><th class="small">Vendor</th><th class="small text-end">Count</th></tr></thead>
+                                        <tbody id="inv-vendor-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                         <div class="col-md-6 col-xl-3">
-                            <div class="fw-semibold small mb-1"><i class="bi bi-cpu me-1"></i>Model</div>
-                            <table class="table table-sm table-hover mb-0">
-                                <thead><tr><th class="small">Model</th><th class="small text-end">Count</th></tr></thead>
-                                <tbody id="inv-model-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
-                            </table>
+                            <div class="inventory-summary-panel border rounded p-2 h-100">
+                                <div class="fw-semibold small mb-1"><i class="bi bi-cpu me-1"></i>Model / Type</div>
+                                <div class="inventory-distribution-chart"><canvas id="inv-model-chart" data-no-auto-zoom="true" aria-label="Current modem model distribution"></canvas></div>
+                                <div class="table-responsive inventory-summary-table-wrap mt-2">
+                                    <table class="table table-sm table-hover mb-0 inventory-summary-table">
+                                        <thead><tr><th class="small">Model</th><th class="small text-end">Count</th></tr></thead>
+                                        <tbody id="inv-model-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                         <div class="col-md-6 col-xl-3">
-                            <div class="fw-semibold small mb-1"><i class="bi bi-file-earmark-code me-1"></i>Firmware</div>
-                            <table class="table table-sm table-hover mb-0">
-                                <thead><tr><th class="small">Firmware</th><th class="small text-end">Count</th></tr></thead>
-                                <tbody id="inv-firmware-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
-                            </table>
+                            <div class="inventory-summary-panel border rounded p-2 h-100">
+                                <div class="fw-semibold small mb-1"><i class="bi bi-file-earmark-code me-1"></i>Software</div>
+                                <div class="inventory-distribution-chart"><canvas id="inv-firmware-chart" data-no-auto-zoom="true" aria-label="Current software distribution"></canvas></div>
+                                <div class="table-responsive inventory-summary-table-wrap mt-2">
+                                    <table class="table table-sm table-hover mb-0 inventory-summary-table">
+                                        <thead><tr><th class="small">Software</th><th class="small text-end">Count</th></tr></thead>
+                                        <tbody id="inv-firmware-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                         <div class="col-md-6 col-xl-3">
-                            <div class="fw-semibold small mb-1"><i class="bi bi-router me-1"></i>DOCSIS</div>
-                            <table class="table table-sm table-hover mb-0">
-                                <thead><tr><th class="small">Version</th><th class="small text-end">Count</th></tr></thead>
-                                <tbody id="inv-docsis-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
-                            </table>
+                            <div class="inventory-summary-panel border rounded p-2 h-100">
+                                <div class="fw-semibold small mb-1"><i class="bi bi-router me-1"></i>DOCSIS</div>
+                                <div class="inventory-distribution-chart"><canvas id="inv-docsis-chart" data-no-auto-zoom="true" aria-label="Current DOCSIS distribution"></canvas></div>
+                                <div class="table-responsive inventory-summary-table-wrap mt-2">
+                                    <table class="table table-sm table-hover mb-0 inventory-summary-table">
+                                        <thead><tr><th class="small">Version</th><th class="small text-end">Count</th></tr></thead>
+                                        <tbody id="inv-docsis-body"><tr><td colspan="2" class="text-muted small">Loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm mt-3">
+                <div class="card-header bg-white d-flex align-items-center gap-2 flex-wrap">
+                    <strong><i class="bi bi-list-ul me-1"></i>Modem Inventory</strong>
+                    <span id="inv-rows-status" class="small text-muted ms-auto">Loading…</span>
+                </div>
+                <div class="card-body">
+                    <div class="row g-2 mb-3 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted mb-1" for="inv-lifecycle">Lifecycle</label>
+                            <select id="inv-lifecycle" class="form-select form-select-sm">
+                                <option value="active" selected>Active</option>
+                                <option value="suspect_missing">Suspect missing</option>
+                                <option value="retired">Retired</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small text-muted mb-1" for="inv-interface">Interface</label>
+                            <select id="inv-interface" class="form-select form-select-sm" disabled>
+                                <option value="">All interfaces</option>
+                            </select>
+                            <div id="inv-interface-status" class="small text-muted mt-1">Select a CCAP to load interfaces.</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small text-muted mb-1" for="inv-page-size">Page size</label>
+                            <select id="inv-page-size" class="form-select form-select-sm">
+                                <option value="25">25</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                                <option value="250">250</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 d-flex gap-1">
+                            <button id="inv-prev-page" type="button" class="btn btn-outline-secondary btn-sm flex-fill" disabled>Previous</button>
+                            <button id="inv-next-page" type="button" class="btn btn-outline-secondary btn-sm flex-fill" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="inv-rows-error" class="alert alert-danger py-2 d-none" role="alert"></div>
+                    <div class="table-responsive inventory-modem-table-wrap border rounded">
+                        <table class="table table-sm table-hover mb-0 inventory-modem-table">
+                            <thead class="sticky-top"><tr>
+                                <th>MAC</th><th>IP</th><th>CCAP</th><th>Vendor / model</th><th>Software</th><th>DOCSIS</th><th>Interface / cable MAC</th><th>Lifecycle</th><th>Updated</th>
+                            </tr></thead>
+                            <tbody id="inv-rows-body"><tr><td colspan="9" class="small text-muted">Loading…</td></tr></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -1067,9 +1147,10 @@
                                 <option value="model" selected>Modem model</option>
                                 <option value="vendor">Vendor</option>
                                 <option value="firmware">Firmware</option>
+                                <option value="docsis">DOCSIS</option>
                             </select>
                         </div>
-                        <div class="col-md-2 small text-muted">Selections update both sections automatically.</div>
+                        <div class="col-md-2 small text-muted">Selections reload distributions, inventory rows, and history.</div>
                     </div>
                     <div id="inv-history-error" class="alert alert-danger py-2 d-none" role="alert"></div>
                     <div id="inv-history-state" class="small text-muted mb-2">Loading history…</div>
@@ -1716,6 +1797,8 @@
         const summaryUrl = '[[ base_path ]]/api/admin/inventory-summary';
         const snapshotsUrl = '[[ base_path ]]/api/admin/inventory/snapshots';
         const historyUrl = '[[ base_path ]]/api/admin/inventory-history';
+        const modemsUrl = '[[ base_path ]]/api/admin/inventory-modems';
+        const interfacesUrl = '[[ base_path ]]/api/admin/inventory-interfaces';
         const byInvId = (id) => document.getElementById(id);
 
         const sourceChip = byInvId('inv-source-chip');
@@ -1742,6 +1825,15 @@
         const historyScope = byInvId('inv-history-scope');
         const historyWrap = byInvId('inv-history-chart-wrap');
         const historyCanvas = byInvId('inv-history-chart');
+        const lifecycleSelect = byInvId('inv-lifecycle');
+        const interfaceSelect = byInvId('inv-interface');
+        const interfaceStatus = byInvId('inv-interface-status');
+        const pageSizeSelect = byInvId('inv-page-size');
+        const prevPageButton = byInvId('inv-prev-page');
+        const nextPageButton = byInvId('inv-next-page');
+        const rowsBody = byInvId('inv-rows-body');
+        const rowsStatus = byInvId('inv-rows-status');
+        const rowsError = byInvId('inv-rows-error');
         const applyButton = byInvId('inv-apply-btn');
         const refreshButton = byInvId('inv-refresh-btn');
 
@@ -1751,9 +1843,14 @@
         let selectedCmtsLabel = 'All CCAPs';
         let lastSummary = null;
         let historyChart = null;
+        let distributionCharts = [];
         let requestGeneration = 0;
         let scopeReloadTimer = null;
         let snapshotsNeedRefresh = false;
+        let interfacesNeedRefresh = true;
+        let tableOffset = 0;
+        let tableHasMore = false;
+        let tableNextOffset = 0;
 
         const areaLabels = {
             all: 'All areas',
@@ -1780,7 +1877,7 @@
             let body = null;
             try { body = await response.json(); } catch (_) {}
             if (!response.ok) throw new Error(body?.message || `HTTP ${response.status}`);
-            if (!body || body.status !== 'success') throw new Error(body?.message || 'Invalid response');
+            if (!body || (body.status && body.status !== 'success')) throw new Error(body?.message || 'Invalid response');
             return body;
         };
 
@@ -1818,14 +1915,11 @@
             });
         };
 
-        const renderTable = (tbodyId, rows, query) => {
+        const renderTable = (tbodyId, rows) => {
             const tbody = byInvId(tbodyId);
             if (!tbody) return;
             tbody.replaceChildren();
-            const q = String(query || '').trim().toLowerCase();
-            const filtered = (Array.isArray(rows) ? rows : []).filter((row) => (
-                !q || String(row?.value ?? '').toLowerCase().includes(q)
-            ));
+            const filtered = Array.isArray(rows) ? rows : [];
             if (!filtered.length) {
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
@@ -1850,13 +1944,67 @@
             });
         };
 
+        const destroyDistributionCharts = () => {
+            distributionCharts.forEach((chart) => chart?.destroy());
+            distributionCharts = [];
+        };
+
+        const renderDistributionCharts = (summary) => {
+            destroyDistributionCharts();
+            if (!window.Chart) return;
+            const specs = [
+                ['inv-vendor-chart', summary.vendors],
+                ['inv-model-chart', summary.models],
+                ['inv-firmware-chart', summary.firmwares],
+                ['inv-docsis-chart', summary.docsis_versions],
+            ];
+            const colors = window.PyPnmCharts?.seriesColors || ['#2563eb', '#dc3545', '#198754', '#f59e0b', '#8b5cf6', '#0891b2'];
+            specs.forEach(([canvasId, sourceRows], chartIndex) => {
+                const canvas = byInvId(canvasId);
+                if (!canvas) return;
+                const rows = (Array.isArray(sourceRows) ? sourceRows : []).slice(0, 12);
+                if (!rows.length) return;
+                const chart = new Chart(canvas, {
+                    type: 'bar',
+                    data: {
+                        labels: rows.map((row) => String(row?.value ?? '')),
+                        datasets: [{
+                            data: rows.map((row) => Number(row?.count) || 0),
+                            backgroundColor: rows.map((_, index) => colors[(index + chartIndex) % colors.length]),
+                            borderWidth: 0,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        animation: false,
+                        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+                        scales: {
+                            x: { beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 5 } },
+                            y: {
+                                ticks: {
+                                    autoSkip: false,
+                                    callback(value) {
+                                        const label = String(this.getLabelForValue(value) || '');
+                                        return label.length > 24 ? `${label.slice(0, 23)}…` : label;
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+                distributionCharts.push(chart);
+            });
+        };
+
         const applyTextFilter = () => {
             if (!lastSummary) return;
-            const query = filterText?.value || '';
-            renderTable('inv-vendor-body', lastSummary.vendors, query);
-            renderTable('inv-model-body', lastSummary.models, query);
-            renderTable('inv-firmware-body', lastSummary.firmwares, query);
-            renderTable('inv-docsis-body', lastSummary.docsis_versions, query);
+            renderTable('inv-vendor-body', lastSummary.vendors);
+            renderTable('inv-model-body', lastSummary.models);
+            renderTable('inv-firmware-body', lastSummary.firmwares);
+            renderTable('inv-docsis-body', lastSummary.docsis_versions);
+            renderDistributionCharts(lastSummary);
         };
 
         const normalizeSnapshot = (snapshot) => {
@@ -1889,8 +2037,14 @@
         };
 
         const selectCcap = (value, label) => {
+            const changed = selectedCmts !== value;
             selectedCmts = value;
             selectedCmtsLabel = label;
+            if (changed) {
+                interfacesNeedRefresh = true;
+                tableOffset = 0;
+                if (interfaceSelect) interfaceSelect.value = '';
+            }
             if (ccapLabel) ccapLabel.textContent = label;
             ccapOptions?.querySelectorAll('.inventory-ccap-option').forEach((option) => {
                 const isSelected = option.dataset.value === value;
@@ -1984,6 +2138,65 @@
             }
         };
 
+        const loadInterfaces = async (expectedGeneration) => {
+            if (expectedGeneration !== requestGeneration) return false;
+            if (!interfaceSelect || !interfaceStatus) return true;
+            interfaceSelect.replaceChildren();
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = 'All interfaces';
+            interfaceSelect.appendChild(allOption);
+            interfaceSelect.disabled = true;
+            if (!selectedCmts) {
+                interfaceStatus.className = 'small text-muted mt-1';
+                interfaceStatus.textContent = 'Select a CCAP to load interfaces.';
+                interfacesNeedRefresh = false;
+                return true;
+            }
+            interfaceStatus.className = 'small text-muted mt-1';
+            interfaceStatus.textContent = 'Loading interfaces…';
+            try {
+                const params = new URLSearchParams({ cmts: selectedCmts });
+                const body = await fetchJson(`${interfacesUrl}?${params}`);
+                if (expectedGeneration !== requestGeneration) return false;
+                const seen = new Set();
+                const rawValues = [
+                    ...(Array.isArray(body.interfaces) ? body.interfaces : []),
+                    ...(Array.isArray(body.upstream_interfaces) ? body.upstream_interfaces : []),
+                    ...(Array.isArray(body.cable_macs) ? body.cable_macs : []),
+                    ...(Array.isArray(body.downstream_interfaces) ? body.downstream_interfaces : []),
+                    ...(Array.isArray(body.other_interfaces) ? body.other_interfaces : []),
+                ];
+                const values = rawValues.map((item) => {
+                    if (typeof item === 'string') return item.trim();
+                    return String(item?.interface || item?.name || item?.if_name || item?.interface_name || item?.value || '').trim();
+                }).filter((value) => {
+                    const key = value.toLowerCase();
+                    if (!value || seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                }).sort((a, b) => a.localeCompare(b));
+                values.forEach((value) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    interfaceSelect.appendChild(option);
+                });
+                interfaceSelect.disabled = false;
+                interfaceStatus.textContent = values.length
+                    ? `${values.length} interface${values.length === 1 ? '' : 's'} available.`
+                    : 'No persisted interfaces found for this CCAP.';
+                interfacesNeedRefresh = false;
+                return true;
+            } catch (error) {
+                if (expectedGeneration !== requestGeneration) return false;
+                interfaceStatus.className = 'small text-warning mt-1';
+                interfaceStatus.textContent = `Interfaces unavailable (${error?.message || error}).`;
+                interfacesNeedRefresh = false;
+                return true;
+            }
+        };
+
         const captureScope = () => ({
             area: areaSelect?.value || 'all',
             cmts: selectedCmts,
@@ -1992,6 +2205,11 @@
             start: historyStart?.value || '',
             end: historyEnd?.value || '',
             dimension: historyDimension?.value || 'model',
+            lifecycle: lifecycleSelect?.value || 'active',
+            interfaceName: interfaceSelect?.value || '',
+            pageSize: pageSizeSelect?.value || '50',
+            text: String(filterText?.value || '').trim(),
+            offset: tableOffset,
         });
 
         const scopeParams = (scope) => {
@@ -2002,6 +2220,7 @@
 
         const clearSummary = (message) => {
             lastSummary = null;
+            destroyDistributionCharts();
             if (sourceChip) sourceChip.textContent = '—';
             if (totalChip) totalChip.textContent = '— modems';
             if (enrichedChip) enrichedChip.textContent = '— enriched';
@@ -2145,6 +2364,98 @@
             }
         };
 
+        const setRowsState = (message) => {
+            if (!rowsBody) return;
+            rowsBody.replaceChildren();
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 9;
+            cell.className = 'small text-muted';
+            cell.textContent = message;
+            row.appendChild(cell);
+            rowsBody.appendChild(row);
+        };
+
+        const appendInventoryCell = (row, value, className = '') => {
+            const cell = document.createElement('td');
+            cell.className = `small ${className}`.trim();
+            const text = String(value || '—');
+            cell.textContent = text;
+            cell.title = text;
+            row.appendChild(cell);
+        };
+
+        const renderInventoryRows = (body, scope) => {
+            if (!rowsBody) return;
+            rowsBody.replaceChildren();
+            const rows = Array.isArray(body.modems) ? body.modems : [];
+            if (!rows.length) {
+                setRowsState('No modems match this scope and filter.');
+            } else {
+                rows.forEach((modem) => {
+                    const row = document.createElement('tr');
+                    const vendorModel = [modem?.vendor, modem?.model || modem?.model_name].filter(Boolean).join(' / ');
+                    const interfaceCable = [
+                        modem?.upstream_interface || modem?.interface || modem?.interface_name,
+                        modem?.cable_mac || modem?.cable_mac_address,
+                    ].filter(Boolean).join(' / ');
+                    appendInventoryCell(row, modem?.mac_address || modem?.mac, 'font-monospace');
+                    appendInventoryCell(row, modem?.ip_address || modem?.ip, 'font-monospace');
+                    appendInventoryCell(row, modem?.cmts || modem?.cmts_hostname || modem?.cmts_ip);
+                    appendInventoryCell(row, vendorModel, 'inv-wrap-cell');
+                    appendInventoryCell(row, modem?.software_version || modem?.firmware, 'inv-wrap-cell');
+                    appendInventoryCell(row, modem?.docsis_version);
+                    appendInventoryCell(row, interfaceCable, 'inv-wrap-cell');
+                    appendInventoryCell(row, modem?.inventory_state || modem?.lifecycle_state || scope.lifecycle);
+                    appendInventoryCell(row, fmtTs(modem?.updated_at || modem?.last_seen_at || modem?.revision_at));
+                    rowsBody.appendChild(row);
+                });
+            }
+            const total = Number(body.total || 0);
+            const count = Number(body.count ?? rows.length);
+            const offset = Number(body.offset ?? scope.offset);
+            const limit = Number(body.limit ?? scope.pageSize);
+            const page = limit > 0 ? Math.floor(offset / limit) + 1 : 1;
+            const pages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
+            tableHasMore = body.has_more === true;
+            tableNextOffset = Number(body.next_offset ?? (offset + count));
+            if (rowsStatus) rowsStatus.textContent = `${total.toLocaleString()} total · page ${page} of ${pages} · ${count.toLocaleString()} shown`;
+            if (prevPageButton) prevPageButton.disabled = offset <= 0;
+            if (nextPageButton) nextPageButton.disabled = !tableHasMore;
+        };
+
+        const loadInventoryRows = async (scope, generation) => {
+            if (generation !== requestGeneration) return;
+            setAlert(rowsError, '');
+            setRowsState('Loading inventory…');
+            if (rowsStatus) rowsStatus.textContent = 'Loading…';
+            if (prevPageButton) prevPageButton.disabled = true;
+            if (nextPageButton) nextPageButton.disabled = true;
+            const params = new URLSearchParams({
+                area: scope.area,
+                lifecycle_state: scope.lifecycle,
+                offset: String(scope.offset),
+                limit: scope.pageSize,
+            });
+            if (scope.cmts) params.set('cmts', scope.cmts);
+            if (scope.interfaceName) params.set('interface', scope.interfaceName);
+            if (scope.text) {
+                params.set('search_type', 'identity');
+                params.set('search_value', scope.text);
+            }
+            try {
+                const body = await fetchJson(`${modemsUrl}?${params}`);
+                if (generation !== requestGeneration) return;
+                renderInventoryRows(body, scope);
+            } catch (error) {
+                if (generation !== requestGeneration) return;
+                setRowsState('Inventory unavailable');
+                if (rowsStatus) rowsStatus.textContent = 'Unavailable';
+                setAlert(rowsError, `Inventory rows failed: ${error?.message || error}`);
+                throw error;
+            }
+        };
+
         const setLoadButtonsDisabled = (disabled) => {
             if (applyButton) applyButton.disabled = disabled;
             if (refreshButton) refreshButton.disabled = disabled;
@@ -2157,12 +2468,14 @@
             await Promise.allSettled([
                 loadSummary(scope, generation),
                 loadHistory(scope, generation),
+                loadInventoryRows(scope, generation),
             ]);
             if (generation === requestGeneration) setLoadButtonsDisabled(false);
         };
 
         const scheduleScopeReload = () => {
             if (!initialized) return;
+            tableOffset = 0;
             if (scopeReloadTimer !== null) window.clearTimeout(scopeReloadTimer);
             const generation = ++requestGeneration;
             setLoadButtonsDisabled(true);
@@ -2170,6 +2483,10 @@
                 scopeReloadTimer = null;
                 if (snapshotsNeedRefresh) {
                     const applied = await loadSnapshots(generation);
+                    if (!applied || generation !== requestGeneration) return;
+                }
+                if (interfacesNeedRefresh) {
+                    const applied = await loadInterfaces(generation);
                     if (!applied || generation !== requestGeneration) return;
                 }
                 await loadSummaryAndHistory(generation);
@@ -2185,12 +2502,16 @@
             setLoadButtonsDisabled(true);
             const applied = await loadSnapshots(generation);
             if (!applied || generation !== requestGeneration) return;
+            interfacesNeedRefresh = true;
+            const interfacesApplied = await loadInterfaces(generation);
+            if (!interfacesApplied || generation !== requestGeneration) return;
             await loadSummaryAndHistory(generation);
         };
 
         const initializeInventory = async () => {
             if (initialized) {
                 historyChart?.resize();
+                distributionCharts.forEach((chart) => chart?.resize());
                 return;
             }
             initialized = true;
@@ -2207,7 +2528,15 @@
         historyStart?.addEventListener('change', scheduleScopeReload);
         historyEnd?.addEventListener('change', scheduleScopeReload);
         historyDimension?.addEventListener('change', scheduleScopeReload);
-        filterText?.addEventListener('input', applyTextFilter);
+        lifecycleSelect?.addEventListener('change', scheduleScopeReload);
+        interfaceSelect?.addEventListener('change', scheduleScopeReload);
+        pageSizeSelect?.addEventListener('change', scheduleScopeReload);
+        filterText?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                scheduleScopeReload();
+            }
+        });
         ccapSearch?.addEventListener('input', filterCcapOptions);
         ccapSearch?.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
@@ -2230,11 +2559,28 @@
                 ccapSearch.focus();
             }
         });
-        applyButton?.addEventListener('click', () => {
+        applyButton?.addEventListener('click', async () => {
             if (scopeReloadTimer !== null) {
                 window.clearTimeout(scopeReloadTimer);
                 scopeReloadTimer = null;
             }
+            tableOffset = 0;
+            const generation = ++requestGeneration;
+            setLoadButtonsDisabled(true);
+            if (interfacesNeedRefresh) {
+                const applied = await loadInterfaces(generation);
+                if (!applied || generation !== requestGeneration) return;
+            }
+            await loadSummaryAndHistory(generation);
+        });
+        prevPageButton?.addEventListener('click', () => {
+            const pageSize = Number(pageSizeSelect?.value || 50);
+            tableOffset = Math.max(0, tableOffset - pageSize);
+            loadSummaryAndHistory();
+        });
+        nextPageButton?.addEventListener('click', () => {
+            if (!tableHasMore) return;
+            tableOffset = Math.max(tableOffset + 1, tableNextOffset);
             loadSummaryAndHistory();
         });
         refreshButton?.addEventListener('click', refreshInventory);

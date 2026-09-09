@@ -1365,22 +1365,103 @@ def get_cmts_by_hostname(hostname):
 
 @api_bp.route('/cmts/<cmts_name>/interfaces', methods=['GET'])
 def get_cmts_interfaces(cmts_name):
-    """Get interfaces for a specific CMTS (placeholder - needs PyPNM integration)."""
-    cmts = CMTSProvider.get_cmts_by_hostname(cmts_name)
-    
-    if cmts:
-        # TODO: Integrate with PyPNM to get real interface data
+    """Return persisted PyPNM interface choices for a configured CMTS."""
+    cmts = (
+        CMTSProvider.get_cmts_by_hostname(cmts_name)
+        or CMTSProvider.get_cmts_by_ip(cmts_name)
+    )
+    if not cmts:
         return jsonify({
-            "status": "success",
-            "cmts": cmts_name,
-            "interfaces": [],
-            "message": "Interface discovery requires PyPNM agent connection"
-        })
-    
+            "status": "error",
+            "message": f"CMTS '{cmts_name}' not found"
+        }), 404
+
+    canonical_name = str(cmts.get('HostName') or cmts_name).strip()
+    cmts_ip = str(
+        cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address') or ''
+    ).strip()
+    client = PyPNMClient()
+    result = None
+    used_ref = canonical_name
+    seen_refs = set()
+    for candidate in (canonical_name, cmts_ip):
+        candidate = str(candidate or '').strip()
+        if not candidate or candidate.lower() in seen_refs:
+            continue
+        seen_refs.add(candidate.lower())
+        response = client.get_inventory_interfaces(candidate)
+        if response.get('status') == 'success':
+            result = response
+            used_ref = candidate
+            break
+        result = response
+
+    if not result or result.get('status') != 'success':
+        return jsonify({
+            "status": "error",
+            "message": (result or {}).get('message') or 'Inventory interfaces unavailable',
+        }), 502
+
+    def _interface_value(item):
+        if isinstance(item, str):
+            return item.strip()
+        if isinstance(item, dict):
+            for key in ('interface', 'name', 'if_name', 'interface_name', 'value'):
+                value = str(item.get(key) or '').strip()
+                if value:
+                    return value
+        return ''
+
+    def _values(*sources):
+        values = []
+        seen = set()
+        for source in sources:
+            if not isinstance(source, list):
+                continue
+            for item in source:
+                value = _interface_value(item)
+                normalized = value.lower()
+                if value and normalized not in seen:
+                    seen.add(normalized)
+                    values.append(value)
+        return values
+
+    downstream = _values(
+        result.get('downstream_interfaces'), result.get('downstream'),
+    )
+    upstream = _values(
+        result.get('upstream_interfaces'), result.get('upstream'),
+    )
+    cable_macs = _values(result.get('cable_macs'))
+    flat = _values(result.get('interfaces'), downstream, upstream, cable_macs)
+    categorized = {value.lower() for value in downstream + upstream + cable_macs}
+    other = [value for value in flat if value.lower() not in categorized]
+
+    # Categorize an upstream flat response without changing its interface labels.
+    for value in list(other):
+        lowered = value.lower()
+        if 'upstream' in lowered or lowered.startswith(('us', 'cable-up')):
+            upstream.append(value)
+            other.remove(value)
+        elif 'downstream' in lowered or lowered.startswith(
+            ('ds', 'cable-down', 'wideband-cable', 'integrated-cable')
+        ):
+            downstream.append(value)
+            other.remove(value)
+
+    interfaces = _values(downstream, upstream, cable_macs, other)
     return jsonify({
-        "status": "error",
-        "message": f"CMTS '{cmts_name}' not found"
-    }), 404
+        "status": "success",
+        "cmts": canonical_name,
+        "cmts_hostname": canonical_name,
+        "cmts_ip": cmts_ip,
+        "inventory_ref": used_ref,
+        "interfaces": interfaces,
+        "downstream_interfaces": _values(downstream),
+        "upstream_interfaces": _values(upstream),
+        "cable_macs": _values(cable_macs),
+        "other_interfaces": _values(other),
+    })
 
 
 @api_bp.route('/cmts/<cmts_name>/modems', methods=['GET'])

@@ -331,6 +331,9 @@ class PyPNMClient:
         search_type: Optional[str] = None,
         search_value: Optional[str] = None,
         interface: Optional[str] = None,
+        lifecycle_state: Optional[str] = None,
+        area: Optional[str] = None,
+        offset: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         limit = _bounded_modem_limit(
@@ -345,7 +348,19 @@ class PyPNMClient:
             params["search_value"] = search_value
         if interface:
             params["interface"] = interface
+        if lifecycle_state:
+            params["lifecycle_state"] = lifecycle_state
+        if area:
+            params["area"] = area
+        if offset is not None:
+            params["offset"] = max(0, int(offset))
         return self._get("/api/admin/inventory/modems", params=params)
+
+    def get_inventory_interfaces(self, cmts: str) -> Dict[str, Any]:
+        return self._get(
+            "/api/admin/inventory/interfaces",
+            params={"cmts": cmts},
+        )
 
     def get_inventory_modem_by_mac(self, mac_address: str, request_timeout: int | None = None) -> Dict[str, Any]:
         return self._get(f"/api/admin/inventory/modems/{mac_address}", request_timeout=request_timeout)
