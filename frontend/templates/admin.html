@@ -1695,51 +1695,52 @@
     };
     const statusChip = (s) => STATUS_CHIPS[s] || `<span class="chip" style="background:#f1f5f9;color:#334155">${s}</span>`;
 
-    const hasActiveJob = () => Array.from(document.querySelectorAll('#jobs-body .job-row')).some((row) => {
-        const s = (row.dataset.jobStatus || '').toLowerCase();
-        return s === 'running' || s === 'queued';
-    });
-
     const refreshJobRows = async () => {
         try {
-            const resp = await fetch(`${jobsUrl}?limit=100`, { credentials: 'same-origin' });
+            const resp = await fetch(`${jobsUrl}?limit=30`, { credentials: 'same-origin' });
             if (!resp.ok) return;
             const data = await resp.json();
-            const jobs = data.jobs || [];
+            const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+            const currentRows = Array.from(document.querySelectorAll('#jobs-body .job-row'));
+            const currentJobIds = currentRows.map((row) => row.dataset.jobId || '');
+            const authoritativeJobIds = jobs.map((job) => String(job.id ?? ''));
+            const jobSetChanged = currentJobIds.length !== authoritativeJobIds.length
+                || currentJobIds.some((jobId, index) => jobId !== authoritativeJobIds[index]);
+            if (jobSetChanged) {
+                window.location.reload();
+                return;
+            }
+
             const byJobId = {};
-            for (const j of jobs) byJobId[String(j.id)] = j;
-            document.querySelectorAll('#jobs-body .job-row').forEach((row) => {
-                const j = byJobId[row.dataset.jobId];
-                if (!j) return;
+            for (const job of jobs) byJobId[String(job.id)] = job;
+            currentRows.forEach((row) => {
+                const job = byJobId[row.dataset.jobId];
+                if (!job) return;
                 const cells = row.children;
                 if (!cells || cells.length < 12) return;
-                cells[2].innerHTML = statusChip(j.status || '');
-                cells[3].textContent = j.rows_collected || 0;
-                cells[4].textContent = `${j.modems_attempted||0}/${j.modems_succeeded||0}/${j.modems_failed||0}`;
-                cells[6].textContent = j.duration_seconds != null ? j.duration_seconds + 's' : '—';
+                cells[2].innerHTML = statusChip(job.status || '');
+                cells[3].textContent = job.rows_collected || 0;
+                cells[4].textContent = `${job.modems_attempted||0}/${job.modems_succeeded||0}/${job.modems_failed||0}`;
+                cells[6].textContent = job.duration_seconds != null ? job.duration_seconds + 's' : '—';
                 const logBtn = cells[9]?.querySelector('.job-show-log');
                 if (logBtn) {
-                    logBtn.dataset.jobStatus = j.status || '';
-                    logBtn.dataset.jobLog = j.error_text || '';
+                    logBtn.dataset.jobStatus = job.status || '';
+                    logBtn.dataset.jobLog = job.error_text || '';
                 }
                 const errCell = cells[11];
                 if (errCell) {
-                    const isRunning = j.status === 'running';
-                    errCell.textContent = isRunning && j.error_text ? 'progress: ' + j.error_text : (j.error_text || '—');
+                    const isRunning = job.status === 'running';
+                    errCell.textContent = isRunning && job.error_text ? 'progress: ' + job.error_text : (job.error_text || '—');
                     errCell.className = 'small ' + (isRunning ? 'text-muted' : 'text-danger');
                 }
-                row.dataset.jobStatus = j.status || '';
-                row.dataset.jobLog = j.error_text || '';
+                row.dataset.jobStatus = job.status || '';
+                row.dataset.jobLog = job.error_text || '';
             });
         } catch (_) {}
     };
 
-    if (hasActiveJob()) {
-        const liveJobInterval = setInterval(async () => {
-            await refreshJobRows();
-            if (!hasActiveJob()) clearInterval(liveJobInterval);
-        }, 10000);
-    }
+    refreshJobRows();
+    setInterval(refreshJobRows, 10000);
 
     // ── Inventory tab ──────────────────────────────────────────
     (() => {
