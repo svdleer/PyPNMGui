@@ -982,7 +982,7 @@
                 </div>
                 <div class="card-body">
                     <div class="row g-2 mb-2 align-items-end">
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="form-label small text-muted mb-1" for="inv-area">Area</label>
                             <select id="inv-area" class="form-select form-select-sm">
                                 <option value="all" selected>All areas</option>
@@ -991,7 +991,7 @@
                                 <option value="fupc">fUPC</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label small text-muted mb-1" for="inv-ccap-toggle">CCAP</label>
                             <div class="dropdown" id="inv-ccap-dropdown">
                                 <button id="inv-ccap-toggle" class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start d-flex justify-content-between align-items-center" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
@@ -1005,9 +1005,22 @@
                             </div>
                             <div id="inv-ccap-status" class="small text-muted mt-1">CCAP choices load when this tab opens.</div>
                         </div>
+                        <div class="col-md-2">
+                            <label class="form-label small text-muted mb-1" for="inv-search-type">Search field</label>
+                            <select id="inv-search-type" class="form-select form-select-sm">
+                                <option value="auto" selected>Auto (exact ID)</option>
+                                <option value="mac">MAC prefix</option>
+                                <option value="ip">Exact IP</option>
+                                <option value="vendor">Vendor prefix</option>
+                                <option value="model">Model prefix</option>
+                                <option value="software">Software prefix</option>
+                                <option value="docsis">DOCSIS prefix</option>
+                                <option value="fiber_node">Fiber node prefix</option>
+                            </select>
+                        </div>
                         <div class="col-md-3">
-                            <label class="form-label small text-muted mb-1" for="inv-filter-text">Search inventory identity</label>
-                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="MAC, IP, vendor, model, software…">
+                            <label class="form-label small text-muted mb-1" for="inv-filter-text">Search inventory</label>
+                            <input id="inv-filter-text" class="form-control form-control-sm" placeholder="Enter an exact ID or field prefix">
                         </div>
                         <div class="col-md-1">
                             <label class="form-label small text-muted mb-1" for="inv-top-n">Top N</label>
@@ -1022,7 +1035,7 @@
                             <button type="button" id="inv-apply-btn" class="btn btn-primary btn-sm w-100">Apply</button>
                         </div>
                     </div>
-                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Scope changes reload current distributions, inventory rows, and history; Apply retries the current scope.</div>
+                    <div class="small text-muted mb-3">VFZ combines fZiggo and fUPC. Area is derived from modem management addresses, not CCAP IP addresses. Auto search recognizes complete MAC and IP values; select a field for safe all-server prefix search. With a selected CCAP, Auto also supports broad identity matching.</div>
                     <div id="inv-error" class="alert alert-danger py-2 d-none" role="alert"></div>
                     <div class="row g-3" id="inv-tables">
                         <div class="col-md-6 col-xl-3">
@@ -1807,6 +1820,7 @@
         const updatedEl = byInvId('inv-updated');
         const summaryError = byInvId('inv-error');
         const filterText = byInvId('inv-filter-text');
+        const searchTypeSelect = byInvId('inv-search-type');
         const areaSelect = byInvId('inv-area');
         const topNEl = byInvId('inv-top-n');
         const ccapDropdown = byInvId('inv-ccap-dropdown');
@@ -1876,8 +1890,8 @@
             const response = await fetch(url, { credentials: 'same-origin' });
             let body = null;
             try { body = await response.json(); } catch (_) {}
-            if (!response.ok) throw new Error(body?.message || `HTTP ${response.status}`);
-            if (!body || (body.status && body.status !== 'success')) throw new Error(body?.message || 'Invalid response');
+            if (!response.ok) throw new Error(body?.message || body?.detail || `HTTP ${response.status}`);
+            if (!body || (body.status && body.status !== 'success')) throw new Error(body?.message || body?.detail || 'Invalid response');
             return body;
         };
 
@@ -2208,6 +2222,7 @@
             lifecycle: lifecycleSelect?.value || 'active',
             interfaceName: interfaceSelect?.value || '',
             pageSize: pageSizeSelect?.value || '50',
+            searchType: searchTypeSelect?.value || 'auto',
             text: String(filterText?.value || '').trim(),
             offset: tableOffset,
         });
@@ -2411,15 +2426,25 @@
                     rowsBody.appendChild(row);
                 });
             }
-            const total = Number(body.total || 0);
+            const totalExact = body.total_exact !== false
+                && body.total !== null
+                && body.total !== undefined;
+            const total = totalExact ? Number(body.total || 0) : null;
             const count = Number(body.count ?? rows.length);
             const offset = Number(body.offset ?? scope.offset);
             const limit = Number(body.limit ?? scope.pageSize);
             const page = limit > 0 ? Math.floor(offset / limit) + 1 : 1;
-            const pages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
             tableHasMore = body.has_more === true;
             tableNextOffset = Number(body.next_offset ?? (offset + count));
-            if (rowsStatus) rowsStatus.textContent = `${total.toLocaleString()} total · page ${page} of ${pages} · ${count.toLocaleString()} shown`;
+            if (rowsStatus) {
+                if (totalExact) {
+                    const pages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
+                    rowsStatus.textContent = `${total.toLocaleString()} total · page ${page} of ${pages} · ${count.toLocaleString()} shown`;
+                } else {
+                    const moreText = tableHasMore ? ' · more available' : ' · end of results';
+                    rowsStatus.textContent = `${count.toLocaleString()} shown · page ${page}${moreText}`;
+                }
+            }
             if (prevPageButton) prevPageButton.disabled = offset <= 0;
             if (nextPageButton) nextPageButton.disabled = !tableHasMore;
         };
@@ -2440,7 +2465,7 @@
             if (scope.cmts) params.set('cmts', scope.cmts);
             if (scope.interfaceName) params.set('interface', scope.interfaceName);
             if (scope.text) {
-                params.set('search_type', 'identity');
+                params.set('search_type', scope.searchType);
                 params.set('search_value', scope.text);
             }
             try {
@@ -2531,6 +2556,7 @@
         lifecycleSelect?.addEventListener('change', scheduleScopeReload);
         interfaceSelect?.addEventListener('change', scheduleScopeReload);
         pageSizeSelect?.addEventListener('change', scheduleScopeReload);
+        searchTypeSelect?.addEventListener('change', scheduleScopeReload);
         filterText?.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();

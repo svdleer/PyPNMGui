@@ -923,6 +923,18 @@ def get_modems():
         except Exception:
             return None
 
+    def _inventory_fallback_error(response):
+        if isinstance(response, dict) and response.get('status') == 'success':
+            return None
+        message = (
+            response.get('message')
+            if isinstance(response, dict)
+            else 'Invalid response from PyPNM inventory'
+        ) or 'PyPNM inventory search failed'
+        status_code = 400 if '400' in str(message) else 503
+        logger.warning('PyPNM inventory fallback failed: %s', message)
+        return jsonify({'status': 'error', 'message': message}), status_code
+
     # Full MAC addresses are primary-key lookups. Resolve them before scanning
     # large Redis payloads or invoking the general inventory search endpoint.
     if search_type == 'mac' and len(re.sub(r'[^a-f0-9]', '', search_value)) == 12:
@@ -941,6 +953,9 @@ def get_modems():
                 interface=iface_filter or None,
                 limit=default_limit,
             )
+            fallback_error = _inventory_fallback_error(modems_resp)
+            if fallback_error:
+                return fallback_error
             modems = filter_ignored_modems(modems_resp.get('modems') or [])
             if not modems and search_type == 'mac' and search_value:
                 mac_fallback = _fallback_for_mac(search_value)
@@ -996,6 +1011,9 @@ def get_modems():
                 interface=iface_filter or None,
                 limit=default_limit,
             )
+            fallback_error = _inventory_fallback_error(db_resp)
+            if fallback_error:
+                return fallback_error
             db_modems = filter_ignored_modems(db_resp.get('modems') or [])
             if db_modems:
                 _backfill_redis_from_inventory(
@@ -1065,6 +1083,9 @@ def get_modems():
                 interface=iface_filter or None,
                 limit=default_limit,
             )
+            fallback_error = _inventory_fallback_error(db_resp)
+            if fallback_error:
+                return fallback_error
             db_modems = filter_ignored_modems(db_resp.get('modems') or [])
             if db_modems:
                 _backfill_redis_from_inventory(

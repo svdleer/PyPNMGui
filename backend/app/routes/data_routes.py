@@ -322,6 +322,17 @@ def enrichment_progress():
 _INVENTORY_AREAS = {"all", "vfz", "fziggo", "fupc"}
 _INVENTORY_HISTORY_DIMENSIONS = {"model", "vendor", "firmware", "docsis"}
 _INVENTORY_LIFECYCLE_STATES = {"active", "suspect_missing", "retired"}
+_INVENTORY_SEARCH_TYPES = {
+    "auto",
+    "mac",
+    "ip",
+    "vendor",
+    "model",
+    "software",
+    "docsis",
+    "fiber_node",
+    "identity",
+}
 _INVENTORY_PAGE_LIMIT_MAX = 50000
 
 
@@ -406,7 +417,16 @@ def inventory_modems():
         request.args.get("search_value") or request.args.get("text") or ""
     ).strip()
     if search_value:
-        params["search_type"] = "identity"
+        search_type = (request.args.get("search_type") or "auto").strip().lower()
+        if search_type not in _INVENTORY_SEARCH_TYPES:
+            return jsonify({
+                "status": "error",
+                "message": (
+                    "search_type must be one of: auto, mac, ip, vendor, model, "
+                    "software, docsis, fiber_node, identity"
+                ),
+            }), 400
+        params["search_type"] = search_type
         params["search_value"] = search_value
     return _proxy("GET", "/inventory/modems", params=params)
 
