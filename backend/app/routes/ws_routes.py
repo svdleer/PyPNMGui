@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from collections import deque
+from threading import Lock
 
 from flask import Blueprint
 
@@ -19,6 +20,9 @@ except ImportError:
     logger.warning("flask-sock not installed, WebSocket support disabled")
 
 _utsc_sessions = {}
+_utsc_sessions_lock = Lock()
+_UTSC_MAX_DURATION_SECONDS = 600
+_UTSC_MAX_SESSIONS_PER_WORKER = 4
 
 
 def _non_empty_community(value):
@@ -150,7 +154,13 @@ def init_websocket(app):
         from flask import request
 
         refresh_ms = int(request.args.get('refresh', 500))
-        duration_s = int(request.args.get('duration', 60))
+        duration_s = max(
+            1,
+            min(
+                int(request.args.get('duration', 60)),
+                _UTSC_MAX_DURATION_SECONDS,
+            ),
+        )
         rf_port = request.args.get('rf_port')
         cfg_index = int(request.args.get('cfg_index', 0))
         cmts_ip = request.args.get('cmts_ip')
@@ -177,7 +187,18 @@ def init_websocket(app):
 
         client = PyPNMClient()
         session_id = f"{mac_clean}_{id(ws)}"
-        _utsc_sessions[session_id] = True
+        with _utsc_sessions_lock:
+            if len(_utsc_sessions) >= _UTSC_MAX_SESSIONS_PER_WORKER:
+                logger.warning(
+                    "UTSC WebSocket capacity reached for worker: %s active",
+                    len(_utsc_sessions),
+                )
+                ws.send(json.dumps({
+                    'type': 'error',
+                    'message': 'UTSC stream capacity reached; try again later',
+                }))
+                return
+            _utsc_sessions[session_id] = True
         processed_files: set[str] = set()
         file_buffer = deque(maxlen=500)
         heartbeat_interval = 5
@@ -263,10 +284,24 @@ def init_websocket(app):
                 'message': 'PyPNM normalized sample stream ready',
                 'buffer_size': len(file_buffer),
             }))
+            stream_start_time = time.time()
 
             while _utsc_sessions.get(session_id, False):
                 current_time = time.time()
-                elapsed = current_time - connection_start_time
+                elapsed = current_time - stream_start_time
+
+                if elapsed >= duration_s:
+                    logger.info(
+                        "UTSC WebSocket duration reached for %s after %.1fs",
+                        mac_address,
+                        elapsed,
+                    )
+                    ws.send(json.dumps({
+                        'type': 'complete',
+                        'message': f'UTSC stream completed after {duration_s}s',
+                        'elapsed': elapsed,
+                    }))
+                    break
 
                 if owns_utsc and current_time - last_trigger_time >= trigger_interval:
                     start_result = start_utsc_via_pypnm(
@@ -370,7 +405,8 @@ def init_websocket(app):
                 )
                 if not stop_result.get('success'):
                     logger.warning("UTSC stop failed on cleanup: %s", stop_result)
-            _utsc_sessions.pop(session_id, None)
+            with _utsc_sessions_lock:
+                _utsc_sessions.pop(session_id, None)
             logger.info("UTSC WebSocket closed for %s after %s owned run(s)", mac_address, run_counter)
 
     logger.info("WebSocket UTSC endpoint registered at /ws/utsc/<mac>")

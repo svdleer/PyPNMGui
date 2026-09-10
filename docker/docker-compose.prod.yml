@@ -135,7 +135,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    command: ["gunicorn", "--worker-class", "gthread", "--threads", "8", "-w", "4", "--bind", "0.0.0.0:5050", "--timeout", "300", "--keep-alive", "120", "run:app"]
+    command: ["gunicorn", "--worker-class", "gthread", "--threads", "16", "-w", "4", "--bind", "0.0.0.0:5050", "--timeout", "360", "--graceful-timeout", "30", "--keep-alive", "5", "run:app"]
 
   # Redis Cache
   #redis-prod:
