@@ -5,6 +5,7 @@ Every request is forwarded to PyPNM's ``/api/admin/*`` endpoints.
 No local database access. No business logic.
 """
 
+import hmac
 import os
 import uuid
 from datetime import datetime
@@ -26,6 +27,25 @@ def _require_admin():
     if session.get("role") != "admin":
         return jsonify({"status": "error", "message": "Admin role required"}), 403
     return None
+
+
+def _inventory_backfill_json_payload() -> dict:
+    raw_payload = request.get_json(silent=True)
+    return dict(raw_payload) if isinstance(raw_payload, dict) else {}
+
+
+def _inventory_backfill_control_password_valid(payload) -> bool:
+    """Validate the server-side operational interlock without forwarding it."""
+    if not isinstance(payload, dict):
+        return False
+    supplied = payload.pop("control_password", None)
+    expected = os.environ.get("INVENTORY_BACKFILL_CONTROL_PASSWORD", "4242")
+    return (
+        isinstance(supplied, str)
+        and isinstance(expected, str)
+        and bool(expected)
+        and hmac.compare_digest(supplied, expected)
+    )
 
 
 def _require_topology_scopes():
@@ -314,6 +334,119 @@ def modem_refresh_status(mac):
 def enrichment_progress():
     cmts = request.args.get("cmts")
     return _proxy("GET", "/inventory/enrichment-progress", params={"cmts": cmts} if cmts else None)
+
+
+# ── Inventory MySQL backfill (optional admin interlock) ─────
+
+
+@api_bp.route('/admin/inventory/mysql-backfill/verify', methods=['POST'])
+def inventory_mysql_backfill_verify():
+    gate = _require_admin()
+    if gate:
+        return gate
+    payload = _inventory_backfill_json_payload()
+    if not _inventory_backfill_control_password_valid(payload):
+        return jsonify({
+            "status": "error",
+            "message": "Inventory backfill control password is invalid",
+        }), 403
+    return jsonify({"status": "success", "unlocked": True})
+
+
+@api_bp.route('/admin/inventory/mysql-backfill/agents', methods=['GET'])
+def inventory_mysql_backfill_agents():
+    gate = _require_admin()
+    if gate:
+        return gate
+    return _proxy("GET", "/inventory/mysql-backfill/agents")
+
+
+@api_bp.route('/admin/inventory/mysql-backfill', methods=['GET'])
+def inventory_mysql_backfill_jobs():
+    gate = _require_admin()
+    if gate:
+        return gate
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        return jsonify({
+            "status": "error",
+            "message": "limit must be an integer from 1 to 200",
+        }), 400
+    if not 1 <= limit <= 200:
+        return jsonify({
+            "status": "error",
+            "message": "limit must be an integer from 1 to 200",
+        }), 400
+    return _proxy("GET", "/inventory/mysql-backfill", params={"limit": limit})
+
+
+@api_bp.route('/admin/inventory/mysql-backfill', methods=['POST'])
+def inventory_mysql_backfill_create():
+    gate = _require_admin()
+    if gate:
+        return gate
+    payload = _inventory_backfill_json_payload()
+    if not _inventory_backfill_control_password_valid(payload):
+        return jsonify({
+            "status": "error",
+            "message": "Inventory backfill control password is invalid",
+        }), 403
+    agent_id = payload.get("agent_id")
+    if not isinstance(agent_id, str) or not 1 <= len(agent_id.strip()) <= 128:
+        return jsonify({
+            "status": "error",
+            "message": "agent_id must be between 1 and 128 characters",
+        }), 400
+    try:
+        page_size = int(payload.get("page_size", 1000))
+    except (TypeError, ValueError):
+        return jsonify({
+            "status": "error",
+            "message": "page_size must be an integer from 100 to 5000",
+        }), 400
+    if isinstance(payload.get("page_size"), bool) or not 100 <= page_size <= 5000:
+        return jsonify({
+            "status": "error",
+            "message": "page_size must be an integer from 100 to 5000",
+        }), 400
+    return _proxy(
+        "POST",
+        "/inventory/mysql-backfill",
+        payload={"agent_id": agent_id.strip(), "page_size": page_size},
+    )
+
+
+@api_bp.route(
+    '/admin/inventory/mysql-backfill/<public_id>/cancel',
+    methods=['POST'],
+)
+def inventory_mysql_backfill_cancel(public_id):
+    gate = _require_admin()
+    if gate:
+        return gate
+    payload = _inventory_backfill_json_payload()
+    if not _inventory_backfill_control_password_valid(payload):
+        return jsonify({
+            "status": "error",
+            "message": "Inventory backfill control password is invalid",
+        }), 403
+    try:
+        normalized_id = str(uuid.UUID(str(public_id)))
+    except (TypeError, ValueError, AttributeError):
+        return jsonify({
+            "status": "error",
+            "message": "Backfill job ID is invalid",
+        }), 400
+    if normalized_id != str(public_id).lower():
+        return jsonify({
+            "status": "error",
+            "message": "Backfill job ID is invalid",
+        }), 400
+    return _proxy(
+        "POST",
+        f"/inventory/mysql-backfill/{normalized_id}/cancel",
+    )
 
 
 # ── Inventory snapshots / summary / history ──────────────────

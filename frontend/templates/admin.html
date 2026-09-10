@@ -291,6 +291,11 @@
                 <i class="bi bi-table"></i> Inventory
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="inventory-backfill-tab" data-bs-toggle="tab" data-bs-target="#inventory-backfill-pane" type="button" role="tab" aria-controls="inventory-backfill-pane" aria-selected="false">
+                <i class="bi bi-database-up"></i> Inventory Backfill
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -1111,6 +1116,68 @@
             </div>
         </div>
     </div>
+        </div>
+
+        <!-- OPTIONAL INVENTORY MYSQL BACKFILL TAB -->
+        <div class="tab-pane fade" id="inventory-backfill-pane" role="tabpanel" aria-labelledby="inventory-backfill-tab">
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white d-flex align-items-center gap-2 flex-wrap">
+                            <strong><i class="bi bi-database-up me-1"></i>CM-poller MySQL Inventory Backfill</strong>
+                            <span id="backfill-lock-chip" class="chip" style="background:#fee2e2;color:#991b1b">Locked</span>
+                            <button type="button" id="backfill-refresh-btn" class="btn btn-outline-primary btn-sm ms-auto">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-warning py-2">
+                                Optional operational tool. Each EQ1 source can contain a different modem subset, so queue every required source agent. Jobs update existing active inventory only. The hardware revision migration must be applied separately before jobs can start.
+                            </div>
+                            <div id="backfill-alert" class="alert d-none py-2" role="alert"></div>
+                            <div class="admin-soft p-3 mb-3">
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-4">
+                                        <label for="backfill-password" class="form-label small text-muted mb-1">Control password</label>
+                                        <input id="backfill-password" type="password" class="form-control form-control-sm" autocomplete="off" maxlength="128" placeholder="Required to unlock start/cancel">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button type="button" id="backfill-unlock-btn" class="btn btn-outline-warning btn-sm w-100">
+                                            <i class="bi bi-unlock me-1"></i>Unlock
+                                        </button>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label for="backfill-page-size" class="form-label small text-muted mb-1">Page size</label>
+                                        <input id="backfill-page-size" type="number" class="form-control form-control-sm" min="100" max="5000" value="1000">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button type="button" id="backfill-queue-btn" class="btn btn-primary btn-sm w-100" disabled>
+                                            <i class="bi bi-list-check me-1"></i>Queue selected source agents
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="small text-muted mt-2">The unlock is held only in this page's memory and is cleared on reload. Start and cancel are also revalidated by the GUI server.</div>
+                            </div>
+
+                            <div class="fw-semibold mb-1">Capable source agents</div>
+                            <div class="table-responsive mb-3">
+                                <table class="table table-sm align-middle mb-0">
+                                    <thead><tr><th style="width:3rem">Use</th><th>Agent</th><th>Free bulk slots</th><th>Active job</th></tr></thead>
+                                    <tbody id="backfill-agents-body"><tr><td colspan="4" class="text-muted small">Open this tab or refresh to load source agents.</td></tr></tbody>
+                                </table>
+                            </div>
+
+                            <div class="fw-semibold mb-1">Backfill jobs</div>
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle mb-0">
+                                    <thead><tr><th>Agent</th><th>Status</th><th>Progress</th><th>Rows received</th><th>Matched / updated</th><th>Cursor</th><th>Error</th><th>Action</th></tr></thead>
+                                    <tbody id="backfill-jobs-body"><tr><td colspan="8" class="text-muted small">No status loaded.</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- MAINTENANCE TAB -->
@@ -2372,4 +2439,5 @@
 
 })();
 </script>
+<script src="[[ asset_url('js/inventory-backfill-admin.js') ]]" defer></script>
 {% endblock %}
