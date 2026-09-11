@@ -584,7 +584,14 @@
                                                 <td><strong>[[ p.name ]]</strong></td>
                                                 <td>[[ 'yes' if p.enabled else 'no' ]]</td>
                                                 {% set is_cpe_task = p.task_type == 'cpe_address_refresh' %}
-                                                {% if is_cpe_task %}
+                                                {% set is_identity_task = p.task_type == 'identity_backfill' %}
+                                                {% set is_system_task = p.system_key %}
+                                                {% if is_identity_task %}
+                                                <td><strong>Manual only</strong></td>
+                                                <td class="small">Run Now only</td>
+                                                <td class="small">—</td>
+                                                <td class="small"><span class="badge text-bg-info">Identity</span></td>
+                                                {% elif is_cpe_task %}
                                                 <td><strong>00:00, 12:00</strong></td>
                                                 <td class="small">Europe/Amsterdam</td>
                                                 <td class="small">—</td>
@@ -602,7 +609,7 @@
                                                 </td>
                                                 {% endif %}
                                                 <td class="d-flex gap-1">
-                                                    {% if is_cpe_task %}
+                                                    {% if is_system_task %}
                                                     <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/enabled" class="m-0">
                                                         <input type="hidden" name="enabled" value="[[ 'false' if p.enabled else 'true' ]]">
                                                         <button class="btn btn-outline-secondary btn-sm icon-btn" type="submit" title="[[ 'Disable' if p.enabled else 'Enable' ]] task">
@@ -640,7 +647,7 @@
                                                     <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/run" class="m-0">
                                                         <button class="btn btn-outline-success btn-sm icon-btn" type="submit" title="[[ 'Run now' if p.enabled else 'Enable task before running' ]]" [[ 'disabled' if not p.enabled else '' ]]><i class="bi bi-play"></i></button>
                                                     </form>
-                                                    {% if not is_cpe_task %}
+                                                    {% if not is_system_task %}
                                                     <form method="post" action="[[ base_path ]]/admin/poller-settings/[[ p.id ]]/delete" class="m-0" onsubmit="return confirm('Delete poller setting [[ p.id ]]?');">
                                                         <button class="btn btn-outline-danger btn-sm icon-btn" type="submit" title="Delete"><i class="bi bi-trash"></i></button>
                                                     </form>
@@ -677,7 +684,7 @@
                                 </div>
                                 <div class="table-responsive">
                                     <table class="table table-sm mb-0 align-middle">
-                                        <thead><tr><th>ID</th><th>Poller</th><th>Status</th><th>Rows</th><th>Att/Suc/Fail</th><th>CMTS</th><th>Duration</th><th>Trigger</th><th>Created</th><th>Log</th><th>Kill</th><th>Error</th></tr></thead>
+                                        <thead><tr><th>ID</th><th>Poller</th><th>Status</th><th>Rows</th><th>Target/Suc/Fail/Rem</th><th>CMTS</th><th>Duration</th><th>Trigger</th><th>Created</th><th>Log</th><th>Kill</th><th>Message</th></tr></thead>
                                         <tbody id="jobs-body">
                                             {% for j in poller_jobs %}
                                             <tr class="job-row" data-job-id="[[ j.id ]]" data-job-poller-id="[[ j.poller_id ]]" data-job-status="[[ j.status or '' ]]" data-job-created="[[ j.created_at or '' ]]" data-job-log="[[ (j.error_text or '')|e ]]">
@@ -687,12 +694,13 @@
                                                     {% if j.status in ['done', 'completed'] %}<span class="chip" style="background:#dcfce7;color:#166534">done</span>
                                                     {% elif j.status == 'timed_out' %}<span class="chip" style="background:#fef3c7;color:#92400e">timed_out</span>
                                                     {% elif j.status == 'failed' %}<span class="chip" style="background:#fee2e2;color:#991b1b">failed</span>
+                                                    {% elif j.status == 'cancelled' %}<span class="chip" style="background:#f1f5f9;color:#475569">cancelled</span>
                                                     {% elif j.status == 'running' %}<span class="chip" style="background:#dbeafe;color:#1e40af">running</span>
                                                     {% elif j.status == 'queued' %}<span class="chip" style="background:#e0f2fe;color:#0c4a6e">queued</span>
                                                     {% else %}<span class="chip" style="background:#f1f5f9;color:#334155">[[ j.status ]]</span>{% endif %}
                                                 </td>
                                                 <td>[[ j.rows_collected or 0 ]]</td>
-                                                <td class="small">[[ j.modems_attempted or 0 ]]/[[ j.modems_succeeded or 0 ]]/[[ j.modems_failed or 0 ]]</td>
+                                                <td class="small">[[ j.modems_attempted or 0 ]]/[[ j.modems_succeeded or 0 ]]/[[ j.modems_failed or 0 ]]/[[ j.modems_remaining or 0 ]]</td>
                                                 <td class="d-flex align-items-center">
                                                     {% if j.cmts_breakdown_obj %}
                                                     <button type="button" class="btn btn-sm btn-primary me-1 job-toggle-breakdown" data-job-id="[[ j.id ]]" title="View Details">
@@ -724,7 +732,7 @@
                                                     <span class="text-muted">—</span>
                                                     {% endif %}
                                                 </td>
-                                                <td class="small [[ 'text-muted' if j.status == 'running' else 'text-danger' ]]">
+                                                <td class="small [[ 'text-danger' if j.status in ['failed', 'timed_out'] else 'text-muted' ]]">
                                                     [[ ('progress: ' + j.error_text) if j.status == 'running' and j.error_text else (j.error_text or '—') ]]
                                                 </td>
                                             </tr>
@@ -1757,6 +1765,7 @@
         completed: '<span class="chip" style="background:#dcfce7;color:#166534">done</span>',
         timed_out: '<span class="chip" style="background:#fef3c7;color:#92400e">timed_out</span>',
         failed: '<span class="chip" style="background:#fee2e2;color:#991b1b">failed</span>',
+        cancelled: '<span class="chip" style="background:#f1f5f9;color:#475569">cancelled</span>',
         running: '<span class="chip" style="background:#dbeafe;color:#1e40af">running</span>',
         queued: '<span class="chip" style="background:#e0f2fe;color:#0c4a6e">queued</span>',
     };
@@ -1787,18 +1796,19 @@
                 if (!cells || cells.length < 12) return;
                 cells[2].innerHTML = statusChip(job.status || '');
                 cells[3].textContent = job.rows_collected || 0;
-                cells[4].textContent = `${job.modems_attempted||0}/${job.modems_succeeded||0}/${job.modems_failed||0}`;
+                cells[4].textContent = `${job.modems_attempted||0}/${job.modems_succeeded||0}/${job.modems_failed||0}/${job.modems_remaining||0}`;
                 cells[6].textContent = job.duration_seconds != null ? job.duration_seconds + 's' : '—';
                 const logBtn = cells[9]?.querySelector('.job-show-log');
                 if (logBtn) {
                     logBtn.dataset.jobStatus = job.status || '';
                     logBtn.dataset.jobLog = job.error_text || '';
                 }
-                const errCell = cells[11];
-                if (errCell) {
+                const messageCell = cells[11];
+                if (messageCell) {
                     const isRunning = job.status === 'running';
-                    errCell.textContent = isRunning && job.error_text ? 'progress: ' + job.error_text : (job.error_text || '—');
-                    errCell.className = 'small ' + (isRunning ? 'text-muted' : 'text-danger');
+                    const isError = ['failed', 'timed_out'].includes(job.status);
+                    messageCell.textContent = isRunning && job.error_text ? 'progress: ' + job.error_text : (job.error_text || '—');
+                    messageCell.className = 'small ' + (isError ? 'text-danger' : 'text-muted');
                 }
                 row.dataset.jobStatus = job.status || '';
                 row.dataset.jobLog = job.error_text || '';
