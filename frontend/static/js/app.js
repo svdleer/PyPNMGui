@@ -242,6 +242,7 @@ createApp({
             fnScanSelectorFilterVendor: '',
             fnScanSelectorFilterType: '',
             fnScanSelectorFilterImpairment: '',
+            fnScanTopologyHandoffActive: false,
             fnScanTopologyBridgeNodeId: '',
             fnScanExpectedServingGroup: '',
             fnSelectedMapVisible: false,
@@ -695,12 +696,18 @@ createApp({
                 return false;
             };
 
+            const isTopologyHandoff = this.fnScanTopologyHandoffActive === true;
             const rows = (this.modems || [])
                 .filter(m => {
                     const macNorm = this.normalizeMacForMatch(m?.mac_address || '');
                     const isSelected = macNorm && selectedNorm.has(macNorm);
                     if (!m?.mac_address || !this.fnScanCmtsIp) return false;
                     if (String(m.cmts_ip || '').trim() !== String(this.fnScanCmtsIp).trim()) return false;
+                    // A topology handoff is already scoped by the topology API result.
+                    // FNxx is derived scanner metadata, never a second search/filter key.
+                    if (isTopologyHandoff) {
+                        return m.source === 'topology-search' && Boolean(m.ip_address);
+                    }
                     if (!matchesSelectedFn(m)) return false;
                     // Selected state can relax display requirements, but never scope.
                     if (m._channel_stub) return true;
@@ -1830,7 +1837,7 @@ createApp({
             return out;
         },
 
-        async _enrichFnSelectorTopologyMetadata() {
+        async _enrichFnSelectorTopologyMetadata({ topologyResultOnly = false } = {}) {
             const dottedNode = String(this.fnScanFiberNode || '').trim();
             const bridgeNode = String(this.fnScanTopologyBridgeNodeId || '').trim();
             const fallbackNode = dottedNode.includes('.') ? dottedNode : (bridgeNode.includes('.') ? bridgeNode : '');
@@ -1875,6 +1882,11 @@ createApp({
                         topology_serving_group: (meta?.serving_group) || m.topology_serving_group || '',
                     };
                 });
+
+                // Topology handoffs remain scoped to the topology query. The
+                // direct node metadata above is sufficient; do not derive a
+                // serving-group lookup from the RF Fiber Node label.
+                if (topologyResultOnly) return;
 
                 // FNxx discovery labels do not match topology node IDs. Bridge via
                 // serving-group pattern: <CMTS>-G### (e.g., FN37 -> ...-G037).
@@ -3252,6 +3264,7 @@ createApp({
                     partial_service_state: patch.partial_service_state ?? m.partial_service_state ?? null,
                     cable_mac: patch.cable_mac || m.cable_mac,
                     fiber_node: m.fiber_node || patch.fiber_node || '',
+                    source: m.source || patch.source || '',
                 };
             });
         },
@@ -3267,24 +3280,27 @@ createApp({
             this.fnScanCmts = null;
             this.fnScanCmtsIp = '';
             this.fnScanFiberNode = '';
+            this.fnScanTopologyHandoffActive = false;
             this.fnScanTopologyBridgeNodeId = '';
             this.fnScanIfindex = '';
             this.fnScanExtraIfindices = [];
+            this.fnScanFN2Name = '';
+            this.fnScanFN2Ifindex = null;
+            this.fnScanFN2Channels = [];
+            this.fnScanModemCount = null;
+            this.fnScanModemSource = '';
+            this.fnScanModemLoadedAt = null;
+            this.fnScanExpectedServingGroup = '';
             this.fnScanSelectedModemMacs = [];
+            this.clearFnScanSelectorFilters();
 
             try {
-                const handoffSearchType = this.searchType;
-                const requestedTopologyNode = handoffSearchType === 'fibernode'
-                    ? String(this.searchValue || '').trim().toLowerCase()
-                    : '';
                 await this._enrichTopologySearchModems(300);
 
+                // The topology endpoint already applied the user's topology search.
+                // Keep those result rows authoritative; FNxx is derived metadata only.
                 const candidates = (this.modems || [])
-                    .filter(m => {
-                        if (!m?.mac_address || !m?.ip_address || !m?.cmts_ip) return false;
-                        if (!requestedTopologyNode) return true;
-                        return String(m.fiber_node || m.fibernode || '').trim().toLowerCase() === requestedTopologyNode;
-                    })
+                    .filter(m => m?.mac_address && m?.ip_address && m?.cmts_ip)
                     .map(m => ({
                         mac_address: m.mac_address,
                         ip_address: m.ip_address,
@@ -3303,8 +3319,6 @@ createApp({
                 // Try to extract CMTS from topology data even if IP is missing.
                 // Topology rows can carry only a CMTS name/path while cmts_ip is blank.
                 const topologyModems = (this.modems || []).filter(m => {
-                    const modemTopologyNode = String(m?.fiber_node || m?.fibernode || '').trim().toLowerCase();
-                    if (requestedTopologyNode && modemTopologyNode !== requestedTopologyNode) return false;
                     const pathPart = String(m?.topology_path || '').split('>').map(p => p.trim()).filter(Boolean)[0] || '';
                     return !!(m?.cmts_ip || m?.cmts || m?.cmts_hostname || pathPart);
                 });
@@ -3387,6 +3401,7 @@ createApp({
                 this.fnScanCommunity = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
                 this.fnScanWriteCommunity = this._firstCredential(this.fnScanWriteCommunity, this.snmpCommunityRW);
                 this.fnScanUseModemSelector = true;
+                this.fnScanTopologyHandoffActive = true;
                 this.fnScanSelectedModemMacs = selected.map(m => m.mac_address);
                 const selectedByMac = new Map(selected.map(modem => [
                     this.normalizeMacForMatch(modem.mac_address || ''),
@@ -3431,15 +3446,15 @@ createApp({
 
                 this.fnScanPreparingMessage = 'Loading FiberNode channels…';
                 await this.loadFnScanChannels();
-                this.fnScanPreparingMessage = 'Loading modem selector list…';
-                await this.refreshFnSelectorModems(true);
+                await this._enrichFnSelectorTopologyMetadata({ topologyResultOnly: true });
 
                 let preferredIfindex = this._toIfindex(
                     selectedModemApi?.ofdma_ifindex,
                     preferred.ofdma_ifindex,
                 );
 
-            // If selector refresh has fresher modem fields, use those as tie-breaker.
+                // Keep the topology result row as a same-MAC fallback. Do not
+                // replace the result set with a full-CMTS/FN inventory.
                 if (!preferredIfindex && selectedMac) {
                     const refreshed = (this.modems || []).find(m => m.mac_address === selectedMac) || {};
                     preferredIfindex = this._toIfindex(
@@ -4003,6 +4018,7 @@ createApp({
 
         async primeFnScanFromSelectedModem(modem) {
             if (!modem?.mac_address) return;
+            this.fnScanTopologyHandoffActive = false;
             this._fnTrace('prime.start', {
                 mac: modem.mac_address,
                 cmts_ip: modem.cmts_ip,
@@ -4062,7 +4078,7 @@ createApp({
             this.fnScanCommunity = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
             this.fnScanWriteCommunity = this._firstCredential(this.fnScanWriteCommunity, this.snmpCommunityRW);
             const selectedModemFn = String(m.fiber_node || m.fibernode || '').trim();
-            this.fnScanTopologyBridgeNodeId = selectedModemFn.includes('.') ? selectedModemFn : this.fnScanTopologyBridgeNodeId;
+            this.fnScanTopologyBridgeNodeId = selectedModemFn.includes('.') ? selectedModemFn : '';
 
             // ── Instant fill from modem data ────────────────────────────
             // Set scanner fields immediately from already-known modem
@@ -5642,6 +5658,7 @@ createApp({
             this.fnScanWriteCommunity = this._firstCredential(resolved?.community_rw, cmts?.community_rw, this.snmpCommunityRW);
             this.fnScanIfindex        = '';
             this.fnScanFiberNode      = '';
+            this.fnScanTopologyHandoffActive = false;
             this.fnScanTopologyBridgeNodeId = '';
             this.fnScanId             = null;
             this.fnScanResult         = null;
@@ -5728,6 +5745,7 @@ createApp({
         },
 
         selectFnFiberNode(fn) {
+            this.fnScanTopologyHandoffActive = false;
             this.fnScanTopologyBridgeNodeId = '';
             this.fnScanFiberNode = fn.name;
             this.fnScanFN2Name = '';
@@ -6652,7 +6670,7 @@ createApp({
                 this.$toast?.error('FiberNode required');
                 return;
             }
-            if (this.fnScanTopologyBridgeNodeId && !this.fnScanUseModemSelector) {
+            if (this.fnScanTopologyHandoffActive && !this.fnScanUseModemSelector) {
                 this.$toast?.error('Topology handoff requires the scoped modem selector.');
                 return;
             }
