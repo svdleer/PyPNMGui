@@ -1933,13 +1933,19 @@
                 ? null
                 : normalizedValue;
             renderSummary();
+            scheduleScopeReload();
         };
 
         const filteredSummaryRows = (spec, sourceRows) => {
             const rows = Array.isArray(sourceRows) ? sourceRows : [];
             const selectedValue = summaryFilters[spec.key];
             if (selectedValue === null) return rows;
-            return rows.filter((item) => String(item?.value ?? '') === selectedValue);
+            const selectedRows = rows.filter(
+                (item) => String(item?.value ?? '') === selectedValue,
+            );
+            return selectedRows.length
+                ? selectedRows
+                : [{ value: selectedValue, count: 0 }];
         };
 
         const renderTable = (spec, sourceRows) => {
@@ -2054,12 +2060,6 @@
                 const rows = Array.isArray(lastSummary?.[spec.sourceKey])
                     ? lastSummary[spec.sourceKey]
                     : [];
-                if (
-                    summaryFilters[spec.key] !== null
-                    && !rows.some((item) => String(item?.value ?? '') === summaryFilters[spec.key])
-                ) {
-                    summaryFilters[spec.key] = null;
-                }
                 renderTable(spec, rows);
             });
             renderDistributionCharts(lastSummary);
@@ -2187,6 +2187,9 @@
         const scopeParams = (scope) => {
             const params = new URLSearchParams({ area: scope.area, top_n: scope.topN });
             if (scope.cmts) params.set('cmts', scope.cmts);
+            Object.entries(summaryFilters).forEach(([dimension, value]) => {
+                if (value !== null) params.set(dimension, value);
+            });
             return params;
         };
 

@@ -594,12 +594,23 @@ def inventory_summary():
     except (TypeError, ValueError):
         top_n = 25
 
+    facet_filters = {}
+    for name in ("vendor", "model", "software", "docsis"):
+        value = (request.args.get(name) or "").strip()
+        if len(value) > 255:
+            return jsonify({
+                "status": "error",
+                "message": f"{name} must not exceed 255 characters",
+            }), 400
+        if value:
+            facet_filters[name] = value
+
     # Global and area summaries always come from authoritative MySQL. Redis
     # acceleration is allowed only for an exact CCAP scope whose payload is
     # revision-verified, explicitly complete, non-truncated, and row-count
-    # consistent. Hostname/IP aliases are candidates for one payload, never
-    # independent inventories to aggregate.
-    if area == "all" and cmts_filter:
+    # consistent. Filtered facets always use the PyPNM API so correlated
+    # inventory aggregation remains behind the API boundary.
+    if area == "all" and cmts_filter and not facet_filters:
         try:
             import collections as _collections
             from app.routes.api_routes import (
@@ -711,7 +722,7 @@ def inventory_summary():
         except Exception:
             pass
 
-    params = {"top_n": top_n}
+    params = {"top_n": top_n, **facet_filters}
     if cmts:
         params["cmts"] = cmts
     if area != "all":
