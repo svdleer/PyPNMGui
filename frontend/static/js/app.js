@@ -3291,11 +3291,17 @@ createApp({
         },
 
         async _reconcileTopologyPhysicalFiberNode({ initializeSelection = false } = {}) {
+            const topologyFiberNode = String(
+                this.fnScanTopologyBridgeNodeId ||
+                this.selectedModem?.topology_fiber_node ||
+                this.selectedModem?.fibernode ||
+                ''
+            ).trim();
             const expectedMacs = [...new Set((this.topologySearchExpectedMacs || [])
                 .map(mac => this.normalizeMacForDisplay(mac))
                 .filter(Boolean))];
             const snapshotDate = String(this.topologySearchSnapshotDate || '').trim();
-            if (!snapshotDate || !expectedMacs.length) {
+            if (!topologyFiberNode && (!snapshotDate || !expectedMacs.length)) {
                 throw new Error('Topology search snapshot is unavailable; run the topology search again');
             }
 
@@ -3303,21 +3309,64 @@ createApp({
             const selectedMac = this.normalizeMacForDisplay(this.selectedModem?.mac_address || '');
             const previousAnchor = this.fnScanTopologyReconciliation?.target?.anchor_mac_address || '';
             const requestedAnchor = [previousAnchor, selectedMac, expectedMacs[0]]
-                .find(mac => expectedNorm.has(this.normalizeMacForMatch(mac))) || expectedMacs[0];
+                .find(mac => !topologyFiberNode || !expectedNorm.size || expectedNorm.has(this.normalizeMacForMatch(mac)))
+                || selectedMac
+                || expectedMacs[0];
+            if (!requestedAnchor) {
+                throw new Error('Topology FiberNode scan requires an anchor modem MAC address');
+            }
 
-            const response = await fetch(`${API_BASE}/topology/reconcile/physical-fiber-node`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            // Technical topology scope is resolved only by PyPNM. Do not fetch
+            // the CMTS-wide inventory and try to infer membership in the GUI.
+            const endpoint = topologyFiberNode
+                ? `${API_BASE}/topology/fiber-nodes/scan-targets`
+                : `${API_BASE}/topology/reconcile/physical-fiber-node`;
+            const payload = topologyFiberNode
+                ? {
+                    date: snapshotDate || null,
+                    fiber_node: topologyFiberNode,
+                    anchor_mac_address: requestedAnchor,
+                    refresh: false,
+                }
+                : {
                     date: snapshotDate,
                     expected_mac_addresses: expectedMacs,
                     anchor_mac_address: requestedAnchor,
                     refresh: false,
-                }),
+                };
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
             const data = await response.json();
             if (!response.ok || data?.status !== 'success' || !Array.isArray(data.records)) {
-                throw new Error(data?.detail || data?.message || 'Physical FiberNode reconciliation failed');
+                throw new Error(data?.detail || data?.message || 'Topology FiberNode scan-target resolution failed');
+            }
+
+            const resolvedTopologyFiberNode = String(data.topology_fiber_node || '').trim();
+            if (
+                topologyFiberNode
+                && resolvedTopologyFiberNode.toLowerCase() !== topologyFiberNode.toLowerCase()
+            ) {
+                throw new Error(
+                    `PyPNM resolved ${resolvedTopologyFiberNode || 'no topology FiberNode'} `
+                    + `instead of requested ${topologyFiberNode}`
+                );
+            }
+
+            const apiExpectedMacs = [...new Set(data.records
+                .filter(record => record?.expected)
+                .map(record => this.normalizeMacForDisplay(record.mac_address || ''))
+                .filter(Boolean))];
+            const apiExpectedNorm = new Set(apiExpectedMacs.map(mac => this.normalizeMacForMatch(mac)));
+            const activeExpectedNorm = topologyFiberNode ? apiExpectedNorm : expectedNorm;
+            if (!activeExpectedNorm.size) {
+                throw new Error(`No exact topology members returned for ${topologyFiberNode}`);
+            }
+            if (topologyFiberNode) {
+                this.topologySearchSnapshotDate = String(data.snapshot_date || '');
+                this.topologySearchExpectedMacs = apiExpectedMacs;
             }
 
             const searchByMac = new Map((this.modems || [])
@@ -3329,7 +3378,7 @@ createApp({
             // reintroduces physical-FN expansion.
             const rows = data.records.filter(record => {
                 const mac = this.normalizeMacForMatch(record?.mac_address || '');
-                return Boolean(record?.expected) && expectedNorm.has(mac);
+                return Boolean(record?.expected) && activeExpectedNorm.has(mac);
             }).map(record => {
                 const current = record.current || {};
                 const expected = record.expected || null;
@@ -3364,7 +3413,10 @@ createApp({
             this.fnScanTopologyReconciled = true;
             this.fnScanTopologyReconciliation = data;
             this.fnScanExpectedServingGroup = '';
-            this.fnScanTopologyBridgeNodeId = '';
+            // Keep the technical path ID so every selector refresh repeats the
+            // exact PyPNM-owned topology query instead of falling back to a
+            // CMTS-wide inventory fetch.
+            this.fnScanTopologyBridgeNodeId = topologyFiberNode;
             this.modems = rows;
             this.fnScanModemCount = rows.filter(row => row.selectable === true).length;
             this.fnScanModemSource = data.inventory?.source || 'inventory';
@@ -6095,7 +6147,8 @@ createApp({
         },
 
         async refreshFnSelectorModems(force = false, liveSnmp = false) {
-            if (this.fnScanTopologyReconciled) {
+            const topologyScoped = Boolean(String(this.fnScanTopologyBridgeNodeId || '').trim());
+            if (this.fnScanTopologyReconciled || topologyScoped) {
                 if (this.fnScanSelectorRefreshInFlight) return;
                 const now = Date.now();
                 if (!force && (now - this.fnScanLastSelectorRefreshAt) < 30000) return;
