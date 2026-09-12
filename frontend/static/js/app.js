@@ -664,10 +664,16 @@ createApp({
         // Base pool: operational + MAC + IP, scoped to selected CMTS & FN
         fnScanBaseModems() {
             if (this.fnScanTopologyReconciled) {
+                // A topology-scoped scan may reconcile the current location of
+                // its original MAC cohort, but it must never include a modem
+                // merely because it shares the anchor's physical FiberNode.
+                const expectedMacs = new Set((this.topologySearchExpectedMacs || [])
+                    .map(mac => this.normalizeMacForMatch(mac))
+                    .filter(Boolean));
                 const seen = new Set();
                 return (this.modems || []).flatMap(modem => {
                     const mac = this.normalizeMacForMatch(modem?.mac_address || '');
-                    if (!mac || seen.has(mac)) return [];
+                    if (!mac || !expectedMacs.has(mac) || !modem?.topology_expected || seen.has(mac)) return [];
                     seen.add(mac);
                     return [{
                         ...modem,
@@ -3317,7 +3323,14 @@ createApp({
             const searchByMac = new Map((this.modems || [])
                 .filter(row => row?.source === 'topology-search')
                 .map(row => [this.normalizeMacForMatch(row.mac_address || ''), row]));
-            const rows = data.records.map(record => {
+            // Reject an out-of-cohort response defensively. PyPNM owns the
+            // membership decision, while this guard ensures the GUI never
+            // dispatches a neighboring technical path if a server regression
+            // reintroduces physical-FN expansion.
+            const rows = data.records.filter(record => {
+                const mac = this.normalizeMacForMatch(record?.mac_address || '');
+                return Boolean(record?.expected) && expectedNorm.has(mac);
+            }).map(record => {
                 const current = record.current || {};
                 const expected = record.expected || null;
                 const searchRow = searchByMac.get(this.normalizeMacForMatch(record.mac_address || '')) || {};
