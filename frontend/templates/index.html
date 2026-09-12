@@ -2972,13 +2972,13 @@
                                 </div>
                             </div>
 
-                            <div v-if="fnScanSelectedChannelModemCount === 0 && fnScanIfindex" class="alert alert-warning small py-2 mb-2">
+                            <div v-if="!fnScanTopologyReconciled && fnScanSelectedChannelModemCount === 0 && fnScanIfindex" class="alert alert-warning small py-2 mb-2">
                                 <i class="bi bi-exclamation-triangle me-1"></i>
                                 Selected channel has <strong>0 modems</strong>. Try a different channel or fiber node.
                             </div>
                             <div class="row g-2 mt-2 align-items-start">
                                 <div class="col-12">
-                                    <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || fnImpulseRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
+                                    <button type="button" @click="scanFiberNodeGroup" :disabled="fnScanRunning || fnImpulseRunning || dsScanRunning || fbScanRunning || fnScanSelectorRefreshInFlight || !fnScanCmtsIp || !fnScanIfindex || (!fnScanTopologyReconciled && fnScanSelectedChannelModemCount === 0 && fnScanExtraIfindices.length === 0) || (fnScanUseModemSelector && fnScanSelectedModemCount === 0)"
                                             class="btn btn-primary w-100">
                                         <span v-if="fnScanRunning" class="spinner-border spinner-border-sm me-1"></span>
                                         <i v-else class="bi bi-play-fill me-1"></i>
