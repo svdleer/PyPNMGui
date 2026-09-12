@@ -5,7 +5,6 @@ __pycache__/
 *.so
 .Python
 env/
-archivedocker exec -it pypnm-api-prod env | grep -E 'FTP_|PNM_FILE_SOURCE|PNM_CACHE_DIR|PYPNM_USE_AGENT_SNMP'docker exec -it pypnm-api-prod env | grep -E 'FTP_|PNM_FILE_SOURCE|PNM_CACHE_DIR|PYPNM_USE_AGENT_SNMP'docker exec -it pypnm-api-prod env | grep -E 'FTP_|PNM_FILE_SOURCE|PNM_CACHE_DIR|PYPNM_USE_AGENT_SNMP'
 venv/
 ENV/
 build/
