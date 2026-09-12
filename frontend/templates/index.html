@@ -868,8 +868,8 @@
                                                 <h5 class="mb-0 overview-stat-value text-truncate" style="max-width: 150px;" :title="selectedModem.fiber_node">
                                                     <a v-if="selectedModem.fiber_node" href="#"
                                                        class="text-decoration-none"
-                                                       :title="`Open Fiber Node Scan for ${selectedModem.fiber_node}`"
-                                                       @click.prevent="fnScanFiberNode = selectedModem.fiber_node; currentView = 'fibernode'">
+                                                       :title="`Open Fiber Node Scan with topology context ${selectedModem.topology_fiber_node || selectedModem.fiber_node}`"
+                                                       @click.prevent="openSelectedModemFiberNodeScan">
                                                         {{ selectedModem.fiber_node }}
                                                     </a>
                                                     <span v-else>N/A</span>
@@ -950,15 +950,21 @@
                                                 <td class="text-muted ps-3 py-2"><i class="bi bi-share me-1 opacity-50"></i>Physical Fiber Node</td>
                                                 <td class="py-2">
                                                     <a href="#" class="badge bg-success bg-opacity-75 text-decoration-none"
-                                                       :title="`Open Fiber Node Scan for ${selectedModem.fiber_node}`"
-                                                       @click.prevent="fnScanFiberNode = selectedModem.fiber_node; currentView = 'fibernode'">
+                                                       :title="`Open Fiber Node Scan with topology context ${selectedModem.topology_fiber_node || selectedModem.fiber_node}`"
+                                                       @click.prevent="openSelectedModemFiberNodeScan">
                                                         <i class="bi bi-box-arrow-up-right me-1"></i>{{ selectedModem.fiber_node }}
                                                     </a>
                                                 </td>
                                             </tr>
                                             <tr v-if="selectedModem.topology_fiber_node">
                                                 <td class="text-muted ps-3 py-2"><i class="bi bi-diagram-3 me-1 opacity-50"></i>Topology Fiber Node</td>
-                                                <td class="py-2"><code>{{ selectedModem.topology_fiber_node }}</code></td>
+                                                <td class="py-2">
+                                                    <a href="#" class="badge bg-info text-decoration-none"
+                                                       :title="`Open Fiber Node Scan with topology context ${selectedModem.topology_fiber_node}`"
+                                                       @click.prevent="openSelectedModemFiberNodeScan">
+                                                        <i class="bi bi-box-arrow-up-right me-1"></i><code class="text-reset">{{ selectedModem.topology_fiber_node }}</code>
+                                                    </a>
+                                                </td>
                                             </tr>
                                             <tr v-if="selectedModem.topology_path || selectedModem.cmts || selectedModem.cmts_hostname || selectedModem.cable_mac || selectedModem.upstream_interface || selectedModem.fiber_node">
                                                 <td class="text-muted">Path</td>

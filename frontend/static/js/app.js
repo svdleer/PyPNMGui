@@ -1315,6 +1315,17 @@ createApp({
             );
         },
 
+        openSelectedModemFiberNodeScan() {
+            const modem = this.selectedModem;
+            if (!modem?.mac_address) return;
+            // Keep the immutable topology identity separate from the physical
+            // CMTS FiberNode label that the scanner resolves for execution.
+            this.fnScanTopologyBridgeNodeId = String(
+                modem.topology_fiber_node || modem.fibernode || ''
+            ).trim();
+            this.currentView = 'fibernode';
+        },
+
         _validVelocityFactor(value) {
             const velocityFactor = Number(value);
             if (!Number.isFinite(velocityFactor)) return null;
