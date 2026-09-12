@@ -633,7 +633,7 @@
             </div>
 
             <!-- Modems/Details View - Modern PNM Dashboard -->
-            <div v-if="currentView === 'modems' && selectedModem" class="modem-detail-page">
+            <div v-if="currentView === 'modems' && selectedModem">
                 <!-- Back button -->
                 <button @click="goBack" class="btn btn-sm btn-outline-secondary mb-3">
                     <i class="bi bi-arrow-left me-1"></i>Back
@@ -890,7 +890,7 @@
                                         <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Modem Details <span v-if="modemDetailLoading" class="spinner-border spinner-border-sm text-primary ms-2" style="width:0.9rem;height:0.9rem;"></span></h5>
                                     </div>
                                     <div class="card-body p-0">
-                                        <table class="table table-sm table-borderless mb-0" style="font-size:0.85rem;">
+                                        <table class="table table-sm table-borderless mb-0 modem-detail-table" style="font-size:0.85rem;">
                                             <tbody>
                                             <tr>
                                                 <td class="text-muted ps-3 py-2" style="width:35%;white-space:nowrap;"><i class="bi bi-ethernet me-1 opacity-50"></i>MAC Address</td>

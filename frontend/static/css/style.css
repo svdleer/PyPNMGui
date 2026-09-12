@@ -494,72 +494,19 @@ ize    tran    tran    tran    tran    tran0.    tran    trsiz-shrinm 0.5rem;
 }
 }
 
-/* Selected modem detail: one compact, operational type system. */
-.modem-detail-page {
+/* Compact, consistent typography for the modem details key/value table only. */
+.modem-detail-table {
     font-family: var(--bs-font-sans-serif);
-    color: #1f2937;
-}
-
-.modem-detail-page .modem-header-card h3 {
-    font-size: 1.4rem;
-    font-weight: 650;
-    line-height: 1.2;
-    letter-spacing: -0.015em;
-}
-
-.modem-detail-page .modem-header-card p {
-    font-size: 0.875rem;
-}
-
-.modem-detail-page .modem-header-card .badge {
-    font-size: 0.72rem !important;
-    font-weight: 600;
-    letter-spacing: 0.015em;
-}
-
-.modem-detail-page .modem-header-card .bi-router {
-    font-size: 2.25rem !important;
-}
-
-.modem-detail-page .modem-header-card .bi-circle-fill {
-    font-size: 0.42rem !important;
-}
-
-.modem-detail-page .overview-stat-card h6 {
-    margin-bottom: 0.35rem;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.055em;
-    text-transform: uppercase;
-}
-
-.modem-detail-page .overview-stat-value {
-    font-size: 0.98rem;
-    font-weight: 650;
-    line-height: 1.25;
-}
-
-.modem-detail-page .overview-stat-card .stat-icon {
-    font-size: 1.6rem;
-}
-
-.modem-detail-page .pnm-card-header h5 {
-    font-size: 0.9rem;
-    font-weight: 650;
-    letter-spacing: 0.01em;
-}
-
-.modem-detail-page .table.table-sm.table-borderless.mb-0 {
     font-size: 0.82rem !important;
     line-height: 1.4;
 }
 
-.modem-detail-page .table.table-sm.table-borderless.mb-0 > :not(caption) > * > * {
+.modem-detail-table > :not(caption) > * > * {
     padding: 0.42rem 0.75rem !important;
     vertical-align: middle;
 }
 
-.modem-detail-page .table.table-sm.table-borderless.mb-0 > tbody > tr > td:first-child {
+.modem-detail-table > tbody > tr > td:first-child {
     width: 35%;
     color: var(--bs-secondary-color) !important;
     font-size: 0.7rem;
@@ -569,27 +516,21 @@ ize    tran    tran    tran    tran    tran0.    tran    trsiz-shrinm 0.5rem;
     white-space: nowrap;
 }
 
-.modem-detail-page .table.table-sm.table-borderless.mb-0 .font-monospace,
-.modem-detail-page .table.table-sm.table-borderless.mb-0 code {
+.modem-detail-table .font-monospace,
+.modem-detail-table code {
     font-family: var(--bs-font-monospace);
     font-size: 0.92em;
 }
 
-.modem-detail-page .table.table-sm.table-borderless.mb-0 code {
+.modem-detail-table code {
     padding: 0.1rem 0.3rem;
     color: inherit;
     background: rgba(148, 163, 184, 0.12);
 }
 
-.modem-detail-page .table.table-sm.table-borderless.mb-0 .badge {
+.modem-detail-table .badge {
     padding: 0.32em 0.58em;
     font-size: 0.68rem;
     font-weight: 650;
     letter-spacing: 0.02em;
-}
-
-.modem-detail-page .card-body .btn small {
-    font-size: 0.72rem;
-    font-weight: 650;
-    letter-spacing: 0.01em;
 }
