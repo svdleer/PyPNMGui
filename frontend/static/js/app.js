@@ -73,6 +73,9 @@ createApp({
             searchSeedFiberNodes: [],
             cpeSearchSuggestions: [],
             _cpeSuggestTimer: null,
+            _topologySuggestTimer: null,
+            _topologySuggestController: null,
+            _topologySuggestSequence: 0,
             useTopologySearch: false,
             topologyEnabled: TOPOLOGY_ENABLED,
             searchHouseNumber: '',
@@ -1149,6 +1152,15 @@ createApp({
             window.removeEventListener('beforeunload', this._pageLeaveHandler);
         }
         this.cancelActiveUiTasks({ silent: true, stopBackend: false });
+        if (this._topologySuggestTimer) {
+            clearTimeout(this._topologySuggestTimer);
+            this._topologySuggestTimer = null;
+        }
+        if (this._topologySuggestController) {
+            this._topologySuggestController.abort();
+            this._topologySuggestController = null;
+        }
+        this._topologySuggestSequence++;
         if (this._fnScanReportPollTimer) {
             clearInterval(this._fnScanReportPollTimer);
             this._fnScanReportPollTimer = null;
@@ -1629,31 +1641,6 @@ createApp({
             return this._isMissingVendorFirmware(modem) || cableMacMissing;
         },
 
-        _shouldRefreshCacheForMetadata(modems) {
-            const rows = Array.isArray(modems) ? modems : [];
-            if (rows.length < 30) return { refresh: false, ratio: 0 };
-            let missing = 0;
-            for (const m of rows) {
-                if (this._isMissingVendorFirmware(m)) missing += 1;
-            }
-            const ratio = rows.length ? (missing / rows.length) : 0;
-            return {
-                refresh: ratio >= 0.60,
-                ratio,
-            };
-        },
-
-        async _clearSelectedCmtsCacheSilently() {
-            if (!this.selectedCmts) return false;
-            try {
-                const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/clear`, { method: 'POST' });
-                const data = await response.json();
-                return data?.status === 'success';
-            } catch (_) {
-                return false;
-            }
-        },
-
         queueSelectedModemEnrichment(rows, options = {}) {
             if (!this.enrichModems || !this.hasCmtsAgent) return 0;
             const maxBatch = Math.max(1, Math.min(Number(options.maxBatch || 20), 20));
@@ -2082,6 +2069,16 @@ createApp({
 
         async onSearchInput() {
             this.showSearchSuggestions = true;
+            if (this._topologySuggestTimer) {
+                clearTimeout(this._topologySuggestTimer);
+                this._topologySuggestTimer = null;
+            }
+            if (this._topologySuggestController) {
+                this._topologySuggestController.abort();
+                this._topologySuggestController = null;
+            }
+            const topologySuggestSequence = ++this._topologySuggestSequence;
+
             if (this.searchType === 'cpe_ip') {
                 if (this._cpeSuggestTimer) clearTimeout(this._cpeSuggestTimer);
                 const q = (this.searchValue || '').trim();
@@ -2119,22 +2116,35 @@ createApp({
                 return;
             }
 
-            try {
-                const params = new URLSearchParams({
-                    type: this.searchType,
-                    q,
-                    limit: '10',
-                });
-                const response = await fetch(`${API_BASE}/topology/search/suggest?${params.toString()}`);
-                const data = await response.json();
-                if (data?.status === 'success' && Array.isArray(data.suggestions)) {
-                    this.topologySuggestions = data.suggestions;
-                } else {
-                    this.topologySuggestions = [];
+            const searchType = this.searchType;
+            this._topologySuggestTimer = setTimeout(async () => {
+                const controller = new AbortController();
+                this._topologySuggestController = controller;
+                try {
+                    const params = new URLSearchParams({
+                        type: searchType,
+                        q,
+                        limit: '10',
+                    });
+                    const response = await fetch(
+                        `${API_BASE}/topology/search/suggest?${params.toString()}`,
+                        { signal: controller.signal },
+                    );
+                    const data = await response.json();
+                    if (topologySuggestSequence !== this._topologySuggestSequence) return;
+                    this.topologySuggestions = data?.status === 'success' && Array.isArray(data.suggestions)
+                        ? data.suggestions : [];
+                } catch (error) {
+                    if (error?.name !== 'AbortError' && topologySuggestSequence === this._topologySuggestSequence) {
+                        this.topologySuggestions = [];
+                    }
+                } finally {
+                    if (topologySuggestSequence === this._topologySuggestSequence) {
+                        this._topologySuggestController = null;
+                        this._topologySuggestTimer = null;
+                    }
                 }
-            } catch (_) {
-                this.topologySuggestions = [];
-            }
+            }, 250);
         },
 
         hideSearchSuggestionsSoon() {
@@ -3167,22 +3177,36 @@ createApp({
                         this.fnScanTopologyReconciled = false;
                         this.fnScanTopologyReconciliation = null;
                         this.modems = rows.map(m => ({
-                            mac_address: this.normalizeMacForDisplay(m.mac || m.mac_address || ''),
+                            mac_address: this.normalizeMacForDisplay(m.mac_address || m.mac || ''),
                             ip_address: m.ip_address || '',
-                            status: m.link_match ? 'topology-matched' : 'topology-only',
-                            name: this.normalizeMacForDisplay(m.mac || m.mac_address || ''),
+                            status: m.status || (m.link_match ? 'topology-matched' : 'topology-only'),
+                            name: this.normalizeMacForDisplay(m.mac_address || m.mac || ''),
                             vendor: m.vendor || 'Unknown',
                             model: m.model || 'N/A',
                             docsis_version: this.resolveDocsisVersion(m, 'Unknown'),
                             cmts: this.resolveCanonicalCmtsDisplayName(m.cmts_ip || '', m.cmts || ''),
                             cmts_ip: m.cmts_ip || '',
-                            cmts_interface: m.cmts_interface || 'N/A',
+                            cmts_index: m.cmts_index ?? null,
+                            docsif3_index: m.docsif3_index ?? null,
+                            cmts_interface: m.cmts_interface || m.upstream_interface || m.cmts_index || 'N/A',
                             software_version: m.software_version || '',
                             cable_mac: m.cable_mac || '',
                             upstream_interface: m.upstream_interface || '',
                             upstream_ifindex: m.upstream_ifindex ?? null,
                             fiber_node: m.fiber_node || '',
                             topology_fiber_node: m.fibernode || m.topology_fiber_node || '',
+                            topology_cmts: m.topology_cmts || '',
+                            ofdm_enabled: m.ofdm_enabled ?? null,
+                            ofdma_enabled: m.ofdma_enabled ?? null,
+                            ofdm_ifindex: m.ofdm_ifindex ?? null,
+                            ofdma_ifindex: m.ofdma_ifindex ?? null,
+                            ofdma_rf_port_ifindex: m.ofdma_rf_port_ifindex ?? null,
+                            ofdm_channel_count: m.ofdm_channel_count ?? null,
+                            ofdma_channel_count: m.ofdma_channel_count ?? null,
+                            partial_service: this.normalizePartialService(m.partial_service),
+                            partial_service_downstream: m.partial_service_downstream ?? null,
+                            partial_service_upstream: m.partial_service_upstream ?? null,
+                            partial_service_state: m.partial_service_state ?? null,
                             customer_id: m.customer_id || '',
                             postalcode: m.postalcode || '',
                             house_number: m.house_number || '',
@@ -3193,14 +3217,15 @@ createApp({
                             topology_link_id: m.topology_link_id || '',
                             linked_node_id: m.linked_node_id || '',
                             link_match: Boolean(m.link_match),
+                            inventory_match: m.inventory_match === true,
                             source: 'topology-search',
                         }));
-                        await this._enrichTopologySearchModems(500);
                         this._mergeSearchSeed(this.modems);
-                        this.queueSelectedModemEnrichment(this.modems, {
-                            scope: 'topology search results',
-                            maxBatch: 20,
-                        });
+                        if (data.inventory_merge_degraded === true) {
+                            this.$toast?.warning(
+                                'Current inventory is temporarily unavailable; showing topology-only results.',
+                            );
+                        }
                     } else {
                         this.showError('Search failed', data?.message || 'Topology search failed');
                     }
@@ -3246,106 +3271,6 @@ createApp({
             } finally {
                 this.isLoading = false;
             }
-        },
-
-        async _enrichTopologySearchModems(limit = 250) {
-            const rows = Array.isArray(this.modems) ? this.modems.slice(0, limit) : [];
-            const targets = rows.filter(m => {
-                if (!m?.mac_address) return false;
-                const vendorMissing = !m.vendor || m.vendor === 'Unknown';
-                const modelMissing = !m.model || m.model === 'N/A';
-                const docsisMissing = !m.docsis_version || m.docsis_version === 'Unknown';
-                const ofdmMissing = m.ofdm_enabled == null || m.ofdma_enabled == null;
-                return !m.ip_address || !m.cmts_ip || vendorMissing || modelMissing || docsisMissing || ofdmMissing;
-            });
-            if (!targets.length) return;
-
-            const chunks = [];
-            const concurrency = 12;
-            for (let i = 0; i < targets.length; i += concurrency) {
-                chunks.push(targets.slice(i, i + concurrency));
-            }
-
-            const patchByMac = {};
-            for (const chunk of chunks) {
-                const out = await Promise.all(chunk.map(async (m) => {
-                    try {
-                        const resp = await fetch(`${API_BASE}/modems/${encodeURIComponent(m.mac_address)}`);
-                        const data = await resp.json();
-                        if (data?.status === 'success' && data.modem) {
-                            return { mac: this.normalizeMacForMatch(m.mac_address), modem: data.modem };
-                        }
-                    } catch (_) {}
-                    return null;
-                }));
-                for (const e of out) {
-                    if (e?.mac && e?.modem) patchByMac[e.mac] = e.modem;
-                }
-            }
-
-            const unresolvedTargets = targets.filter(m => {
-                const patch = patchByMac[this.normalizeMacForMatch(m.mac_address)];
-                if (!patch) return true;
-                const vendorMissing = !patch.vendor || patch.vendor === 'Unknown';
-                const modelMissing = !patch.model || patch.model === 'N/A';
-                const docsisMissing = !patch.docsis_version || patch.docsis_version === 'Unknown';
-                return !patch.ip_address || !patch.cmts_ip || vendorMissing || modelMissing || docsisMissing;
-            });
-
-            const groupsByCmts = new Map();
-            for (const modem of unresolvedTargets) {
-                const cmtsMatch = this.findCmtsMatch(modem.cmts_ip, modem.cmts || modem.cmts_hostname || '');
-                const canonicalName = String(cmtsMatch?.name || '').trim();
-                if (!canonicalName) continue;
-                const entry = groupsByCmts.get(canonicalName) || { cmts: cmtsMatch, modems: [] };
-                entry.modems.push(modem);
-                groupsByCmts.set(canonicalName, entry);
-            }
-
-            for (const [canonicalName, group] of groupsByCmts.entries()) {
-                try {
-                    const params = new URLSearchParams({
-                        limit: String(CM_MODEM_LIMIT),
-                    });
-                    const community = this._firstCredential(this.snmpCommunity);
-                    if (community) params.set('community', community);
-                    const response = await fetch(`${API_BASE}/cmts/${encodeURIComponent(canonicalName)}/modems?${params.toString()}`);
-                    const data = await response.json();
-                    if (data?.status !== 'success' || !Array.isArray(data.modems)) continue;
-                    const wantedMacs = new Set(group.modems.map(m => this.normalizeMacForMatch(m.mac_address)).filter(Boolean));
-                    for (const modem of data.modems) {
-                        const mac = this.normalizeMacForMatch(modem.mac_address);
-                        if (!mac || !wantedMacs.has(mac)) continue;
-                        patchByMac[mac] = modem;
-                    }
-                } catch (_) {
-                    // Best-effort live CMTS fallback only.
-                }
-            }
-
-            if (!Object.keys(patchByMac).length) return;
-            this.modems = this.modems.map(m => {
-                const patch = patchByMac[this.normalizeMacForMatch(m.mac_address)];
-                if (!patch) return m;
-                const merged = this._mergeModemPreservingCmts({ ...m }, patch);
-                return {
-                    ...merged,
-                    ip_address: m.ip_address || patch.ip_address || '',
-                    cmts_ip: m.cmts_ip || patch.cmts_ip || '',
-                    cmts: this.resolveCanonicalCmtsDisplayName(m.cmts_ip || patch.cmts_ip || '', m.cmts || patch.cmts || patch.cmts_hostname || ''),
-                    status: patch.status || m.status,
-                    vendor: patch.vendor || m.vendor,
-                    model: patch.model || m.model,
-                    software_version: patch.software_version || m.software_version || '',
-                    partial_service: this.normalizePartialService(patch.partial_service ?? m.partial_service),
-                    partial_service_downstream: patch.partial_service_downstream ?? m.partial_service_downstream ?? null,
-                    partial_service_upstream: patch.partial_service_upstream ?? m.partial_service_upstream ?? null,
-                    partial_service_state: patch.partial_service_state ?? m.partial_service_state ?? null,
-                    cable_mac: patch.cable_mac || m.cable_mac,
-                    fiber_node: patch.fiber_node || m.fiber_node || '',
-                    topology_fiber_node: m.topology_fiber_node || patch.topology_fiber_node || '',
-                };
-            });
         },
 
         async _reconcileTopologyPhysicalFiberNode({ initializeSelection = false } = {}) {
@@ -3503,8 +3428,6 @@ createApp({
                         return;
                     }
                 }
-
-                this._enrichTopologySearchModems(300);
 
                 const candidates = (this.modems || [])
                     .filter(m => m?.mac_address && m?.ip_address && m?.cmts_ip)
@@ -3770,12 +3693,13 @@ createApp({
             }, 1600);
             
             try {
-                const buildUrl = (limit, enrichEnabled, forceRefresh = false) => {
+                const buildUrl = (limit, enrichEnabled, forceRefresh = false, includeTopology = true) => {
                     // This same-origin API uses configured server-side communities.
                     // Never put SNMP credentials in browser URLs or access logs.
                     const boundedLimit = Math.max(1, Math.min(Number(limit) || CM_MODEM_LIMIT, 50000));
                     let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${boundedLimit}`;
                     u += `&enrich=${enrichEnabled ? 'true' : 'false'}`;
+                    u += `&include_topology=${includeTopology ? 'true' : 'false'}`;
                     if (forceRefresh) u += '&refresh=true';
                     return u;
                 };
@@ -3835,7 +3759,10 @@ createApp({
 
                 // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
-                const preview = await this._fetchJsonWithTimeout(buildUrl(PRELOAD_COUNT, false, false), 180000);
+                const preview = await this._fetchJsonWithTimeout(
+                    buildUrl(PRELOAD_COUNT, false, false, false),
+                    180000,
+                );
 
                 if (preview.status !== 'success') {
                     this.showError('Failed to get modems', preview.message || 'Unknown error');
@@ -4117,10 +4044,6 @@ createApp({
                     if (data.enriched === true) {
                         this.liveModemSource = `Inventory from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems [enriched ✓]`;
                         this._stopEnrichmentPolling('backend reports enriched');
-                        if (this.selectedCmts) {
-                            fetch(`${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/cache/refresh`, { method: 'POST' })
-                                .catch(() => {});
-                        }
                         return true;
                     }
                     if (data.enriching === false) {

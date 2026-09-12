@@ -26,6 +26,7 @@ _SENSITIVE_PAYLOAD_KEYS = {
     "ip_address",
     "target_ip",
     "cmts_ip",
+    "input",
 }
 
 
@@ -159,6 +160,61 @@ class PyPNMClient:
         
         return payload
     
+    @staticmethod
+    def _http_error_result(error: requests.exceptions.HTTPError) -> Dict[str, Any]:
+        """Return failure metadata without exposing arbitrary upstream content."""
+        response = error.response
+        upstream_status = response.status_code if response is not None else None
+        error_response: Dict[str, Any] = {}
+        if response is not None:
+            try:
+                parsed = response.json()
+                if isinstance(parsed, dict):
+                    error_response = _redact_payload(parsed)
+            except (TypeError, ValueError):
+                pass
+
+        error_text = json.dumps(error_response, default=str).lower()
+        explicit_failure = str(error_response.get("failure_status") or "").strip().lower()
+        known_failures = {
+            "timeout",
+            "service_unavailable",
+            "agent_unavailable",
+            "application_error",
+            "upstream_error",
+            "capture_failed",
+            "unexpected_error",
+        }
+        if explicit_failure in known_failures:
+            failure_status = explicit_failure
+        elif upstream_status == 504 or "timed out" in error_text or "timeout" in error_text:
+            failure_status = "timeout"
+        elif upstream_status == 503:
+            failure_status = "service_unavailable"
+        elif (
+            "no connected" in error_text
+            or "agent manager" in error_text
+            or "agent is not connected" in error_text
+        ):
+            failure_status = "agent_unavailable"
+        elif upstream_status is not None and 400 <= upstream_status < 500:
+            failure_status = "application_error"
+        else:
+            failure_status = "upstream_error"
+
+        message = (
+            f"PyPNM returned HTTP {upstream_status}"
+            if upstream_status is not None
+            else "PyPNM returned an HTTP error"
+        )
+        return {
+            "status": "error",
+            "success": False,
+            "failure_status": failure_status,
+            "upstream_http_status": upstream_status,
+            "message": message,
+        }
+
     def _post(
         self,
         endpoint: str,
@@ -168,7 +224,7 @@ class PyPNMClient:
     ) -> Union[Dict[str, Any], bytes]:
         """Make POST request to PyPNM API."""
         url = f"{self.config.base_url}{endpoint}"
-        
+
         # Spectrum analyzer endpoints can be slow on large CMTS walks.
         # Allow per-call override so discovery paths can fail fast instead of
         # blocking the entire UI request for up to 300s.
@@ -176,122 +232,98 @@ class PyPNMClient:
             timeout = request_timeout
         else:
             timeout = 300 if 'spectrumAnalyzer' in endpoint else self.config.timeout
-        
+
         try:
             logger.debug("POST %s with payload: %s", url, _redact_payload(payload))
-            response = self.session.post(
-                url,
-                json=payload,
-                timeout=timeout
-            )
-            
-            # Log PyPNM errors
+            response = self.session.post(url, json=payload, timeout=timeout)
+
             if response.status_code >= 400:
-                try:
-                    error_detail = response.json()
-                    logger.error(f"PyPNM returned {response.status_code}: {error_detail}")
-                    if 'constellation' in endpoint.lower():
-                        logger.error(f"=== CONSTELLATION ERROR DETAIL ===")
-                        logger.error(f"Full error response: {json.dumps(error_detail, indent=2)}")
-                except:
-                    logger.error(f"PyPNM returned {response.status_code}: {response.text[:500]}")
-                    if 'constellation' in endpoint.lower():
-                        logger.error(f"=== CONSTELLATION ERROR (RAW) ===")
-                        logger.error(f"Full response text: {response.text}")
-            
+                logger.error("PyPNM returned HTTP %s", response.status_code)
+
             response.raise_for_status()
-            
+
             # For archive responses, return binary content
             if expect_binary or payload.get('analysis', {}).get('output', {}).get('type') == 'archive':
                 content_len = len(response.content)
                 content_type = response.headers.get('content-type', '')
                 logger.info(f"PyPNM returned {content_len} bytes, Content-Type: {content_type}")
-                
+
                 # Check if response is actually JSON (error response) vs binary archive
                 # PyPNM may return JSON error even when archive was requested
                 if 'application/json' in content_type or (content_len < 1000 and response.content.startswith(b'{')):
                     try:
                         json_response = response.json()
-                        # Check if it's an error response (status != 0)
                         if isinstance(json_response, dict) and json_response.get('status', 0) != 0:
-                            logger.error(f"PyPNM returned error: {json_response}")
-                            return json_response
+                            logger.error("PyPNM returned archive error: %s", _redact_payload(json_response))
+                            return _redact_payload(json_response)
                         return json_response
                     except Exception as e:
                         logger.warning(f"Response looks like JSON but failed to parse: {e}")
-                
+
                 if content_len == 0:
                     logger.error("PyPNM returned empty content for archive request!")
-                # Log first 200 bytes if not binary
-                if content_len > 0 and content_len < 1000:
-                    logger.warning(f"Small response ({content_len} bytes): {response.content[:200]}")
                 return response.content
-            
+
             result = response.json()
             logger.debug(f"PyPNM response from {endpoint}: status={result.get('status')}, keys={list(result.keys())[:10]}")
             if result.get('status') == -1 or result.get('success') is False:
-                logger.warning(f"PyPNM {endpoint} error: success={result.get('success')}, error={result.get('error')}, timing={result.get('timing')}")
+                result = _redact_payload(result)
+                logger.warning(
+                    "PyPNM %s application error: success=%s failure_status=%s",
+                    endpoint,
+                    result.get('success'),
+                    result.get('failure_status'),
+                )
             if 'results' in result:
                 result_val = result['results']
                 if isinstance(result_val, dict):
-                    if result_val:  # only log when non-empty — empty dict is normal for failures
+                    if result_val:
                         logger.debug(f"Response 'results' is dict with keys: {list(result_val.keys())}")
                     if 'entries' in result_val:
                         logger.debug(f"Response 'results.entries' length: {len(result_val['entries'])}")
                 elif isinstance(result_val, list):
                     logger.debug(f"Response 'results' is list with length: {len(result_val)}")
             return result
-        
+
         except requests.exceptions.ConnectionError:
-            logger.error(f"Cannot connect to PyPNM at {self.config.base_url}")
+            logger.error("Cannot connect to configured PyPNM API")
             return {
-                "status": "error",
-                "failure_status": "service_unavailable",
-                "message": f"PyPNM server not reachable at {self.config.base_url}. "
-                          "Please ensure PyPNM is installed and running."
-            }
-        
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout connecting to PyPNM")
-            return {
-                "status": "error",
-                "failure_status": "timeout",
-                "message": "Request to PyPNM timed out"
-            }
-        
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP error from PyPNM: {e}")
-            error_response: Dict[str, Any] = {}
-            if e.response is not None:
-                try:
-                    parsed = e.response.json()
-                    if isinstance(parsed, dict):
-                        error_response = parsed
-                except (TypeError, ValueError):
-                    pass
-            error_text = json.dumps(error_response).lower()
-            if 'timed out' in error_text or 'timeout' in error_text:
-                failure_status = 'timeout'
-            elif 'no connected' in error_text or 'agent manager' in error_text or 'agent is not connected' in error_text:
-                failure_status = 'agent_unavailable'
-            else:
-                failure_status = 'capture_failed'
-            return {
-                **error_response,
                 "status": "error",
                 "success": False,
-                "failure_status": error_response.get("failure_status", failure_status),
-                "message": error_response.get("message") or error_response.get("detail") or f"PyPNM returned error: {e.response.status_code}",
+                "failure_status": "service_unavailable",
+                "upstream_http_status": None,
+                "message": "PyPNM API is unavailable",
             }
-        
-        except Exception as e:
-            logger.exception(f"Unexpected error calling PyPNM")
+
+        except requests.exceptions.Timeout:
+            logger.error("Timeout connecting to PyPNM")
             return {
                 "status": "error",
-                "failure_status": "capture_failed",
-                "message": f"Unexpected error: {str(e)}"
+                "success": False,
+                "failure_status": "timeout",
+                "upstream_http_status": None,
+                "message": "Request to PyPNM timed out",
             }
-    
+
+        except requests.exceptions.HTTPError as error:
+            result = self._http_error_result(error)
+            logger.error(
+                "HTTP error from PyPNM: upstream_status=%s failure_status=%s",
+                result.get("upstream_http_status"),
+                result.get("failure_status"),
+            )
+            return result
+
+        except Exception as e:
+            logger.exception("Unexpected error calling PyPNM")
+            return {
+                "status": "error",
+                "success": False,
+                "failure_status": "unexpected_error",
+                "upstream_http_status": None,
+                "message": f"Unexpected PyPNM client error: {type(e).__name__}",
+            }
+
     def _get(
         self,
         endpoint: str,
@@ -305,25 +337,49 @@ class PyPNMClient:
             timeout = request_timeout if request_timeout is not None else self.config.timeout
             response = self.session.get(url, params=params, timeout=timeout)
             if response.status_code >= 400:
-                try:
-                    logger.error(f"PyPNM returned {response.status_code}: {response.json()}")
-                except Exception:
-                    logger.error(f"PyPNM returned {response.status_code}: {response.text[:500]}")
+                logger.error("PyPNM returned HTTP %s", response.status_code)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            if isinstance(result, dict) and (
+                result.get('status') in ('error', -1) or result.get('success') is False
+            ):
+                return _redact_payload(result)
+            return result
         except requests.exceptions.ConnectionError:
-            logger.error(f"Cannot connect to PyPNM at {self.config.base_url}")
-            return {"status": "error", "message": f"PyPNM server not reachable at {self.config.base_url}."}
+            logger.error("Cannot connect to configured PyPNM API")
+            return {
+                "status": "error",
+                "success": False,
+                "failure_status": "service_unavailable",
+                "upstream_http_status": None,
+                "message": "PyPNM API is unavailable",
+            }
         except requests.exceptions.Timeout:
             logger.error("Timeout connecting to PyPNM")
-            return {"status": "error", "message": "Request to PyPNM timed out"}
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP error from PyPNM: {e}")
-            return {"status": "error", "message": f"PyPNM returned error: {e.response.status_code}",
-                    "detail": e.response.text if e.response else None}
+            return {
+                "status": "error",
+                "success": False,
+                "failure_status": "timeout",
+                "upstream_http_status": None,
+                "message": "Request to PyPNM timed out",
+            }
+        except requests.exceptions.HTTPError as error:
+            result = self._http_error_result(error)
+            logger.error(
+                "HTTP error from PyPNM: upstream_status=%s failure_status=%s",
+                result.get("upstream_http_status"),
+                result.get("failure_status"),
+            )
+            return result
         except Exception as e:
             logger.exception("Unexpected error calling PyPNM")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {
+                "status": "error",
+                "success": False,
+                "failure_status": "unexpected_error",
+                "upstream_http_status": None,
+                "message": f"Unexpected PyPNM client error: {type(e).__name__}",
+            }
 
     def get_inventory_modems(
         self,
@@ -378,12 +434,21 @@ class PyPNMClient:
             params={"q": query, "limit": limit},
         )
 
-    def get_inventory_snapshots(self, request_timeout: int | None = None) -> Dict[str, Any]:
-        """Return current inventory cache revisions without transferring modem rows."""
-        return self._get(
-            "/api/admin/inventory/snapshots/current",
-            request_timeout=request_timeout,
+    def enqueue_delta_enrichment(self, cmts: str, max_batch: int = 25) -> Dict[str, Any]:
+        """Ask PyPNM to enqueue enrichment for one CMTS inventory delta."""
+        try:
+            bounded_batch = max(1, min(int(max_batch), 25))
+        except (TypeError, ValueError):
+            bounded_batch = 25
+        return self._post(
+            "/api/admin/inventory/enrich/delta",
+            {"cmts": cmts, "max_batch": bounded_batch},
         )
+
+    def clear_cmts_modem_cache(self, cmts_ip: str) -> Dict[str, Any]:
+        """Clear PyPNM-owned modem cache state for one configured CMTS IP."""
+        encoded_cmts_ip = quote(str(cmts_ip), safe="")
+        return self._post(f"/cmts/cache/clear?cmts_ip={encoded_cmts_ip}", {})
 
     def get_inventory_modems_bulk(self, mac_addresses: list[str]) -> Dict[str, Any]:
         return self._post("/api/admin/inventory/modems/bulk", {"mac_addresses": mac_addresses})

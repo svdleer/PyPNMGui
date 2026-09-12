@@ -585,7 +585,6 @@ def inventory_summary():
         return gate
 
     cmts = (request.args.get("cmts") or "").strip()
-    cmts_filter = cmts.lower()
     area, error = _inventory_area_arg()
     if error:
         return error
@@ -605,122 +604,7 @@ def inventory_summary():
         if value:
             facet_filters[name] = value
 
-    # Global and area summaries always come from authoritative MySQL. Redis
-    # acceleration is allowed only for an exact CCAP scope whose payload is
-    # revision-verified, explicitly complete, non-truncated, and row-count
-    # consistent. Filtered facets always use the PyPNM API so correlated
-    # inventory aggregation remains behind the API boundary.
-    if area == "all" and cmts_filter and not facet_filters:
-        try:
-            import collections as _collections
-            from app.routes.api_routes import (
-                redis_client,
-                REDIS_AVAILABLE,
-                _inventory_revision_map,
-                _read_modem_cache,
-            )
-
-            revisions = _inventory_revision_map() if REDIS_AVAILABLE and redis_client else None
-            if revisions is not None:
-                for key in redis_client.scan_iter(match="modems:*", count=500):
-                    payload = _read_modem_cache(key, revisions)
-                    if not isinstance(payload, dict):
-                        continue
-                    rows = payload.get("modems") or []
-                    aliases = {
-                        str(payload.get("cmts") or "").strip().lower(),
-                        str(key).split("modems:", 1)[-1].strip().lower(),
-                    }
-                    if rows and isinstance(rows[0], dict):
-                        aliases.update({
-                            str(rows[0].get("cmts") or "").strip().lower(),
-                            str(rows[0].get("cmts_ip") or "").strip().lower(),
-                        })
-                    if cmts_filter not in aliases:
-                        continue
-                    if payload.get("complete") is not True or payload.get("truncated") is True:
-                        continue
-
-                    unique_rows = []
-                    seen_macs = set()
-                    valid_rows = True
-                    for modem in rows:
-                        if not isinstance(modem, dict):
-                            valid_rows = False
-                            break
-                        mac = "".join(
-                            ch for ch in str(modem.get("mac_address") or modem.get("mac") or "").lower()
-                            if ch.isalnum()
-                        )
-                        if not mac:
-                            valid_rows = False
-                            break
-                        if mac in seen_macs:
-                            continue
-                        seen_macs.add(mac)
-                        unique_rows.append(modem)
-                    try:
-                        row_count = int(payload.get("row_count"))
-                    except (TypeError, ValueError):
-                        valid_rows = False
-                        row_count = -1
-                    if not valid_rows or row_count != len(unique_rows):
-                        continue
-
-                    vendor_counts = _collections.Counter()
-                    model_counts = _collections.Counter()
-                    firmware_counts = _collections.Counter()
-                    docsis_counts = _collections.Counter()
-                    active_rows = []
-                    enriched = 0
-                    for modem in unique_rows:
-                        lifecycle = str(
-                            modem.get("inventory_state")
-                            or modem.get("lifecycle_state")
-                            or "active"
-                        ).strip().lower()
-                        if lifecycle != "active":
-                            continue
-                        active_rows.append(modem)
-                        vendor = str(modem.get("vendor") or "").strip() or "(unknown)"
-                        model = str(modem.get("model") or "").strip() or "(unknown)"
-                        firmware = str(
-                            modem.get("software_version") or modem.get("firmware") or ""
-                        ).strip() or "(unknown)"
-                        docsis = str(modem.get("docsis_version") or "").strip() or "(unknown)"
-                        vendor_counts[vendor] += 1
-                        model_counts[model] += 1
-                        firmware_counts[firmware] += 1
-                        docsis_counts[docsis] += 1
-                        if (
-                            vendor.lower() not in ("unknown", "n/a", "(unknown)")
-                            and firmware.lower() not in ("unknown", "n/a", "(unknown)")
-                        ):
-                            enriched += 1
-
-                    def _top(counter):
-                        return [
-                            {"value": value, "count": count}
-                            for value, count in counter.most_common(top_n)
-                        ]
-
-                    total = len(active_rows)
-                    return jsonify({
-                        "status": "success",
-                        "source": "redis",
-                        "total": total,
-                        "enriched": enriched,
-                        "enriched_pct": round(enriched / total * 100, 1) if total else 0.0,
-                        "last_updated": str(
-                            payload.get("collected_at") or payload.get("cache_written_at") or ""
-                        ),
-                        "vendors": _top(vendor_counts),
-                        "models": _top(model_counts),
-                        "firmwares": _top(firmware_counts),
-                        "docsis_versions": _top(docsis_counts),
-                    })
-        except Exception:
-            pass
+    # Inventory aggregation remains behind the PyPNM API for every scope.
 
     params = {"top_n": top_n, **facet_filters}
     if cmts:

@@ -4,7 +4,6 @@ import os
 import re
 import json
 import logging
-import time
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -141,113 +140,81 @@ def get_cmts_community():
     )
 
 
-# Redis for caching modem data
-try:
-    import redis
-    REDIS_HOST = os.environ.get('REDIS_HOST', 'eve-li-redis')
-    REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
-    # Redis accelerates authoritative MySQL inventory reads. Cache entries are
-    # revision-checked, so their lifetime can safely exceed inventory freshness.
-    REDIS_TTL = max(1, min(int(os.environ.get('REDIS_TTL', '604800')), 2592000))
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-    # Test connection
-    redis_client.ping()
-    REDIS_AVAILABLE = True
-    print(f"[INFO] Redis cache connected: {REDIS_HOST}:{REDIS_PORT}", flush=True)
-except Exception as e:
-    REDIS_AVAILABLE = False
-    redis_client = None
-    print(f"[WARNING] Redis not available: {e}", flush=True)
-
-
-def _redis_cache_modems_for_key(
-    cache_key: str,
-    cmts_name: str,
-    modems: list[dict],
-    requested_limit: int | None = None,
-    metadata: dict | None = None,
-) -> None:
-    if not REDIS_AVAILABLE or not redis_client or not cache_key:
-        return
-    if requested_limit is None:
-        requested_limit = _cm_modem_limit_default()
+def _pypnm_error_status(result: dict | None) -> int:
+    """Map sanitized PyPNM failures without hiding safe application errors."""
+    result = result if isinstance(result, dict) else {}
     try:
-        cache_rows = []
-        topology_fields = {
-            'topology_fiber_node', 'topology_path', 'topology_link_id',
-            'linked_node_id', 'linked_node_type', 'link_match',
-            'lat', 'lon', 'customer_id', 'address',
-        }
-        for source in filter_ignored_modems(modems):
-            row = dict(source)
-            for field in topology_fields:
-                row.pop(field, None)
-            cache_rows.append(row)
-        modems = cache_rows
-        snapshot_id = str((metadata or {}).get("snapshot_id") or "").strip()
-        if not snapshot_id:
-            logger.info("Skipped unverifiable modem cache write for %s", cache_key)
-            return
-        payload = {
-            "schema_version": 2,
-            "cmts": cmts_name,
-            "requested_limit": requested_limit,
-            "cache_query_limit": requested_limit,
-            "modems": modems,
-            "cache_written_at": int(time.time()),
-            "source": "pypnm-inventory",
-        }
-        payload.update(_snapshot_metadata(metadata or {}, modems))
-        for state_key in ('enriched', 'enriching', 'enrichment_progress'):
-            if state_key in (metadata or {}):
-                payload[state_key] = metadata.get(state_key)
-        ttl = _cache_remaining_ttl(payload)
-        if ttl <= 0:
-            redis_client.delete(cache_key)
-            logger.info("Skipped stale modem cache write for %s", cache_key)
-            return
-        redis_client.setex(cache_key, ttl, json.dumps(payload))
-    except Exception as exc:
-        logger.warning(f"Redis modem cache write error for {cache_key}: {exc}")
+        upstream_status = int(result.get('upstream_http_status'))
+    except (TypeError, ValueError):
+        upstream_status = None
+
+    if upstream_status is not None:
+        if 400 <= upstream_status < 500 or upstream_status in (503, 504):
+            return upstream_status
+        if upstream_status >= 500:
+            return 502
+
+    failure_status = str(result.get('failure_status') or '').strip().lower()
+    if failure_status == 'timeout':
+        return 504
+    if failure_status in ('service_unavailable', 'agent_unavailable'):
+        return 503
+    return 502
 
 
-def _backfill_redis_from_inventory(
-    modems: list[dict],
-    requested_limit: int | None = None,
-    metadata: dict | None = None,
-) -> None:
-    if not REDIS_AVAILABLE or not redis_client or not modems:
-        return
-    if requested_limit is None:
-        requested_limit = _cm_modem_limit_default()
+def _pypnm_error_response(result: dict | None, fallback: str):
+    """Return a route-owned safe message while retaining routing metadata."""
+    result = result if isinstance(result, dict) else {}
+    body = {'status': 'error', 'message': fallback}
+    if result.get('failure_status'):
+        body['failure_status'] = result['failure_status']
+    if result.get('upstream_http_status') is not None:
+        body['upstream_http_status'] = result['upstream_http_status']
+    return jsonify(body), _pypnm_error_status(result)
 
-    modems = filter_ignored_modems(modems)
 
-    grouped: dict[str, list[dict]] = {}
-    aliases: dict[str, str] = {}
-    for modem in modems:
-        cmts_name = str(modem.get('cmts') or '').strip()
-        cmts_ip = str(modem.get('cmts_ip') or '').strip()
-        if cmts_name:
-            grouped.setdefault(cmts_name, []).append(modem)
-            if cmts_ip and cmts_ip != cmts_name:
-                aliases[cmts_ip] = cmts_name
-        elif cmts_ip:
-            grouped.setdefault(cmts_ip, []).append(modem)
+def _pypnm_exception_result(exc: Exception) -> dict:
+    logger.warning("PyPNM client call raised %s", type(exc).__name__)
+    return {
+        'status': 'error',
+        'success': False,
+        'failure_status': 'service_unavailable',
+        'upstream_http_status': None,
+        'message': 'PyPNM API unavailable',
+    }
 
-    for group_name, rows in grouped.items():
-        _redis_cache_modems_for_key(
-            f"modems:{group_name}", group_name, rows,
-            requested_limit=requested_limit, metadata=metadata,
-        )
 
-    for alias_key, group_name in aliases.items():
-        rows = grouped.get(group_name) or []
-        if rows:
-            _redis_cache_modems_for_key(
-                f"modems:{alias_key}", group_name, rows,
-                requested_limit=requested_limit, metadata=metadata,
-            )
+def _cmts_inventory_refs(cmts: dict, requested_ref: str = '') -> list[str]:
+    """Return distinct authoritative inventory keys in hostname/IP order."""
+    values = (
+        cmts.get('HostName'),
+        cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address'),
+    )
+    refs = []
+    seen = set()
+    for value in values:
+        ref = str(value or '').strip()
+        normalized = ref.lower()
+        if ref and normalized not in seen:
+            seen.add(normalized)
+            refs.append(ref)
+    if not refs:
+        requested = str(requested_ref or '').strip()
+        if requested:
+            refs.append(requested)
+    return refs
+
+
+def _inventory_lookup_absent(result: dict | None, record_key: str) -> bool:
+    """Recognize only authoritative success-empty or explicit not-found contracts."""
+    if not isinstance(result, dict):
+        return False
+    if result.get('status') == 'success':
+        return not result.get(record_key)
+    if result.get('upstream_http_status') == 404:
+        return True
+    message = str(result.get('message') or '').strip().lower().rstrip('.')
+    return result.get('status') == 'error' and message == 'modem not found'
 
 
 def _parse_inventory_timestamp(value):
@@ -307,147 +274,12 @@ def _snapshot_metadata(metadata: dict, modems: list[dict]) -> dict:
     out['partial'] = not out['inventory_complete']
     return out
 
-def _cache_reference_time(payload: dict):
-    return _parse_inventory_timestamp(payload.get("collected_at")) or _parse_inventory_timestamp(
-        payload.get("timestamp")
-    )
-
-
-def _cache_remaining_ttl(payload: dict) -> int:
-    """Bound Redis lifetime from cache write time, not inventory collection time."""
-    written_at = _parse_inventory_timestamp(payload.get("cache_written_at"))
-    if written_at is None:
-        # Legacy payloads remain bounded by their existing Redis TTL.
-        return REDIS_TTL
-    age = max(0.0, (datetime.now(timezone.utc) - written_at).total_seconds())
-    return max(0, min(REDIS_TTL, int(REDIS_TTL - age)))
-
-
-def _inventory_revision_map() -> dict[str, dict] | None:
-    """Load authoritative CMTS revisions; return None when verification is unavailable."""
-    revisions: dict[str, dict] = {}
-    try:
-        response = PyPNMClient().get_inventory_snapshots(request_timeout=5)
-        if response.get("status") != "success":
-            raise RuntimeError(response.get("message") or "revision lookup failed")
-        for snapshot in response.get("snapshots") or []:
-            revision = _parse_inventory_timestamp(
-                snapshot.get("revision_at") or snapshot.get("collected_at")
-            )
-            if revision is None:
-                continue
-            state = {
-                "revision": revision,
-                "snapshot_id": str(snapshot.get("snapshot_id") or "").strip(),
-            }
-            for alias in (snapshot.get("cmts"), snapshot.get("cmts_ip")):
-                key = str(alias or "").strip().lower()
-                if key:
-                    revisions[key] = state
-    except Exception as exc:
-        logger.warning("Inventory revision lookup unavailable: %s", exc)
-        return None
-    return revisions
-
-
-def _cache_payload_is_current(payload: dict, revisions: dict[str, dict] | None = None) -> bool:
-    if _cache_remaining_ttl(payload) <= 0 or revisions is None:
-        return False
-
-    aliases = [str(payload.get("cmts") or "").strip().lower()]
-    modems = payload.get("modems") or []
-    if modems and isinstance(modems[0], dict):
-        aliases.append(str(modems[0].get("cmts_ip") or "").strip().lower())
-    states = [revisions[a] for a in aliases if a in revisions]
-    current_state = max(states, key=lambda state: state["revision"], default=None)
-    if current_state is None:
-        return False
-
-    current_snapshot_id = current_state.get("snapshot_id")
-    cached_snapshot_id = str(payload.get("snapshot_id") or "").strip()
-    if current_snapshot_id and current_snapshot_id != cached_snapshot_id:
-        return False
-
-    cached_revision = _parse_inventory_timestamp(payload.get("revision_at"))
-    cached_revision = cached_revision or _parse_inventory_timestamp(
-        payload.get("inventory_revision")
-    )
-    cached_revision = cached_revision or _cache_reference_time(payload)
-    return cached_revision is not None and current_state["revision"] <= cached_revision
-
-
-def _read_modem_cache(cache_key: str, revisions: dict[str, dict] | None = None):
-    """Read a verified modem cache payload; retain keys during verifier outages."""
-    cached = redis_client.get(cache_key) if redis_client else None
-    if not cached:
-        return None
-    try:
-        payload = json.loads(cached)
-    except Exception:
-        if redis_client:
-            redis_client.delete(cache_key)
-        return None
-    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
-        if redis_client:
-            redis_client.delete(cache_key)
-        logger.info("Invalidated legacy modem cache key %s", cache_key)
-        return None
-    if not _cache_payload_is_current(payload, revisions):
-        # None means PyPNM verification was unavailable. Bypass but retain the
-        # cache so a transient outage does not destroy a valid generation.
-        if redis_client and revisions is not None:
-            redis_client.delete(cache_key)
-            logger.info("Invalidated stale modem cache key %s", cache_key)
-        else:
-            logger.info("Bypassed unverifiable modem cache key %s", cache_key)
-        return None
-    return payload
-
-
-def _inventory_snapshot_is_fresh(modems: list[dict]) -> bool:
-    if not modems:
-        return False
-    timestamps = [_parse_inventory_timestamp(m.get("updated_at")) for m in modems]
-    timestamps = [dt for dt in timestamps if dt is not None]
-    if not timestamps:
-        return False
-    oldest = min(timestamps)
-    age_seconds = (datetime.now(timezone.utc) - oldest).total_seconds()
-    return age_seconds <= REDIS_TTL
-
-
-# Minimum fraction of modems that must have both vendor AND firmware populated
-# for the dataset to be considered truly enriched.
-_ENRICH_QUALITY_THRESHOLD = 0.40
-
-
 # Values that mean an identity field has not actually been enriched.
 _IDENTITY_PLACEHOLDERS = {'', 'unknown', 'n/a', 'na', 'none', 'null', '-', '—'}
 
 
 def _identity_value_missing(value) -> bool:
     return str(value or '').strip().lower() in _IDENTITY_PLACEHOLDERS
-
-
-def _modems_are_enriched(modems: list[dict]) -> bool:
-    """Return True only when a meaningful portion of modems have vendor+firmware data."""
-    if not modems:
-        return False
-    sample = modems[:200]  # Check up to 200 rows for speed
-    enriched_count = sum(
-        1 for m in sample
-        if not _identity_value_missing(m.get('vendor'))
-        and not _identity_value_missing(m.get('software_version') or m.get('firmware'))
-    )
-    return (enriched_count / len(sample)) >= _ENRICH_QUALITY_THRESHOLD
-
-
-def _modem_missing_enrichment(modem: dict) -> bool:
-    vendor = str(modem.get('vendor') or '').strip().lower()
-    fw = str(modem.get('software_version') or modem.get('firmware') or '').strip().lower()
-    vendor_missing = vendor in ('', 'unknown', 'n/a')
-    fw_missing = fw in ('', 'unknown', 'n/a')
-    return vendor_missing or fw_missing
 
 
 def _docsis_version_rank(value) -> int:
@@ -813,7 +645,7 @@ def handle_agent_result(result, success_field='success'):
 
 @api_bp.route('/modems', methods=['GET'])
 def get_modems():
-    """Search cached cable modems across one or all CMTS entries.
+    """Search authoritative cable modem inventory across one or all CMTS entries.
 
     Query params:
       - search_type: ip | mac | name
@@ -821,9 +653,7 @@ def get_modems():
       - cmts: optional CMTS hostname to scope the search
       - interface: optional interface filter
 
-    Notes:
-      - This endpoint is cache-backed and intentionally does not trigger live SNMP walks.
-      - Call /api/cmts/<hostname>/modems first to load cache for a CMTS.
+    This endpoint reads persisted PyPNM inventory and never triggers a live SNMP walk.
     """
     search_type = (request.args.get('search_type') or '').strip().lower()
     search_value = (request.args.get('search_value') or '').strip().lower()
@@ -834,7 +664,7 @@ def get_modems():
     )
 
     # CPE addresses are persisted and indexed by PyPNM. Keep the GUI as a
-    # thin proxy and bypass its per-worker Redis modem caches for this search.
+    # thin proxy for this search.
     if search_type == 'cpe_ip':
         if not search_value:
             return jsonify({'status': 'error', 'message': 'CPE address is required'}), 400
@@ -846,47 +676,71 @@ def get_modems():
                 interface=iface_filter or None,
                 limit=query_limit,
             )
-            if response.get('status') != 'success':
-                message = response.get('message') or 'CPE inventory search failed'
-                logger.warning('PyPNM CPE inventory search failed: %s', message)
-                return jsonify({'status': 'error', 'message': message}), 503
-            # CPE matches are authoritative. Do not hide them based on the
-            # linked modem's IP address matching MODEM_IGNORE_CIDRS.
-            modems = response.get('modems') or []
-            return jsonify({
-                'status': 'success',
-                'modems': modems,
-                'count': len(modems),
-                'cached': bool(response.get('cached')),
-                'source': response.get('source') or 'pypnm-inventory',
-            })
         except Exception as exc:
             logger.exception('PyPNM CPE inventory search failed')
-            return jsonify({'status': 'error', 'message': str(exc)}), 503
+            return _pypnm_error_response(
+                _pypnm_exception_result(exc), 'CPE inventory search failed'
+            )
+        if not isinstance(response, dict):
+            return _pypnm_error_response(None, 'PyPNM returned an invalid CPE inventory response')
+        if response.get('status') != 'success':
+            logger.warning(
+                'PyPNM CPE inventory search failed: %s',
+                response.get('message') or 'unknown error',
+            )
+            return _pypnm_error_response(response, 'CPE inventory search failed')
+        # CPE matches are authoritative. Do not hide them based on the
+        # linked modem's IP address matching MODEM_IGNORE_CIDRS.
+        modems = response.get('modems') or []
+        return jsonify({
+            'status': 'success',
+            'modems': modems,
+            'count': len(modems),
+            'cached': True,
+            'source': response.get('source') or 'pypnm-inventory',
+        })
 
     def _fallback_for_mac(query_mac: str):
         mac_bare = re.sub(r'[^a-f0-9]', '', (query_mac or '').lower())
         if len(mac_bare) != 12:
             return None
+
+        client = PyPNMClient()
         try:
-            inv_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
-            inv_modem = inv_resp.get('modem') if isinstance(inv_resp, dict) else None
-            if inv_modem:
-                _normalize_modem_capability(inv_modem)
-                return jsonify({
-                    'status': 'success',
-                    'modems': [inv_modem],
-                    'count': 1,
-                    'cached': False,
-                    'source': inv_resp.get('source') or 'pypnm-inventory',
-                })
-        except Exception:
-            pass
+            inv_resp = client.get_inventory_modem_by_mac(mac_bare, request_timeout=10)
+        except Exception as exc:
+            return _pypnm_error_response(
+                _pypnm_exception_result(exc), 'PyPNM inventory lookup failed'
+            )
+        if not isinstance(inv_resp, dict):
+            return _pypnm_error_response(None, 'PyPNM returned an invalid inventory response')
+        inv_modem = inv_resp.get('modem')
+        if inv_resp.get('status') == 'success' and inv_modem:
+            _normalize_modem_capability(inv_modem)
+            _augment_modems_with_topology_fields(
+                [inv_modem], cmts_name=str(inv_modem.get('cmts') or '')
+            )
+            return jsonify({
+                'status': 'success',
+                'modems': [inv_modem],
+                'count': 1,
+                'cached': True,
+                'source': inv_resp.get('source') or 'pypnm-inventory',
+            })
+        if not _inventory_lookup_absent(inv_resp, 'modem'):
+            return _pypnm_error_response(inv_resp, 'PyPNM inventory lookup failed')
+
+        # Topology is an exact fallback only after authoritative inventory absence.
         try:
-            topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare, request_timeout=10)
-            topo_modem = topo_resp.get('modem') if isinstance(topo_resp, dict) else None
-            if not topo_modem:
-                return None
+            topo_resp = client.get_topology_modem_by_mac(mac_bare, request_timeout=10)
+        except Exception as exc:
+            return _pypnm_error_response(
+                _pypnm_exception_result(exc), 'PyPNM topology lookup failed'
+            )
+        if not isinstance(topo_resp, dict):
+            return _pypnm_error_response(None, 'PyPNM returned an invalid topology response')
+        topo_modem = topo_resp.get('modem')
+        if topo_resp.get('status') == 'success' and topo_modem:
             modem = {
                 "mac_address": topo_modem.get('mac') or query_mac,
                 "name": topo_modem.get('mac') or query_mac,
@@ -917,209 +771,72 @@ def get_modems():
                 "cached": False,
                 "source": "topology-mysql",
             })
-        except Exception:
-            return None
+        if not _inventory_lookup_absent(topo_resp, 'modem'):
+            return _pypnm_error_response(topo_resp, 'PyPNM topology lookup failed')
+        return jsonify({
+            "status": "success",
+            "modems": [],
+            "count": 0,
+            "cached": True,
+            "source": "pypnm-inventory",
+        })
 
     def _inventory_fallback_error(response):
         if isinstance(response, dict) and response.get('status') == 'success':
             return None
-        message = (
-            response.get('message')
-            if isinstance(response, dict)
-            else 'Invalid response from PyPNM inventory'
-        ) or 'PyPNM inventory search failed'
-        status_code = 400 if '400' in str(message) else 503
-        logger.warning('PyPNM inventory fallback failed: %s', message)
-        return jsonify({'status': 'error', 'message': message}), status_code
+        logger.warning(
+            'PyPNM inventory fallback failed: %s',
+            response.get('message') if isinstance(response, dict) else 'invalid response',
+        )
+        return _pypnm_error_response(response, 'PyPNM inventory search failed')
 
-    # Full MAC addresses are primary-key lookups. Resolve them before scanning
-    # large Redis payloads or invoking the general inventory search endpoint.
+    # Full MAC addresses use one authoritative primary-key lookup followed by
+    # one topology fallback; do not repeat the chain through general search.
     if search_type == 'mac' and len(re.sub(r'[^a-f0-9]', '', search_value)) == 12:
-        exact_mac_result = _fallback_for_mac(search_value)
-        if exact_mac_result is not None:
-            return exact_mac_result
-
-    # MySQL inventory fallback path when Redis is unavailable.
-    if not REDIS_AVAILABLE or not redis_client:
-        try:
-            default_limit = query_limit
-            modems_resp = PyPNMClient().get_inventory_modems(
-                cmts=cmts_filter or None,
-                search_type=search_type or None,
-                search_value=search_value or None,
-                interface=iface_filter or None,
-                limit=default_limit,
-            )
-            fallback_error = _inventory_fallback_error(modems_resp)
-            if fallback_error:
-                return fallback_error
-            modems = filter_ignored_modems(modems_resp.get('modems') or [])
-            if not modems and search_type == 'mac' and search_value:
-                mac_fallback = _fallback_for_mac(search_value)
-                if mac_fallback is not None:
-                    return mac_fallback
-            _augment_modems_with_topology_fields(modems)
-            return jsonify({
-                "status": "success",
-                "modems": modems,
-                "count": len(modems),
-                "cached": False,
-                "source": modems_resp.get('source') or "pypnm-inventory",
-            })
-        except Exception as e:
-            return jsonify({
-                "status": "error",
-                "message": f"Modem cache unavailable and PyPNM inventory fallback failed: {e}"
-            }), 503
+        return _fallback_for_mac(search_value)
 
     try:
-        keys = (
-            [f"modems:{cmts_filter}"]
-            if cmts_filter
-            else redis_client.scan_iter(match='modems:*', count=500)
+        modems_resp = PyPNMClient().get_inventory_modems(
+            cmts=cmts_filter or None,
+            search_type=search_type or None,
+            search_value=search_value or None,
+            interface=iface_filter or None,
+            limit=query_limit,
         )
-        revisions = _inventory_revision_map()
-        seen_macs: set[str] = set()
-        modems = []
+        inventory_error = _inventory_fallback_error(modems_resp)
+        if inventory_error:
+            return inventory_error
 
-        for key in keys:
-            payload = _read_modem_cache(key, revisions)
-            if not payload:
-                continue
-            cmts_name = str(payload.get('cmts') or key.split(':', 1)[-1])
-            for m in payload.get('modems', []):
-                mac_key = str(m.get('mac_address', '')).lower().replace(':', '').replace('-', '')
-                if mac_key in seen_macs:
-                    continue
-                seen_macs.add(mac_key)
-                row = dict(m)
-                row.setdefault('cmts', cmts_name)
-                modems.append(row)
-
-        modems = filter_ignored_modems(modems)
-
-        if not modems:
-            # If Redis has no records yet, fallback to PyPNM inventory snapshot.
-            default_limit = query_limit
-            db_resp = PyPNMClient().get_inventory_modems(
-                cmts=cmts_filter or None,
-                search_type=search_type or None,
-                search_value=search_value or None,
-                interface=iface_filter or None,
-                limit=default_limit,
-            )
-            fallback_error = _inventory_fallback_error(db_resp)
-            if fallback_error:
-                return fallback_error
-            db_modems = filter_ignored_modems(db_resp.get('modems') or [])
-            if db_modems:
-                _backfill_redis_from_inventory(
-                    db_modems,
-                    requested_limit=db_resp.get('requested_limit') or default_limit,
-                    metadata=db_resp,
-                )
-                _augment_modems_with_topology_fields(db_modems)
-                return jsonify({
-                    "status": "success",
-                    "modems": db_modems,
-                    "count": len(db_modems),
-                    "cached": False,
-                    "source": db_resp.get('source') or "pypnm-inventory",
-                })
-            if search_type == 'mac' and search_value:
-                mac_fallback = _fallback_for_mac(search_value)
-                if mac_fallback is not None:
-                    return mac_fallback
-            msg = f"No cached modems for CMTS '{cmts_filter}'. Load modems first." if cmts_filter else "No cached modems found. Load modems from a CMTS first."
-            return jsonify({"status": "success", "modems": [], "count": 0, "message": msg})
-
-        def _norm_mac(v: str) -> str:
-            return ''.join(ch for ch in (v or '').lower() if ch.isalnum())
-
-        # Apply search filter (if requested)
-        if search_value:
-            if search_type == 'ip':
-                modems = [m for m in modems if search_value in str(m.get('ip_address', '')).lower()]
-            elif search_type == 'mac':
-                q = _norm_mac(search_value)
-                modems = [m for m in modems if q in _norm_mac(str(m.get('mac_address', '')))]
-            elif search_type == 'name':
-                modems = [
-                    m for m in modems
-                    if search_value in str(m.get('name', '')).lower()
-                    or search_value in str(m.get('hostname', '')).lower()
-                    or search_value in str(m.get('alias', '')).lower()
-                ]
-            elif search_type == 'fiber_node':
-                modems = [
-                    m for m in modems
-                    if search_value in str(m.get('fiber_node', '')).lower()
-                ]
-
-        # Apply interface filter (if requested)
-        if iface_filter:
-            def _iface_match(m: dict) -> bool:
-                fields = (
-                    str(m.get('interface', '')).lower(),
-                    str(m.get('cmts_interface', '')).lower(),
-                    str(m.get('upstream_interface', '')).lower(),
-                    str(m.get('cable_mac', '')).lower(),
-                )
-                return any(iface_filter in f for f in fields)
-            modems = [m for m in modems if _iface_match(m)]
-
-        # Redis may contain rows for other searches while having no match for
-        # this query. Always ask persisted PyPNM inventory before MAC/topology
-        # fallback so expiration or a sparse acceleration cache cannot hide data.
-        if not modems:
-            default_limit = query_limit
-            db_resp = PyPNMClient().get_inventory_modems(
-                cmts=cmts_filter or None,
-                search_type=search_type or None,
-                search_value=search_value or None,
-                interface=iface_filter or None,
-                limit=default_limit,
-            )
-            fallback_error = _inventory_fallback_error(db_resp)
-            if fallback_error:
-                return fallback_error
-            db_modems = filter_ignored_modems(db_resp.get('modems') or [])
-            if db_modems:
-                _backfill_redis_from_inventory(
-                    db_modems,
-                    requested_limit=db_resp.get('requested_limit') or default_limit,
-                    metadata=db_resp,
-                )
-                _augment_modems_with_topology_fields(db_modems)
-                return jsonify({
-                    "status": "success",
-                    "modems": db_modems,
-                    "count": len(db_modems),
-                    "cached": False,
-                    "source": db_resp.get('source') or "pypnm-inventory",
-                })
-
+        modems = filter_ignored_modems(modems_resp.get('modems') or [])
         if not modems and search_type == 'mac' and search_value:
             mac_fallback = _fallback_for_mac(search_value)
             if mac_fallback is not None:
                 return mac_fallback
 
-        # Stable ordering for UI and honor the bounded caller limit.
-        modems.sort(key=lambda m: (str(m.get('cmts', '')), str(m.get('mac_address', ''))))
+        # Keep ordering deterministic across authoritative inventory pages and
+        # enforce the bounded browser-facing limit after ignored-row filtering.
+        modems.sort(
+            key=lambda modem: (
+                str(modem.get('cmts') or modem.get('cmts_ip') or '').lower(),
+                re.sub(r'[^a-f0-9]', '', str(modem.get('mac_address') or '').lower()),
+            )
+        )
         modems = modems[:query_limit]
-
-        # Enrich inventory results with topology fields (fibernode, customer_id, lat/lon)
         _augment_modems_with_topology_fields(modems)
 
+        metadata = _snapshot_metadata(modems_resp, modems)
         return jsonify({
             "status": "success",
             "modems": modems,
             "count": len(modems),
             "cached": True,
+            **metadata,
         })
-    except Exception as e:
-        logger.error(f"Error searching cached modems: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as exc:
+        logger.exception("PyPNM inventory search failed")
+        return _pypnm_error_response(
+            _pypnm_exception_result(exc), 'PyPNM inventory search failed'
+        )
 
 
 @api_bp.route('/modems/cpe-suggestions', methods=['GET'])
@@ -1153,7 +870,7 @@ def get_cpe_suggestions():
 
 @api_bp.route('/modems/<mac_address>', methods=['GET'])
 def get_modem(mac_address):
-    """Get a specific modem by MAC address from cache or mock data."""
+    """Get a specific modem by authoritative MAC lookup or topology fallback."""
     # Normalise both to bare hex (no separators) for comparison so that
     # 5CFA25A1CA92, 5c:fa:25:a1:ca:92, and 5c-fa-25-a1-ca-92 all match.
     def _bare(mac):
@@ -1168,152 +885,80 @@ def get_modem(mac_address):
 
     mac_bare = _bare(mac_address)
 
-    # Authoritative inventory lookup is a primary-key query and avoids scanning
-    # every CMTS cache payload as Redis retention grows.
+    # Authoritative inventory lookup is a primary-key query. Topology is only
+    # consulted after the inventory positively confirms absence.
     try:
         modem_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
-        modem = modem_resp.get('modem') if isinstance(modem_resp, dict) else None
-        if modem:
-            _normalize_modem_capability(modem)
-            _backfill_topology(modem)
-            return jsonify({
-                "status": "success",
-                "modem": modem,
-                "source": modem_resp.get('source') or "pypnm-inventory",
-            })
     except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "PyPNM primary modem inventory lookup error: %s", exc
+        return _pypnm_error_response(
+            _pypnm_exception_result(exc), 'PyPNM modem inventory lookup failed'
         )
+    if not isinstance(modem_resp, dict):
+        return _pypnm_error_response(None, 'PyPNM returned an invalid inventory response')
+    modem = modem_resp.get('modem')
+    if modem_resp.get('status') == 'success' and modem:
+        _normalize_modem_capability(modem)
+        _backfill_topology(modem)
+        return jsonify({
+            "status": "success",
+            "modem": modem,
+            "cached": True,
+            "source": modem_resp.get('source') or "pypnm-inventory",
+        })
+    if not _inventory_lookup_absent(modem_resp, 'modem'):
+        return _pypnm_error_response(modem_resp, 'PyPNM modem inventory lookup failed')
 
-    # Try to find in a revision-current Redis cache.
-    if REDIS_AVAILABLE and redis_client:
-        try:
-            revisions = _inventory_revision_map()
-            keys = redis_client.scan_iter(match='modems:*', count=500)
-            for key in keys:
-                data = _read_modem_cache(key, revisions)
-                if data:
-                    modems = data.get('modems', [])
-                    for modem in modems:
-                        if _bare(modem.get('mac_address', '')) == mac_bare:
-                            # Merge enrichment fields from inventory when Redis
-                            # cache lacks them (vendor/model/software/ofdm come
-                            # from sysDescr refresh, stored in MySQL only).
-                            inv_m = None
-                            if (_identity_value_missing(modem.get('vendor'))
-                                    or _identity_value_missing(modem.get('model'))
-                                    or _identity_value_missing(modem.get('software_version') or modem.get('firmware'))
-                                    or not modem.get('fiber_node')
-                                    or not modem.get('cable_mac')
-                                    or modem.get('ofdm_enabled') is None
-                                    or modem.get('ofdma_enabled') is None
-                                    or 'cpe_ipv4' not in modem
-                                    or 'cpe_ipv6' not in modem
-                                    or _docsis_version_rank(modem.get('docsis_version')) < 31):
-                                try:
-                                    inv = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
-                                    inv_m = inv.get('modem') if isinstance(inv, dict) else None
-                                    if inv_m:
-                                        for field in ('vendor', 'model', 'software_version'):
-                                            incoming = inv_m.get(field)
-                                            if (not _identity_value_missing(incoming)
-                                                    and _identity_value_missing(modem.get(field))):
-                                                modem[field] = incoming
-                                        for field in ('fiber_node', 'cable_mac'):
-                                            incoming = inv_m.get(field)
-                                            if incoming and not modem.get(field):
-                                                modem[field] = incoming
-                                        for field in ('ofdm_ifindex', 'ofdma_ifindex',
-                                                      'ofdma_rf_port_ifindex'):
-                                            if (_positive_index(inv_m.get(field))
-                                                    and not _positive_index(modem.get(field))):
-                                                modem[field] = inv_m[field]
-                                        for field in ('ofdm_channels', 'ofdma_channels',
-                                                      'ofdm', 'ofdma'):
-                                            if (_positive_channels(inv_m.get(field))
-                                                    and not _positive_channels(modem.get(field))):
-                                                modem[field] = inv_m[field]
-                                        incoming_interface = str(inv_m.get('upstream_interface') or '').strip()
-                                        current_interface = str(modem.get('upstream_interface') or '').strip()
-                                        if incoming_interface and (
-                                                not current_interface
-                                                or ('ofdma' in incoming_interface.lower()
-                                                    and 'ofdma' not in current_interface.lower())):
-                                            modem['upstream_interface'] = incoming_interface
-                                        modem['cpe_ipv4'] = inv_m.get('cpe_ipv4') or []
-                                        modem['cpe_ipv6'] = inv_m.get('cpe_ipv6') or []
-                                except Exception:
-                                    pass
-                            _normalize_modem_capability(modem, inv_m)
-                            _backfill_topology(modem)
-                            return jsonify({
-                                "status": "success",
-                                "modem": modem
-                            })
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Redis search error: {e}")
-
-    # Fallback to PyPNM inventory snapshot (pass bare hex so DB REPLACE works)
-    try:
-        modem_resp = PyPNMClient().get_inventory_modem_by_mac(mac_bare, request_timeout=10)
-        modem = modem_resp.get('modem')
-        if modem:
-            _normalize_modem_capability(modem)
-            _backfill_topology(modem)
-            return jsonify({
-                "status": "success",
-                "modem": modem,
-                "source": modem_resp.get('source') or "pypnm-inventory",
-            })
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"PyPNM modem inventory fallback error: {e}")
-
-    # Final fallback: topology MySQL snapshot (for topology-origin modems that
-    # are not present in live CMTS Redis cache/inventory).
+    # Final fallback: exact topology snapshot for a positively absent inventory row.
     try:
         topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare, request_timeout=10)
-        topo_modem = topo_resp.get('modem') if isinstance(topo_resp, dict) else None
-        if topo_modem:
-            mac_norm = topo_modem.get('mac') or mac_address
-            modem = {
-                "mac_address": mac_norm,
-                "name": mac_norm,
-                "ip_address": "",
-                "cpe_ipv4": [],
-                "cpe_ipv6": [],
-                "status": "topology-only",
-                "vendor": "Unknown",
-                "model": "N/A",
-                "docsis_version": "Unknown",
-                "cmts": topo_modem.get('cmts') or "",
-                "cmts_ip": topo_modem.get('cmts_ip') or "",
-                "fiber_node": "",
-                "topology_fiber_node": topo_modem.get('fibernode') or "",
-                "customer_id": topo_modem.get('customer_id') or "",
-                "postalcode": topo_modem.get('postalcode') or "",
-                "house_number": topo_modem.get('house_number') or "",
-                "house_number_extension": topo_modem.get('house_number_extension') or "",
-                "topology_path": topo_modem.get('hierarchy_path') or "",
-                "topology_link_id": topo_modem.get('topology_link_id') or "",
-                "linked_node_id": topo_modem.get('linked_node_id') or "",
-                "lat": topo_modem.get('lat'),
-                "lon": topo_modem.get('lon'),
-                "linked_node_type": topo_modem.get('linked_node_type') or "",
-                "link_match": bool(topo_modem.get('link_match')),
-                "source": "topology-mysql",
-            }
-            return jsonify({
-                "status": "success",
-                "modem": modem,
-                "source": "topology-mysql",
-            })
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"PyPNM topology modem fallback error: {e}")
-    
+    except Exception as exc:
+        return _pypnm_error_response(
+            _pypnm_exception_result(exc), 'PyPNM topology modem lookup failed'
+        )
+    if not isinstance(topo_resp, dict):
+        return _pypnm_error_response(None, 'PyPNM returned an invalid topology response')
+    topo_modem = topo_resp.get('modem')
+    if topo_resp.get('status') == 'success' and topo_modem:
+        mac_norm = topo_modem.get('mac') or mac_address
+        modem = {
+            "mac_address": mac_norm,
+            "name": mac_norm,
+            "ip_address": "",
+            "cpe_ipv4": [],
+            "cpe_ipv6": [],
+            "status": "topology-only",
+            "vendor": "Unknown",
+            "model": "N/A",
+            "docsis_version": "Unknown",
+            "cmts": topo_modem.get('cmts') or "",
+            "cmts_ip": topo_modem.get('cmts_ip') or "",
+            "fiber_node": "",
+            "topology_fiber_node": topo_modem.get('fibernode') or "",
+            "customer_id": topo_modem.get('customer_id') or "",
+            "postalcode": topo_modem.get('postalcode') or "",
+            "house_number": topo_modem.get('house_number') or "",
+            "house_number_extension": topo_modem.get('house_number_extension') or "",
+            "topology_path": topo_modem.get('hierarchy_path') or "",
+            "topology_link_id": topo_modem.get('topology_link_id') or "",
+            "linked_node_id": topo_modem.get('linked_node_id') or "",
+            "lat": topo_modem.get('lat'),
+            "lon": topo_modem.get('lon'),
+            "linked_node_type": topo_modem.get('linked_node_type') or "",
+            "link_match": bool(topo_modem.get('link_match')),
+            "source": "topology-mysql",
+        }
+        return jsonify({
+            "status": "success",
+            "modem": modem,
+            "cached": False,
+            "source": "topology-mysql",
+        })
+    if not _inventory_lookup_absent(topo_resp, 'modem'):
+        return _pypnm_error_response(topo_resp, 'PyPNM topology modem lookup failed')
+
     return jsonify({
         "status": "error",
-        "message": "Modem not found in cache/inventory/topology snapshot."
+        "message": "Modem not found in inventory or topology snapshot."
     }), 404
 
 
@@ -1399,27 +1044,6 @@ def get_cmts_interfaces(cmts_name):
     cmts_ip = str(
         cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address') or ''
     ).strip()
-    client = PyPNMClient()
-    result = None
-    used_ref = canonical_name
-    seen_refs = set()
-    for candidate in (canonical_name, cmts_ip):
-        candidate = str(candidate or '').strip()
-        if not candidate or candidate.lower() in seen_refs:
-            continue
-        seen_refs.add(candidate.lower())
-        response = client.get_inventory_interfaces(candidate)
-        if response.get('status') == 'success':
-            result = response
-            used_ref = candidate
-            break
-        result = response
-
-    if not result or result.get('status') != 'success':
-        return jsonify({
-            "status": "error",
-            "message": (result or {}).get('message') or 'Inventory interfaces unavailable',
-        }), 502
 
     def _interface_value(item):
         if isinstance(item, str):
@@ -1444,6 +1068,41 @@ def get_cmts_interfaces(cmts_name):
                     seen.add(normalized)
                     values.append(value)
         return values
+
+    def _response_values(response):
+        return _values(
+            response.get('interfaces'),
+            response.get('downstream_interfaces'), response.get('downstream'),
+            response.get('upstream_interfaces'), response.get('upstream'),
+            response.get('cable_macs'),
+        )
+
+    client = PyPNMClient()
+    result = None
+    used_ref = canonical_name
+    empty_successes = []
+    first_error = None
+    for candidate in _cmts_inventory_refs(cmts, cmts_name):
+        try:
+            response = client.get_inventory_interfaces(candidate)
+        except Exception as exc:
+            response = _pypnm_exception_result(exc)
+        if isinstance(response, dict) and response.get('status') == 'success':
+            if _response_values(response):
+                result = response
+                used_ref = candidate
+                break
+            empty_successes.append((candidate, response))
+        elif first_error is None:
+            first_error = response
+
+    if result is None:
+        if first_error is not None:
+            return _pypnm_error_response(first_error, 'Inventory interfaces unavailable')
+        if not empty_successes:
+            return _pypnm_error_response(None, 'Inventory interfaces unavailable')
+        # Every distinct hostname/IP lookup succeeded empty.
+        used_ref, result = empty_successes[0]
 
     downstream = _values(
         result.get('downstream_interfaces'), result.get('downstream'),
@@ -1488,7 +1147,10 @@ def get_cmts_modems(cmts_name):
     """Return persisted CMTS inventory first; discover live only when explicitly needed."""
     logger = logging.getLogger(__name__)
 
-    cmts = CMTSProvider.get_cmts_by_hostname(cmts_name)
+    cmts = (
+        CMTSProvider.get_cmts_by_hostname(cmts_name)
+        or CMTSProvider.get_cmts_by_ip(cmts_name)
+    )
     if not cmts:
         return jsonify({
             "status": "error",
@@ -1503,6 +1165,7 @@ def get_cmts_modems(cmts_name):
     limit = _bounded_modem_limit(request.args.get('limit', _cm_modem_limit_default()))
     enrich = request.args.get('enrich', 'false').lower() == 'true'
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+    include_topology = request.args.get('include_topology', 'true').lower() == 'true'
 
     try:
         cmts_ip = cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address')
@@ -1523,7 +1186,8 @@ def get_cmts_modems(cmts_name):
                     modem['cmts_community'] = community
                 else:
                     modem.pop('cmts_community', None)
-            _augment_modems_with_topology_fields(prepared, cmts_name=canonical_name)
+            if include_topology:
+                _augment_modems_with_topology_fields(prepared, cmts_name=canonical_name)
             return prepared
 
         def _success_response(rows, metadata, agent_id, cached):
@@ -1546,106 +1210,63 @@ def get_cmts_modems(cmts_name):
                 **snapshot,
             })
 
-        # Redis accelerates reads, but it is not the inventory authority. Read
-        # canonical hostname first and then the configured-IP alias.
-        cache_candidate = None
-        if REDIS_AVAILABLE and redis_client and not force_refresh:
-            revisions = _inventory_revision_map()
-            seen_keys = set()
-            for cache_ref in (canonical_name, cmts_ip):
-                cache_key = f"modems:{cache_ref}"
-                if cache_key in seen_keys:
-                    continue
-                seen_keys.add(cache_key)
-                try:
-                    data = _read_modem_cache(cache_key, revisions)
-                    if not data:
-                        continue
-                    cached_rows = filter_ignored_modems(data.get('modems') or [])
-                    if not cached_rows:
-                        continue
-                    cache_candidate = (cached_rows, data)
-                    cached_limit = _bounded_modem_limit(
-                        data.get('cache_query_limit'), default=0
-                    ) if data.get('cache_query_limit') else 0
-                    try:
-                        authoritative_row_count = int(data.get('row_count'))
-                    except (TypeError, ValueError):
-                        authoritative_row_count = len(cached_rows)
-                    cache_contains_complete_generation = (
-                        authoritative_row_count <= len(cached_rows)
-                    )
-                    cache_covers_request = (
-                        (
-                            data.get('complete') is True
-                            and data.get('truncated') is not True
-                            and cache_contains_complete_generation
-                        )
-                        or cached_limit == 0
-                        or cached_limit >= limit
-                    )
-                    if cache_covers_request:
-                        rows = _prepare_rows(cached_rows)
-                        logger.info(
-                            "Returning %d persisted modems from Redis key %s",
-                            len(rows), cache_key,
-                        )
-                        return _success_response(rows, data, 'cached', True)
-                    # A smaller partial cache is retained as a fallback while
-                    # the authoritative persisted inventory is queried below.
-                    break
-                except Exception as exc:
-                    logger.warning("Redis cache read error for %s: %s", cache_key, exc)
-
-        # Query authoritative persisted inventory by canonical hostname and then
-        # configured IP. Age, completeness, truncation, and identity metadata do
-        # not invalidate rows.
+        # Query every distinct authoritative hostname/IP inventory key. A live
+        # non-refresh discovery is safe only when all of them succeed empty.
         if not force_refresh:
             client = PyPNMClient()
-            seen_refs = set()
-            for inventory_ref in (canonical_name, cmts_ip):
-                normalized_ref = str(inventory_ref or '').strip()
-                if not normalized_ref or normalized_ref.lower() in seen_refs:
-                    continue
-                seen_refs.add(normalized_ref.lower())
+            inventory_refs = _cmts_inventory_refs(cmts, cmts_name)
+            empty_success_count = 0
+            first_inventory_error = None
+            for normalized_ref in inventory_refs:
                 try:
                     inventory_resp = client.get_inventory_modems(
                         cmts=normalized_ref,
                         limit=limit,
                     )
                 except Exception as exc:
+                    inventory_resp = _pypnm_exception_result(exc)
+
+                if not isinstance(inventory_resp, dict):
+                    inventory_resp = {
+                        'status': 'error',
+                        'success': False,
+                        'failure_status': 'unexpected_error',
+                        'upstream_http_status': None,
+                        'message': 'PyPNM returned an invalid inventory response',
+                    }
+
+                if inventory_resp.get('status') != 'success':
+                    if first_inventory_error is None:
+                        first_inventory_error = inventory_resp
                     logger.warning(
                         "Persisted inventory lookup failed for %s: %s",
-                        normalized_ref, exc,
+                        normalized_ref,
+                        inventory_resp.get('message') or inventory_resp.get('error'),
                     )
                     continue
+
                 inventory_rows = inventory_resp.get('modems') or []
                 if not inventory_rows:
+                    empty_success_count += 1
                     continue
+
                 rows = _prepare_rows(inventory_rows)
                 inventory_resp.setdefault('source', 'pypnm-inventory')
-                _backfill_redis_from_inventory(
-                    rows,
-                    requested_limit=limit,
-                    metadata=inventory_resp,
-                )
                 logger.info(
                     "Returning %d persisted modems for %s via inventory key %s",
                     len(rows), canonical_name, normalized_ref,
                 )
                 return _success_response(rows, inventory_resp, 'inventory', True)
 
-            if cache_candidate:
-                cached_rows, data = cache_candidate
-                rows = _prepare_rows(cached_rows)
-                logger.info(
-                    "Returning %d partial Redis rows for %s after persisted lookup miss",
-                    len(rows), canonical_name,
+            if first_inventory_error is not None:
+                return _pypnm_error_response(
+                    first_inventory_error, 'PyPNM inventory unavailable'
                 )
-                return _success_response(rows, data, 'cached', True)
+            if not inventory_refs or empty_success_count != len(inventory_refs):
+                return _pypnm_error_response(None, 'PyPNM inventory unavailable')
 
-        # Live base discovery is reserved for refresh=true or genuinely absent
-        # persisted inventory. Forward refresh so PyPNM owns that policy.
+        # Live base discovery is reserved for refresh=true or confirmed absence
+        # from every persisted hostname/IP inventory key.
         client = PyPNMClient()
         live_query = {
             'cmts_ip': cmts_ip,
@@ -1657,36 +1278,32 @@ def get_cmts_modems(cmts_name):
         if community is not None:
             live_query['community'] = community
         result = client.get_cmts_modems(**live_query)
+        if not isinstance(result, dict):
+            return _pypnm_error_response(None, 'PyPNM returned an invalid live modem response')
 
         if result.get('success'):
             rows = _prepare_rows(result.get('modems') or [])
             result.setdefault('source', 'pypnm-live')
-            if rows:
-                _redis_cache_modems_for_key(
-                    f"modems:{canonical_name}", canonical_name, rows,
-                    requested_limit=limit,
-                    metadata=result,
-                )
-                if cmts_ip != canonical_name:
-                    _redis_cache_modems_for_key(
-                        f"modems:{cmts_ip}", canonical_name, rows,
-                        requested_limit=limit,
-                        metadata=result,
-                    )
             logger.info(
                 "Retrieved %d modems from %s via PyPNM live query",
                 len(rows), canonical_name,
             )
             return _success_response(rows, result, result.get('agent_id', 'agent'), False)
 
-        error_value = result.get('error') or result.get('message') or 'Unknown error from PyPNM API'
-        error_msg = json.dumps(error_value, default=str) if isinstance(error_value, (dict, list)) else str(error_value)
-        logger.error(f"PyPNM API error for {canonical_name}: {error_msg}")
-        return jsonify({"status": "error", "message": error_msg}), 500
+        logger.error(
+            "PyPNM live modem query failed for %s: failure_status=%s upstream_status=%s",
+            canonical_name,
+            result.get('failure_status'),
+            result.get('upstream_http_status'),
+        )
+        return _pypnm_error_response(result, 'PyPNM live modem query failed')
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Error getting modems from %s", cmts_name)
-        return jsonify({"status": "error", "message": str(exc)}), 500
+        return jsonify({
+            "status": "error",
+            "message": "Unexpected error while loading CMTS modems",
+        }), 500
 
 
 # ============== System Information Endpoints ==============
@@ -1755,208 +1372,74 @@ def pypnm_health_check():
 
 @api_bp.route('/cmts/<cmts_name>/cache/clear', methods=['POST'])
 def clear_cmts_modem_cache(cmts_name):
-    """Clear all cached modem data for a specific CMTS (Redis + API in-memory)."""
-    logger = logging.getLogger(__name__)
-    cleared = []
+    """Clear PyPNM-owned modem cache state for one configured CMTS."""
+    cmts = (
+        CMTSProvider.get_cmts_by_hostname(cmts_name)
+        or CMTSProvider.get_cmts_by_ip(cmts_name)
+    )
+    if not cmts:
+        return jsonify({
+            "status": "error",
+            "message": f"CMTS '{cmts_name}' not found",
+        }), 404
 
-    # 1. Clear Redis cache for this CMTS — delete hostname key AND the IP-alias key
-    #    that is written alongside it in get_cmts_modems / _backfill_redis_from_inventory.
-    if REDIS_AVAILABLE and redis_client:
-        try:
-            keys_to_delete = [f"modems:{cmts_name}"]
-            # Resolve the CMTS IP so we can also purge the IP-alias key.
-            cmts_info = CMTSProvider.get_cmts_by_hostname(cmts_name)
-            cmts_ip = None
-            if cmts_info:
-                cmts_ip = cmts_info.get('IPAddress') or cmts_info.get('ip') or cmts_info.get('ip_address')
-            if cmts_ip and cmts_ip != cmts_name:
-                keys_to_delete.append(f"modems:{cmts_ip}")
-            deleted = redis_client.delete(*keys_to_delete)
-            if deleted:
-                cleared.append(f"Redis keys {keys_to_delete} ({deleted} deleted)")
-        except Exception as e:
-            logger.warning(f"Redis cache clear error: {e}")
+    cmts_ip = cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address')
+    canonical_name = str(cmts.get('HostName') or cmts_name).strip()
+    if not cmts_ip:
+        return jsonify({
+            "status": "error",
+            "message": f"CMTS '{cmts_name}' has no IP address configured",
+        }), 500
 
-    # 2. Clear PyPNM API in-memory enrichment cache
-    try:
-        import requests
-        pypnm_url = os.environ.get('PYPNM_BASE_URL', os.environ.get('PYPNM_API_URL', 'http://localhost:8000'))
-        resp = requests.post(f"{pypnm_url}/cache/clear", timeout=5)
-        if resp.status_code == 200:
-            cleared.append("API enrichment cache")
-    except Exception as e:
-        logger.warning(f"API cache clear error: {e}")
+    result = PyPNMClient().clear_cmts_modem_cache(str(cmts_ip))
+    if not isinstance(result, dict):
+        return _pypnm_error_response(None, 'PyPNM returned an invalid cache-clear response')
+    if result.get('status') == 'success' or result.get('success') is True:
+        response = dict(result)
+        response['status'] = 'success'
+        response.setdefault('cmts', canonical_name)
+        response.setdefault('cmts_ip', cmts_ip)
+        response.setdefault('message', f"Cache cleared for {canonical_name}")
+        return jsonify(response)
 
-    msg = f"Cleared cache for {cmts_name}: {', '.join(cleared)}" if cleared else f"No cache found for {cmts_name}"
-    logger.info(msg)
-    return jsonify({"status": "success", "message": msg})
-
-
-@api_bp.route('/cmts/<cmts_name>/cache/refresh', methods=['POST'])
-def refresh_cmts_modem_cache(cmts_name):
-    """Re-pull enriched modem data from PyPNM inventory and rewrite Redis.
-
-    Called fire-and-forget by the frontend when enrichment completes, so that
-    cable_mac / fiber_node fields are present in the Redis cache for subsequent
-    modem searches without waiting for the next full CMTS modem load.
-    """
-    _log = logging.getLogger(__name__)
-    if not REDIS_AVAILABLE or not redis_client:
-        return jsonify({"status": "skipped", "reason": "Redis not available"})
-    try:
-        default_limit = _cm_modem_limit_default()
-        inv_resp = PyPNMClient().get_inventory_modems(cmts=cmts_name, limit=default_limit)
-        inv_modems = filter_ignored_modems(inv_resp.get('modems') or [])
-        if not inv_modems:
-            return jsonify({"status": "skipped", "reason": "no inventory modems yet"})
-        for m in inv_modems:
-            m.setdefault('cmts', cmts_name)
-        _backfill_redis_from_inventory(
-            inv_modems,
-            requested_limit=inv_resp.get('requested_limit') or default_limit,
-            metadata=inv_resp,
-        )
-        _log.info(f"cache/refresh: wrote {len(inv_modems)} enriched modems to Redis for {cmts_name}")
-        return jsonify({"status": "success", "count": len(inv_modems)})
-    except Exception as exc:
-        _log.warning(f"cache/refresh failed for {cmts_name}: {exc}")
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    return _pypnm_error_response(result, 'PyPNM cache clear failed')
 
 
 @api_bp.route('/cmts/<cmts_name>/enrich/delta', methods=['POST'])
 def enqueue_delta_enrichment(cmts_name):
-    """Queue refresh only for modems missing enrichment fields in current CMTS cache."""
-    if not REDIS_AVAILABLE or not redis_client:
-        return jsonify({"status": "error", "message": "Redis not available"}), 503
+    """Ask PyPNM to select and queue this CMTS inventory's enrichment delta."""
+    cmts = (
+        CMTSProvider.get_cmts_by_hostname(cmts_name)
+        or CMTSProvider.get_cmts_by_ip(cmts_name)
+    )
+    if not cmts:
+        return jsonify({
+            "status": "error",
+            "message": f"CMTS '{cmts_name}' not found",
+        }), 404
 
+    canonical_name = str(cmts.get('HostName') or cmts_name).strip()
     payload = request.get_json(silent=True) or {}
     try:
         max_batch = max(1, min(int(payload.get('max_batch') or 25), 25))
     except (TypeError, ValueError):
         max_batch = 25
 
-    cache_key = f"modems:{cmts_name}"
-    data = _read_modem_cache(cache_key, _inventory_revision_map())
-    if not data:
-        return jsonify({"status": "error", "message": f"No current cached modems for {cmts_name}"}), 404
+    result = PyPNMClient().enqueue_delta_enrichment(canonical_name, max_batch=max_batch)
+    if not isinstance(result, dict):
+        return _pypnm_error_response(None, 'PyPNM returned an invalid delta-enrichment response')
+    if result.get('status') == 'success' or result.get('success') is True:
+        response = dict(result)
+        response['status'] = 'success'
+        response.setdefault('cmts', canonical_name)
+        response.setdefault('total_modems', 0)
+        response.setdefault('missing_count', 0)
+        response.setdefault('enqueued', 0)
+        response.setdefault('already_queued', 0)
+        response.setdefault('max_batch', max_batch)
+        return jsonify(response)
 
-    modems = data.get('modems') or []
-    if not modems:
-        return jsonify({
-            "status": "success",
-            "cmts": cmts_name,
-            "total_modems": 0,
-            "missing_count": 0,
-            "enqueued": 0,
-            "already_queued": 0,
-            "max_batch": max_batch,
-        })
-
-    missing = [m for m in modems if _modem_missing_enrichment(m)]
-    enqueued = []
-
-    pypnm_base = (os.environ.get("PYPNM_API_URL") or os.environ.get("PYPNM_BASE_URL") or "http://172.17.0.1:8081").rstrip("/")
-    for modem in missing:
-        if len(enqueued) >= max_batch:
-            break
-        mac = str(modem.get('mac_address') or '').strip()
-        if not mac:
-            continue
-        try:
-            import requests as _req
-            _req.post(
-                f"{pypnm_base}/api/admin/modem-refresh",
-                json={"mac": mac, "cmts": cmts_name, "requested_by": "delta-enrich"},
-                timeout=5,
-                verify=False,
-            )
-            enqueued.append(mac)
-        except Exception:
-            pass
-
-    return jsonify({
-        "status": "success",
-        "cmts": cmts_name,
-        "total_modems": len(modems),
-        "missing_count": len(missing),
-        "enqueued": len(enqueued),
-        "max_batch": max_batch,
-        "sample_enqueued_macs": enqueued[:20],
-    })
-
-
-@api_bp.route('/cache/flush', methods=['POST'])
-def flush_cache():
-    """Flush all Redis cache."""
-    if not REDIS_AVAILABLE or not redis_client:
-        return jsonify({"status": "error", "message": "Redis not available"}), 503
-    
-    try:
-        redis_client.flushdb()
-        return jsonify({"status": "success", "message": "Cache flushed"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/cache/flush/modems', methods=['POST'])
-def flush_modem_cache():
-    """Flush modem cache (modems:*)."""
-    if not REDIS_AVAILABLE or not redis_client:
-        return jsonify({"status": "error", "message": "Redis not available"}), 503
-    
-    try:
-        count = 0
-        batch = []
-        for key in redis_client.scan_iter(match="modems:*", count=500):
-            batch.append(key)
-            if len(batch) >= 500:
-                count += redis_client.delete(*batch)
-                batch = []
-        if batch:
-            count += redis_client.delete(*batch)
-        return jsonify({"status": "success", "message": f"Flushed {count} modem cache keys"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/cache/flush/cmts', methods=['POST'])
-def flush_cmts_cache():
-    """Flush CMTS cache (cmts:*)."""
-    if not REDIS_AVAILABLE or not redis_client:
-        return jsonify({"status": "error", "message": "Redis not available"}), 503
-    
-    try:
-        keys = redis_client.keys("cmts:*")
-        if keys:
-            redis_client.delete(*keys)
-            count = len(keys)
-        else:
-            count = 0
-        return jsonify({"status": "success", "message": f"Flushed {count} CMTS cache keys"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@api_bp.route('/cache/stats', methods=['GET'])
-def cache_stats():
-    """Get Redis cache statistics."""
-    if not REDIS_AVAILABLE or not redis_client:
-        return jsonify({"status": "error", "message": "Redis not available"}), 503
-    
-    try:
-        info = redis_client.info()
-        stats = {
-            "status": "ok",
-            "keys": redis_client.dbsize(),
-            "memory_used": info.get('used_memory_human', 'N/A'),
-            "memory_peak": info.get('used_memory_peak_human', 'N/A'),
-            "hits": info.get('keyspace_hits', 0),
-            "misses": info.get('keyspace_misses', 0),
-            "hit_rate": f"{info.get('keyspace_hits', 0) / max(info.get('keyspace_hits', 0) + info.get('keyspace_misses', 1), 1) * 100:.1f}%"
-        }
-        return jsonify(stats)
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    return _pypnm_error_response(result, 'PyPNM delta enrichment failed')
 
 
 @api_bp.route('/agent/status', methods=['GET'])

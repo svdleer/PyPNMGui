@@ -323,7 +323,7 @@
                                         <div class="d-flex justify-content-between align-items-center mb-1">
                                             <span class="small fw-medium" :class="enrichmentProgress && enrichmentProgress.total > 0 ? 'text-success' : 'text-primary'">
                                                 <i class="bi me-1" :class="enrichmentProgress && enrichmentProgress.total > 0 ? 'bi-check-circle-fill' : 'bi-arrow-repeat spin'"></i>
-                                                Reading modem table
+                                                Loading persisted inventory (cache / MySQL)
                                             </span>
                                             <span class="badge rounded-pill" :class="enrichmentProgress && enrichmentProgress.total > 0 ? 'bg-success' : 'bg-primary'">{{ loadProgress }}%</span>
                                         </div>
@@ -333,9 +333,9 @@
                                                  :style="{width: Math.max(loadProgress, 5) + '%'}"></div>
                                         </div>
                                     </div>
-                                    <div>
+                                    <div v-if="isEnriching || (enrichmentProgress && enrichmentProgress.total > 0)">
                                         <div class="d-flex justify-content-between align-items-center mb-1">
-                                            <span class="small fw-medium" :class="enrichmentProgress && enrichmentProgress.total > 0 ? 'text-primary' : 'text-muted'">
+                                            <span class="small fw-medium text-primary">
                                                 <i class="bi me-1" :class="enrichmentProgress && enrichmentProgress.total > 0 ? 'bi-cpu-fill' : 'bi-cpu'"></i>
                                                 Enriching (model / firmware / interfaces)
                                             </span>
