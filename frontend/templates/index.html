@@ -3141,7 +3141,7 @@
                                         @click="clearFnScanSelectorFilters">
                                     <i class="bi bi-x-lg"></i>
                                 </button>
-                                <button type="button" class="btn btn-sm btn-outline-primary" @click="fnScanSelectAllVisibleModems" :disabled="!fnScanCandidateModems.length">Select visible</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" @click="fnScanSelectAllVisibleModems" :disabled="!fnScanCandidateModems.some(m => fnScanModemSelectable(m))">Select visible</button>
                                 <button type="button" class="btn btn-sm btn-outline-success"
                                         @click="toggleFnSelectedMap"
                                         :disabled="!fnScanSelectedMappableModems.length"
@@ -3157,6 +3157,15 @@
                                     <i v-else class="bi bi-arrow-clockwise"></i>
                                 </button>
                             </div>
+                        </div>
+                        <div v-if="fnScanTopologyReconciled && (fnScanTopologyReconciliation?.inventory?.stale || fnScanTopologyReconciliation?.inventory?.quarantined || !fnScanTopologyReconciliation?.inventory?.authoritative || !fnScanTopologyReconciliation?.inventory?.complete || fnScanTopologyReconciliation?.inventory?.truncated)"
+                             class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0 py-2 px-3 small">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            Physical-FN membership uses {{ fnScanTopologyReconciliation?.inventory?.source || 'current inventory' }}.
+                            <span v-if="fnScanTopologyReconciliation?.inventory?.stale">Inventory is stale. </span>
+                            <span v-if="fnScanTopologyReconciliation?.inventory?.quarantined">Inventory is quarantined. </span>
+                            <span v-if="!fnScanTopologyReconciliation?.inventory?.complete || fnScanTopologyReconciliation?.inventory?.truncated">Inventory is incomplete. </span>
+                            <span v-if="!fnScanTopologyReconciliation?.inventory?.authoritative">Generation is not marked authoritative.</span>
                         </div>
                         <div v-if="targetedEnrichmentProgress.total > 0" class="mx-2 mt-2 px-2 py-2 border rounded small"
                              :class="targetedEnrichmentProgress.status === 'warning' ? 'bg-warning-subtle border-warning' : 'bg-info-subtle border-info'">
@@ -3225,18 +3234,28 @@
                                 </thead>
                                 <tbody>
                                     <tr v-for="(m, idx) in fnScanCandidateModems" :key="`${normalizeMacForMatch(m.mac_address || '')}:${m.ip_address || ''}:${idx}`"
-                                        :class="{ 'table-primary': !m._linked_node_mismatch && fnScanIsMacSelected(m.mac_address), 'table-warning opacity-50': m._linked_node_mismatch }"
-                                        @click="!m._linked_node_mismatch && fnScanToggleModemSelection(m.mac_address)"
-                                        :style="m._linked_node_mismatch ? 'cursor:not-allowed;' : 'cursor:pointer;'"
-                                        :title="m._linked_node_mismatch ? `Serving group mismatch — ${m.topology_serving_group || m.topology_node_id || '?'} (expected: ${fnScanExpectedServingGroup || fnScanDominantNodeId || '?'})` : ''">
+                                        :class="{ 'table-primary': fnScanModemSelectable(m) && fnScanIsMacSelected(m.mac_address), 'table-warning opacity-50': !fnScanModemSelectable(m) }"
+                                        @click="fnScanModemSelectable(m) && fnScanToggleModemSelection(m.mac_address)"
+                                        :style="fnScanModemSelectable(m) ? 'cursor:pointer;' : 'cursor:not-allowed;'"
+                                        :title="!fnScanModemSelectable(m) ? fnScanDisabledReason(m) : fnScanClassificationLabel(m.reconciliation_classification)">
                                         <td @click.stop>
                                             <input type="checkbox" class="form-check-input"
-                                                   :checked="!m._linked_node_mismatch && fnScanIsMacSelected(m.mac_address)"
-                                                   :disabled="m._linked_node_mismatch"
-                                                   @change="!m._linked_node_mismatch && fnScanToggleModemSelection(m.mac_address)">
+                                                   :checked="fnScanModemSelectable(m) && fnScanIsMacSelected(m.mac_address)"
+                                                   :disabled="!fnScanModemSelectable(m)"
+                                                   @change="fnScanModemSelectable(m) && fnScanToggleModemSelection(m.mac_address)">
                                         </td>
-                                        <td><span class="badge bg-success">{{ m.status }}</span></td>
-                                        <td><code class="small">{{ m.mac_address }}</code></td>
+                                        <td>
+                                            <span class="badge" :class="fnScanTopologyReconciled ? (fnScanModemSelectable(m) ? 'bg-success' : 'bg-warning text-dark') : 'bg-success'">{{ m.status }}</span>
+                                            <span v-if="fnScanTopologyReconciled && m.reconciliation_classification" class="d-block small mt-1"
+                                                  :class="fnScanModemSelectable(m) ? 'text-success' : 'text-warning-emphasis'">
+                                                {{ fnScanClassificationLabel(m.reconciliation_classification) }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <code class="small">{{ m.mac_address }}</code>
+                                            <span v-if="m.topology_fiber_node" class="d-block small text-muted">Topology: {{ m.topology_fiber_node }}</span>
+                                            <span v-if="m.disabled_reason" class="d-block small text-warning-emphasis">{{ m.disabled_reason }}</span>
+                                        </td>
                                         <td class="small">{{ m.ip_address }}</td>
                                         <td class="text-center align-middle fn-map-cell" @click.stop>
                                             <button v-if="hasModemCoordinates(m)" type="button"

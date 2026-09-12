@@ -228,6 +228,39 @@ def topology_search_modems_api():
         return jsonify({'status': 'error', 'message': str(exc), 'modems': []}), 502
 
 
+@topology_bp.route('/api/topology/reconcile/physical-fiber-node', methods=['POST'])
+def topology_reconcile_physical_fiber_node_api():
+    """Proxy physical FiberNode reconciliation to the PyPNM API boundary."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'status': 'error', 'message': 'JSON body is required'}), 400
+
+    forwarded = {
+        'date': payload.get('date'),
+        'expected_mac_addresses': payload.get('expected_mac_addresses'),
+        'anchor_mac_address': payload.get('anchor_mac_address'),
+        'refresh': payload.get('refresh', False) is True,
+    }
+    try:
+        base_url = _pypnm_base_url()
+        connect_timeout = int(os.environ.get('PYPNM_API_CONNECT_TIMEOUT', '5'))
+        read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '120'))
+        response = requests.post(
+            f"{base_url}/api/topology/reconcile/physical-fiber-node",
+            json=forwarded,
+            timeout=(connect_timeout, read_timeout),
+        )
+        response_payload = response.json() if response.content else {}
+        if not isinstance(response_payload, dict):
+            response_payload = {
+                'status': 'error',
+                'message': 'invalid reconciliation response from PyPNM API',
+            }
+        return jsonify(response_payload), response.status_code
+    except Exception as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 502
+
+
 @topology_bp.route('/api/topology/paths/by-modems', methods=['POST'])
 def topology_paths_by_modems_api():
     """Resolve read-only physical topology paths for a bounded modem batch."""

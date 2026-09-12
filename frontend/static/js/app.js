@@ -78,6 +78,8 @@ createApp({
             searchHouseNumber: '',
             customerIdPrefix: 'RES-',
             topologySuggestions: [],
+            topologySearchSnapshotDate: '',
+            topologySearchExpectedMacs: [],
             snmpCommunity: '',
             snmpCommunityRW: '',
             snmpCommunityModem: '',
@@ -244,6 +246,8 @@ createApp({
             fnScanSelectorFilterImpairment: '',
             fnScanTopologyBridgeNodeId: '',
             fnScanExpectedServingGroup: '',
+            fnScanTopologyReconciled: false,
+            fnScanTopologyReconciliation: null,
             fnSelectedMapVisible: false,
             fnSelectedMapPathStatus: {
                 loading: false,
@@ -656,6 +660,22 @@ createApp({
 
         // Base pool: operational + MAC + IP, scoped to selected CMTS & FN
         fnScanBaseModems() {
+            if (this.fnScanTopologyReconciled) {
+                const seen = new Set();
+                return (this.modems || []).flatMap(modem => {
+                    const mac = this.normalizeMacForMatch(modem?.mac_address || '');
+                    if (!mac || seen.has(mac)) return [];
+                    seen.add(mac);
+                    return [{
+                        ...modem,
+                        docsis_version: this.resolveDocsisVersion(
+                            modem,
+                            modem.docsis_version || 'Unknown',
+                        ),
+                    }];
+                });
+            }
+
             const fnName = this.fnScanFiberNode;
             const fnObj = (this.fnScanFiberNodes || []).find(f => f.name === fnName);
             const fnNameLc = (fnName || '').trim().toLowerCase();
@@ -780,7 +800,7 @@ createApp({
 
         fnScanUniqueSelectorGroupAmps() {
             const vals = this.fnScanBaseModems
-                .filter(m => !m._linked_node_mismatch)
+                .filter(m => this.fnScanModemSelectable(m))
                 .map(m => this.formatTopologyGroupAmplifier(m.topology_group_amplifier))
                 .filter(v => v && v.trim());
             return [...new Set(vals)].sort();
@@ -788,7 +808,7 @@ createApp({
 
         fnScanUniqueSelectorEndAmps() {
             const vals = this.fnScanBaseModems
-                .filter(m => !m._linked_node_mismatch)
+                .filter(m => this.fnScanModemSelectable(m))
                 .map(m => this.formatTopologyEndAmplifier(m.topology_end_amplifier))
                 .filter(v => v && v.trim());
             return [...new Set(vals)].sort();
@@ -796,7 +816,7 @@ createApp({
 
         fnScanUniqueSelectorTaps() {
             const vals = this.fnScanBaseModems
-                .filter(m => !m._linked_node_mismatch)
+                .filter(m => this.fnScanModemSelectable(m))
                 .map(m => this.formatTopologyTap(m.topology_tap))
                 .filter(v => v && v.trim());
             return [...new Set(vals)].sort();
@@ -846,7 +866,7 @@ createApp({
         fnScanDetectedNodes() {
             const freq = {};
             for (const m of this.fnScanBaseModems) {
-                if (m._linked_node_mismatch) continue;
+                if (!this.fnScanModemSelectable(m)) continue;
                 const nid = (m.topology_node_id || '').trim();
                 if (nid) freq[nid] = (freq[nid] || 0) + 1;
             }
@@ -856,7 +876,7 @@ createApp({
         },
 
         fnScanMismatchCount() {
-            return this.fnScanBaseModems.filter(m => m._linked_node_mismatch).length;
+            return this.fnScanBaseModems.filter(m => !this.fnScanModemSelectable(m)).length;
         },
 
         fnScanMaxSelectableModems() {
@@ -984,14 +1004,17 @@ createApp({
             // Keep rendering fast for large FN inventories.
             // Sort mismatched modems to the bottom so they're visible.
             const all = this.fnScanFilteredModems;
-            const normal = all.filter(m => !m._linked_node_mismatch);
-            const mismatched = all.filter(m => m._linked_node_mismatch);
+            const normal = all.filter(m => this.fnScanModemSelectable(m));
+            const mismatched = all.filter(m => !this.fnScanModemSelectable(m));
             return [...normal, ...mismatched].slice(0, this.fnScanSelectorDisplayLimit);
         },
 
         fnScanSelectorDisplayLimit() {
             const n = Number(this.fnScanModemCount ?? this.fnScanSelectedChannelModemCount ?? 0);
             const base = (Number.isFinite(n) && n > 0) ? n : 300;
+            if (this.fnScanTopologyReconciled) {
+                return Math.max(base, 300) + this.fnScanMismatchCount;
+            }
             // Add headroom for mismatched modems that are sorted to the bottom.
             return Math.max(base, 300) + 50;
         },
@@ -1523,6 +1546,32 @@ createApp({
             return target;
         },
 
+        fnScanModemSelectable(modem) {
+            if (!modem) return false;
+            if (this.fnScanTopologyReconciled) return modem.selectable === true;
+            return modem._linked_node_mismatch !== true;
+        },
+
+        fnScanClassificationLabel(classification) {
+            return {
+                expected_current_member: 'Expected · current FN',
+                expected_moved: 'Expected · moved',
+                expected_not_current: 'Expected · not current',
+                expected_location_unknown: 'Expected · location unknown',
+                current_physical_fn_member: 'Current physical FN',
+            }[classification] || '';
+        },
+
+        fnScanDisabledReason(modem) {
+            if (modem?.disabled_reason) return modem.disabled_reason;
+            if (modem?._linked_node_mismatch) {
+                const actual = modem.topology_serving_group || modem.topology_node_id || '?';
+                const expected = this.fnScanExpectedServingGroup || this.fnScanDominantNodeId || '?';
+                return `Serving group mismatch — ${actual} (expected: ${expected})`;
+            }
+            return 'This modem cannot be selected';
+        },
+
         _normalizeFnSelectedMacsToCurrentRows() {
             const selected = Array.isArray(this.fnScanSelectedModemMacs) ? this.fnScanSelectedModemMacs : [];
             if (!selected.length) return;
@@ -1533,10 +1582,15 @@ createApp({
             const resolvedNorm = new Set();
             for (const m of (this.modems || [])) {
                 const norm = this.normalizeMacForMatch(m?.mac_address || '');
-                if (norm && wanted.has(norm)) {
+                if (norm && wanted.has(norm)
+                    && (!this.fnScanTopologyReconciled || this.fnScanModemSelectable(m))) {
                     resolved.push(m.mac_address);
                     resolvedNorm.add(norm);
                 }
+            }
+            if (this.fnScanTopologyReconciled) {
+                this.fnScanSelectedModemMacs = [...new Set(resolved)];
+                return;
             }
             if (resolved.length) {
                 // Keep unresolved entries instead of dropping them, so a refresh
@@ -1844,6 +1898,7 @@ createApp({
         },
 
         async _enrichFnSelectorTopologyMetadata() {
+            if (this.fnScanTopologyReconciled) return;
             const dottedNode = String(this.fnScanFiberNode || '').trim();
             const bridgeNode = String(this.fnScanTopologyBridgeNodeId || '').trim();
             const fallbackNode = dottedNode.includes('.') ? dottedNode : (bridgeNode.includes('.') ? bridgeNode : '');
@@ -3048,6 +3103,10 @@ createApp({
             this.modemFilterFn = '';
             this.modemFilterCableMac = '';
             this.modems = [];
+            this.topologySearchSnapshotDate = '';
+            this.topologySearchExpectedMacs = [];
+            this.fnScanTopologyReconciled = false;
+            this.fnScanTopologyReconciliation = null;
             this.searchPerformed = false;
             this.modemPage = 1;
         },
@@ -3060,6 +3119,12 @@ createApp({
                 // Topology-only search types always go through topology endpoint
                 const topologyOnlyTypes = ['fibernode', 'postal_house', 'customer_id'];
                 const isTopologyOnlySearch = this.useTopologySearch && topologyOnlyTypes.includes(this.searchType);
+                if (!isTopologyOnlySearch) {
+                    this.topologySearchSnapshotDate = '';
+                    this.topologySearchExpectedMacs = [];
+                    this.fnScanTopologyReconciled = false;
+                    this.fnScanTopologyReconciliation = null;
+                }
 
                 if (isTopologyOnlySearch) {
                     if (this.searchType === 'postal_house' && (!this.searchValue || !this.searchHouseNumber)) {
@@ -3084,6 +3149,12 @@ createApp({
                     const data = await response.json();
                     if (data?.status === 'success') {
                         const rows = Array.isArray(data.modems) ? data.modems : [];
+                        this.topologySearchSnapshotDate = String(data.snapshot_date || '');
+                        this.topologySearchExpectedMacs = rows
+                            .map(m => this.normalizeMacForDisplay(m.mac || m.mac_address || ''))
+                            .filter(Boolean);
+                        this.fnScanTopologyReconciled = false;
+                        this.fnScanTopologyReconciliation = null;
                         this.modems = rows.map(m => ({
                             mac_address: this.normalizeMacForDisplay(m.mac || m.mac_address || ''),
                             ip_address: m.ip_address || '',
@@ -3264,6 +3335,103 @@ createApp({
             });
         },
 
+        async _reconcileTopologyPhysicalFiberNode({ initializeSelection = false } = {}) {
+            const expectedMacs = [...new Set((this.topologySearchExpectedMacs || [])
+                .map(mac => this.normalizeMacForDisplay(mac))
+                .filter(Boolean))];
+            const snapshotDate = String(this.topologySearchSnapshotDate || '').trim();
+            if (!snapshotDate || !expectedMacs.length) {
+                throw new Error('Topology search snapshot is unavailable; run the topology search again');
+            }
+
+            const expectedNorm = new Set(expectedMacs.map(mac => this.normalizeMacForMatch(mac)));
+            const selectedMac = this.normalizeMacForDisplay(this.selectedModem?.mac_address || '');
+            const previousAnchor = this.fnScanTopologyReconciliation?.target?.anchor_mac_address || '';
+            const requestedAnchor = [previousAnchor, selectedMac, expectedMacs[0]]
+                .find(mac => expectedNorm.has(this.normalizeMacForMatch(mac))) || expectedMacs[0];
+
+            const response = await fetch(`${API_BASE}/topology/reconcile/physical-fiber-node`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    date: snapshotDate,
+                    expected_mac_addresses: expectedMacs,
+                    anchor_mac_address: requestedAnchor,
+                    refresh: false,
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok || data?.status !== 'success' || !Array.isArray(data.records)) {
+                throw new Error(data?.detail || data?.message || 'Physical FiberNode reconciliation failed');
+            }
+
+            const searchByMac = new Map((this.modems || [])
+                .filter(row => row?.source === 'topology-search')
+                .map(row => [this.normalizeMacForMatch(row.mac_address || ''), row]));
+            const rows = data.records.map(record => {
+                const current = record.current || {};
+                const expected = record.expected || null;
+                const searchRow = searchByMac.get(this.normalizeMacForMatch(record.mac_address || '')) || {};
+                return {
+                    ...current,
+                    mac_address: this.normalizeMacForDisplay(record.mac_address || current.mac_address || ''),
+                    ip_address: current.ip_address || '',
+                    status: current.status || (record.classification === 'expected_not_current' ? 'not-current' : 'unknown'),
+                    cmts: current.cmts || '',
+                    cmts_ip: current.cmts_ip || '',
+                    fiber_node: current.fiber_node || '',
+                    lat: searchRow.lat ?? null,
+                    lon: searchRow.lon ?? null,
+                    topology_expected: expected,
+                    topology_fiber_node: expected?.fibernode || '',
+                    reconciliation_classification: record.classification || '',
+                    selectable: record.selectable === true,
+                    disabled_reason: record.disabled_reason || '',
+                    source: expected ? 'topology-reconciliation' : 'physical-fn-inventory',
+                };
+            });
+
+            const target = data.target || {};
+            const cmtsMatch = this.findCmtsMatch(target.cmts_ip, target.cmts || '');
+            this.fnScanCmts = cmtsMatch || {
+                name: target.cmts || target.cmts_ip,
+                ip: target.cmts_ip,
+            };
+            this.fnScanCmtsIp = target.cmts_ip || '';
+            this.fnScanFiberNode = target.physical_fiber_node || '';
+            this.fnScanTopologyReconciled = true;
+            this.fnScanTopologyReconciliation = data;
+            this.fnScanExpectedServingGroup = '';
+            this.fnScanTopologyBridgeNodeId = '';
+            this.modems = rows;
+            this.fnScanModemCount = rows.filter(row => row.selectable === true).length;
+            this.fnScanModemSource = data.inventory?.source || 'inventory';
+            this.fnScanModemLoadedAt = new Date();
+
+            const selectableByNorm = new Map(rows
+                .filter(row => row.selectable === true)
+                .map(row => [this.normalizeMacForMatch(row.mac_address), row.mac_address]));
+            if (initializeSelection) {
+                this.clearFnScanSelectorFilters();
+                const expectedCurrent = rows
+                    .filter(row => row.reconciliation_classification === 'expected_current_member')
+                    .sort((a, b) => (
+                        this.normalizeMacForMatch(a.mac_address) === this.normalizeMacForMatch(requestedAnchor) ? -1
+                            : this.normalizeMacForMatch(b.mac_address) === this.normalizeMacForMatch(requestedAnchor) ? 1
+                                : 0
+                    ));
+                this.fnScanSelectedModemMacs = expectedCurrent
+                    .slice(0, this.fnScanMaxSelectableModems)
+                    .map(row => row.mac_address);
+            } else {
+                this.fnScanSelectedModemMacs = (this.fnScanSelectedModemMacs || [])
+                    .map(mac => selectableByNorm.get(this.normalizeMacForMatch(mac)))
+                    .filter(Boolean);
+            }
+            this._normalizeFnSelectedMacsToCurrentRows();
+            return data;
+        },
+
         async prepareTopologyFiberNodeScanTargets() {
             if (!this.useTopologySearch) {
                 this.$toast?.info('Enable topology search first');
@@ -3274,6 +3442,55 @@ createApp({
             this.fnScanPreparingMessage = 'Loading inventory and topology context…';
 
             try {
+                if (this.topologySearchSnapshotDate && this.topologySearchExpectedMacs.length) {
+                    try {
+                        this.fnScanPreparingMessage = 'Reconciling topology with current physical FiberNode inventory…';
+
+                        const reconciliation = await this._reconcileTopologyPhysicalFiberNode({
+                            initializeSelection: true,
+                        });
+                        this.fnScanUseModemSelector = true;
+                        this.fnScanIfindex = '';
+                        this.fnScanExtraIfindices = [];
+                        this.currentView = 'fibernode';
+
+                        this.fnScanPreparingMessage = 'Loading FiberNode channels…';
+                        await this.loadFnScanChannels();
+                        const anchorMac = this.normalizeMacForMatch(reconciliation.target?.anchor_mac_address || '');
+                        const anchorRecord = (reconciliation.records || []).find(record => (
+                            this.normalizeMacForMatch(record.mac_address || '') === anchorMac
+                        ));
+                        const preferredIfindex = this._toIfindex(
+                            anchorRecord?.current?.ofdma_ifindex,
+                            anchorRecord?.current?.upstream_ifindex,
+                        );
+                        this._ensureFiberNodeInScanList(this.fnScanFiberNode, preferredIfindex);
+                        const fn = (this.fnScanFiberNodes || []).find(node => node.name === this.fnScanFiberNode);
+                        const fnIfindices = (fn?.channels || [])
+                            .map(channel => this._toIfindex(channel?.ifindex))
+                            .filter(Boolean);
+                        this.fnScanIfindex = preferredIfindex || fnIfindices[0] || '';
+                        this.fnScanExtraIfindices = fnIfindices.filter(ifindex => ifindex !== this.fnScanIfindex);
+
+                        const movedCount = (reconciliation.records || [])
+                            .filter(record => record.classification === 'expected_moved').length;
+                        const unavailableCount = (reconciliation.records || [])
+                            .filter(record => ['expected_not_current', 'expected_location_unknown'].includes(record.classification)).length;
+                        if (movedCount || unavailableCount) {
+                            this.$toast?.warning(
+                                `${movedCount} moved and ${unavailableCount} unresolved topology modem(s) are visible but disabled`,
+                            );
+                        }
+                        this.$toast?.success(
+                            `FiberNode ${this.fnScanFiberNode} prepared with ${this.fnScanModemCount} current selectable modem(s)`,
+                        );
+                        return;
+                    } catch (error) {
+                        this.showError('FiberNode reconciliation failed', error?.message || String(error));
+                        return;
+                    }
+                }
+
                 this._enrichTopologySearchModems(300);
 
                 const candidates = (this.modems || [])
@@ -5653,6 +5870,8 @@ createApp({
             this.clearFnScanSelectorFilters();
             this.fnScanSelectedModemMacs = [];
             this.fnScanExpectedServingGroup = '';
+            this.fnScanTopologyReconciled = false;
+            this.fnScanTopologyReconciliation = null;
             this.modems              = [];
             await this.loadFnScanChannels();
             this.refreshFnSelectorModems(true);
@@ -5703,6 +5922,7 @@ createApp({
 
         selectFnChannel(ch) {
             this.fnScanIfindex = ch.ifindex;
+            if (this.fnScanTopologyReconciled) return;
             // Use modem_count from channel data if available (from channel/list)
             this.fnScanModemCount = ch.modem_count ?? null;
             // Only fetch if not already in channel data
@@ -5712,6 +5932,17 @@ createApp({
         },
 
         selectFnFiberNode(fn) {
+            const reconciledTarget = String(
+                this.fnScanTopologyReconciliation?.target?.physical_fiber_node || '',
+            ).trim().toLowerCase();
+            const nextFiberNode = String(fn?.name || '').trim();
+            const leavingReconciledTarget = this.fnScanTopologyReconciled
+                && nextFiberNode.toLowerCase() !== reconciledTarget;
+            if (leavingReconciledTarget) {
+                this.fnScanTopologyReconciled = false;
+                this.fnScanTopologyReconciliation = null;
+                this.modems = [];
+            }
             this.fnScanFiberNode = fn.name;
             this.fnScanFN2Name = '';
             this.fnScanFN2Ifindex = null;
@@ -5731,6 +5962,9 @@ createApp({
             // Reset selector because FN context changed.
             this.clearFnScanSelectorFilters();
             this.fnScanSelectedModemMacs = [];
+            if (leavingReconciledTarget) {
+                this.refreshFnSelectorModems(true);
+            }
         },
 
         selectFnFiberNode2(fn) {
@@ -5793,7 +6027,7 @@ createApp({
             const selectedNorm = new Set(selected.map(m => this.normalizeMacForMatch(m)).filter(Boolean));
             const addable = [];
             for (const modem of (this.fnScanCandidateModems || [])) {
-                if (modem._linked_node_mismatch) continue;
+                if (!this.fnScanModemSelectable(modem)) continue;
                 const mac = modem?.mac_address || '';
                 const norm = this.normalizeMacForMatch(mac);
                 if (!norm || selectedNorm.has(norm)) continue;
@@ -5835,6 +6069,12 @@ createApp({
         fnScanToggleModemSelection(mac) {
             const norm = this.normalizeMacForMatch(mac || '');
             if (!norm) return;
+            const candidate = (this.fnScanCandidateModems || [])
+                .find(modem => this.normalizeMacForMatch(modem?.mac_address || '') === norm);
+            if (candidate && !this.fnScanModemSelectable(candidate)) {
+                this.$toast?.warning(candidate.disabled_reason || 'This modem cannot be selected');
+                return;
+            }
             const current = [...(this.fnScanSelectedModemMacs || [])];
             const idx = current.findIndex(m => this.normalizeMacForMatch(m) === norm);
             if (idx >= 0) {
@@ -5865,7 +6105,7 @@ createApp({
         },
 
         fnScanAllVisibleSelected() {
-            const vis = (this.fnScanCandidateModems || []).filter(m => !m._linked_node_mismatch);
+            const vis = (this.fnScanCandidateModems || []).filter(m => this.fnScanModemSelectable(m));
             if (!vis.length) return false;
             return vis.every(m => this.fnScanIsMacSelected(m.mac_address));
         },
@@ -5877,6 +6117,23 @@ createApp({
         },
 
         async refreshFnSelectorModems(force = false, liveSnmp = false) {
+            if (this.fnScanTopologyReconciled) {
+                if (this.fnScanSelectorRefreshInFlight) return;
+                const now = Date.now();
+                if (!force && (now - this.fnScanLastSelectorRefreshAt) < 30000) return;
+                this.fnScanSelectorRefreshInFlight = true;
+                this.fnScanLastSelectorRefreshAt = now;
+                try {
+                    await this._reconcileTopologyPhysicalFiberNode({
+                        initializeSelection: false,
+                    });
+                } catch (error) {
+                    this.showError('FiberNode reconciliation failed', error?.message || String(error));
+                } finally {
+                    this.fnScanSelectorRefreshInFlight = false;
+                }
+                return;
+            }
             if (!this.fnScanCmtsIp || this.fnScanSelectorRefreshInFlight) return;
             const now = Date.now();
             if (!force && (now - this.fnScanLastSelectorRefreshAt) < 30000) return;
@@ -6011,6 +6268,9 @@ createApp({
         },
 
         async loadFnModemCount(forceSnmp = false) {
+            // Topology reconciliation already returns complete exact physical-FN rows.
+            // Never add one-channel OFDMA stubs to that API-owned membership set.
+            if (this.fnScanTopologyReconciled) return;
             if (!this.fnScanCmtsIp || !this.fnScanIfindex) return;
             this.fnScanModemCountLoading = true;
             try {
