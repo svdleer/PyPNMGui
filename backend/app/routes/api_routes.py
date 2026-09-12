@@ -12,7 +12,6 @@ from flask import jsonify, request, current_app, session
 from . import api_bp
 from app.core.cmts_provider import CMTSProvider
 from app.core.pypnm_client import PyPNMClient
-from app.core.topology_db import topology_db
 from app.core.modem_filters import filter_ignored_modems
 
 # ── Viewer role guard — block mutating requests ─────────────────────────────
@@ -173,12 +172,24 @@ def _redis_cache_modems_for_key(
     if requested_limit is None:
         requested_limit = _cm_modem_limit_default()
     try:
-        modems = filter_ignored_modems(modems)
+        cache_rows = []
+        topology_fields = {
+            'topology_fiber_node', 'topology_path', 'topology_link_id',
+            'linked_node_id', 'linked_node_type', 'link_match',
+            'lat', 'lon', 'customer_id', 'address',
+        }
+        for source in filter_ignored_modems(modems):
+            row = dict(source)
+            for field in topology_fields:
+                row.pop(field, None)
+            cache_rows.append(row)
+        modems = cache_rows
         snapshot_id = str((metadata or {}).get("snapshot_id") or "").strip()
         if not snapshot_id:
             logger.info("Skipped unverifiable modem cache write for %s", cache_key)
             return
         payload = {
+            "schema_version": 2,
             "cmts": cmts_name,
             "requested_limit": requested_limit,
             "cache_query_limit": requested_limit,
@@ -376,7 +387,12 @@ def _read_modem_cache(cache_key: str, revisions: dict[str, dict] | None = None):
         if redis_client:
             redis_client.delete(cache_key)
         return None
-    if not isinstance(payload, dict) or not _cache_payload_is_current(payload, revisions):
+    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+        if redis_client:
+            redis_client.delete(cache_key)
+        logger.info("Invalidated legacy modem cache key %s", cache_key)
+        return None
+    if not _cache_payload_is_current(payload, revisions):
         # None means PyPNM verification was unavailable. Bypass but retain the
         # cache so a transient outage does not destroy a valid generation.
         if redis_client and revisions is not None:
@@ -578,7 +594,7 @@ def _normalize_modem_capability(modem: dict, *sources: dict | None) -> dict:
 
 
 def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
-    """Best-effort lookup of topology fields keyed by bare uppercase MAC."""
+    """Load topology identities through PyPNM, keyed by bare uppercase MAC."""
     if not mac_addresses:
         return {}
 
@@ -590,59 +606,39 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
         return {}
 
     out: dict[str, dict] = {}
-    conn = None
+    snapshot_date = None
     try:
-        conn = topology_db._connect()
-        cur = conn.cursor()
-        cur.execute("SELECT MAX(id) AS id FROM topology_snapshots")
-        snapshot_row = cur.fetchone() or {}
-        snapshot_id = snapshot_row.get("id") if hasattr(snapshot_row, "get") else None
-        if snapshot_id is None:
-            return out
-
-        marker = "%s"
-        for i in range(0, len(wanted), 500):
-            chunk = wanted[i:i + 500]
-            # topology_modems is indexed by (snapshot_id, mac). Query common
-            # stored MAC formats directly so MySQL can use that index instead
-            # of repeatedly scanning the table through REPLACE/UPPER.
-            candidates = set()
-            for mac in chunk:
-                pairs = [mac[j:j + 2] for j in range(0, 12, 2)]
-                candidates.add(mac)
-                candidates.add(":".join(pairs))
-                candidates.add("-".join(pairs))
-                candidates.add(f"{mac[:4]}.{mac[4:8]}.{mac[8:12]}")
-            candidate_list = sorted(candidates)
-            placeholders = ",".join([marker] * len(candidate_list))
-            sql = (
-                "SELECT mac, linked_node_id, lat, lon, fibernode, customer_id, address "
-                "FROM topology_modems "
-                f"WHERE snapshot_id={marker} AND mac IN ({placeholders})"
-            )
-            cur.execute(sql, tuple([snapshot_id, *candidate_list]))
-            rows = cur.fetchall() or []
-            for row in rows:
-                r = dict(row) if hasattr(row, "keys") else row
-                mac_norm = _bare(r.get("mac"))
-                if not mac_norm:
-                    continue
-                out[mac_norm] = {
-                    "linked_node_id": r.get("linked_node_id") or "",
-                    "lat": r.get("lat"),
-                    "lon": r.get("lon"),
-                    "fibernode": r.get("fibernode") or "",
-                    "customer_id": r.get("customer_id") or "",
-                    "address": r.get("address") or "",
-                }
+        client = PyPNMClient()
     except Exception as exc:
-        logger.warning(f"Topology MAC lookup skipped: {exc}")
-    finally:
+        logger.warning("Topology MAC lookup client initialization failed: %s", exc)
+        return out
+    for offset in range(0, len(wanted), 5000):
+        chunk = wanted[offset:offset + 5000]
         try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+            response = client.get_topology_modems_by_macs(
+                chunk,
+                date=snapshot_date,
+                request_timeout=30,
+            )
+        except Exception as exc:
+            logger.warning("Topology MAC lookup via PyPNM skipped: %s", exc)
+            continue
+        if not isinstance(response, dict):
+            logger.warning("Topology MAC lookup via PyPNM returned an invalid response")
+            continue
+        if response.get("status") != "success":
+            logger.warning(
+                "Topology MAC lookup via PyPNM returned an error: %s",
+                response.get("message") or response.get("detail") or "unknown error",
+            )
+            continue
+        snapshot_date = response.get("snapshot_date") or snapshot_date
+        for row in response.get("modems") or []:
+            if not isinstance(row, dict):
+                continue
+            mac_norm = _bare(row.get("mac"))
+            if mac_norm:
+                out[mac_norm] = row
     return out
 
 
@@ -747,8 +743,8 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
                 m["lat"] = t.get("lat")
             if (m.get("lon") is None or m.get("lon") == "") and t.get("lon") is not None:
                 m["lon"] = t.get("lon")
-            if not m.get("fiber_node") and t.get("fibernode"):
-                m["fiber_node"] = t["fibernode"]
+            if not m.get("topology_fiber_node") and t.get("fibernode"):
+                m["topology_fiber_node"] = t["fibernode"]
             if not m.get("customer_id") and t.get("customer_id"):
                 m["customer_id"] = t["customer_id"]
             if not m.get("address") and t.get("address"):
@@ -901,7 +897,8 @@ def get_modems():
                 "docsis_version": "Unknown",
                 "cmts": topo_modem.get('cmts') or "",
                 "cmts_ip": topo_modem.get('cmts_ip') or "",
-                "fiber_node": topo_modem.get('fibernode') or "",
+                "fiber_node": "",
+                "topology_fiber_node": topo_modem.get('fibernode') or "",
                 "customer_id": topo_modem.get('customer_id') or "",
                 "postalcode": topo_modem.get('postalcode') or "",
                 "house_number": topo_modem.get('house_number') or "",
@@ -1291,7 +1288,8 @@ def get_modem(mac_address):
                 "docsis_version": "Unknown",
                 "cmts": topo_modem.get('cmts') or "",
                 "cmts_ip": topo_modem.get('cmts_ip') or "",
-                "fiber_node": topo_modem.get('fibernode') or "",
+                "fiber_node": "",
+                "topology_fiber_node": topo_modem.get('fibernode') or "",
                 "customer_id": topo_modem.get('customer_id') or "",
                 "postalcode": topo_modem.get('postalcode') or "",
                 "house_number": topo_modem.get('house_number') or "",

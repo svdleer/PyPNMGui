@@ -625,7 +625,7 @@ createApp({
         },
 
         fnScanDisplayFiberNode() {
-            return this.fnScanFiberNode || this.selectedModem?.fiber_node || this.selectedModem?.fibernode || '';
+            return this.fnScanFiberNode || this.selectedModem?.fiber_node || '';
         },
 
         fnScanDisplayChannelLabel() {
@@ -1469,7 +1469,7 @@ createApp({
             const before = { ...target };
             const preserve = [
                 'cmts', 'cmts_ip', 'cmts_hostname', 'cmts_community',
-                'fiber_node', 'cable_mac', 'upstream_interface',
+                'fiber_node', 'topology_fiber_node', 'cable_mac', 'upstream_interface',
             ];
             const saved = {};
             for (const key of preserve) {
@@ -1899,16 +1899,20 @@ createApp({
 
         async _enrichFnSelectorTopologyMetadata() {
             if (this.fnScanTopologyReconciled) return;
-            const dottedNode = String(this.fnScanFiberNode || '').trim();
+            const topologyFiberNode = String(
+                this.selectedModem?.topology_fiber_node ||
+                this.selectedModem?.fibernode ||
+                ''
+            ).trim();
             const bridgeNode = String(this.fnScanTopologyBridgeNodeId || '').trim();
-            const fallbackNode = dottedNode.includes('.') ? dottedNode : (bridgeNode.includes('.') ? bridgeNode : '');
+            const fallbackNode = topologyFiberNode || (bridgeNode.includes('.') ? bridgeNode : '');
             // Scope to selected CMTS — this.modems can contain cross-network
             // search results; sending every area's nodes is wrong and expensive.
             const cmtsScope = (this.fnScanCmtsIp || '').trim();
             const nodeIds = [...new Set((this.modems || [])
                 .filter(m => !cmtsScope || !m.cmts_ip || m.cmts_ip === cmtsScope)
-                .map(m => (m?.fiber_node || '').trim())
-                .filter(v => v && v.includes('.')))];
+                .map(m => String(m?.topology_fiber_node || m?.fibernode || '').trim())
+                .filter(Boolean))];
             if (!nodeIds.length && fallbackNode) {
                 nodeIds.push(fallbackNode);
             }
@@ -1922,8 +1926,15 @@ createApp({
                     }
                 }
                 this.modems = (this.modems || []).map(m => {
-                    const derived = this._deriveTopologyLevels(m.linked_node_id || m.fiber_node || '');
-                    const lookupNode = (derived.topology_node_id || (String(m.fiber_node || '').includes('.') ? m.fiber_node : '') || fallbackNode || '').trim();
+                    const rowTopologyFiberNode = String(
+                        m.topology_fiber_node || m.fibernode || ''
+                    ).trim();
+                    const derived = this._deriveTopologyLevels(
+                        m.linked_node_id || rowTopologyFiberNode
+                    );
+                    const lookupNode = (
+                        derived.topology_node_id || rowTopologyFiberNode || fallbackNode || ''
+                    ).trim();
                     const meta = metaMap[lookupNode] || null;
                     const metaGroup = meta?.serving_group || meta?.group || '';
                     const metaEnd = meta?.end_amplifier || meta?.end_amp || meta?.amp || meta?.end || meta?.cmts || '';
@@ -3170,7 +3181,8 @@ createApp({
                             cable_mac: m.cable_mac || '',
                             upstream_interface: m.upstream_interface || '',
                             upstream_ifindex: m.upstream_ifindex ?? null,
-                            fiber_node: m.fibernode || '',
+                            fiber_node: m.fiber_node || '',
+                            topology_fiber_node: m.fibernode || m.topology_fiber_node || '',
                             customer_id: m.customer_id || '',
                             postalcode: m.postalcode || '',
                             house_number: m.house_number || '',
@@ -3330,7 +3342,8 @@ createApp({
                     partial_service_upstream: patch.partial_service_upstream ?? m.partial_service_upstream ?? null,
                     partial_service_state: patch.partial_service_state ?? m.partial_service_state ?? null,
                     cable_mac: patch.cable_mac || m.cable_mac,
-                    fiber_node: m.fiber_node || patch.fiber_node || '',
+                    fiber_node: patch.fiber_node || m.fiber_node || '',
+                    topology_fiber_node: m.topology_fiber_node || patch.topology_fiber_node || '',
                 };
             });
         },
@@ -3630,12 +3643,19 @@ createApp({
                 const selectedModemFnRaw = (
                     selectedModemApi?.fiber_node ||
                     this.selectedModem?.fiber_node ||
-                    this.selectedModem?.fibernode ||
                     preferred.fiber_node ||
                     ''
                 ).trim();
                 const selectedModemFn = /^FN\d+/i.test(selectedModemFnRaw) ? selectedModemFnRaw : '';
-                this.fnScanTopologyBridgeNodeId = selectedModemFn.includes('.') ? selectedModemFn : this.fnScanTopologyBridgeNodeId;
+                const selectedTopologyFiberNode = String(
+                    selectedModemApi?.topology_fiber_node ||
+                    this.selectedModem?.topology_fiber_node ||
+                    this.selectedModem?.fibernode ||
+                    preferred.topology_fiber_node ||
+                    preferred.fibernode ||
+                    ''
+                ).trim();
+                this.fnScanTopologyBridgeNodeId = selectedTopologyFiberNode || this.fnScanTopologyBridgeNodeId;
                 this.fnScanFiberNode = selectedModemFn || (uniqueFn.length === 1 ? uniqueFn[0] : '');
                 this.fnScanIfindex = this._toIfindex(
                     selectedModemApi?.ofdma_ifindex,
@@ -3782,6 +3802,7 @@ createApp({
                         interface_name: m.interface_name || '',
                         upstream_ifindex: m.upstream_ifindex ?? null,
                         fiber_node: m.fiber_node || '',
+                        topology_fiber_node: m.topology_fiber_node || '',
                         partial_service: this.normalizePartialService(m.partial_service),
                         partial_service_downstream: m.partial_service_downstream ?? null,
                         partial_service_upstream: m.partial_service_upstream ?? null,
@@ -4220,21 +4241,27 @@ createApp({
             // fast and always returns the complete data.
             let m = modem;
             try {
-                // Preserve topology/previously-resolved fiber_node before enrichment
-                // (inventory/Redis may return empty fiber_node, wiping the topology value).
-                const preFiberNode = m.fiber_node || m.fibernode || '';
+                // Preserve physical and topology FiberNode identities independently.
+                const prePhysicalFiberNode = m.fiber_node || '';
+                const preTopologyFiberNode = m.topology_fiber_node || m.fibernode || '';
                 const enrichResp = await fetch(`${API_BASE}/modems/${encodeURIComponent(m.mac_address)}`);
                 const enrichData = await enrichResp.json();
                 if (enrichData?.status === 'success' && enrichData.modem) {
                     // Merge enriched data monotonically onto both references.
                     this._mergeModemPreservingCmts(m, enrichData.modem);
-                    if (!m.fiber_node && preFiberNode) {
-                        m.fiber_node = preFiberNode;
+                    if (!m.fiber_node && prePhysicalFiberNode) {
+                        m.fiber_node = prePhysicalFiberNode;
+                    }
+                    if (!m.topology_fiber_node && preTopologyFiberNode) {
+                        m.topology_fiber_node = preTopologyFiberNode;
                     }
                     if (this.selectedModem?.mac_address === m.mac_address) {
                         this._mergeModemPreservingCmts(this.selectedModem, enrichData.modem);
-                        if (!this.selectedModem.fiber_node && preFiberNode) {
-                            this.selectedModem.fiber_node = preFiberNode;
+                        if (!this.selectedModem.fiber_node && prePhysicalFiberNode) {
+                            this.selectedModem.fiber_node = prePhysicalFiberNode;
+                        }
+                        if (!this.selectedModem.topology_fiber_node && preTopologyFiberNode) {
+                            this.selectedModem.topology_fiber_node = preTopologyFiberNode;
                         }
                     }
                     this._fnTrace('prime.enriched_modem', {
@@ -4263,8 +4290,11 @@ createApp({
             this.fnScanCmtsIp = resolvedCmtsIp;
             this.fnScanCommunity = this._firstCredential(this.fnScanCommunity, this.snmpCommunity);
             this.fnScanWriteCommunity = this._firstCredential(this.fnScanWriteCommunity, this.snmpCommunityRW);
-            const selectedModemFn = String(m.fiber_node || m.fibernode || '').trim();
-            this.fnScanTopologyBridgeNodeId = selectedModemFn.includes('.') ? selectedModemFn : this.fnScanTopologyBridgeNodeId;
+            const selectedModemFn = String(m.fiber_node || '').trim();
+            const selectedTopologyFiberNode = String(
+                m.topology_fiber_node || m.fibernode || ''
+            ).trim();
+            this.fnScanTopologyBridgeNodeId = selectedTopologyFiberNode || this.fnScanTopologyBridgeNodeId;
 
             // ── Instant fill from modem data ────────────────────────────
             // Set scanner fields immediately from already-known modem
@@ -4412,20 +4442,20 @@ createApp({
             const _needsEnrich = this.selectedModem && this.selectedModem.mac_address &&
                 (!this.selectedModem.ip_address || !this.selectedModem.cmts_ip ||
                  !this.selectedModem.vendor || !this.selectedModem.software_version ||
-                 !(this.selectedModem.fiber_node || this.selectedModem.fibernode) ||
+                 !this.selectedModem.fiber_node ||
                  !this.selectedModem.cable_mac ||
                  this.selectedModem.ofdm_enabled == null || this.selectedModem.ofdma_enabled == null ||
                  this.selectedModem.cpe_ipv4 === undefined || this.selectedModem.cpe_ipv6 === undefined);
             if (_needsEnrich) {
                 this.modemDetailLoading = true;
                 try {
-                    const topologyFiberNode = this.selectedModem.fiber_node || this.selectedModem.fibernode || '';
+                    const topologyFiberNode = this.selectedModem.topology_fiber_node || this.selectedModem.fibernode || '';
                     const resp = await fetch(`${API_BASE}/modems/${encodeURIComponent(this.selectedModem.mac_address)}`);
                     const data = await resp.json();
                     if (data?.status === 'success' && data.modem) {
                         this._mergeModemPreservingCmts(this.selectedModem, data.modem);
-                        if (!this.selectedModem.fiber_node && topologyFiberNode) {
-                            this.selectedModem.fiber_node = topologyFiberNode;
+                        if (!this.selectedModem.topology_fiber_node && topologyFiberNode) {
+                            this.selectedModem.topology_fiber_node = topologyFiberNode;
                         }
                     }
                 } catch (_) {
@@ -4441,9 +4471,10 @@ createApp({
                     // Best-effort handoff only.
                 }
             }
-            if (this.selectedModem && !this.selectedModem.topology_path && this.selectedModem.fiber_node) {
+            const topologyPathNode = this.selectedModem?.topology_fiber_node || this.selectedModem?.fibernode || '';
+            if (this.selectedModem && !this.selectedModem.topology_path && topologyPathNode) {
                 try {
-                    const pr = await fetch(`${API_BASE}/topology/path?node_id=${encodeURIComponent(this.selectedModem.fiber_node)}`);
+                    const pr = await fetch(`${API_BASE}/topology/path?node_id=${encodeURIComponent(topologyPathNode)}`);
                     const pd = await pr.json();
                     if (pd?.status === 'success' && pd.path) {
                         this.selectedModem.topology_path = pd.path;
@@ -6195,6 +6226,7 @@ createApp({
                         ip_address: m.ip_address || existing.ip_address || '',
                         status: m.status || existing.status || '',
                         fiber_node: m.fiber_node || existing.fiber_node || '',
+                        topology_fiber_node: m.topology_fiber_node || existing.topology_fiber_node || '',
                         cable_mac: m.cable_mac || existing.cable_mac || '',
                         vendor: merged.vendor || 'Unknown',
                         partial_service: this.normalizePartialService(m.partial_service ?? existing.partial_service),

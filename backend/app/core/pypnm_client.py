@@ -394,6 +394,21 @@ class PyPNMClient:
             params["date"] = date
         return self._get("/api/topology/modem/by-mac", params=params, request_timeout=request_timeout)
 
+    def get_topology_modems_by_macs(
+        self,
+        mac_addresses: list[str],
+        date: Optional[str] = None,
+        request_timeout: int | None = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"mac_addresses": mac_addresses}
+        if date:
+            payload["date"] = date
+        return self._post(
+            "/api/topology/modems/by-macs",
+            payload,
+            request_timeout=request_timeout,
+        )
+
     # ============== Agent Management ==============
     
     def get_agents(self) -> Dict[str, Any]:
