@@ -222,11 +222,11 @@
         }).join('');
     }
 
-    function resetModemFacetSelectors() {
+    function resetModemFacetSelectors(placeholder = 'Select CMTS') {
         modemVendorSelect.disabled = true;
-        modemVendorSelect.innerHTML = '<option value="">Select affiliate</option>';
+        modemVendorSelect.innerHTML = `<option value="">${placeholder}</option>`;
         modemTypeSelect.disabled = true;
-        modemTypeSelect.innerHTML = '<option value="">Select affiliate</option>';
+        modemTypeSelect.innerHTML = `<option value="">${placeholder}</option>`;
     }
 
     async function loadCmtsOptions() {
@@ -284,12 +284,16 @@
 
     async function loadModemVendorOptions() {
         const affiliate = affiliateSelect.value;
+        const cmts = cmtsSelect.value;
         if (!affiliate) {
+            resetModemFacetSelectors('Select affiliate');
+            return;
+        }
+        if (!cmts) {
             resetModemFacetSelectors();
             return;
         }
-        const params = new URLSearchParams({ affiliate, limit: '5000' });
-        if (cmtsSelect.value) params.set('cmts', cmtsSelect.value);
+        const params = new URLSearchParams({ affiliate, cmts, limit: '5000' });
         modemVendorSelect.disabled = true;
         modemVendorSelect.innerHTML = '<option value="">Loading...</option>';
         try {
@@ -305,13 +309,18 @@
 
     async function loadModemTypeOptions() {
         const affiliate = affiliateSelect.value;
+        const cmts = cmtsSelect.value;
         if (!affiliate) {
             modemTypeSelect.disabled = true;
             modemTypeSelect.innerHTML = '<option value="">Select affiliate</option>';
             return;
         }
-        const params = new URLSearchParams({ affiliate, limit: '5000' });
-        if (cmtsSelect.value) params.set('cmts', cmtsSelect.value);
+        if (!cmts) {
+            modemTypeSelect.disabled = true;
+            modemTypeSelect.innerHTML = '<option value="">Select CMTS</option>';
+            return;
+        }
+        const params = new URLSearchParams({ affiliate, cmts, limit: '5000' });
         if (modemVendorSelect.value) params.set('modem_vendor', modemVendorSelect.value);
         modemTypeSelect.disabled = true;
         modemTypeSelect.innerHTML = '<option value="">Loading...</option>';
@@ -330,7 +339,8 @@
         await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
     });
     affiliateSelect.addEventListener('change', async () => {
-        await Promise.all([loadCmtsOptions(), loadFiberNodeOptions(), loadModemVendorOptions()]);
+        resetModemFacetSelectors();
+        await Promise.all([loadCmtsOptions(), loadFiberNodeOptions()]);
     });
     modemVendorSelect.addEventListener('change', loadModemTypeOptions);
 
