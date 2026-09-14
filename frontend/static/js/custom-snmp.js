@@ -191,6 +191,7 @@
     // ── Scope ───────────────────────────────────────────────
 
     const scopeType = byId('snmp-scope-type');
+    const affiliateSelect = byId('snmp-affiliate');
     const cmtsWrap = byId('snmp-cmts-wrap');
     const fnWrap = byId('snmp-fn-wrap');
 
@@ -213,23 +214,35 @@
         } catch (e) { console.warn('CMTS options:', e); }
     }
 
-    byId('snmp-cmts').addEventListener('change', async function () {
-        const cmts = this.value;
+    async function loadFiberNodeOptions() {
+        const cmts = byId('snmp-cmts').value;
+        const affiliate = affiliateSelect.value;
         const fnSel = byId('snmp-fiber-node');
         if (!topologyScopesEnabled) {
             fnSel.innerHTML = '<option value="">Topology scopes disabled</option>';
             fnSel.disabled = true;
             return;
         }
-        if (!cmts) { fnSel.innerHTML = '<option value="">Select CMTS</option>'; fnSel.disabled = true; return; }
+        if (!cmts) {
+            fnSel.innerHTML = '<option value="">Select CMTS</option>';
+            fnSel.disabled = true;
+            return;
+        }
         fnSel.disabled = false;
         fnSel.innerHTML = '<option value="">Loading...</option>';
         try {
-            const data = await request('GET', `/options/fiber-nodes?cmts=${encodeURIComponent(cmts)}`);
-            fnSel.innerHTML = '<option value="">— all —</option>' +
+            const params = new URLSearchParams({ cmts, affiliate, limit: '5000' });
+            const data = await request('GET', `/options/fiber-nodes?${params.toString()}`);
+            fnSel.innerHTML = '<option value="">— select —</option>' +
                 (data.fiber_nodes || []).map(fn => `<option value="${fn}">${fn}</option>`).join('');
-        } catch (e) { fnSel.innerHTML = '<option value="">Error</option>'; }
-    });
+        } catch (e) {
+            fnSel.innerHTML = '<option value="">Error loading FiberNodes</option>';
+            fnSel.disabled = true;
+        }
+    }
+
+    byId('snmp-cmts').addEventListener('change', loadFiberNodeOptions);
+    affiliateSelect.addEventListener('change', loadFiberNodeOptions);
 
     // ── Create plan ─────────────────────────────────────────
 
@@ -238,10 +251,11 @@
         if (!oids.length) return alert('Add at least one OID');
 
         const type = scopeType.value;
+        const affiliate = affiliateSelect.value;
         if (type === 'fiber_node' && !topologyScopesEnabled) {
             return alert('Fiber Node scope is disabled by the administrator');
         }
-        const scope = { type };
+        const scope = { type, affiliate };
         if (type === 'cmts') {
             const cmts = byId('snmp-cmts').value;
             if (!cmts) return alert('Select a CMTS');

@@ -1218,7 +1218,7 @@ def custom_snmp_fiber_node_options():
     gate = _require_custom_snmp()
     if gate:
         return gate
-    params = {k: v for k, v in request.args.items() if k in {"cmts", "limit"}}
+    params = {k: v for k, v in request.args.items() if k in {"cmts", "affiliate", "limit"}}
     return _proxy("GET", "/custom-snmp/options/fiber-nodes", params=params)
 
 

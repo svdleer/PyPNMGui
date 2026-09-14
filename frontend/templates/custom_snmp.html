@@ -26,27 +26,36 @@
                 <div class="card-header bg-white"><strong>Scope</strong></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label small fw-bold">Type</label>
                             <select class="form-select form-select-sm" id="snmp-scope-type">
                                 <option value="cmts">CMTS</option>
-                                <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Fiber node{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
+                                <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Technical FiberNode{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
                                 <option value="all_network">All network</option>
                             </select>
                         </div>
-                        <div class="col-md-4" id="snmp-cmts-wrap">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Affiliate</label>
+                            <select class="form-select form-select-sm" id="snmp-affiliate">
+                                <option value="all">All</option>
+                                <option value="vfz">VFZ</option>
+                                <option value="fziggo">fZiggo</option>
+                                <option value="fupc">fUPC</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3" id="snmp-cmts-wrap">
                             <label class="form-label small fw-bold">CMTS</label>
                             <select class="form-select form-select-sm" id="snmp-cmts">
                                 <option value="">Loading...</option>
                             </select>
                         </div>
-                        <div class="col-md-4 d-none" id="snmp-fn-wrap">
-                            <label class="form-label small fw-bold">Fiber node</label>
+                        <div class="col-md-3 d-none" id="snmp-fn-wrap">
+                            <label class="form-label small fw-bold">Technical FiberNode</label>
                             <select class="form-select form-select-sm" id="snmp-fiber-node" disabled>
                                 <option value="">Select CMTS</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label small fw-bold">Max modems</label>
                             <input type="number" class="form-control form-control-sm" id="snmp-max-modems" value="100" min="1" max="100000">
                         </div>
