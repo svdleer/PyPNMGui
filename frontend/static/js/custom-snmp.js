@@ -192,6 +192,9 @@
 
     const scopeType = byId('snmp-scope-type');
     const affiliateSelect = byId('snmp-affiliate');
+    const cmtsSelect = byId('snmp-cmts');
+    const modemVendorSelect = byId('snmp-modem-vendor');
+    const modemTypeSelect = byId('snmp-modem-type');
     const cmtsWrap = byId('snmp-cmts-wrap');
     const fnWrap = byId('snmp-fn-wrap');
 
@@ -205,17 +208,38 @@
     }
     scopeType.addEventListener('change', updateScopeUI);
 
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        }[char]));
+    }
+
+    function facetOptions(items, placeholder) {
+        return `<option value="">${placeholder}</option>` + (items || []).map(item => {
+            const value = String(item.value || '');
+            const count = Number(item.count || 0);
+            return `<option value="${escapeHtml(value)}">${escapeHtml(value)} (${count})</option>`;
+        }).join('');
+    }
+
     async function loadCmtsOptions() {
+        const affiliate = affiliateSelect.value;
+        cmtsSelect.disabled = true;
+        cmtsSelect.innerHTML = '<option value="">Loading...</option>';
         try {
-            const data = await request('GET', '/options/cmts?limit=5000');
-            const sel = byId('snmp-cmts');
-            sel.innerHTML = '<option value="">— select —</option>' +
-                (data.cmts || []).map(c => `<option value="${c}">${c}</option>`).join('');
-        } catch (e) { console.warn('CMTS options:', e); }
+            const params = new URLSearchParams({ affiliate, limit: '5000' });
+            const data = await request('GET', `/options/cmts?${params.toString()}`);
+            cmtsSelect.innerHTML = '<option value="">— select —</option>' +
+                (data.cmts || []).map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+            cmtsSelect.disabled = false;
+        } catch (e) {
+            cmtsSelect.innerHTML = '<option value="">Error loading CMTSs</option>';
+            console.warn('CMTS options:', e);
+        }
     }
 
     async function loadFiberNodeOptions() {
-        const cmts = byId('snmp-cmts').value;
+        const cmts = cmtsSelect.value;
         const affiliate = affiliateSelect.value;
         const fnSel = byId('snmp-fiber-node');
         if (!topologyScopesEnabled) {
@@ -234,15 +258,53 @@
             const params = new URLSearchParams({ cmts, affiliate, limit: '5000' });
             const data = await request('GET', `/options/fiber-nodes?${params.toString()}`);
             fnSel.innerHTML = '<option value="">— select —</option>' +
-                (data.fiber_nodes || []).map(fn => `<option value="${fn}">${fn}</option>`).join('');
+                (data.fiber_nodes || []).map(fn => `<option value="${escapeHtml(fn)}">${escapeHtml(fn)}</option>`).join('');
         } catch (e) {
             fnSel.innerHTML = '<option value="">Error loading FiberNodes</option>';
             fnSel.disabled = true;
         }
     }
 
-    byId('snmp-cmts').addEventListener('change', loadFiberNodeOptions);
-    affiliateSelect.addEventListener('change', loadFiberNodeOptions);
+    async function loadModemVendorOptions() {
+        const params = new URLSearchParams({ affiliate: affiliateSelect.value, limit: '5000' });
+        if (cmtsSelect.value) params.set('cmts', cmtsSelect.value);
+        modemVendorSelect.disabled = true;
+        modemVendorSelect.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const data = await request('GET', `/options/modem-vendors?${params.toString()}`);
+            modemVendorSelect.innerHTML = facetOptions(data.modem_vendors, 'All vendors');
+            modemVendorSelect.disabled = false;
+        } catch (e) {
+            modemVendorSelect.innerHTML = '<option value="">Error loading vendors</option>';
+            console.warn('Modem vendor options:', e);
+        }
+        await loadModemTypeOptions();
+    }
+
+    async function loadModemTypeOptions() {
+        const params = new URLSearchParams({ affiliate: affiliateSelect.value, limit: '5000' });
+        if (cmtsSelect.value) params.set('cmts', cmtsSelect.value);
+        if (modemVendorSelect.value) params.set('modem_vendor', modemVendorSelect.value);
+        modemTypeSelect.disabled = true;
+        modemTypeSelect.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const data = await request('GET', `/options/modem-types?${params.toString()}`);
+            modemTypeSelect.innerHTML = facetOptions(data.modem_types, 'All types / models');
+            modemTypeSelect.disabled = false;
+        } catch (e) {
+            modemTypeSelect.innerHTML = '<option value="">Error loading types / models</option>';
+            console.warn('Modem type options:', e);
+        }
+    }
+
+    cmtsSelect.addEventListener('change', async () => {
+        await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
+    });
+    affiliateSelect.addEventListener('change', async () => {
+        await loadCmtsOptions();
+        await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
+    });
+    modemVendorSelect.addEventListener('change', loadModemTypeOptions);
 
     // ── Create plan ─────────────────────────────────────────
 
@@ -256,12 +318,14 @@
             return alert('Fiber Node scope is disabled by the administrator');
         }
         const scope = { type, affiliate };
+        if (modemVendorSelect.value) scope.modem_vendor = modemVendorSelect.value;
+        if (modemTypeSelect.value) scope.modem_type = modemTypeSelect.value;
         if (type === 'cmts') {
-            const cmts = byId('snmp-cmts').value;
+            const cmts = cmtsSelect.value;
             if (!cmts) return alert('Select a CMTS');
             scope.cmts = [cmts];
         } else if (type === 'fiber_node') {
-            const cmts = byId('snmp-cmts').value;
+            const cmts = cmtsSelect.value;
             const fn = byId('snmp-fiber-node').value;
             if (!cmts) return alert('Select a CMTS');
             if (!fn) return alert('Select a fiber node');
@@ -393,7 +457,12 @@
 
     async function init() {
         updateScopeUI();
-        await Promise.all([loadCmtsOptions(), loadTemplates(), refreshJobs()]);
+        await Promise.all([
+            loadCmtsOptions(),
+            loadModemVendorOptions(),
+            loadTemplates(),
+            refreshJobs(),
+        ]);
         // Auto-poll if any job is running
         const body = byId('snmp-jobs-body');
         if (body && body.innerHTML.includes('bg-primary')) startPolling();

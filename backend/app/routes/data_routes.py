@@ -1209,7 +1209,7 @@ def custom_snmp_cmts_options():
     gate = _require_custom_snmp()
     if gate:
         return gate
-    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    params = {k: v for k, v in request.args.items() if k in {"affiliate", "limit"}}
     return _proxy("GET", "/custom-snmp/options/cmts", params=params)
 
 
@@ -1220,6 +1220,28 @@ def custom_snmp_fiber_node_options():
         return gate
     params = {k: v for k, v in request.args.items() if k in {"cmts", "affiliate", "limit"}}
     return _proxy("GET", "/custom-snmp/options/fiber-nodes", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/options/modem-vendors', methods=['GET'])
+def custom_snmp_modem_vendor_options():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"affiliate", "cmts", "limit"}}
+    return _proxy("GET", "/custom-snmp/options/modem-vendors", params=params)
+
+
+@api_bp.route('/admin/custom-snmp/options/modem-types', methods=['GET'])
+def custom_snmp_modem_type_options():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    params = {
+        k: v
+        for k, v in request.args.items()
+        if k in {"affiliate", "cmts", "modem_vendor", "limit"}
+    }
+    return _proxy("GET", "/custom-snmp/options/modem-types", params=params)
 
 
 @api_bp.route('/admin/custom-snmp/templates', methods=['GET'])

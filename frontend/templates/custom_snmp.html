@@ -26,15 +26,15 @@
                 <div class="card-header bg-white"><strong>Scope</strong></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-3">
-                            <label class="form-label small fw-bold">Type</label>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Scope</label>
                             <select class="form-select form-select-sm" id="snmp-scope-type">
                                 <option value="cmts">CMTS</option>
                                 <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Technical FiberNode{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
                                 <option value="all_network">All network</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Affiliate</label>
                             <select class="form-select form-select-sm" id="snmp-affiliate">
                                 <option value="all">All</option>
@@ -55,9 +55,21 @@
                                 <option value="">Select CMTS</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Max modems</label>
                             <input type="number" class="form-control form-control-sm" id="snmp-max-modems" value="100" min="1" max="100000">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">Modem vendor</label>
+                            <select class="form-select form-select-sm" id="snmp-modem-vendor">
+                                <option value="">All vendors</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">Modem type / model</label>
+                            <select class="form-select form-select-sm" id="snmp-modem-type">
+                                <option value="">All types / models</option>
+                            </select>
                         </div>
                     </div>
                 </div>
