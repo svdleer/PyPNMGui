@@ -89,7 +89,10 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
             try {
-                const data = await request('POST', '/verify-oid', { oid: oidVal, cmts });
+                const data = await request('POST', '/verify-oid', {
+                    oid: oidVal,
+                    cmts: isAffiliateAllCmtsSelected() ? null : cmts,
+                });
                 if (data.success) {
                     btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
                     btn.title = `OK: ${data.value} (tested on ${data.modem_ip})`;
@@ -197,6 +200,11 @@
     const modemTypeSelect = byId('snmp-modem-type');
     const cmtsWrap = byId('snmp-cmts-wrap');
     const fnWrap = byId('snmp-fn-wrap');
+    const affiliateAllCmtsValue = '__affiliate_all_cmts__';
+
+    function isAffiliateAllCmtsSelected() {
+        return cmtsSelect.value === affiliateAllCmtsValue;
+    }
 
     function updateScopeUI() {
         if (!topologyScopesEnabled && scopeType.value === 'fiber_node') {
@@ -241,7 +249,12 @@
         try {
             const params = new URLSearchParams({ affiliate, limit: '5000' });
             const data = await request('GET', `/options/cmts?${params.toString()}`);
-            cmtsSelect.innerHTML = '<option value="">— select —</option>' +
+            const aggregate = data.aggregate || {};
+            const modemCount = Number(aggregate.modem_count);
+            const aggregateOption = aggregate.kind === 'affiliate_all' && Number.isFinite(modemCount)
+                ? `<option value="${affiliateAllCmtsValue}">All CMTS (${modemCount.toLocaleString()} active modems)</option>`
+                : '';
+            cmtsSelect.innerHTML = '<option value="">— select —</option>' + aggregateOption +
                 (data.cmts || []).map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
             cmtsSelect.disabled = false;
         } catch (e) {
@@ -269,6 +282,11 @@
             fnSel.disabled = true;
             return;
         }
+        if (isAffiliateAllCmtsSelected()) {
+            fnSel.innerHTML = '<option value="">All CMTS does not support Fiber Node</option>';
+            fnSel.disabled = true;
+            return;
+        }
         fnSel.disabled = false;
         fnSel.innerHTML = '<option value="">Loading...</option>';
         try {
@@ -293,7 +311,8 @@
             resetModemFacetSelectors();
             return;
         }
-        const params = new URLSearchParams({ affiliate, cmts, limit: '5000' });
+        const params = new URLSearchParams({ affiliate, limit: '5000' });
+        if (!isAffiliateAllCmtsSelected()) params.set('cmts', cmts);
         modemVendorSelect.disabled = true;
         modemVendorSelect.innerHTML = '<option value="">Loading...</option>';
         try {
@@ -320,7 +339,8 @@
             modemTypeSelect.innerHTML = '<option value="">Select CMTS</option>';
             return;
         }
-        const params = new URLSearchParams({ affiliate, cmts, limit: '5000' });
+        const params = new URLSearchParams({ affiliate, limit: '5000' });
+        if (!isAffiliateAllCmtsSelected()) params.set('cmts', cmts);
         if (modemVendorSelect.value) params.set('modem_vendor', modemVendorSelect.value);
         modemTypeSelect.disabled = true;
         modemTypeSelect.innerHTML = '<option value="">Loading...</option>';
@@ -350,12 +370,17 @@
         const oids = getOids();
         if (!oids.length) return alert('Add at least one OID');
 
-        const type = scopeType.value;
+        const requestedType = scopeType.value;
         const affiliate = affiliateSelect.value;
+        const affiliateAllCmts = isAffiliateAllCmtsSelected();
         if (!affiliate) return alert('Select an affiliate first');
-        if (type === 'fiber_node' && !topologyScopesEnabled) {
+        if (affiliateAllCmts && requestedType === 'fiber_node') {
+            return alert('All CMTS cannot be used with a Fiber Node scope');
+        }
+        if (requestedType === 'fiber_node' && !topologyScopesEnabled) {
             return alert('Fiber Node scope is disabled by the administrator');
         }
+        const type = affiliateAllCmts ? 'all_network' : requestedType;
         const scope = { type, affiliate };
         if (modemVendorSelect.value) scope.modem_vendor = modemVendorSelect.value;
         if (modemTypeSelect.value) scope.modem_type = modemTypeSelect.value;
