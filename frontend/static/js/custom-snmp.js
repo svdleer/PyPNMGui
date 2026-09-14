@@ -222,8 +222,20 @@
         }).join('');
     }
 
+    function resetModemFacetSelectors() {
+        modemVendorSelect.disabled = true;
+        modemVendorSelect.innerHTML = '<option value="">Select affiliate</option>';
+        modemTypeSelect.disabled = true;
+        modemTypeSelect.innerHTML = '<option value="">Select affiliate</option>';
+    }
+
     async function loadCmtsOptions() {
         const affiliate = affiliateSelect.value;
+        if (!affiliate) {
+            cmtsSelect.disabled = true;
+            cmtsSelect.innerHTML = '<option value="">Select affiliate</option>';
+            return;
+        }
         cmtsSelect.disabled = true;
         cmtsSelect.innerHTML = '<option value="">Loading...</option>';
         try {
@@ -247,6 +259,11 @@
             fnSel.disabled = true;
             return;
         }
+        if (!affiliate) {
+            fnSel.innerHTML = '<option value="">Select affiliate</option>';
+            fnSel.disabled = true;
+            return;
+        }
         if (!cmts) {
             fnSel.innerHTML = '<option value="">Select CMTS</option>';
             fnSel.disabled = true;
@@ -266,7 +283,12 @@
     }
 
     async function loadModemVendorOptions() {
-        const params = new URLSearchParams({ affiliate: affiliateSelect.value, limit: '5000' });
+        const affiliate = affiliateSelect.value;
+        if (!affiliate) {
+            resetModemFacetSelectors();
+            return;
+        }
+        const params = new URLSearchParams({ affiliate, limit: '5000' });
         if (cmtsSelect.value) params.set('cmts', cmtsSelect.value);
         modemVendorSelect.disabled = true;
         modemVendorSelect.innerHTML = '<option value="">Loading...</option>';
@@ -282,7 +304,13 @@
     }
 
     async function loadModemTypeOptions() {
-        const params = new URLSearchParams({ affiliate: affiliateSelect.value, limit: '5000' });
+        const affiliate = affiliateSelect.value;
+        if (!affiliate) {
+            modemTypeSelect.disabled = true;
+            modemTypeSelect.innerHTML = '<option value="">Select affiliate</option>';
+            return;
+        }
+        const params = new URLSearchParams({ affiliate, limit: '5000' });
         if (cmtsSelect.value) params.set('cmts', cmtsSelect.value);
         if (modemVendorSelect.value) params.set('modem_vendor', modemVendorSelect.value);
         modemTypeSelect.disabled = true;
@@ -298,11 +326,11 @@
     }
 
     cmtsSelect.addEventListener('change', async () => {
+        if (!affiliateSelect.value) return;
         await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
     });
     affiliateSelect.addEventListener('change', async () => {
-        await loadCmtsOptions();
-        await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
+        await Promise.all([loadCmtsOptions(), loadFiberNodeOptions(), loadModemVendorOptions()]);
     });
     modemVendorSelect.addEventListener('change', loadModemTypeOptions);
 
@@ -314,6 +342,7 @@
 
         const type = scopeType.value;
         const affiliate = affiliateSelect.value;
+        if (!affiliate) return alert('Select an affiliate first');
         if (type === 'fiber_node' && !topologyScopesEnabled) {
             return alert('Fiber Node scope is disabled by the administrator');
         }
@@ -457,12 +486,7 @@
 
     async function init() {
         updateScopeUI();
-        await Promise.all([
-            loadCmtsOptions(),
-            loadModemVendorOptions(),
-            loadTemplates(),
-            refreshJobs(),
-        ]);
+        await Promise.all([loadTemplates(), refreshJobs()]);
         // Auto-poll if any job is running
         const body = byId('snmp-jobs-body');
         if (body && body.innerHTML.includes('bg-primary')) startPolling();

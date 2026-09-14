@@ -37,6 +37,7 @@
                         <div class="col-md-2">
                             <label class="form-label small fw-bold">Affiliate</label>
                             <select class="form-select form-select-sm" id="snmp-affiliate">
+                                <option value="" selected disabled>— select —</option>
                                 <option value="all">All</option>
                                 <option value="vfz">VFZ</option>
                                 <option value="fziggo">fZiggo</option>
@@ -45,30 +46,30 @@
                         </div>
                         <div class="col-md-3" id="snmp-cmts-wrap">
                             <label class="form-label small fw-bold">CMTS</label>
-                            <select class="form-select form-select-sm" id="snmp-cmts">
-                                <option value="">Loading...</option>
+                            <select class="form-select form-select-sm" id="snmp-cmts" disabled>
+                                <option value="">Select affiliate</option>
                             </select>
                         </div>
                         <div class="col-md-3 d-none" id="snmp-fn-wrap">
                             <label class="form-label small fw-bold">Technical FiberNode</label>
                             <select class="form-select form-select-sm" id="snmp-fiber-node" disabled>
-                                <option value="">Select CMTS</option>
+                                <option value="">Select affiliate</option>
                             </select>
                         </div>
-                        <div class="col-md-2">
+                        <div class="col-md-2 ms-md-auto">
                             <label class="form-label small fw-bold">Max modems</label>
                             <input type="number" class="form-control form-control-sm" id="snmp-max-modems" value="100" min="1" max="100000">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">Modem vendor</label>
-                            <select class="form-select form-select-sm" id="snmp-modem-vendor">
-                                <option value="">All vendors</option>
+                            <select class="form-select form-select-sm" id="snmp-modem-vendor" disabled>
+                                <option value="">Select affiliate</option>
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">Modem type / model</label>
-                            <select class="form-select form-select-sm" id="snmp-modem-type">
-                                <option value="">All types / models</option>
+                            <select class="form-select form-select-sm" id="snmp-modem-type" disabled>
+                                <option value="">Select affiliate</option>
                             </select>
                         </div>
                     </div>
