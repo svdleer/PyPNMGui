@@ -45,6 +45,7 @@
         // Autocomplete
         const oidInput = row.querySelector('[data-field="oid"]');
         const sugBox = row.querySelector('[data-role="suggestions"]');
+        oidInput.addEventListener('input', () => clearRowVerification(row));
         let debounceTimer = null;
         oidInput.addEventListener('input', () => {
             clearTimeout(debounceTimer);
@@ -63,6 +64,7 @@
                         a.addEventListener('mousedown', (e) => {
                             e.preventDefault();
                             oidInput.value = results[i].name;
+                            clearRowVerification(row);
                             const labelInput = row.querySelector('[data-field="label"]');
                             if (!labelInput.value) labelInput.value = results[i].name.split('.')[0];
                             sugBox.style.display = 'none';
@@ -82,13 +84,17 @@
         row.querySelector('.oid-verify-btn').addEventListener('click', async () => {
             const cmts = byId('snmp-cmts').value;
             const affiliate = byId('snmp-affiliate').value;
-            if (!affiliate || !cmts) { alert('Select an affiliate and CMTS first to verify OIDs'); return; }
+            const requestedScope = byId('snmp-scope-type').value;
+            if (!affiliate || (requestedScope !== 'all_network' && !cmts)) {
+                alert('Select an affiliate and CMTS first to verify OIDs');
+                return;
+            }
             const oidInput = row.querySelector('[data-field="oid"]');
             const oidVal = oidInput.value.trim();
             if (!oidVal) return;
             const btn = row.querySelector('.oid-verify-btn');
             const targetMode = byId('snmp-verify-modem').checked ? 'modem' : 'cmts';
-            const allCmts = isAffiliateAllCmtsSelected();
+            const allCmts = requestedScope === 'all_network' || isAffiliateAllCmtsSelected();
             const payload = {
                 oid: oidVal,
                 target_mode: targetMode,
@@ -103,28 +109,71 @@
                 const data = await request('POST', '/verify-oid', payload);
                 if (data.success) {
                     const target = data.target || {};
+                    const receipt = data.verification_receipt || {};
                     const targetLabel = target.role === 'cmts'
                         ? `${target.cmts || 'CMTS'} (${target.ip || 'unknown IP'})`
                         : `${target.modem_ip || target.ip || 'modem'} behind ${target.cmts || 'CMTS'}`;
-                    btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
-                    btn.title = `OK: ${data.value} (tested on ${targetLabel}; attempt ${data.attempts_used || 1})`;
-                    oidInput.classList.remove('is-invalid');
-                    oidInput.classList.add('is-valid');
+                    if (targetMode === 'modem' && receipt.receipt_id) {
+                        row.dataset.verificationReceipt = receipt.receipt_id;
+                        row.dataset.verifiedOid = oidVal;
+                        btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                        btn.title = `Verified: ${data.value} (tested on ${targetLabel}; attempt ${data.attempts_used || 1})`;
+                        oidInput.classList.remove('is-invalid');
+                        oidInput.classList.add('is-valid');
+                    } else {
+                        clearRowVerification(row);
+                        btn.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning"></i>';
+                        btn.title = `Valid only on ${targetLabel}. Modem verification is required before planning a modem query task.`;
+                    }
                 } else {
+                    clearRowVerification(row);
                     btn.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
                     btn.title = `${data.error || 'Verification failed'} (${data.attempts_used || 0}/${data.attempts_limit || 0} attempts)`;
-                    oidInput.classList.remove('is-valid');
                     oidInput.classList.add('is-invalid');
                 }
             } catch (e) {
+                clearRowVerification(row);
                 btn.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
                 btn.title = e.message;
-                oidInput.classList.remove('is-valid');
                 oidInput.classList.add('is-invalid');
             }
             btn.disabled = false;
         });
         return row;
+    }
+
+    function clearRowVerification(row) {
+        delete row.dataset.verificationReceipt;
+        delete row.dataset.verifiedOid;
+        const oidInput = row.querySelector('[data-field="oid"]');
+        oidInput.classList.remove('is-valid', 'is-invalid');
+    }
+
+    function invalidateOidVerifications() {
+        oidContainer.querySelectorAll('.oid-row').forEach(row => {
+            clearRowVerification(row);
+            const btn = row.querySelector('.oid-verify-btn');
+            btn.innerHTML = '<i class="bi bi-check-circle"></i>';
+            btn.title = 'Verify OID';
+        });
+    }
+
+    function getVerificationReceipts() {
+        const receipts = [];
+        const unverified = [];
+        oidContainer.querySelectorAll('.oid-row').forEach(row => {
+            const oid = row.querySelector('[data-field="oid"]').value.trim();
+            if (!oid) return;
+            if (row.dataset.verifiedOid !== oid || !row.dataset.verificationReceipt) {
+                unverified.push(oid);
+                return;
+            }
+            receipts.push(row.dataset.verificationReceipt);
+        });
+        if (unverified.length) {
+            throw new Error(`Verify every OID on a cable modem before planning: ${unverified.join(', ')}`);
+        }
+        return receipts;
     }
 
     function updateOidCount() {
@@ -227,7 +276,10 @@
         cmtsWrap.classList.toggle('d-none', type === 'all_network');
         fnWrap.classList.toggle('d-none', !topologyScopesEnabled || type !== 'fiber_node');
     }
-    scopeType.addEventListener('change', updateScopeUI);
+    scopeType.addEventListener('change', () => {
+        updateScopeUI();
+        invalidateOidVerifications();
+    });
 
     function escapeHtml(value) {
         return String(value).replace(/[&<>'"]/g, char => ({
@@ -368,14 +420,21 @@
     }
 
     cmtsSelect.addEventListener('change', async () => {
+        invalidateOidVerifications();
         if (!affiliateSelect.value) return;
         await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
     });
     affiliateSelect.addEventListener('change', async () => {
+        invalidateOidVerifications();
         resetModemFacetSelectors();
         await Promise.all([loadCmtsOptions(), loadFiberNodeOptions()]);
     });
-    modemVendorSelect.addEventListener('change', loadModemTypeOptions);
+    modemVendorSelect.addEventListener('change', () => {
+        invalidateOidVerifications();
+        return loadModemTypeOptions();
+    });
+    modemTypeSelect.addEventListener('change', invalidateOidVerifications);
+    byId('snmp-verify-modem').addEventListener('change', invalidateOidVerifications);
 
     // ── Create plan ─────────────────────────────────────────
 
@@ -410,10 +469,21 @@
             scope.fiber_nodes = [fn];
         }
 
+        let verificationReceipts;
+        try {
+            verificationReceipts = getVerificationReceipts();
+        } catch (e) {
+            return alert(e.message);
+        }
         const maxModems = parseInt(byId('snmp-max-modems').value) || 100;
         this.disabled = true;
         try {
-            await request('POST', '/jobs/plan', { scope, oids, max_modems: maxModems });
+            await request('POST', '/jobs/plan', {
+                scope,
+                oids,
+                verification_receipts: verificationReceipts,
+                max_modems: maxModems,
+            });
             await refreshJobs();
         } catch (e) { alert(`Plan failed: ${e.message}`); }
         finally { this.disabled = false; }
