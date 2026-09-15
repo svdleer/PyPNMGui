@@ -81,32 +81,45 @@
         });
         row.querySelector('.oid-verify-btn').addEventListener('click', async () => {
             const cmts = byId('snmp-cmts').value;
-            if (!cmts) { alert('Select a CMTS first to verify OIDs'); return; }
+            const affiliate = byId('snmp-affiliate').value;
+            if (!affiliate || !cmts) { alert('Select an affiliate and CMTS first to verify OIDs'); return; }
             const oidInput = row.querySelector('[data-field="oid"]');
             const oidVal = oidInput.value.trim();
             if (!oidVal) return;
             const btn = row.querySelector('.oid-verify-btn');
+            const targetMode = byId('snmp-verify-modem').checked ? 'modem' : 'cmts';
+            const allCmts = isAffiliateAllCmtsSelected();
+            const payload = {
+                oid: oidVal,
+                target_mode: targetMode,
+                affiliate,
+                cmts: allCmts ? null : cmts,
+                modem_vendor: byId('snmp-modem-vendor').value || null,
+                modem_type: byId('snmp-modem-type').value || null,
+            };
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
             try {
-                const data = await request('POST', '/verify-oid', {
-                    oid: oidVal,
-                    cmts: isAffiliateAllCmtsSelected() ? null : cmts,
-                });
+                const data = await request('POST', '/verify-oid', payload);
                 if (data.success) {
+                    const target = data.target || {};
+                    const targetLabel = target.role === 'cmts'
+                        ? `${target.cmts || 'CMTS'} (${target.ip || 'unknown IP'})`
+                        : `${target.modem_ip || target.ip || 'modem'} behind ${target.cmts || 'CMTS'}`;
                     btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
-                    btn.title = `OK: ${data.value} (tested on ${data.modem_ip})`;
+                    btn.title = `OK: ${data.value} (tested on ${targetLabel}; attempt ${data.attempts_used || 1})`;
                     oidInput.classList.remove('is-invalid');
                     oidInput.classList.add('is-valid');
                 } else {
                     btn.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
-                    btn.title = data.error || 'Verification failed';
+                    btn.title = `${data.error || 'Verification failed'} (${data.attempts_used || 0}/${data.attempts_limit || 0} attempts)`;
                     oidInput.classList.remove('is-valid');
                     oidInput.classList.add('is-invalid');
                 }
             } catch (e) {
                 btn.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
                 btn.title = e.message;
+                oidInput.classList.remove('is-valid');
                 oidInput.classList.add('is-invalid');
             }
             btn.disabled = false;

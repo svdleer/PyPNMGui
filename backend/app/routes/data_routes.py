@@ -1341,7 +1341,7 @@ def custom_snmp_verify_oid():
     return _proxy(
         "POST",
         "/custom-snmp/verify-oid",
-        payload=_normalize_modem_community_payload(request.get_json(silent=True) or {}),
+        payload=request.get_json(silent=True) or {},
     )
 
 
