@@ -304,6 +304,34 @@ def cancel_poller_job(job_id):
 # ── Modem refresh (on-demand single-modem enrichment) ────────
 
 
+@api_bp.route('/admin/inventory/modem-refresh-jobs', methods=['POST'])
+def inventory_bulk_modem_refresh_create():
+    gate = _require_admin()
+    if gate:
+        return gate
+    return _proxy(
+        "POST",
+        "/inventory/modem-refresh-jobs",
+        payload=request.get_json(silent=True) or {},
+    )
+
+
+@api_bp.route('/admin/inventory/modem-refresh-jobs/<int:job_id>', methods=['GET'])
+def inventory_bulk_modem_refresh_status(job_id):
+    gate = _require_admin()
+    return gate or _proxy("GET", f"/inventory/modem-refresh-jobs/{job_id}")
+
+
+@api_bp.route('/admin/inventory/modem-refresh-jobs/<int:job_id>/cancel', methods=['POST'])
+def inventory_bulk_modem_refresh_cancel(job_id):
+    gate = _require_admin()
+    return gate or _proxy(
+        "POST",
+        f"/inventory/modem-refresh-jobs/{job_id}/cancel",
+        payload=request.get_json(silent=True) or {},
+    )
+
+
 @api_bp.route('/admin/modem-refresh/<int:request_id>/cancel', methods=['POST'])
 def cancel_modem_refresh(request_id):
     gate = _require_admin()

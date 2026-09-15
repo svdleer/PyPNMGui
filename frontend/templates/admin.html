@@ -985,6 +985,49 @@
         <div class="tab-pane fade" id="inventory-tap-pane" role="tabpanel" aria-labelledby="inventory-tap-tab">
     <div class="row g-3">
         <div class="col-12">
+            <div class="card shadow-sm mb-3" id="ubee-bulk-refresh-card">
+                <div class="card-header bg-white d-flex align-items-center gap-2 flex-wrap">
+                    <strong><i class="bi bi-arrow-repeat me-1"></i>Ubee UBC1318ZG Inventory Refresh</strong>
+                    <span id="ubee-refresh-status" class="chip" style="background:#e2e8f0;color:#334155">Not started</span>
+                    <button type="button" id="ubee-refresh-status-btn" class="btn btn-outline-primary btn-sm ms-auto">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh status
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning py-2 small mb-3">
+                        Refreshes active inventory modems with vendor <strong>Ubee</strong> and model <strong>UBC1318ZG</strong> through PyPNM. The API snapshots the cohort and limits work to 8 concurrent requests with a 128-modem queue.
+                    </div>
+                    <div id="ubee-refresh-alert" class="alert d-none py-2" role="alert" aria-live="polite"></div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label for="ubee-refresh-concurrency" class="form-label small text-muted mb-1">Concurrent requests</label>
+                            <input id="ubee-refresh-concurrency" class="form-control form-control-sm" type="number" min="1" max="32" value="8">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="ubee-refresh-queue-depth" class="form-label small text-muted mb-1">Queue depth</label>
+                            <input id="ubee-refresh-queue-depth" class="form-control form-control-sm" type="number" min="16" max="512" value="128">
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" id="ubee-refresh-start-btn" class="btn btn-primary btn-sm w-100">
+                                <i class="bi bi-play-fill me-1"></i>Start Ubee refresh
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" id="ubee-refresh-cancel-btn" class="btn btn-outline-danger btn-sm w-100" disabled>
+                                <i class="bi bi-stop-fill me-1"></i>Cancel refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-3 small">
+                        <div class="col-sm-3"><span class="text-muted">Targeted:</span> <strong id="ubee-refresh-targeted">—</strong></div>
+                        <div class="col-sm-3"><span class="text-muted">Succeeded:</span> <strong id="ubee-refresh-succeeded">—</strong></div>
+                        <div class="col-sm-3"><span class="text-muted">Failed:</span> <strong id="ubee-refresh-failed">—</strong></div>
+                        <div class="col-sm-3"><span class="text-muted">Remaining:</span> <strong id="ubee-refresh-remaining">—</strong></div>
+                    </div>
+                    <div class="small text-muted mt-2" id="ubee-refresh-detail">No bulk refresh job is active.</div>
+                </div>
+            </div>
+
             <div class="card shadow-sm">
                 <div class="card-header bg-white d-flex align-items-center gap-2 flex-wrap">
                     <strong><i class="bi bi-table me-1"></i>Inventory Summary</strong>
@@ -2452,5 +2495,6 @@
 
 })();
 </script>
+<script src="[[ asset_url('js/inventory-ubee-refresh-admin.js') ]]" defer></script>
 <script src="[[ asset_url('js/inventory-backfill-admin.js') ]]" defer></script>
 {% endblock %}
