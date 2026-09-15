@@ -435,6 +435,11 @@
     });
     modemTypeSelect.addEventListener('change', invalidateOidVerifications);
     byId('snmp-verify-modem').addEventListener('change', invalidateOidVerifications);
+    const allMatchingModems = byId('snmp-all-matching-modems');
+    const maxModemsInput = byId('snmp-max-modems');
+    allMatchingModems.addEventListener('change', () => {
+        maxModemsInput.disabled = allMatchingModems.checked;
+    });
 
     // ── Create plan ─────────────────────────────────────────
 
@@ -475,16 +480,21 @@
         } catch (e) {
             return alert(e.message);
         }
-        const maxModems = parseInt(byId('snmp-max-modems').value) || 100;
+        const allMatching = allMatchingModems.checked;
+        const maxModems = allMatching ? null : (parseInt(maxModemsInput.value) || 100);
         this.disabled = true;
         try {
-            await request('POST', '/jobs/plan', {
+            const data = await request('POST', '/jobs/plan', {
                 scope,
                 oids,
                 verification_receipts: verificationReceipts,
                 max_modems: maxModems,
+                all_matching_modems: allMatching,
             });
             await refreshJobs();
+            if (data.job?.status === 'planning' || data.job?.status === 'materializing') {
+                startPolling();
+            }
         } catch (e) { alert(`Plan failed: ${e.message}`); }
         finally { this.disabled = false; }
     });
@@ -492,7 +502,15 @@
     // ── Job list ────────────────────────────────────────────
 
     function statusBadge(status) {
-        const map = { planned: 'bg-secondary', running: 'bg-primary', completed: 'bg-success', completed_with_errors: 'bg-warning text-dark', failed: 'bg-danger' };
+        const map = {
+            planning: 'bg-info text-dark',
+            materializing: 'bg-info text-dark',
+            planned: 'bg-secondary',
+            running: 'bg-primary',
+            completed: 'bg-success',
+            completed_with_errors: 'bg-warning text-dark',
+            failed: 'bg-danger',
+        };
         return `<span class="badge ${map[status] || 'bg-secondary'}">${status}</span>`;
     }
 
@@ -506,9 +524,11 @@
                 const total = job.targets_total || 1;
                 const done = (job.targets_succeeded || 0) + (job.targets_failed || 0);
                 const pct = Math.round(done * 100 / total);
-                const progressHtml = job.status === 'running' || done > 0
-                    ? `<div class="progress" style="height:4px"><div class="progress-bar ${job.targets_failed ? 'bg-warning' : 'bg-success'}" style="width:${pct}%"></div></div><small class="text-muted">${done}/${total}</small>`
-                    : `<small class="text-muted">${total} targets</small>`;
+                const progressHtml = job.status === 'planning' || job.status === 'materializing'
+                    ? '<small class="text-muted">Expanding matching modems…</small>'
+                    : job.status === 'running' || done > 0
+                        ? `<div class="progress" style="height:4px"><div class="progress-bar ${job.targets_failed ? 'bg-warning' : 'bg-success'}" style="width:${pct}%"></div></div><small class="text-muted">${done}/${total}</small>`
+                        : `<small class="text-muted">${total} targets</small>`;
                 return `
                 <tr data-job-id="${job.public_id}" style="cursor:pointer">
                     <td>${statusBadge(job.status)}</td>
@@ -605,9 +625,9 @@
     async function init() {
         updateScopeUI();
         await Promise.all([loadTemplates(), refreshJobs()]);
-        // Auto-poll if any job is running
+        // Auto-poll while targets are being expanded or queried.
         const body = byId('snmp-jobs-body');
-        if (body && body.innerHTML.includes('bg-primary')) startPolling();
+        if (body && (body.innerHTML.includes('bg-primary') || body.innerHTML.includes('Expanding matching modems'))) startPolling();
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
