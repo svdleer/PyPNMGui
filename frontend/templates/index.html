@@ -524,6 +524,11 @@
                                                            modem.status === 'rangingComplete' ? 'ranging' :
                                                            modem.status }}
                                                     </span>
+                                                    <span v-if="modem.inventory_state === 'suspect_missing'"
+                                                          class="badge bg-warning text-dark ms-1"
+                                                          :title="`Not seen in the last complete inventory poll${modem.missing_since ? ` since ${modem.missing_since}` : ''}`">
+                                                        stale inventory
+                                                    </span>
                                                 </td>
                                                 <td><code>{{ modem.mac_address }}</code></td>
                                                 <td>{{ modem.ip_address }}</td>

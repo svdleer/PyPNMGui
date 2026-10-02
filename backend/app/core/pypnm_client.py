@@ -391,6 +391,7 @@ class PyPNMClient:
         area: Optional[str] = None,
         offset: Optional[int] = None,
         limit: Optional[int] = None,
+        request_timeout: int | None = None,
     ) -> Dict[str, Any]:
         limit = _bounded_modem_limit(
             _cm_modem_limit_default() if limit is None else limit
@@ -410,7 +411,11 @@ class PyPNMClient:
             params["area"] = area
         if offset is not None:
             params["offset"] = max(0, int(offset))
-        return self._get("/api/admin/inventory/modems", params=params)
+        return self._get(
+            "/api/admin/inventory/modems",
+            params=params,
+            request_timeout=request_timeout,
+        )
 
     def get_inventory_interfaces(self, cmts: str) -> Dict[str, Any]:
         return self._get(

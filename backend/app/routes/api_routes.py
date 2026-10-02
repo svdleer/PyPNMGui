@@ -730,6 +730,41 @@ def get_modems():
         if not _inventory_lookup_absent(inv_resp, 'modem'):
             return _pypnm_error_response(inv_resp, 'PyPNM inventory lookup failed')
 
+        # A recently missed modem remains useful operational evidence. Query the
+        # API-owned suspect-missing state explicitly so an exact MAC search does
+        # not present it as absent, while keeping general inventory searches
+        # active-only.
+        try:
+            stale_resp = client.get_inventory_modems(
+                search_type='mac',
+                search_value=mac_bare,
+                lifecycle_state='suspect_missing',
+                limit=1,
+                request_timeout=10,
+            )
+        except Exception as exc:
+            return _pypnm_error_response(
+                _pypnm_exception_result(exc), 'PyPNM stale inventory lookup failed'
+            )
+        if not isinstance(stale_resp, dict):
+            return _pypnm_error_response(None, 'PyPNM returned an invalid stale inventory response')
+        if stale_resp.get('status') != 'success':
+            return _pypnm_error_response(stale_resp, 'PyPNM stale inventory lookup failed')
+        stale_modems = stale_resp.get('modems') or []
+        if stale_modems:
+            stale_modem = stale_modems[0]
+            if isinstance(stale_modem, dict):
+                _normalize_modem_capability(stale_modem)
+                stale_modem['stale_inventory'] = True
+                stale_modem['inventory_state'] = 'suspect_missing'
+                return jsonify({
+                    'status': 'success',
+                    'modems': [stale_modem],
+                    'count': 1,
+                    'cached': True,
+                    'source': stale_resp.get('source') or 'pypnm-inventory-suspect-missing',
+                })
+
         # Topology is an exact fallback only after authoritative inventory absence.
         try:
             topo_resp = client.get_topology_modem_by_mac(mac_bare, request_timeout=10)
@@ -907,6 +942,37 @@ def get_modem(mac_address):
         })
     if not _inventory_lookup_absent(modem_resp, 'modem'):
         return _pypnm_error_response(modem_resp, 'PyPNM modem inventory lookup failed')
+
+    # Preserve an exact stale match rather than collapsing it into a topology
+    # miss. General inventory listings remain active-only.
+    try:
+        stale_resp = PyPNMClient().get_inventory_modems(
+            search_type='mac',
+            search_value=mac_bare,
+            lifecycle_state='suspect_missing',
+            limit=1,
+            request_timeout=10,
+        )
+    except Exception as exc:
+        return _pypnm_error_response(
+            _pypnm_exception_result(exc), 'PyPNM stale inventory lookup failed'
+        )
+    if not isinstance(stale_resp, dict):
+        return _pypnm_error_response(None, 'PyPNM returned an invalid stale inventory response')
+    if stale_resp.get('status') != 'success':
+        return _pypnm_error_response(stale_resp, 'PyPNM stale inventory lookup failed')
+    stale_modems = stale_resp.get('modems') or []
+    if stale_modems and isinstance(stale_modems[0], dict):
+        stale_modem = stale_modems[0]
+        _normalize_modem_capability(stale_modem)
+        stale_modem['stale_inventory'] = True
+        stale_modem['inventory_state'] = 'suspect_missing'
+        return jsonify({
+            "status": "success",
+            "modem": stale_modem,
+            "cached": True,
+            "source": stale_resp.get('source') or "pypnm-inventory-suspect-missing",
+        })
 
     # Final fallback: exact topology snapshot for a positively absent inventory row.
     try:

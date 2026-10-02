@@ -57,7 +57,7 @@ def _normalize_mac_display(mac: str) -> str:
 def _load_topology_summary(selected_date: str | None = None) -> dict:
     base_url = _pypnm_base_url()
     connect_timeout = int(os.environ.get('PYPNM_API_CONNECT_TIMEOUT', '5'))
-    read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '120'))
+    read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '90'))
     params: dict[str, str] = {'auto_import': 'false'}
     if selected_date:
         params['date'] = selected_date
@@ -244,7 +244,7 @@ def topology_fiber_node_scan_targets_api():
     try:
         base_url = _pypnm_base_url()
         connect_timeout = int(os.environ.get('PYPNM_API_CONNECT_TIMEOUT', '5'))
-        read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '120'))
+        read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '90'))
         response = requests.post(
             f"{base_url}/api/topology/fiber-nodes/scan-targets",
             json=forwarded,
@@ -277,7 +277,7 @@ def topology_reconcile_physical_fiber_node_api():
     try:
         base_url = _pypnm_base_url()
         connect_timeout = int(os.environ.get('PYPNM_API_CONNECT_TIMEOUT', '5'))
-        read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '120'))
+        read_timeout = int(os.environ.get('PYPNM_TOPOLOGY_READ_TIMEOUT', '90'))
         response = requests.post(
             f"{base_url}/api/topology/reconcile/physical-fiber-node",
             json=forwarded,
