@@ -444,13 +444,13 @@ def _topology_fields_by_mac(mac_addresses: list[str]) -> dict[str, dict]:
     except Exception as exc:
         logger.warning("Topology MAC lookup client initialization failed: %s", exc)
         return out
-    for offset in range(0, len(wanted), 5000):
-        chunk = wanted[offset:offset + 5000]
+    for offset in range(0, len(wanted), 100):
+        chunk = wanted[offset:offset + 100]
         try:
             response = client.get_topology_modems_by_macs(
                 chunk,
                 date=snapshot_date,
-                request_timeout=30,
+                request_timeout=8,
             )
         except Exception as exc:
             logger.warning("Topology MAC lookup via PyPNM skipped: %s", exc)
@@ -662,6 +662,7 @@ def get_modems():
     query_limit = _bounded_modem_limit(
         request.args.get('limit', _cm_modem_limit_default())
     )
+    include_topology = (request.args.get('include_topology') or '').strip().lower() == 'true'
 
     # CPE addresses are persisted and indexed by PyPNM. Keep the GUI as a
     # thin proxy for this search.
@@ -859,7 +860,16 @@ def get_modems():
             )
         )
         modems = modems[:query_limit]
-        _augment_modems_with_topology_fields(modems)
+        topology_enrichment = {
+            'requested': include_topology,
+            'applied': False,
+            'requested_macs': len(modems),
+        }
+        if include_topology and len(modems) <= 100:
+            _augment_modems_with_topology_fields(modems)
+            topology_enrichment['applied'] = True
+        elif include_topology:
+            topology_enrichment['skipped_reason'] = 'cohort_exceeds_100_mac_limit'
 
         metadata = _snapshot_metadata(modems_resp, modems)
         return jsonify({
@@ -867,6 +877,7 @@ def get_modems():
             "modems": modems,
             "count": len(modems),
             "cached": True,
+            "topology_enrichment": topology_enrichment,
             **metadata,
         })
     except Exception as exc:
@@ -1272,7 +1283,7 @@ def get_cmts_modems(cmts_name):
     limit = _bounded_modem_limit(request.args.get('limit', _cm_modem_limit_default()))
     enrich = request.args.get('enrich', 'false').lower() == 'true'
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
-    include_topology = request.args.get('include_topology', 'true').lower() == 'true'
+    include_topology = request.args.get('include_topology', 'false').lower() == 'true'
 
     try:
         cmts_ip = cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address')
@@ -1293,8 +1304,14 @@ def get_cmts_modems(cmts_name):
                     modem['cmts_community'] = community
                 else:
                     modem.pop('cmts_community', None)
-            if include_topology:
+            if include_topology and len(prepared) <= 100:
                 _augment_modems_with_topology_fields(prepared, cmts_name=canonical_name)
+            elif include_topology:
+                logger.info(
+                    'Topology augmentation skipped for %s: %d modems exceeds bulk limit',
+                    canonical_name,
+                    len(prepared),
+                )
             return prepared
 
         def _success_response(rows, metadata, agent_id, cached):

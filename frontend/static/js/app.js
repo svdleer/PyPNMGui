@@ -1145,8 +1145,8 @@ createApp({
         // Load CMTS list
         await this.loadCmtsList();
 
-        // Warm up MAC/IP suggestion cache for search box.
-        await this.preloadSearchSeed();
+        // MAC autocomplete is API-backed and on-demand. Do not bulk-load modem
+        // inventory at page start merely to populate browser-side suggestions.
         
         // Don't load mock modems - only show live data from CMTS
         // await this.searchModems();
@@ -3850,7 +3850,7 @@ createApp({
             }, 1600);
             
             try {
-                const buildUrl = (limit, enrichEnabled, forceRefresh = false, includeTopology = true) => {
+                const buildUrl = (limit, enrichEnabled, forceRefresh = false, includeTopology = false) => {
                     // This same-origin API uses configured server-side communities.
                     // Never put SNMP credentials in browser URLs or access logs.
                     const boundedLimit = Math.max(1, Math.min(Number(limit) || CM_MODEM_LIMIT, 50000));
@@ -3945,7 +3945,11 @@ createApp({
                 this.loadProgress = 100;
                 this.loadingLiveModems = false;
                 this.liveCacheRefreshing = false;
-                this._loadAllModemsInBackground(buildUrl(CM_MODEM_LIMIT, false, false), mapModem, loadToken);
+                this._loadAllModemsInBackground(
+                    buildUrl(CM_MODEM_LIMIT, false, false, false),
+                    mapModem,
+                    loadToken,
+                );
                 return;
             } catch (error) {
                 if (error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('timed out')) {
