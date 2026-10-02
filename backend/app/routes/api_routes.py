@@ -743,29 +743,31 @@ def get_modems():
                 request_timeout=10,
             )
         except Exception as exc:
-            return _pypnm_error_response(
-                _pypnm_exception_result(exc), 'PyPNM stale inventory lookup failed'
+            logger.warning('PyPNM stale inventory lookup skipped: %s', exc)
+            stale_resp = None
+        if isinstance(stale_resp, dict) and stale_resp.get('status') == 'success':
+            stale_modems = stale_resp.get('modems') or []
+            if stale_modems:
+                stale_modem = stale_modems[0]
+                if isinstance(stale_modem, dict):
+                    _normalize_modem_capability(stale_modem)
+                    stale_modem['stale_inventory'] = True
+                    stale_modem['inventory_state'] = 'suspect_missing'
+                    return jsonify({
+                        'status': 'success',
+                        'modems': [stale_modem],
+                        'count': 1,
+                        'cached': True,
+                        'source': stale_resp.get('source') or 'pypnm-inventory-suspect-missing',
+                    })
+        elif stale_resp is not None:
+            logger.warning(
+                'PyPNM stale inventory lookup skipped: %s',
+                stale_resp.get('message') if isinstance(stale_resp, dict) else 'invalid response',
             )
-        if not isinstance(stale_resp, dict):
-            return _pypnm_error_response(None, 'PyPNM returned an invalid stale inventory response')
-        if stale_resp.get('status') != 'success':
-            return _pypnm_error_response(stale_resp, 'PyPNM stale inventory lookup failed')
-        stale_modems = stale_resp.get('modems') or []
-        if stale_modems:
-            stale_modem = stale_modems[0]
-            if isinstance(stale_modem, dict):
-                _normalize_modem_capability(stale_modem)
-                stale_modem['stale_inventory'] = True
-                stale_modem['inventory_state'] = 'suspect_missing'
-                return jsonify({
-                    'status': 'success',
-                    'modems': [stale_modem],
-                    'count': 1,
-                    'cached': True,
-                    'source': stale_resp.get('source') or 'pypnm-inventory-suspect-missing',
-                })
 
-        # Topology is an exact fallback only after authoritative inventory absence.
+        # Topology is an exact fallback after an active miss when stale inventory
+        # is absent or temporarily unavailable.
         try:
             topo_resp = client.get_topology_modem_by_mac(mac_bare, request_timeout=10)
         except Exception as exc:
@@ -874,6 +876,43 @@ def get_modems():
         )
 
 
+
+@api_bp.route('/modems/mac-suggestions', methods=['GET'])
+def get_mac_suggestions():
+    """Proxy bounded authoritative MAC suggestions from PyPNM inventory."""
+    query = (request.args.get('q') or '').strip()
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 10), 50))
+    except (TypeError, ValueError):
+        limit = 10
+    if not query:
+        return jsonify({'status': 'success', 'suggestions': []})
+
+    try:
+        response = PyPNMClient().get_inventory_mac_suggestions(
+            query,
+            limit=limit,
+            include_suspect_missing=True,
+        )
+    except Exception as exc:
+        logger.warning('PyPNM MAC suggestions unavailable: %s', exc)
+        return jsonify({'status': 'success', 'suggestions': []})
+    if not isinstance(response, dict) or response.get('status') != 'success':
+        logger.warning(
+            'PyPNM MAC suggestions unavailable: %s',
+            response.get('message') if isinstance(response, dict) else 'invalid response',
+        )
+        return jsonify({'status': 'success', 'suggestions': []})
+    suggestions = [
+        row for row in (response.get('suggestions') or []) if isinstance(row, dict)
+    ]
+    return jsonify({
+        'status': 'success',
+        'suggestions': suggestions[:limit],
+        'source': response.get('source') or 'pypnm-inventory',
+    })
+
+
 @api_bp.route('/modems/cpe-suggestions', methods=['GET'])
 def get_cpe_suggestions():
     """Proxy CPE address autocomplete to PyPNM's persisted CPE index."""
@@ -954,27 +993,29 @@ def get_modem(mac_address):
             request_timeout=10,
         )
     except Exception as exc:
-        return _pypnm_error_response(
-            _pypnm_exception_result(exc), 'PyPNM stale inventory lookup failed'
+        logger.warning('PyPNM stale inventory lookup skipped: %s', exc)
+        stale_resp = None
+    if isinstance(stale_resp, dict) and stale_resp.get('status') == 'success':
+        stale_modems = stale_resp.get('modems') or []
+        if stale_modems and isinstance(stale_modems[0], dict):
+            stale_modem = stale_modems[0]
+            _normalize_modem_capability(stale_modem)
+            stale_modem['stale_inventory'] = True
+            stale_modem['inventory_state'] = 'suspect_missing'
+            return jsonify({
+                "status": "success",
+                "modem": stale_modem,
+                "cached": True,
+                "source": stale_resp.get('source') or "pypnm-inventory-suspect-missing",
+            })
+    elif stale_resp is not None:
+        logger.warning(
+            'PyPNM stale inventory lookup skipped: %s',
+            stale_resp.get('message') if isinstance(stale_resp, dict) else 'invalid response',
         )
-    if not isinstance(stale_resp, dict):
-        return _pypnm_error_response(None, 'PyPNM returned an invalid stale inventory response')
-    if stale_resp.get('status') != 'success':
-        return _pypnm_error_response(stale_resp, 'PyPNM stale inventory lookup failed')
-    stale_modems = stale_resp.get('modems') or []
-    if stale_modems and isinstance(stale_modems[0], dict):
-        stale_modem = stale_modems[0]
-        _normalize_modem_capability(stale_modem)
-        stale_modem['stale_inventory'] = True
-        stale_modem['inventory_state'] = 'suspect_missing'
-        return jsonify({
-            "status": "success",
-            "modem": stale_modem,
-            "cached": True,
-            "source": stale_resp.get('source') or "pypnm-inventory-suspect-missing",
-        })
 
-    # Final fallback: exact topology snapshot for a positively absent inventory row.
+    # Final fallback: exact topology snapshot after an active miss when stale
+    # inventory is absent or temporarily unavailable.
     try:
         topo_resp = PyPNMClient().get_topology_modem_by_mac(mac_bare, request_timeout=10)
     except Exception as exc:

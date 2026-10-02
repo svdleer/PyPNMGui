@@ -433,6 +433,22 @@ class PyPNMClient:
             request_timeout=request_timeout,
         )
 
+    def get_inventory_mac_suggestions(
+        self,
+        query: str,
+        limit: int = 10,
+        include_suspect_missing: bool = True,
+    ) -> Dict[str, Any]:
+        return self._get(
+            "/api/admin/inventory/modems/mac-suggestions",
+            params={
+                "q": query,
+                "limit": limit,
+                "include_suspect_missing": include_suspect_missing,
+            },
+            request_timeout=10,
+        )
+
     def get_inventory_cpe_suggestions(self, query: str, limit: int = 10) -> Dict[str, Any]:
         return self._get(
             "/api/admin/inventory/cpe/suggestions",

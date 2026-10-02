@@ -228,11 +228,16 @@
                                              class="list-group position-absolute w-100 shadow-sm"
                                              style="z-index: 1200; max-height: 220px; overflow-y: auto;">
                                             <button type="button"
-                                                    class="list-group-item list-group-item-action py-1"
+                                                    class="list-group-item list-group-item-action py-1 d-flex justify-content-between align-items-center"
                                                     v-for="s in searchSuggestions"
-                                                    :key="s"
-                                                    @mousedown.prevent="applySearchSuggestion(s)">
-                                                {{ s }}
+                                                    :key="typeof s === 'object' ? s.mac_address : s"
+                                                    @mousedown.prevent="applySearchSuggestion(typeof s === 'object' ? s.mac_address : s)">
+                                                <span>{{ typeof s === 'object' ? s.mac_address : s }}</span>
+                                                <span v-if="typeof s === 'object' && s.inventory_state === 'suspect_missing'"
+                                                      class="badge bg-warning text-dark ms-2"
+                                                      :title="s.missing_since ? `Not seen in a complete inventory poll since ${s.missing_since}` : 'Not seen in a complete inventory poll'">
+                                                    stale
+                                                </span>
                                             </button>
                                         </div>
                                     </div>

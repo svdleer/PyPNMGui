@@ -71,7 +71,11 @@ createApp({
             searchSeedMacs: [],
             searchSeedIps: [],
             searchSeedFiberNodes: [],
+            macSearchSuggestions: [],
             cpeSearchSuggestions: [],
+            _macSuggestTimer: null,
+            _macSuggestController: null,
+            _macSuggestSequence: 0,
             _cpeSuggestTimer: null,
             _topologySuggestTimer: null,
             _topologySuggestController: null,
@@ -389,6 +393,19 @@ createApp({
                 const qq = q.toLowerCase();
                 return this.searchSeedIps
                     .filter(v => String(v || '').toLowerCase().includes(qq))
+                    .slice(0, 10);
+            }
+
+            if (this.searchType === 'mac') {
+                return (this.macSearchSuggestions || [])
+                    .map(row => ({
+                        mac_address: this.formatMacForSearchStyle(
+                            row?.mac_address || '', q,
+                        ),
+                        inventory_state: row?.inventory_state || 'active',
+                        missing_since: row?.missing_since || null,
+                    }))
+                    .filter(row => row.mac_address)
                     .slice(0, 10);
             }
 
@@ -1158,6 +1175,15 @@ createApp({
             window.removeEventListener('beforeunload', this._pageLeaveHandler);
         }
         this.cancelActiveUiTasks({ silent: true, stopBackend: false });
+        if (this._macSuggestTimer) {
+            clearTimeout(this._macSuggestTimer);
+            this._macSuggestTimer = null;
+        }
+        if (this._macSuggestController) {
+            this._macSuggestController.abort();
+            this._macSuggestController = null;
+        }
+        this._macSuggestSequence++;
         if (this._topologySuggestTimer) {
             clearTimeout(this._topologySuggestTimer);
             this._topologySuggestTimer = null;
@@ -2095,6 +2121,51 @@ createApp({
                 this._topologySuggestController = null;
             }
             const topologySuggestSequence = ++this._topologySuggestSequence;
+
+            if (this.searchType === 'mac') {
+                if (this._macSuggestTimer) clearTimeout(this._macSuggestTimer);
+                if (this._macSuggestController) {
+                    this._macSuggestController.abort();
+                    this._macSuggestController = null;
+                }
+                const query = (this.searchValue || '').trim();
+                const compact = query.replace(/[:.\-\s]/g, '');
+                if (
+                    !/^[0-9a-fA-F:.\-\s]+$/.test(query)
+                    || compact.length < 2
+                    || compact.length > 12
+                ) {
+                    this.macSearchSuggestions = [];
+                    return;
+                }
+                const sequence = ++this._macSuggestSequence;
+                this._macSuggestTimer = setTimeout(async () => {
+                    const controller = new AbortController();
+                    this._macSuggestController = controller;
+                    try {
+                        const params = new URLSearchParams({ q: query, limit: '10' });
+                        const response = await fetch(
+                            `${API_BASE}/modems/mac-suggestions?${params.toString()}`,
+                            { signal: controller.signal },
+                        );
+                        const data = await response.json();
+                        if (sequence !== this._macSuggestSequence) return;
+                        this.macSearchSuggestions = data?.status === 'success'
+                            && Array.isArray(data.suggestions)
+                            ? data.suggestions : [];
+                    } catch (error) {
+                        if (error?.name !== 'AbortError' && sequence === this._macSuggestSequence) {
+                            this.macSearchSuggestions = [];
+                        }
+                    } finally {
+                        if (sequence === this._macSuggestSequence) {
+                            this._macSuggestController = null;
+                            this._macSuggestTimer = null;
+                        }
+                    }
+                }, 200);
+                return;
+            }
 
             if (this.searchType === 'cpe_ip') {
                 if (this._cpeSuggestTimer) clearTimeout(this._cpeSuggestTimer);
@@ -3135,6 +3206,7 @@ createApp({
 
         clearSearchForm() {
             this.searchValue = '';
+            this.macSearchSuggestions = [];
             this.searchHouseNumber = '';
             this.selectedCmts = '';
             this.selectedInterface = '';
