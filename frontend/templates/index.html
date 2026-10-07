@@ -953,6 +953,10 @@
                                                 <td class="text-muted ps-3 py-2"><i class="bi bi-code-square me-1 opacity-50"></i>Firmware</td>
                                                 <td class="py-2 font-monospace">{{ selectedModem.firmware || selectedModem.software_version || 'N/A' }}</td>
                                             </tr>
+                                            <tr v-if="selectedModem.sys_descr">
+                                                <td class="text-muted ps-3 py-2 align-top"><i class="bi bi-terminal me-1 opacity-50"></i>System Description</td>
+                                                <td class="py-2 small">{{ selectedModem.sys_descr }}</td>
+                                            </tr>
                                             <tr v-if="selectedModem.cable_mac">
                                                 <td class="text-muted ps-3 py-2"><i class="bi bi-diagram-2 me-1 opacity-50"></i>Cable MAC Interface</td>
                                                 <td class="py-2 font-monospace">{{ selectedModem.cable_mac }}</td>
@@ -1017,6 +1021,16 @@
                                                     <i class="bi bi-bar-chart d-block mb-1" style="font-size: 1.5rem;"></i>
                                                     <small>Channel Stats</small>
                                                 </button>
+                                            </div>
+                                            <div class="col-6">
+                                                <button @click="requestInventoryRefresh" class="btn btn-outline-warning w-100 py-3"
+                                                        :disabled="modemRefreshStatus === 'queued' || modemRefreshStatus === 'running'">
+                                                    <i class="bi bi-arrow-repeat d-block mb-1" :class="{ 'spin': modemRefreshStatus === 'queued' || modemRefreshStatus === 'running' }" style="font-size: 1.5rem;"></i>
+                                                    <small>Refresh Modem Details</small>
+                                                </button>
+                                            </div>
+                                            <div v-if="modemRefreshStatus" class="col-12 small" :class="modemRefreshError ? 'text-danger' : 'text-muted'">
+                                                Modem detail refresh: {{ modemRefreshError || modemRefreshStatus }}
                                             </div>
                                             <div class="col-6">
                                                 <button @click="runRxmerTest" class="btn btn-outline-success w-100 py-3" :disabled="runningTest">

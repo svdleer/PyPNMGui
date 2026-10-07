@@ -535,6 +535,8 @@ def _inventory_fields_by_mac(mac_addresses: list[str], cmts_name: str = "") -> d
                     'docsis_version': m.get('docsis_version') or '',
                     'vendor': m.get('vendor') or '',
                     'model': m.get('model') or '',
+                    'software_version': m.get('software_version') or '',
+                    'sys_descr': m.get('sys_descr') or '',
                 }
     return out
 
@@ -555,7 +557,11 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
     inv: dict[str, dict] = {}
     need_inv = [m for m in modems if isinstance(m, dict) and (
         not m.get("fiber_node")
+        or not m.get("cable_mac")
+        or _identity_value_missing(m.get("vendor"))
         or _identity_value_missing(m.get("model"))
+        or _identity_value_missing(m.get("software_version"))
+        or _identity_value_missing(m.get("sys_descr"))
         or m.get("ofdm_enabled") is None
         or m.get("ofdma_enabled") is None
         or _docsis_version_rank(m.get("docsis_version")) < 31
@@ -615,6 +621,10 @@ def _augment_modems_with_topology_fields(modems: list[dict], cmts_name: str = ""
                 m["vendor"] = iv["vendor"]
             if _identity_value_missing(m.get("model")) and not _identity_value_missing(iv.get("model")):
                 m["model"] = iv["model"]
+            if _identity_value_missing(m.get("software_version")) and not _identity_value_missing(iv.get("software_version")):
+                m["software_version"] = iv["software_version"]
+            if _identity_value_missing(m.get("sys_descr")) and not _identity_value_missing(iv.get("sys_descr")):
+                m["sys_descr"] = iv["sys_descr"]
         _normalize_modem_capability(m, iv)
     return modems
 

@@ -1534,7 +1534,7 @@ createApp({
             }
             // A non-enriched cache row must not replace identity data obtained
             // by a completed targeted refresh.
-            for (const key of ['vendor', 'model', 'software_version', 'firmware']) {
+            for (const key of ['vendor', 'model', 'software_version', 'firmware', 'sys_descr']) {
                 if (!this._isIdentityPlaceholder(before[key]) && this._isIdentityPlaceholder(source[key])) {
                     saved[key] = before[key];
                 }
@@ -1674,9 +1674,11 @@ createApp({
 
         _isMissingVendorFirmware(modem) {
             const firmware = modem?.software_version || modem?.firmware;
-            // Either missing field needs identity enrichment; requiring both to
-            // be absent left vendor-only and firmware-only gaps untouched.
-            return this._isIdentityPlaceholder(modem?.vendor) || this._isIdentityPlaceholder(firmware);
+            // Either missing identity field needs agent-owned enrichment.
+            return this._isIdentityPlaceholder(modem?.vendor)
+                || this._isIdentityPlaceholder(modem?.model)
+                || this._isIdentityPlaceholder(firmware)
+                || this._isIdentityPlaceholder(modem?.sys_descr);
         },
 
         _isMissingSelectedMetadata(modem) {
@@ -3279,6 +3281,7 @@ createApp({
                             docsif3_index: m.docsif3_index ?? null,
                             cmts_interface: m.cmts_interface || m.upstream_interface || m.cmts_index || 'N/A',
                             software_version: m.software_version || '',
+                            sys_descr: m.sys_descr || '',
                             cable_mac: m.cable_mac || '',
                             upstream_interface: m.upstream_interface || '',
                             upstream_ifindex: m.upstream_ifindex ?? null,
@@ -3877,6 +3880,7 @@ createApp({
                         docsif3_index: m.docsif3_index ?? null,
                         cmts_interface: m.interface || m.cmts_index || 'N/A',
                         software_version: m.software_version || '',
+                        sys_descr: m.sys_descr || '',
                         cable_mac: m.cable_mac || '',
                         upstream_interface: m.upstream_interface || '',
                         ofdma_interface: m.ofdma_interface || '',
@@ -4548,6 +4552,14 @@ createApp({
                     this.modemDetailLoading = false;
                 }
             }
+
+            // Queue the API-owned identity/interface refresh when the exact
+            // inventory row is still incomplete. The GUI never contacts a
+            // modem or agent directly; it only uses the PyPNM refresh API.
+            if (this.hasCmtsAgent && this.selectedModem && this._isMissingSelectedMetadata(this.selectedModem)) {
+                this.requestInventoryRefreshForModem(this.selectedModem, { trackStatus: true });
+            }
+
             if (this.currentView === 'fibernode') {
                 try {
                     await this.primeFnScanFromSelectedModem(this.selectedModem);
@@ -4863,13 +4875,8 @@ createApp({
                     body: JSON.stringify({ 
                         modem_ip: this.selectedModem.ip_address,
                         cmts_ip: this.selectedModem.cmts_ip,
-                        ...this._credentialFields({
-                            community: this.snmpCommunityModem,
-                            cmts_community: this._firstCredential(
-                                this.selectedModem.cmts_community,
-                                this.snmpCommunity,
-                            ),
-                        }),
+                        // SNMP credentials are agent-owned in production and are
+                        // intentionally not sent through the GUI/API request.
                         // Full CMTS stats: button-driven so latency is acceptable.
                         // Needed for OFDM Stats tab (IUC codewords, profile speed, partial reason).
                         cmts_stats: true,

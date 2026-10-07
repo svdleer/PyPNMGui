@@ -1036,12 +1036,7 @@ def channel_stats(mac_address):
     
     data = request.get_json() or {}
     modem_ip = data.get('modem_ip')
-    community = _first_community(data.get('community'), get_default_community())
     cmts_ip = data.get('cmts_ip')
-    cmts_community = _first_community(
-        data.get('cmts_community'),
-        get_community_for_cmts(cmts_ip),
-    )
     # Full stats by default for GUI completeness.
     # Clients can explicitly set cmts_stats=false for lean mode.
     cmts_stats = bool(data.get('cmts_stats', True))
@@ -1078,7 +1073,6 @@ def channel_stats(mac_address):
         'cmts_task_timeout_s': cmts_task_timeout_s,
         'skip_connectivity_check': True,  # modem is known online from enrichment; skip redundant 5s snmp_get
     }
-    _add_community_fields(payload, community=community)
 
     if cm_index is not None:
         payload['cm_index'] = cm_index
@@ -1086,8 +1080,7 @@ def channel_stats(mac_address):
     # Add CMTS info for fiber node lookup if available
     if cmts_ip:
         payload['cmts_ip'] = cmts_ip
-        _add_community_fields(payload, cmts_community=cmts_community)
-    
+
     result = client._post('/cm/channel-stats', payload)
 
     # Pass CMTS-side data through even on modem-side failure so downstream/
