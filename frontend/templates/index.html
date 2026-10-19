@@ -1653,6 +1653,39 @@
                                     </div>
                                 </div>
 
+                                <!-- DSID Resequencing Statistics (DOCS-QOS3-MIB) -->
+                                <div class="col-12" v-if="channelStats.ofdm_stats.ds_dsid_stats?.length">
+                                    <div class="card shadow-sm ofdmstats-section">
+                                        <div class="card-header pnm-card-header pnm-card-header--downstream d-flex align-items-center gap-2">
+                                            <i class="bi bi-diagram-3 text-primary"></i>
+                                            <strong class="text-primary">DSID Resequencing Statistics</strong>
+                                            <span class="badge bg-primary ms-auto">DOCS-QOS3-MIB</span>
+                                        </div>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-hover mb-0 small ofdmstats-table">
+                                                <thead class="table-light border-bottom">
+                                                    <tr>
+                                                        <th>DSID</th>
+                                                        <th class="text-end">Missing Sequence Numbers</th>
+                                                        <th class="text-end">Skew Threshold Exceeds</th>
+                                                        <th class="text-end">Out-of-Range Packets</th>
+                                                        <th class="text-end">Packets</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="row in channelStats.ofdm_stats.ds_dsid_stats" :key="row.dsid">
+                                                        <td class="font-monospace">{{ row.dsid }}</td>
+                                                        <td class="text-end font-monospace">{{ fmtN(row.seq_num_missing) }}</td>
+                                                        <td class="text-end font-monospace">{{ fmtN(row.skew_thresh_exceeds) }}</td>
+                                                        <td class="text-end font-monospace">{{ fmtN(row.out_of_range_packets) }}</td>
+                                                        <td class="text-end font-monospace">{{ fmtN(row.num_packets) }}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- DS Subcarrier Status (modulation per range) -->
                                 <div class="col-12 col-xl-6" v-if="channelStats.ofdm_stats.ds_subcarrier?.length">
                                     <div class="card shadow-sm h-100 ofdmstats-section">
