@@ -4038,8 +4038,10 @@ createApp({
                 let hasMore = true;
                 let lastData = null;
                 while (hasMore) {
-                    const separator = url.includes('?') ? '&' : '?';
-                    const pageUrl = `${url}${separator}offset=${offset}`;
+                    const pageUrl = url.replace(
+                        /([?&])offset=\d+/,
+                        `$1offset=${offset}`,
+                    );
                     const data = await this._fetchJsonWithTimeout(pageUrl, 180000);
                     if (data.status !== 'success') {
                         throw new Error(data?.message || 'Background inventory page failed');
