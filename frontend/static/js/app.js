@@ -3853,11 +3853,11 @@ createApp({
             }, 1600);
             
             try {
-                const buildUrl = (limit, enrichEnabled, forceRefresh = false, includeTopology = false) => {
+                const buildUrl = (limit, enrichEnabled, forceRefresh = false, includeTopology = false, offset = 0) => {
                     // This same-origin API uses configured server-side communities.
                     // Never put SNMP credentials in browser URLs or access logs.
                     const boundedLimit = Math.max(1, Math.min(Number(limit) || CM_MODEM_LIMIT, 50000));
-                    let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${boundedLimit}`;
+                    let u = `${API_BASE}/cmts/${encodeURIComponent(this.selectedCmts)}/modems?limit=${boundedLimit}&offset=${Math.max(0, Number(offset) || 0)}`;
                     u += `&enrich=${enrichEnabled ? 'true' : 'false'}`;
                     u += `&include_topology=${includeTopology ? 'true' : 'false'}`;
                     if (forceRefresh) u += '&refresh=true';
@@ -3918,10 +3918,10 @@ createApp({
                     return this._mergeModemPreservingCmts(row, {});
                 };
 
-                // Phase 1: quick preview (first page only, no enrichment — speed matters).
                 const PRELOAD_COUNT = 200;
+                const INVENTORY_PAGE_SIZE = 500;
                 const preview = await this._fetchJsonWithTimeout(
-                    buildUrl(PRELOAD_COUNT, false, false, false),
+                    buildUrl(PRELOAD_COUNT, false, false, false, 0),
                     180000,
                 );
 
@@ -3950,7 +3950,7 @@ createApp({
                 this.loadingLiveModems = false;
                 this.liveCacheRefreshing = false;
                 this._loadAllModemsInBackground(
-                    buildUrl(CM_MODEM_LIMIT, false, false, false),
+                    buildUrl(INVENTORY_PAGE_SIZE, false, false, false, 0),
                     mapModem,
                     loadToken,
                 );
@@ -4022,48 +4022,57 @@ createApp({
 
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
-                const data = await this._fetchJsonWithTimeout(url, 180000);
-                if (data.status !== 'success') {
-                    throw new Error(data?.message || 'Background inventory load failed');
-                }
-                if (this._liveLoadToken !== loadToken) return;
-
-                const CHUNK_SIZE = 200;
-                const rawModems = Array.isArray(data.modems) ? data.modems : [];
-                const existingByMac = new Map();
+                const pageSize = 500;
+                const modemsByMac = new Map();
                 for (const modem of (this.modems || [])) {
                     const norm = this.normalizeMacForMatch(modem?.mac_address || '');
-                    if (norm) existingByMac.set(norm, modem);
+                    if (norm) modemsByMac.set(norm, modem);
                 }
 
-                const mapped = rawModems.map(m => {
-                    const row = mapModem(m, data);
-                    const norm = this.normalizeMacForMatch(row?.mac_address || '');
-                    const prev = norm ? existingByMac.get(norm) : null;
-                    if (!prev) return row;
-
-                    // Non-enriched refresh responses can regress known capability
-                    // fields to false/null. Reconcile through the monotonic merge.
-                    return this._mergeModemPreservingCmts({ ...prev }, row);
-                });
-                const visibleMapped = this._filterBySelectedInterface(mapped);
-                this._mergeSearchSeed(visibleMapped);
-                // Identity enrichment is selection-scoped and starts from the
-                // initial preview/search rows. Never probe the full CMTS list.
-
-                // Append the complete dataset in chunks to avoid freezing the UI.
-                // Selected interface/FN/Cable-MAC values are display filters only.
-                this.modems = [];
-                let nextIdx = 0;
-                const appendChunk = () => {
+                let offset = 0;
+                let hasMore = true;
+                let lastData = null;
+                while (hasMore) {
+                    const separator = url.includes('?') ? '&' : '?';
+                    const pageUrl = `${url}${separator}offset=${offset}`;
+                    const data = await this._fetchJsonWithTimeout(pageUrl, 180000);
+                    if (data.status !== 'success') {
+                        throw new Error(data?.message || 'Background inventory page failed');
+                    }
                     if (this._liveLoadToken !== loadToken) return;
-                    if (nextIdx >= visibleMapped.length) return;
-                    this.modems.push(...visibleMapped.slice(nextIdx, nextIdx + CHUNK_SIZE));
-                    nextIdx += CHUNK_SIZE;
-                    if (nextIdx < visibleMapped.length) setTimeout(appendChunk, 0);
-                };
-                appendChunk();
+                    lastData = data;
 
+                    const rawModems = Array.isArray(data.modems) ? data.modems : [];
+                    for (const raw of rawModems) {
+                        const row = mapModem(raw, data);
+                        const norm = this.normalizeMacForMatch(row?.mac_address || '');
+                        if (!norm) continue;
+                        const previous = modemsByMac.get(norm);
+                        modemsByMac.set(
+                            norm,
+                            previous
+                                ? this._mergeModemPreservingCmts({ ...previous }, row)
+                                : row,
+                        );
+                    }
+
+                    const visible = this._filterBySelectedInterface([...modemsByMac.values()]);
+                    this.modems = visible;
+                    this._mergeSearchSeed(visible);
+                    const totalLabel = Number.isFinite(Number(data.total)) ? data.total : '?';
+                    this.liveModemSource = `Loading inventory ${visible.length}/${totalLabel} modems…`;
+
+                    hasMore = data.has_more === true;
+                    const nextOffset = Number(data.next_offset);
+                    offset = Number.isFinite(nextOffset)
+                        ? nextOffset
+                        : offset + rawModems.length;
+                    if (hasMore && (!rawModems.length || offset <= 0)) {
+                        throw new Error('Inventory pagination did not advance');
+                    }
+                }
+
+                const data = lastData || {};
                 if (data.enrichment_progress) {
                     this.enrichmentProgress = {
                         current: data.enrichment_progress.completed || 0,
@@ -4072,8 +4081,10 @@ createApp({
                 }
 
                 const cacheInfo = data.cached ? ' (persisted)' : '';
-                const enrichInfo = data.enriched === true ? ' [enriched]' : (data.enriching === true ? ' [enriching in background...]' : '');
-                this.liveModemSource = `Inventory from ${data.cmts_hostname} (${data.cmts_ip}) - ${data.count} modems${cacheInfo}${enrichInfo}`;
+                const enrichInfo = data.enriched === true
+                    ? ' [enriched]'
+                    : (data.enriching === true ? ' [enriching in background...]' : '');
+                this.liveModemSource = `Inventory from ${data.cmts_hostname} (${data.cmts_ip}) - ${modemsByMac.size} modems${cacheInfo}${enrichInfo}`;
                 this.liveCachePartial = Boolean(data.partial);
                 this.liveInventoryComplete = data.inventory_complete === true;
                 this.liveInventoryStale = data.inventory_stale === true;
@@ -4096,8 +4107,8 @@ createApp({
                 const reason = String(error?.message || '').toLowerCase().includes('timed out')
                     ? 'timed out'
                     : 'failed';
-                this.liveModemSource = `${this.liveModemSource} — preview only; full load ${reason}`;
-                this.$toast?.warning(`Full modem inventory ${reason}; the preview remains available.`);
+                this.liveModemSource = `${this.liveModemSource} — preview/page load ${reason}`;
+                this.$toast?.warning(`Full modem inventory ${reason}; loaded pages remain available.`);
             }
         },
         

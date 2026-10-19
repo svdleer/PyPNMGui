@@ -1291,6 +1291,10 @@ def get_cmts_modems(cmts_name):
         get_cmts_community(),
     )
     limit = _bounded_modem_limit(request.args.get('limit', _cm_modem_limit_default()))
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "offset must be a non-negative integer"}), 400
     enrich = request.args.get('enrich', 'false').lower() == 'true'
     force_refresh = request.args.get('refresh', 'false').lower() == 'true'
     include_topology = request.args.get('include_topology', 'false').lower() == 'true'
@@ -1341,6 +1345,12 @@ def get_cmts_modems(cmts_name):
                     (metadata or {}).get('enrichment_progress')
                     or (metadata or {}).get('enrich_progress')
                 ),
+                "total": (metadata or {}).get('total'),
+                "total_exact": (metadata or {}).get('total_exact'),
+                "offset": (metadata or {}).get('offset', offset),
+                "limit": (metadata or {}).get('limit', limit),
+                "has_more": (metadata or {}).get('has_more'),
+                "next_offset": (metadata or {}).get('next_offset'),
                 **snapshot,
             })
 
@@ -1355,6 +1365,7 @@ def get_cmts_modems(cmts_name):
                 try:
                     inventory_resp = client.get_inventory_modems(
                         cmts=normalized_ref,
+                        offset=offset,
                         limit=limit,
                     )
                 except Exception as exc:
@@ -1381,6 +1392,8 @@ def get_cmts_modems(cmts_name):
 
                 inventory_rows = inventory_resp.get('modems') or []
                 if not inventory_rows:
+                    if offset > 0:
+                        return _success_response([], inventory_resp, 'inventory', True)
                     empty_success_count += 1
                     continue
 
