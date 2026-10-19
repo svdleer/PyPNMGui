@@ -3839,6 +3839,7 @@ createApp({
             this.modemPage = 1;
             this.loadProgress = 0;
             const loadToken = Date.now();
+            let backgroundLoadStarted = false;
             this._liveLoadToken = loadToken;
             this.pendingFullLoadUrl = null;
             this.pendingFullLoadToken = null;
@@ -3948,7 +3949,8 @@ createApp({
                 if (this._progressTimer) { clearInterval(this._progressTimer); this._progressTimer = null; }
                 this.loadProgress = 100;
                 this.loadingLiveModems = false;
-                this.liveCacheRefreshing = false;
+                this.liveCacheRefreshing = true;
+                backgroundLoadStarted = true;
                 this._loadAllModemsInBackground(
                     buildUrl(INVENTORY_PAGE_SIZE, false, false, false, 0),
                     mapModem,
@@ -3967,6 +3969,9 @@ createApp({
                 if (this._progressTimer) { clearInterval(this._progressTimer); this._progressTimer = null; }
                 this.loadProgress = 100;
                 this.loadingLiveModems = false;
+                if (!backgroundLoadStarted) {
+                    this.liveCacheRefreshing = false;
+                }
                 // Keep progress visible during enrichment.
                 if (!this.isEnriching) {
                     this.enrichmentProgress = { current: 0, total: 0 };

@@ -314,9 +314,9 @@
                                     </div>
                                     <div class="col-md-2 d-flex align-items-end">
                                         <button @click="getLiveModems" class="btn btn-success w-100"
-                                                :disabled="!selectedCmts || loadingLiveModems"
+                                                :disabled="!selectedCmts || loadingLiveModems || liveCacheRefreshing"
                                                 title="Load persisted modem inventory; live discovery occurs only when no inventory exists">
-                                            <span v-if="loadingLiveModems"><i class="bi bi-arrow-repeat spin me-1"></i>{{ t('search.loading') }}</span>
+                                            <span v-if="loadingLiveModems || liveCacheRefreshing"><i class="bi bi-arrow-repeat spin me-1"></i>{{ liveCacheRefreshing ? 'Loading inventory…' : t('search.loading') }}</span>
                                             <span v-else><i class="bi bi-router me-1"></i>{{ t('search.get_modems') }}</span>
                                         </button>
                                     </div>
