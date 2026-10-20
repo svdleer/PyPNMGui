@@ -8534,8 +8534,8 @@ createApp({
                     throw new Error(result.detail || result.message || 'Unable to start modem reset');
                 }
 
-                modal.job = result.job || null;
-                this.$toast?.info(`Reset queued for ${modem.mac_address}`);
+                modal.job = result.job || { reset_sent: result.reset_sent === true };
+                this.$toast?.info(`Reset command sent to ${modem.mac_address}`);
                 setTimeout(() => this.closeModemResetModal(), 1800);
             } catch (error) {
                 modal.error = error?.message || 'Modem reset failed';

@@ -4061,7 +4061,7 @@
                         <label class="form-label" for="singleResetPassphrase">Type the confirmation phrase to continue:</label>
                         <input id="singleResetPassphrase" v-model="modemResetModal.passphrase" type="text" class="form-control" autocomplete="off" placeholder="have you tried turning it on and off again?" @keyup.enter="confirmModemReset">
                         <div v-if="modemResetModal.error" class="alert alert-danger mt-3 mb-0">{{ modemResetModal.error }}</div>
-                        <div v-if="modemResetModal.job" class="alert alert-success mt-3 mb-0">Reset job started.</div>
+                        <div v-if="modemResetModal.job" class="alert alert-success mt-3 mb-0">Reset command sent.</div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" @click="closeModemResetModal" :disabled="modemResetModal.submitting">Cancel</button>

@@ -16,7 +16,14 @@ from app.core.modem_filters import filter_ignored_modems
 # ── Viewer role guard — block mutating requests ─────────────────────────────
 @api_bp.before_request
 def _viewer_readonly():
-    if session.get('role') == 'viewer' and request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
+    # A single modem reset is explicitly available to authenticated users;
+    # keep the viewer read-only policy for every other mutating API call.
+    is_single_reset = request.path.rstrip('/').endswith('/api/cm-reset/single')
+    if (
+        session.get('role') == 'viewer'
+        and request.method in ('POST', 'PUT', 'DELETE', 'PATCH')
+        and not is_single_reset
+    ):
         return jsonify({'status': 'error', 'message': 'Viewer role is read-only'}), 403
 
 # ── Background modem-load job store ─────────────────────────────────────────
