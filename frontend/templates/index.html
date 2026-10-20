@@ -603,7 +603,7 @@
                                                     <button @click="quickPing(modem)" class="btn btn-sm btn-outline-secondary me-1" title="Quick Ping">
                                                         <i class="bi bi-broadcast"></i>
                                                     </button>
-                                                    {% if auth_role == 'admin' and cm_bulk_reset_enabled %}
+                                                    {% if auth_username %}
                                                     <button @click="openModemResetModal(modem)" class="btn btn-sm btn-outline-danger" title="Reset modem">
                                                         <i class="bi bi-arrow-counterclockwise"></i>
                                                     </button>

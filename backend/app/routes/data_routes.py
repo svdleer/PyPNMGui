@@ -1119,6 +1119,67 @@ def network_rxmer_cancel(public_id):
     return gate or _proxy("POST", f"/rxmer-analytics/jobs/{public_id}/cancel")
 
 
+# ── Single modem reset ──────────────────────────────────────
+
+_SINGLE_RESET_PASSPHRASE = "have you tried turning it on and off again?"
+
+
+@api_bp.route('/cm-reset/single', methods=['POST'])
+def cm_reset_single():
+    """Plan and start one authenticated modem reset through PyPNM."""
+    if not is_authenticated_session(session):
+        return jsonify({"status": "error", "message": "Authentication required"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    mac = str(payload.get("mac") or "").strip()
+    confirmation = str(payload.get("confirmation_passphrase") or "").strip().lower()
+    if not mac:
+        return jsonify({"status": "error", "message": "mac is required"}), 400
+    if confirmation != _SINGLE_RESET_PASSPHRASE:
+        return jsonify({"status": "error", "message": "Incorrect reset confirmation phrase"}), 403
+
+    requested_by = session.get("username") or session.get("user") or "user"
+    plan_payload = {
+        "scope": {"type": "single", "mac": mac},
+        "requested_by": requested_by,
+        "idempotency_key": str(payload.get("idempotency_key") or uuid.uuid4()),
+    }
+    base = _poller_api_base()
+    timeout = int(os.environ.get("PYPNM_POLLER_API_TIMEOUT_SEC", "30"))
+    try:
+        plan_response = requests.post(
+            f"{base}/cm-reset/jobs/plan",
+            json=plan_payload,
+            timeout=timeout,
+            verify=False,
+        )
+        plan_body = plan_response.json() if plan_response.content else {}
+        if not plan_response.ok:
+            return jsonify(plan_body), plan_response.status_code
+        public_id = ((plan_body.get("job") or {}).get("public_id"))
+        if not public_id:
+            return jsonify({"status": "error", "message": "PyPNM returned no reset job"}), 502
+
+        start_response = requests.post(
+            f"{base}/cm-reset/jobs/{public_id}/start",
+            json={
+                "max_concurrency": 1,
+                "confirmation_passphrase": _SINGLE_RESET_PASSPHRASE,
+            },
+            timeout=timeout,
+            verify=False,
+        )
+        start_body = start_response.json() if start_response.content else {}
+        return jsonify(start_body), start_response.status_code
+    except requests.Timeout:
+        return jsonify({
+            "status": "error",
+            "message": "PyPNM reset request timed out; the operation may still be queued",
+        }), 504
+    except requests.RequestException:
+        return jsonify({"status": "error", "message": "PyPNM API unavailable"}), 502
+
+
 # ── CM Bulk Reset ────────────────────────────────────────────
 
 
