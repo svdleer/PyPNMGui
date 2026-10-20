@@ -106,7 +106,8 @@ createApp({
             modemResetModal: {
                 open: false,
                 modem: null,
-                passphrase: '',
+                resetLetters: ['y', 'e', 's'],
+                resetClicked: [],
                 submitting: false,
                 error: '',
                 job: null,
@@ -8517,8 +8518,8 @@ createApp({
         async confirmModemReset() {
             const modal = this.modemResetModal;
             const modem = modal.modem;
-            const required = 'have you tried turning it on and off again?';
-            if (!modem || modal.passphrase.trim().toLowerCase() !== required) return;
+            const clicks = (modal.resetClicked || []).map(letter => String(letter).toLowerCase());
+            if (!modem || clicks.length !== 3 || new Set(clicks).size !== 3 || !['y', 'e', 's'].every(letter => clicks.includes(letter))) return;
 
             const controller = new AbortController();
             this._resetAbortController = controller;
@@ -8532,7 +8533,7 @@ createApp({
                     signal: controller.signal,
                     body: JSON.stringify({
                         mac: modem.mac_address,
-                        confirmation_passphrase: required,
+                        confirmation_clicks: clicks,
                         idempotency_key: `single-reset-${this.normalizeMacForMatch(modem.mac_address)}-${Date.now()}`,
                     }),
                 });
@@ -8561,14 +8562,28 @@ createApp({
 
         openModemResetModal(modem) {
             if (!modem) return;
+            const resetLetters = ['y', 'e', 's'];
+            for (let index = resetLetters.length - 1; index > 0; index -= 1) {
+                const swapIndex = Math.floor(Math.random() * (index + 1));
+                [resetLetters[index], resetLetters[swapIndex]] = [resetLetters[swapIndex], resetLetters[index]];
+            }
             this.modemResetModal = {
                 open: true,
                 modem,
-                passphrase: '',
+                resetLetters,
+                resetClicked: [],
                 submitting: false,
                 error: '',
                 job: null,
             };
+        },
+
+        clickModemResetLetter(letter) {
+            const modal = this.modemResetModal;
+            const normalized = String(letter || '').toLowerCase();
+            if (modal.submitting || !['y', 'e', 's'].includes(normalized) || modal.resetClicked.includes(normalized)) return;
+            modal.resetClicked.push(normalized);
+            if (modal.resetClicked.length === 3) this.confirmModemReset();
         },
 
         closeModemResetModal() {

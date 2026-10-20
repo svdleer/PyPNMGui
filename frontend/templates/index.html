@@ -4046,17 +4046,19 @@
                     <div class="modal-body">
                         <p class="mb-2">Modem: <strong class="text-dark font-monospace">{{ modemResetModal.modem?.mac_address }}</strong></p>
                         <p class="mb-2">IP address: <strong class="text-dark font-monospace">{{ modemResetModal.modem?.ip_address || 'unknown' }}</strong></p>
-                        <label class="form-label" for="singleResetPassphrase">Type the confirmation phrase to continue:</label>
-                        <input id="singleResetPassphrase" v-model="modemResetModal.passphrase" type="text" class="form-control" autocomplete="off" placeholder="have you tried turning it on and off again?" @keyup.enter="confirmModemReset">
+                        <p class="mb-3">Click each of the three buttons to confirm the reset:</p>
+                        <div class="d-flex justify-content-center gap-2 mb-2">
+                            <button v-for="letter in modemResetModal.resetLetters" :key="letter" type="button"
+                                    class="btn btn-lg px-4"
+                                    :class="modemResetModal.resetClicked.includes(letter) ? 'btn-success' : 'btn-outline-danger'"
+                                    :disabled="modemResetModal.submitting || modemResetModal.resetClicked.includes(letter)"
+                                    @click="clickModemResetLetter(letter)">{{ letter }}</button>
+                        </div>
                         <div v-if="modemResetModal.error" class="alert alert-danger mt-3 mb-0">{{ modemResetModal.error }}</div>
                         <div v-if="modemResetModal.job" class="alert alert-success mt-3 mb-0">Reset command sent.</div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" @click="closeModemResetModal">Close</button>
-                        <button type="button" class="btn btn-danger" @click="confirmModemReset" :disabled="modemResetModal.submitting || modemResetModal.passphrase.trim().toLowerCase() !== 'have you tried turning it on and off again?'">
-                            <span v-if="modemResetModal.submitting" class="spinner-border spinner-border-sm me-1"></span>
-                            <i v-else class="bi bi-arrow-counterclockwise me-1"></i>Reset Modem
-                        </button>
+                        <button type="button" class="btn btn-secondary" @click="closeModemResetModal">Cancel</button>
                     </div>
                 </div>
             </div>

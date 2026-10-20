@@ -1134,9 +1134,6 @@ def network_rxmer_cancel(public_id):
 
 # ── Single modem reset ──────────────────────────────────────
 
-_SINGLE_RESET_PASSPHRASE = "have you tried turning it on and off again?"
-
-
 @api_bp.route('/cm-reset/single', methods=['POST'])
 def cm_reset_single():
     """Reset one authenticated modem through the dedicated PyPNM API path."""
@@ -1145,15 +1142,16 @@ def cm_reset_single():
 
     payload = request.get_json(silent=True) or {}
     mac = str(payload.get("mac") or "").strip()
-    confirmation = str(payload.get("confirmation_passphrase") or "").strip().lower()
+    raw_clicks = payload.get("confirmation_clicks")
+    clicks = [str(letter).strip().lower() for letter in raw_clicks] if isinstance(raw_clicks, list) else []
     if not mac:
         return jsonify({"status": "error", "message": "mac is required"}), 400
-    if confirmation != _SINGLE_RESET_PASSPHRASE:
-        return jsonify({"status": "error", "message": "Incorrect reset confirmation phrase"}), 403
+    if len(clicks) != 3 or len(set(clicks)) != 3 or set(clicks) != {"y", "e", "s"}:
+        return jsonify({"status": "error", "message": "Click Y, E, and S to confirm the modem reset"}), 403
 
     upstream_payload = {
         "mac": mac,
-        "confirmation_passphrase": _SINGLE_RESET_PASSPHRASE,
+        "confirmation_clicks": clicks,
         "requested_by": session.get("username") or session.get("user") or "user",
         "idempotency_key": str(payload.get("idempotency_key") or uuid.uuid4()),
     }
