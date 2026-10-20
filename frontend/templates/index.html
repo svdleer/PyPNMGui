@@ -4044,9 +4044,8 @@
                         <button type="button" class="btn-close btn-close-white" aria-label="Close" @click="closeModemResetModal"></button>
                     </div>
                     <div class="modal-body">
-                        <p>You are about to reboot modem <strong>{{ modemResetModal.modem?.mac_address }}</strong>.</p>
-                        <p class="mb-2">IP address: <code>{{ modemResetModal.modem?.ip_address || 'unknown' }}</code></p>
-                        <p class="text-danger fw-bold">This interrupts customer service. The reset is sent through the PyPNM API and agent.</p>
+                        <p class="mb-2">Modem: <strong class="text-dark font-monospace">{{ modemResetModal.modem?.mac_address }}</strong></p>
+                        <p class="mb-2">IP address: <strong class="text-dark font-monospace">{{ modemResetModal.modem?.ip_address || 'unknown' }}</strong></p>
                         <label class="form-label" for="singleResetPassphrase">Type the confirmation phrase to continue:</label>
                         <input id="singleResetPassphrase" v-model="modemResetModal.passphrase" type="text" class="form-control" autocomplete="off" placeholder="have you tried turning it on and off again?" @keyup.enter="confirmModemReset">
                         <div v-if="modemResetModal.error" class="alert alert-danger mt-3 mb-0">{{ modemResetModal.error }}</div>
