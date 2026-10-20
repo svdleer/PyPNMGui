@@ -600,9 +600,14 @@
                                                     <button @click="requestInventoryRefreshForModem(modem, { trackStatus: false })" class="btn btn-sm btn-outline-warning me-1" title="Refresh modem inventory">
                                                         <i class="bi bi-arrow-clockwise"></i>
                                                     </button>
-                                                    <button @click="quickPing(modem)" class="btn btn-sm btn-outline-secondary" title="Quick Ping">
+                                                    <button @click="quickPing(modem)" class="btn btn-sm btn-outline-secondary me-1" title="Quick Ping">
                                                         <i class="bi bi-broadcast"></i>
                                                     </button>
+                                                    {% if auth_role == 'admin' and cm_bulk_reset_enabled %}
+                                                    <button @click="openModemResetModal(modem)" class="btn btn-sm btn-outline-danger" title="Reset modem">
+                                                        <i class="bi bi-arrow-counterclockwise"></i>
+                                                    </button>
+                                                    {% endif %}
                                                 </td>
                                             </tr>
                                         </tbody>
@@ -4043,6 +4048,34 @@
     </div>
 
     {% include 'footer.html' %}
+
+    <!-- Single modem reset confirmation -->
+    <div v-if="modemResetModal.open" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" style="background:rgba(0,0,0,.55);z-index:1055;">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Confirm Modem Reset</h5>
+                    <button type="button" class="btn-close btn-close-white" aria-label="Close" @click="closeModemResetModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>You are about to reboot modem <strong>{{ modemResetModal.modem?.mac_address }}</strong>.</p>
+                    <p class="mb-2">IP address: <code>{{ modemResetModal.modem?.ip_address || 'unknown' }}</code></p>
+                    <p class="text-danger fw-bold">This interrupts customer service. The reset is sent through the PyPNM API and agent.</p>
+                    <label class="form-label" for="singleResetPassphrase">Type the confirmation phrase to continue:</label>
+                    <input id="singleResetPassphrase" v-model="modemResetModal.passphrase" type="text" class="form-control" autocomplete="off" placeholder="have you tried turning it on and off again?" @keyup.enter="confirmModemReset">
+                    <div v-if="modemResetModal.error" class="alert alert-danger mt-3 mb-0">{{ modemResetModal.error }}</div>
+                    <div v-if="modemResetModal.job" class="alert alert-success mt-3 mb-0">Reset job started.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @click="closeModemResetModal" :disabled="modemResetModal.submitting">Cancel</button>
+                    <button type="button" class="btn btn-danger" @click="confirmModemReset" :disabled="modemResetModal.submitting || modemResetModal.passphrase.trim().toLowerCase() !== 'have you tried turning it on and off again?'">
+                        <span v-if="modemResetModal.submitting" class="spinner-border spinner-border-sm me-1"></span>
+                        <i v-else class="bi bi-arrow-counterclockwise me-1"></i>Reset Modem
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Pro Spectrum Analyzer Modal -->
     <div class="modal fade" id="spectrumAnalyzerModal" tabindex="-1" aria-labelledby="spectrumAnalyzerModalLabel" aria-hidden="true">

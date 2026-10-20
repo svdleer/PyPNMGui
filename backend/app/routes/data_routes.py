@@ -1169,7 +1169,9 @@ def cm_reset_plan():
     gate = _require_cm_bulk_reset()
     if gate:
         return gate
-    return _proxy("POST", "/cm-reset/jobs/plan", payload=request.get_json(silent=True) or {})
+    payload = dict(request.get_json(silent=True) or {})
+    payload["requested_by"] = session.get("username") or session.get("user") or "user"
+    return _proxy("POST", "/cm-reset/jobs/plan", payload=payload)
 
 
 @api_bp.route('/admin/cm-reset/jobs/<public_id>', methods=['GET'])

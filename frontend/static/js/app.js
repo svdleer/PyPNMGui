@@ -103,6 +103,14 @@ createApp({
             cmtsLegacyNameMap: {},
             cmtsInterfaces: [],
             selectedModem: null,
+            modemResetModal: {
+                open: false,
+                modem: null,
+                passphrase: '',
+                submitting: false,
+                error: '',
+                job: null,
+            },
             modemRefreshStatus: null,   // null | 'queued' | 'running' | 'completed' | 'failed'
             modemRefreshRequestId: null,
             modemRefreshError: null,
@@ -8503,6 +8511,69 @@ createApp({
             return levels[level] || `LEVEL-${level}`;
         },
         
+        async confirmModemReset() {
+            const modal = this.modemResetModal;
+            const modem = modal.modem;
+            const required = 'have you tried turning it on and off again?';
+            if (!modem || modal.passphrase.trim().toLowerCase() !== required) return;
+
+            modal.submitting = true;
+            modal.error = '';
+            try {
+                const idempotencyKey = `single-reset-${this.normalizeMacForMatch(modem.mac_address)}-${Date.now()}`;
+                const planResponse = await fetch(`${API_BASE}/admin/cm-reset/jobs/plan`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scope: { type: 'single', mac: modem.mac_address },
+                        idempotency_key: idempotencyKey,
+                    }),
+                });
+                const plan = await planResponse.json().catch(() => ({}));
+                if (!planResponse.ok || plan.status !== 'success' || !plan.job?.public_id) {
+                    throw new Error(plan.detail || plan.message || 'Unable to create reset plan');
+                }
+
+                const startResponse = await fetch(`${API_BASE}/admin/cm-reset/jobs/${encodeURIComponent(plan.job.public_id)}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        max_concurrency: 1,
+                        confirmation_passphrase: required,
+                    }),
+                });
+                const started = await startResponse.json().catch(() => ({}));
+                if (!startResponse.ok || started.status !== 'success') {
+                    throw new Error(started.detail || started.message || 'Unable to start modem reset');
+                }
+
+                modal.job = started.job || plan.job;
+                this.$toast?.info(`Reset queued for ${modem.mac_address}`);
+                setTimeout(() => this.closeModemResetModal(), 1800);
+            } catch (error) {
+                modal.error = error?.message || 'Modem reset failed';
+            } finally {
+                modal.submitting = false;
+            }
+        },
+
+        openModemResetModal(modem) {
+            if (!modem) return;
+            this.modemResetModal = {
+                open: true,
+                modem,
+                passphrase: '',
+                submitting: false,
+                error: '',
+                job: null,
+            };
+        },
+
+        closeModemResetModal() {
+            if (this.modemResetModal.submitting) return;
+            this.modemResetModal.open = false;
+        },
+
         quickPing(modem) {
             // Simulate a quick connectivity check
             Swal.fire({
