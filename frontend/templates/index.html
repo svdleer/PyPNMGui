@@ -4047,7 +4047,7 @@
         </div>
 
         <!-- Single modem reset confirmation (inside Vue #app mount) -->
-        <div v-if="modemResetModal.open" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" style="background:rgba(0,0,0,.55);z-index:1055;">
+        <div v-if="modemResetModal.open" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" @click.self="closeModemResetModal" @keydown.esc.window="closeModemResetModal" style="background:rgba(0,0,0,.55);z-index:1055;">
             <div class="modal-dialog modal-dialog-centered" role="document">
                 <div class="modal-content">
                     <div class="modal-header bg-danger text-white">
@@ -4064,7 +4064,7 @@
                         <div v-if="modemResetModal.job" class="alert alert-success mt-3 mb-0">Reset command sent.</div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" @click="closeModemResetModal" :disabled="modemResetModal.submitting">Cancel</button>
+                        <button type="button" class="btn btn-secondary" @click="closeModemResetModal">Close</button>
                         <button type="button" class="btn btn-danger" @click="confirmModemReset" :disabled="modemResetModal.submitting || modemResetModal.passphrase.trim().toLowerCase() !== 'have you tried turning it on and off again?'">
                             <span v-if="modemResetModal.submitting" class="spinner-border spinner-border-sm me-1"></span>
                             <i v-else class="bi bi-arrow-counterclockwise me-1"></i>Reset Modem

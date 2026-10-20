@@ -111,6 +111,9 @@ createApp({
                 error: '',
                 job: null,
             },
+            _resetAbortController: null,
+            _resetTimeoutId: null,
+            _resetCloseTimer: null,
             modemRefreshStatus: null,   // null | 'queued' | 'running' | 'completed' | 'failed'
             modemRefreshRequestId: null,
             modemRefreshError: null,
@@ -8517,12 +8520,16 @@ createApp({
             const required = 'have you tried turning it on and off again?';
             if (!modem || modal.passphrase.trim().toLowerCase() !== required) return;
 
+            const controller = new AbortController();
+            this._resetAbortController = controller;
+            this._resetTimeoutId = setTimeout(() => controller.abort(), 15000);
             modal.submitting = true;
             modal.error = '';
             try {
                 const response = await fetch(`${API_BASE}/cm-reset/single`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal,
                     body: JSON.stringify({
                         mac: modem.mac_address,
                         confirmation_passphrase: required,
@@ -8538,8 +8545,16 @@ createApp({
                 this.$toast?.info(`Reset command sent to ${modem.mac_address}`);
                 setTimeout(() => this.closeModemResetModal(), 1800);
             } catch (error) {
-                modal.error = error?.message || 'Modem reset failed';
+                modal.error = error?.name === 'AbortError'
+                    ? 'Reset request timed out. The page is available again; verify the modem status before retrying.'
+                    : (error?.message || 'Modem reset failed');
+                this._resetCloseTimer = setTimeout(() => {
+                    if (this.modemResetModal === modal) this.closeModemResetModal();
+                }, 5000);
             } finally {
+                clearTimeout(this._resetTimeoutId);
+                this._resetTimeoutId = null;
+                if (this._resetAbortController === controller) this._resetAbortController = null;
                 modal.submitting = false;
             }
         },
@@ -8557,7 +8572,19 @@ createApp({
         },
 
         closeModemResetModal() {
-            if (this.modemResetModal.submitting) return;
+            if (this._resetCloseTimer) {
+                clearTimeout(this._resetCloseTimer);
+                this._resetCloseTimer = null;
+            }
+            if (this._resetTimeoutId) {
+                clearTimeout(this._resetTimeoutId);
+                this._resetTimeoutId = null;
+            }
+            if (this._resetAbortController) {
+                this._resetAbortController.abort();
+                this._resetAbortController = null;
+            }
+            this.modemResetModal.submitting = false;
             this.modemResetModal.open = false;
         },
 
