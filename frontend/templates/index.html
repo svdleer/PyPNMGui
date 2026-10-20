@@ -4047,7 +4047,8 @@
         </div>
 
         <!-- Single modem reset confirmation (inside Vue #app mount) -->
-        <div v-if="modemResetModal.open" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" @click.self="closeModemResetModal" @keydown.esc.window="closeModemResetModal" style="background:rgba(0,0,0,.55);z-index:1055;">
+        <template v-if="modemResetModal.open">
+        <div class="modal fade show" tabindex="-1" role="dialog" aria-modal="true" @click.self="closeModemResetModal" @keydown.esc.window="closeModemResetModal" style="display:none;background:rgba(0,0,0,.55);z-index:1055;" :style="'display:block;background:rgba(0,0,0,.55);z-index:1055;'">
             <div class="modal-dialog modal-dialog-centered" role="document">
                 <div class="modal-content">
                     <div class="modal-header bg-danger text-white">
@@ -4073,6 +4074,7 @@
                 </div>
             </div>
         </div>
+        </template>
     </div>
 
     {% include 'footer.html' %}
