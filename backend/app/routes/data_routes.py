@@ -1146,8 +1146,8 @@ def cm_reset_single():
     clicks = [str(letter).strip().lower() for letter in raw_clicks] if isinstance(raw_clicks, list) else []
     if not mac:
         return jsonify({"status": "error", "message": "mac is required"}), 400
-    if len(clicks) != 3 or len(set(clicks)) != 3 or set(clicks) != {"y", "e", "s"}:
-        return jsonify({"status": "error", "message": "Click Y, E, and S to confirm the modem reset"}), 403
+    if clicks != ["y", "e", "s"]:
+        return jsonify({"status": "error", "message": "Click Y, E, then S in that exact order to confirm the modem reset"}), 403
 
     upstream_payload = {
         "mac": mac,
