@@ -38,6 +38,16 @@
         [v-cloak] {
             display: none !important;
         }
+        @keyframes resetShake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-8px); }
+            40% { transform: translateX(8px); }
+            60% { transform: translateX(-6px); }
+            80% { transform: translateX(6px); }
+        }
+        .reset-shake {
+            animation: resetShake 0.4s ease-in-out;
+        }
     </style>
 </head>
 <body class="pypnm-app-shell{% if brand_enabled %} pypnm-brand-skin{% endif %}" data-ui-skin="[[ ui_skin ]]">
@@ -4046,13 +4056,16 @@
                     <div class="modal-body">
                         <p class="mb-2">Modem: <strong class="text-dark font-monospace">{{ modemResetModal.modem?.mac_address }}</strong></p>
                         <p class="mb-2">IP address: <strong class="text-dark font-monospace">{{ modemResetModal.modem?.ip_address || 'unknown' }}</strong></p>
-                        <p class="mb-3">Click each of the three buttons to confirm the reset:</p>
-                        <div class="d-flex justify-content-center gap-2 mb-2">
+                        <p class="mb-3">Click the buttons in the order <strong>Y &rarr; E &rarr; S</strong> to confirm the reset:</p>
+                        <div class="d-flex justify-content-center gap-2 mb-2" :class="{ 'reset-shake': modemResetModal.wrong }">
                             <button v-for="letter in modemResetModal.resetLetters" :key="letter" type="button"
-                                    class="btn btn-lg px-4"
-                                    :class="modemResetModal.resetClicked.includes(letter) ? 'btn-success' : 'btn-outline-danger'"
+                                    class="btn btn-lg px-4 text-uppercase"
+                                    :class="modemResetModal.wrong ? 'btn-danger' : (modemResetModal.resetClicked.includes(letter) ? 'btn-success' : 'btn-outline-danger')"
                                     :disabled="modemResetModal.submitting || modemResetModal.resetClicked.includes(letter)"
                                     @click="clickModemResetLetter(letter)">{{ letter }}</button>
+                        </div>
+                        <div v-if="modemResetModal.wrong" class="alert alert-danger text-center fw-bold mt-3 mb-0">
+                            <i class="bi bi-x-octagon-fill me-2"></i>WRONGGG — wrong order. Start again: Y &rarr; E &rarr; S.
                         </div>
                         <div v-if="modemResetModal.error" class="alert alert-danger mt-3 mb-0">{{ modemResetModal.error }}</div>
                         <div v-if="modemResetModal.job" class="alert alert-success mt-3 mb-0">Reset command sent.</div>

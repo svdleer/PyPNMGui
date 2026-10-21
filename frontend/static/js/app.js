@@ -115,6 +115,7 @@ createApp({
             _resetAbortController: null,
             _resetTimeoutId: null,
             _resetCloseTimer: null,
+            _resetWrongTimer: null,
             modemRefreshStatus: null,   // null | 'queued' | 'running' | 'completed' | 'failed'
             modemRefreshRequestId: null,
             modemRefreshError: null,
@@ -8572,6 +8573,7 @@ createApp({
                 modem,
                 resetLetters,
                 resetClicked: [],
+                wrong: false,
                 submitting: false,
                 error: '',
                 job: null,
@@ -8582,6 +8584,20 @@ createApp({
             const modal = this.modemResetModal;
             const normalized = String(letter || '').toLowerCase();
             if (modal.submitting || !['y', 'e', 's'].includes(normalized) || modal.resetClicked.includes(normalized)) return;
+
+            const expected = ['y', 'e', 's'][modal.resetClicked.length];
+            if (normalized !== expected) {
+                // Wrong letter for this position — reset progress and let the user retry.
+                modal.resetClicked = [];
+                modal.wrong = true;
+                if (this._resetWrongTimer) clearTimeout(this._resetWrongTimer);
+                this._resetWrongTimer = setTimeout(() => {
+                    if (this.modemResetModal === modal) modal.wrong = false;
+                }, 2500);
+                return;
+            }
+
+            modal.wrong = false;
             modal.resetClicked.push(normalized);
             if (modal.resetClicked.length === 3) this.confirmModemReset();
         },
@@ -8590,6 +8606,10 @@ createApp({
             if (this._resetCloseTimer) {
                 clearTimeout(this._resetCloseTimer);
                 this._resetCloseTimer = null;
+            }
+            if (this._resetWrongTimer) {
+                clearTimeout(this._resetWrongTimer);
+                this._resetWrongTimer = null;
             }
             if (this._resetTimeoutId) {
                 clearTimeout(this._resetTimeoutId);
