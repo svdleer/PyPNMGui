@@ -515,7 +515,7 @@ def admin_set_topology_scopes_enabled():
 
 
 @auth_bp.route("/custom-snmp", methods=["GET"])
-@admin_required
+@login_required
 def custom_snmp_page():
     if not is_custom_snmp_enabled():
         abort(404)
@@ -523,7 +523,7 @@ def custom_snmp_page():
         "custom_snmp.html",
         base_path=current_app.config.get("APP_ROOT", ""),
         auth_username=session.get("username", ""),
-        auth_role=session.get("role", "admin"),
+        auth_role=session.get("role", "user"),
     )
 
 

@@ -1275,9 +1275,8 @@ def cm_reset_targets(public_id):
 
 
 def _require_custom_snmp():
-    gate = _require_admin()
-    if gate:
-        return gate
+    if session.get("role") not in {"admin", "user"}:
+        return jsonify({"status": "error", "message": "Admin or user role required"}), 403
     if not is_custom_snmp_enabled():
         return jsonify({"status": "error", "message": "Custom SNMP is disabled"}), 404
     return _require_topology_scopes()
