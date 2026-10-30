@@ -700,19 +700,23 @@
                 targets.flatMap(target => Object.keys(target.results || {}))
             )];
             const formatResultValue = value => {
+                const scalarText = scalar => {
+                    if (scalar === null || scalar === undefined) return '—';
+                    if (typeof scalar === 'object') return JSON.stringify(scalar);
+                    return String(scalar);
+                };
                 if (Array.isArray(value)) {
                     if (!value.length) return '—';
                     return value.map(item => {
                         if (item && typeof item === 'object') {
                             const oid = escapeHtml(item.oid || '');
-                            const rendered = escapeHtml(item.value ?? '');
+                            const rendered = escapeHtml(scalarText(item.value));
                             return `<div><span class="text-muted">${oid}</span>: ${rendered}</div>`;
                         }
-                        return `<div>${escapeHtml(item)}</div>`;
+                        return `<div>${escapeHtml(scalarText(item))}</div>`;
                     }).join('');
                 }
-                if (value && typeof value === 'object') return escapeHtml(JSON.stringify(value));
-                return escapeHtml(value ?? '—');
+                return escapeHtml(scalarText(value));
             };
             head.innerHTML = `<tr><th>MAC</th><th>IP</th><th>State</th>${resultKeys.map(k => `<th class="snmp-code">${escapeHtml(k)}</th>`).join('')}</tr>`;
             body.innerHTML = targets.map(t => {
