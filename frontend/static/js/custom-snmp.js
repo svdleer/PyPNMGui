@@ -29,7 +29,7 @@
 
     const oidContainer = byId('oid-list-container');
 
-    function createOidRow(oid = '', label = '') {
+    function createOidRow(oid = '', label = '', operation = 'walk') {
         const row = document.createElement('div');
         row.className = 'oid-row';
         row.style.position = 'relative';
@@ -39,13 +39,18 @@
                 <div class="list-group position-absolute w-100 shadow-sm" style="z-index:100;max-height:150px;overflow-y:auto;display:none" data-role="suggestions"></div>
             </div>
             <input type="text" class="form-control form-control-sm" placeholder="Label" style="max-width:120px;" data-field="label" value="${label}">
+            <select class="form-select form-select-sm" style="max-width:125px;" data-field="operation" title="SNMP operation">
+                <option value="walk" ${operation === 'walk' ? 'selected' : ''}>Walk subtree</option>
+                <option value="get" ${operation === 'get' ? 'selected' : ''}>GET value</option>
+            </select>
             <button class="btn btn-sm btn-outline-success oid-verify-btn" title="Verify OID"><i class="bi bi-check-circle"></i></button>
             <button class="btn btn-sm btn-outline-danger oid-remove-btn" title="Remove"><i class="bi bi-dash"></i></button>
         `;
         // Autocomplete
         const oidInput = row.querySelector('[data-field="oid"]');
         const sugBox = row.querySelector('[data-role="suggestions"]');
-        oidInput.addEventListener('input', () => clearRowVerification(row));
+        const operationSelect = row.querySelector('[data-field="operation"]');
+        operationSelect.addEventListener('change', () => clearRowVerification(row));
         let debounceTimer = null;
         oidInput.addEventListener('input', () => {
             clearTimeout(debounceTimer);
@@ -106,6 +111,7 @@
                 target_mode: targetMode,
                 affiliate,
                 cmts: allCmts ? null : cmts,
+                operation: row.querySelector('[data-field="operation"]').value,
                 modem_mac: requestedScope === 'single' && !modemIsIp ? modemValue : null,
                 modem_ip: requestedScope === 'single' && modemIsIp ? modemValue : null,
                 modem_vendor: byId('snmp-modem-vendor').value || null,
@@ -124,6 +130,7 @@
                     if (targetMode === 'modem' && receipt.receipt_id) {
                         row.dataset.verificationReceipt = receipt.receipt_id;
                         row.dataset.verifiedOid = oidVal;
+                        row.dataset.verifiedOperation = payload.operation;
                         btn.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
                         btn.title = `Verified: ${data.value} (tested on ${targetLabel}; attempt ${data.attempts_used || 1})`;
                         oidInput.classList.remove('is-invalid');
@@ -153,6 +160,7 @@
     function clearRowVerification(row) {
         delete row.dataset.verificationReceipt;
         delete row.dataset.verifiedOid;
+        delete row.dataset.verifiedOperation;
         const oidInput = row.querySelector('[data-field="oid"]');
         oidInput.classList.remove('is-valid', 'is-invalid');
     }
@@ -172,7 +180,9 @@
         oidContainer.querySelectorAll('.oid-row').forEach(row => {
             const oid = row.querySelector('[data-field="oid"]').value.trim();
             if (!oid) return;
-            if (row.dataset.verifiedOid !== oid || !row.dataset.verificationReceipt) {
+            if (row.dataset.verifiedOid !== oid
+                || row.dataset.verifiedOperation !== row.querySelector('[data-field="operation"]').value
+                || !row.dataset.verificationReceipt) {
                 unverified.push(oid);
                 return;
             }
@@ -214,7 +224,8 @@
         rows.forEach(row => {
             const oid = row.querySelector('[data-field="oid"]').value.trim();
             const label = row.querySelector('[data-field="label"]').value.trim();
-            if (oid) oids.push({ oid, label: label || null });
+            const operation = row.querySelector('[data-field="operation"]').value;
+            if (oid) oids.push({ oid, label: label || null, operation });
         });
         return oids;
     }
@@ -222,7 +233,7 @@
     function setOids(oids) {
         oidContainer.innerHTML = '';
         (oids || []).forEach(entry => {
-            oidContainer.appendChild(createOidRow(entry.oid || '', entry.label || ''));
+            oidContainer.appendChild(createOidRow(entry.oid || '', entry.label || '', entry.operation || 'walk'));
         });
         if (!oidContainer.children.length) oidContainer.appendChild(createOidRow());
         updateOidCount();
@@ -685,12 +696,28 @@
                 return;
             }
 
-            // Determine columns from first target's results
-            const resultKeys = targets[0].results ? Object.keys(targets[0].results) : [];
-            head.innerHTML = `<tr><th>MAC</th><th>IP</th><th>State</th>${resultKeys.map(k => `<th class="snmp-code">${k}</th>`).join('')}</tr>`;
+            const resultKeys = [...new Set(
+                targets.flatMap(target => Object.keys(target.results || {}))
+            )];
+            const formatResultValue = value => {
+                if (Array.isArray(value)) {
+                    if (!value.length) return '—';
+                    return value.map(item => {
+                        if (item && typeof item === 'object') {
+                            const oid = escapeHtml(item.oid || '');
+                            const rendered = escapeHtml(item.value ?? '');
+                            return `<div><span class="text-muted">${oid}</span>: ${rendered}</div>`;
+                        }
+                        return `<div>${escapeHtml(item)}</div>`;
+                    }).join('');
+                }
+                if (value && typeof value === 'object') return escapeHtml(JSON.stringify(value));
+                return escapeHtml(value ?? '—');
+            };
+            head.innerHTML = `<tr><th>MAC</th><th>IP</th><th>State</th>${resultKeys.map(k => `<th class="snmp-code">${escapeHtml(k)}</th>`).join('')}</tr>`;
             body.innerHTML = targets.map(t => {
-                const vals = resultKeys.map(k => `<td class="snmp-code"><small>${t.results?.[k] ?? '—'}</small></td>`).join('');
-                return `<tr><td class="snmp-code">${t.mac}</td><td><small>${t.modem_ip || '—'}</small></td><td><span class="badge ${t.state === 'complete' ? 'bg-success' : t.state === 'failed' ? 'bg-danger' : 'bg-secondary'}">${t.state}</span></td>${vals}</tr>`;
+                const vals = resultKeys.map(k => `<td class="snmp-code"><small>${formatResultValue(t.results?.[k])}</small></td>`).join('');
+                return `<tr><td class="snmp-code">${escapeHtml(t.mac)}</td><td><small>${escapeHtml(t.modem_ip || '—')}</small></td><td><span class="badge ${t.state === 'complete' ? 'bg-success' : t.state === 'failed' ? 'bg-danger' : 'bg-secondary'}">${escapeHtml(t.state)}</span></td>${vals}</tr>`;
             }).join('');
         } catch (e) { console.error('Results load:', e); }
     }
