@@ -322,6 +322,10 @@
 
     function isIpAddress(value) {
         const text = String(value || '').trim();
+        const macAddress = /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(text)
+            || /^(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}$/i.test(text)
+            || /^[0-9a-f]{12}$/i.test(text);
+        if (macAddress) return false;
         const ipv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(text);
         const ipv6 = text.includes(':') && /^[0-9a-f:]+$/i.test(text);
         return ipv4 || ipv6;
