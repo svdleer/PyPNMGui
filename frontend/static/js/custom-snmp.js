@@ -29,7 +29,7 @@
 
     const oidContainer = byId('oid-list-container');
 
-    function createOidRow(oid = '', label = '', operation = 'walk') {
+    function createOidRow(oid = '', label = '', operation = 'get') {
         const row = document.createElement('div');
         row.className = 'oid-row';
         row.style.position = 'relative';
@@ -233,7 +233,7 @@
     function setOids(oids) {
         oidContainer.innerHTML = '';
         (oids || []).forEach(entry => {
-            oidContainer.appendChild(createOidRow(entry.oid || '', entry.label || '', entry.operation || 'walk'));
+            oidContainer.appendChild(createOidRow(entry.oid || '', entry.label || '', entry.operation || 'get'));
         });
         if (!oidContainer.children.length) oidContainer.appendChild(createOidRow());
         updateOidCount();
