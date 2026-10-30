@@ -471,6 +471,14 @@ class PyPNMClient:
         encoded_cmts_ip = quote(str(cmts_ip), safe="")
         return self._post(f"/cmts/cache/clear?cmts_ip={encoded_cmts_ip}", {})
 
+    def clear_inventory_modems(self, *, cmts: str | None = None, cmts_ip: str | None = None) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if cmts:
+            payload["cmts"] = cmts
+        if cmts_ip:
+            payload["cmts_ip"] = cmts_ip
+        return self._post("/api/admin/inventory/modems/clear", payload)
+
     def get_inventory_modems_bulk(self, mac_addresses: list[str]) -> Dict[str, Any]:
         return self._post("/api/admin/inventory/modems/bulk", {"mac_addresses": mac_addresses})
 

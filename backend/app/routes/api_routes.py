@@ -1548,15 +1548,40 @@ def clear_cmts_modem_cache(cmts_name):
     result = PyPNMClient().clear_cmts_modem_cache(str(cmts_ip))
     if not isinstance(result, dict):
         return _pypnm_error_response(None, 'PyPNM returned an invalid cache-clear response')
-    if result.get('status') == 'success' or result.get('success') is True:
-        response = dict(result)
-        response['status'] = 'success'
-        response.setdefault('cmts', canonical_name)
-        response.setdefault('cmts_ip', cmts_ip)
-        response.setdefault('message', f"Cache cleared for {canonical_name}")
-        return jsonify(response)
+    if not (result.get('status') == 'success' or result.get('success') is True):
+        return _pypnm_error_response(result, 'PyPNM cache clear failed')
 
-    return _pypnm_error_response(result, 'PyPNM cache clear failed')
+    inventory_result = PyPNMClient().clear_inventory_modems(
+        cmts=canonical_name,
+        cmts_ip=str(cmts_ip),
+    )
+    if not isinstance(inventory_result, dict):
+        return _pypnm_error_response(
+            None,
+            'PyPNM returned an invalid persisted-inventory clear response',
+        )
+    if not (
+        inventory_result.get('status') == 'success'
+        or inventory_result.get('success') is True
+    ):
+        return _pypnm_error_response(
+            inventory_result,
+            'PyPNM persisted-inventory clear failed',
+        )
+
+    response = dict(result)
+    response.update({
+        'status': 'success',
+        'cmts': canonical_name,
+        'cmts_ip': cmts_ip,
+        'persisted_inventory_cleared': True,
+        'deleted_inventory_rows': inventory_result.get('deleted', 0),
+        'message': (
+            f"Live cache and persisted inventory cleared for {canonical_name} "
+            f"({inventory_result.get('deleted', 0)} modem rows)"
+        ),
+    })
+    return jsonify(response)
 
 
 @api_bp.route('/cmts/<cmts_name>/enrich/delta', methods=['POST'])
