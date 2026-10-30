@@ -99,12 +99,15 @@
             const btn = row.querySelector('.oid-verify-btn');
             const targetMode = byId('snmp-verify-modem').checked ? 'modem' : 'cmts';
             const allCmts = requestedScope === 'all_network' || isAffiliateAllCmtsSelected();
+            const modemValue = requestedScope === 'single' ? singleModemInput.value.trim() : '';
+            const modemIsIp = isIpAddress(modemValue);
             const payload = {
                 oid: oidVal,
                 target_mode: targetMode,
                 affiliate,
                 cmts: allCmts ? null : cmts,
-                modem_mac: requestedScope === 'single' ? singleModemInput.value.trim() : null,
+                modem_mac: requestedScope === 'single' && !modemIsIp ? modemValue : null,
+                modem_ip: requestedScope === 'single' && modemIsIp ? modemValue : null,
                 modem_vendor: byId('snmp-modem-vendor').value || null,
                 modem_type: byId('snmp-modem-type').value || null,
             };
@@ -306,6 +309,13 @@
         }[char]));
     }
 
+    function isIpAddress(value) {
+        const text = String(value || '').trim();
+        const ipv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(text);
+        const ipv6 = text.includes(':') && /^[0-9a-f:]+$/i.test(text);
+        return ipv4 || ipv6;
+    }
+
     function facetOptions(items, placeholder) {
         return `<option value="">${placeholder}</option>` + (items || []).map(item => {
             const value = String(item.value || '');
@@ -341,18 +351,22 @@
                 });
                 const data = await request('GET', `/options/modems?${params.toString()}`);
                 const modems = data.modems || [];
-                singleModemSuggestions.innerHTML = modems.map(modem => `
+                const ipFallback = isIpAddress(query) && !modems.some(modem => modem.ip === query)
+                    ? [{ ip: query, mac: null, model: 'Use this IP directly' }]
+                    : [];
+                const options = [...modems, ...ipFallback];
+                singleModemSuggestions.innerHTML = options.map(modem => `
                     <button type="button" class="list-group-item list-group-item-action py-1 px-2 small">
-                        <span class="font-monospace">${escapeHtml(modem.mac || '')}</span>
-                        <span class="text-muted ms-2">${escapeHtml(modem.ip || '')}</span>
-                        <span class="text-muted ms-2">${escapeHtml(modem.model || modem.vendor || '')}</span>
+                        <span class="font-monospace">${escapeHtml(modem.mac || modem.ip || '')}</span>
+                        <span class="text-muted ms-2">${escapeHtml(modem.ip && modem.mac ? modem.ip : (modem.model || ''))}</span>
+                        ${modem.mac ? '' : '<span class="badge bg-info text-dark ms-2">IP fallback</span>'}
                     </button>
                 `).join('');
-                singleModemSuggestions.style.display = modems.length ? 'block' : 'none';
+                singleModemSuggestions.style.display = options.length ? 'block' : 'none';
                 singleModemSuggestions.querySelectorAll('button').forEach((button, index) => {
                     button.addEventListener('mousedown', event => {
                         event.preventDefault();
-                        singleModemInput.value = modems[index].mac || '';
+                        singleModemInput.value = options[index].mac || options[index].ip || '';
                         singleModemSuggestions.style.display = 'none';
                         invalidateOidVerifications();
                     });
@@ -543,9 +557,10 @@
             const modemMac = singleModemInput.value.trim();
             if (!cmts) return alert('Select a CMTS');
             if (isAffiliateAllCmtsSelected()) return alert('Select one CMTS for a single modem scope');
-            if (!modemMac) return alert('Select a modem MAC');
+            if (!modemMac) return alert('Select a modem MAC or IP');
             scope.cmts = cmts;
-            scope.mac = modemMac;
+            if (isIpAddress(modemMac)) scope.ip = modemMac;
+            else scope.mac = modemMac;
         } else if (type === 'cmts') {
             if (!cmts) return alert('Select a CMTS');
             scope.cmts = [cmts];
