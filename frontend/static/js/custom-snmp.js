@@ -106,6 +106,13 @@
             const allCmts = requestedScope === 'all_network' || isAffiliateAllCmtsSelected();
             const modemValue = requestedScope === 'single' ? singleModemInput.value.trim() : '';
             const modemIsIp = isIpAddress(modemValue);
+            const targetIp = requestedScope === 'single'
+                ? (singleModemIpInput.value.trim() || (modemIsIp ? modemValue : ''))
+                : '';
+            if (requestedScope === 'single' && !isIpAddress(targetIp)) {
+                alert('Enter or select a valid modem IP address before verifying the OID');
+                return;
+            }
             const payload = {
                 oid: oidVal,
                 target_mode: targetMode,
@@ -113,7 +120,7 @@
                 cmts: allCmts ? null : cmts,
                 operation: row.querySelector('[data-field="operation"]').value,
                 modem_mac: requestedScope === 'single' && !modemIsIp ? modemValue : null,
-                modem_ip: requestedScope === 'single' && modemIsIp ? modemValue : null,
+                modem_ip: requestedScope === 'single' ? targetIp : null,
                 modem_vendor: byId('snmp-modem-vendor').value || null,
                 modem_type: byId('snmp-modem-type').value || null,
             };
@@ -279,6 +286,7 @@
     const cmtsSelect = byId('snmp-cmts');
     const singleModemWrap = byId('snmp-single-modem-wrap');
     const singleModemInput = byId('snmp-single-modem');
+    const singleModemIpInput = byId('snmp-single-modem-ip');
     const singleModemSuggestions = byId('snmp-single-modem-suggestions');
     const modemVendorSelect = byId('snmp-modem-vendor');
     const modemTypeSelect = byId('snmp-modem-type');
@@ -299,6 +307,7 @@
         fnWrap.classList.toggle('d-none', !topologyScopesEnabled || type !== 'fiber_node');
         singleModemWrap.classList.toggle('d-none', type !== 'single');
         singleModemInput.disabled = type !== 'single' || !cmtsSelect.value || isAffiliateAllCmtsSelected();
+        singleModemIpInput.disabled = type !== 'single' || !cmtsSelect.value || isAffiliateAllCmtsSelected();
         if (type === 'single') {
             allMatchingModems.checked = false;
             allMatchingModems.disabled = true;
@@ -342,6 +351,8 @@
     function resetSingleModemSelector(placeholder = 'Select CMTS first') {
         singleModemInput.value = '';
         singleModemInput.disabled = true;
+        singleModemIpInput.value = '';
+        singleModemIpInput.disabled = true;
         singleModemSuggestions.innerHTML = '';
         singleModemSuggestions.style.display = 'none';
         singleModemInput.placeholder = placeholder;
@@ -352,6 +363,7 @@
         invalidateOidVerifications();
         clearTimeout(singleModemDebounce);
         const query = singleModemInput.value.trim();
+        if (!isIpAddress(query)) singleModemIpInput.value = '';
         if (scopeType.value !== 'single' || !cmtsSelect.value || isAffiliateAllCmtsSelected() || query.length < 2) {
             singleModemSuggestions.style.display = 'none';
             return;
@@ -382,6 +394,7 @@
                     button.addEventListener('mousedown', event => {
                         event.preventDefault();
                         singleModemInput.value = options[index].mac || options[index].ip || '';
+                        singleModemIpInput.value = options[index].ip || (isIpAddress(singleModemInput.value) ? singleModemInput.value : '');
                         singleModemSuggestions.style.display = 'none';
                         invalidateOidVerifications();
                     });
@@ -395,6 +408,7 @@
     singleModemInput.addEventListener('blur', () => {
         setTimeout(() => { singleModemSuggestions.style.display = 'none'; }, 200);
     });
+    singleModemIpInput.addEventListener('input', invalidateOidVerifications);
 
     function resetModemFacetSelectors(placeholder = 'Select CMTS') {
         modemVendorSelect.disabled = true;
@@ -570,12 +584,15 @@
         if (modemTypeSelect.value) scope.modem_type = modemTypeSelect.value;
         if (type === 'single') {
             const modemMac = singleModemInput.value.trim();
+            const targetIp = singleModemIpInput.value.trim() || (isIpAddress(modemMac) ? modemMac : '');
             if (!cmts) return alert('Select a CMTS');
             if (isAffiliateAllCmtsSelected()) return alert('Select one CMTS for a single modem scope');
             if (!modemMac) return alert('Select a modem MAC or IP');
+            if (!isIpAddress(targetIp)) return alert('Enter or select a valid modem IP address');
             scope.cmts = cmts;
             if (isIpAddress(modemMac)) scope.ip = modemMac;
             else scope.mac = modemMac;
+            scope.ip = targetIp;
         } else if (type === 'cmts') {
             if (!cmts) return alert('Select a CMTS');
             scope.cmts = [cmts];
