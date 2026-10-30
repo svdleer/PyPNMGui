@@ -705,18 +705,19 @@
                     if (typeof scalar === 'object') return JSON.stringify(scalar);
                     return String(scalar);
                 };
+                const formatObject = value => {
+                    if (!value || typeof value !== 'object') return scalarText(value);
+                    if (Object.prototype.hasOwnProperty.call(value, 'value')) {
+                        const name = value.mib || value.oid || '';
+                        return `${name ? `${escapeHtml(name)}: ` : ''}${escapeHtml(scalarText(value.value))}`;
+                    }
+                    return escapeHtml(JSON.stringify(value));
+                };
                 if (Array.isArray(value)) {
                     if (!value.length) return '—';
-                    return value.map(item => {
-                        if (item && typeof item === 'object') {
-                            const oid = escapeHtml(item.oid || '');
-                            const rendered = escapeHtml(scalarText(item.value));
-                            return `<div><span class="text-muted">${oid}</span>: ${rendered}</div>`;
-                        }
-                        return `<div>${escapeHtml(scalarText(item))}</div>`;
-                    }).join('');
+                    return value.map(item => `<div>${formatObject(item)}</div>`).join('');
                 }
-                return escapeHtml(scalarText(value));
+                return formatObject(value);
             };
             head.innerHTML = `<tr><th>MAC</th><th>IP</th><th>State</th>${resultKeys.map(k => `<th class="snmp-code">${escapeHtml(k)}</th>`).join('')}</tr>`;
             body.innerHTML = targets.map(t => {
