@@ -89,6 +89,10 @@
                 alert('Select an affiliate and CMTS first to verify OIDs');
                 return;
             }
+            if (requestedScope === 'single' && !singleModemInput.value.trim()) {
+                alert('Select a modem MAC first to verify OIDs');
+                return;
+            }
             const oidInput = row.querySelector('[data-field="oid"]');
             const oidVal = oidInput.value.trim();
             if (!oidVal) return;
@@ -100,6 +104,7 @@
                 target_mode: targetMode,
                 affiliate,
                 cmts: allCmts ? null : cmts,
+                modem_mac: requestedScope === 'single' ? singleModemInput.value.trim() : null,
                 modem_vendor: byId('snmp-modem-vendor').value || null,
                 modem_type: byId('snmp-modem-type').value || null,
             };
@@ -258,6 +263,9 @@
     const scopeType = byId('snmp-scope-type');
     const affiliateSelect = byId('snmp-affiliate');
     const cmtsSelect = byId('snmp-cmts');
+    const singleModemWrap = byId('snmp-single-modem-wrap');
+    const singleModemInput = byId('snmp-single-modem');
+    const singleModemSuggestions = byId('snmp-single-modem-suggestions');
     const modemVendorSelect = byId('snmp-modem-vendor');
     const modemTypeSelect = byId('snmp-modem-type');
     const cmtsWrap = byId('snmp-cmts-wrap');
@@ -275,9 +283,20 @@
         const type = scopeType.value;
         cmtsWrap.classList.toggle('d-none', type === 'all_network');
         fnWrap.classList.toggle('d-none', !topologyScopesEnabled || type !== 'fiber_node');
+        singleModemWrap.classList.toggle('d-none', type !== 'single');
+        singleModemInput.disabled = type !== 'single' || !cmtsSelect.value || isAffiliateAllCmtsSelected();
+        if (type === 'single') {
+            allMatchingModems.checked = false;
+            allMatchingModems.disabled = true;
+            maxModemsInput.disabled = true;
+        } else {
+            allMatchingModems.disabled = false;
+            maxModemsInput.disabled = allMatchingModems.checked;
+        }
     }
     scopeType.addEventListener('change', () => {
         updateScopeUI();
+        resetSingleModemSelector();
         invalidateOidVerifications();
     });
 
@@ -295,12 +314,66 @@
         }).join('');
     }
 
+    function resetSingleModemSelector(placeholder = 'Select CMTS first') {
+        singleModemInput.value = '';
+        singleModemInput.disabled = true;
+        singleModemSuggestions.innerHTML = '';
+        singleModemSuggestions.style.display = 'none';
+        singleModemInput.placeholder = placeholder;
+    }
+
+    let singleModemDebounce = null;
+    singleModemInput.addEventListener('input', () => {
+        invalidateOidVerifications();
+        clearTimeout(singleModemDebounce);
+        const query = singleModemInput.value.trim();
+        if (scopeType.value !== 'single' || !cmtsSelect.value || isAffiliateAllCmtsSelected() || query.length < 2) {
+            singleModemSuggestions.style.display = 'none';
+            return;
+        }
+        singleModemDebounce = setTimeout(async () => {
+            try {
+                const params = new URLSearchParams({
+                    cmts: cmtsSelect.value,
+                    q: query,
+                    affiliate: affiliateSelect.value || 'all',
+                    limit: '10',
+                });
+                const data = await request('GET', `/options/modems?${params.toString()}`);
+                const modems = data.modems || [];
+                singleModemSuggestions.innerHTML = modems.map(modem => `
+                    <button type="button" class="list-group-item list-group-item-action py-1 px-2 small">
+                        <span class="font-monospace">${escapeHtml(modem.mac || '')}</span>
+                        <span class="text-muted ms-2">${escapeHtml(modem.ip || '')}</span>
+                        <span class="text-muted ms-2">${escapeHtml(modem.model || modem.vendor || '')}</span>
+                    </button>
+                `).join('');
+                singleModemSuggestions.style.display = modems.length ? 'block' : 'none';
+                singleModemSuggestions.querySelectorAll('button').forEach((button, index) => {
+                    button.addEventListener('mousedown', event => {
+                        event.preventDefault();
+                        singleModemInput.value = modems[index].mac || '';
+                        singleModemSuggestions.style.display = 'none';
+                        invalidateOidVerifications();
+                    });
+                });
+            } catch (error) {
+                singleModemSuggestions.style.display = 'none';
+                console.warn('Single modem options:', error);
+            }
+        }, 250);
+    });
+    singleModemInput.addEventListener('blur', () => {
+        setTimeout(() => { singleModemSuggestions.style.display = 'none'; }, 200);
+    });
+
     function resetModemFacetSelectors(placeholder = 'Select CMTS') {
         modemVendorSelect.disabled = true;
         modemVendorSelect.innerHTML = `<option value="">${placeholder}</option>`;
         modemTypeSelect.disabled = true;
         modemTypeSelect.innerHTML = `<option value="">${placeholder}</option>`;
     }
+
 
     async function loadCmtsOptions() {
         const affiliate = affiliateSelect.value;
@@ -421,12 +494,16 @@
 
     cmtsSelect.addEventListener('change', async () => {
         invalidateOidVerifications();
+        resetSingleModemSelector();
+        updateScopeUI();
         if (!affiliateSelect.value) return;
         await Promise.all([loadFiberNodeOptions(), loadModemVendorOptions()]);
     });
     affiliateSelect.addEventListener('change', async () => {
         invalidateOidVerifications();
         resetModemFacetSelectors();
+        resetSingleModemSelector('Select CMTS first');
+        updateScopeUI();
         await Promise.all([loadCmtsOptions(), loadFiberNodeOptions()]);
     });
     modemVendorSelect.addEventListener('change', () => {
@@ -458,11 +535,18 @@
             return alert('Fiber Node scope is disabled by the administrator');
         }
         const type = affiliateAllCmts ? 'all_network' : requestedType;
+        const cmts = cmtsSelect.value;
         const scope = { type, affiliate };
         if (modemVendorSelect.value) scope.modem_vendor = modemVendorSelect.value;
         if (modemTypeSelect.value) scope.modem_type = modemTypeSelect.value;
-        if (type === 'cmts') {
-            const cmts = cmtsSelect.value;
+        if (type === 'single') {
+            const modemMac = singleModemInput.value.trim();
+            if (!cmts) return alert('Select a CMTS');
+            if (isAffiliateAllCmtsSelected()) return alert('Select one CMTS for a single modem scope');
+            if (!modemMac) return alert('Select a modem MAC');
+            scope.cmts = cmts;
+            scope.mac = modemMac;
+        } else if (type === 'cmts') {
             if (!cmts) return alert('Select a CMTS');
             scope.cmts = [cmts];
         } else if (type === 'fiber_node') {

@@ -30,6 +30,7 @@
                             <label class="form-label small fw-bold">Scope</label>
                             <select class="form-select form-select-sm" id="snmp-scope-type">
                                 <option value="cmts">CMTS</option>
+                                <option value="single">Single modem</option>
                                 <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Technical FiberNode{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
                                 <option value="all_network">All network</option>
                             </select>
@@ -55,6 +56,15 @@
                             <select class="form-select form-select-sm" id="snmp-fiber-node" disabled>
                                 <option value="">Select affiliate</option>
                             </select>
+                        </div>
+                        <div class="col-md-6 d-none" id="snmp-single-modem-wrap">
+                            <label class="form-label small fw-bold" for="snmp-single-modem">Modem MAC</label>
+                            <div class="position-relative">
+                                <input type="text" class="form-control form-control-sm snmp-code" id="snmp-single-modem"
+                                       placeholder="Select a CMTS, then type a MAC prefix" autocomplete="off" disabled>
+                                <div class="list-group position-absolute w-100 shadow-sm" id="snmp-single-modem-suggestions"
+                                     style="z-index:100;max-height:180px;overflow-y:auto;display:none;"></div>
+                            </div>
                         </div>
                         <div class="col-md-2 ms-md-auto">
                             <label class="form-label small fw-bold">Max modems</label>

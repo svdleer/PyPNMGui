@@ -1306,6 +1306,26 @@ def custom_snmp_fiber_node_options():
     return _proxy("GET", "/custom-snmp/options/fiber-nodes", params=params)
 
 
+@api_bp.route('/admin/custom-snmp/options/modems', methods=['GET'])
+def custom_snmp_modem_options():
+    gate = _require_custom_snmp()
+    if gate:
+        return gate
+    cmts = (request.args.get("cmts") or "").strip()
+    query = (request.args.get("q") or "").strip()
+    if not cmts or len(query) < 2:
+        return jsonify({"status": "success", "modems": []})
+    params = {
+        "cmts": cmts,
+        "q": query,
+        "limit": request.args.get("limit", "10"),
+    }
+    affiliate = (request.args.get("affiliate") or "all").strip()
+    if affiliate:
+        params["affiliate"] = affiliate
+    return _proxy("GET", "/custom-snmp/options/modems", params=params)
+
+
 @api_bp.route('/admin/custom-snmp/options/modem-vendors', methods=['GET'])
 def custom_snmp_modem_vendor_options():
     gate = _require_custom_snmp()
