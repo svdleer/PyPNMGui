@@ -192,10 +192,10 @@ def _pypnm_exception_result(exc: Exception) -> dict:
 
 
 def _cmts_inventory_refs(cmts: dict, requested_ref: str = '') -> list[str]:
-    """Return distinct authoritative inventory keys in hostname/IP order."""
+    """Return distinct authoritative inventory keys in stable IP/hostname order."""
     values = (
-        cmts.get('HostName'),
         cmts.get('IPAddress') or cmts.get('ip') or cmts.get('ip_address'),
+        cmts.get('HostName'),
     )
     refs = []
     seen = set()
@@ -1316,8 +1316,8 @@ def get_cmts_modems(cmts_name):
                 "message": f"CMTS '{cmts_name}' has no IP address configured"
             }), 500
 
-        def _prepare_rows(rows):
-            prepared = filter_ignored_modems(rows or [])[:limit]
+        def _prepare_rows(rows, max_rows=limit):
+            prepared = filter_ignored_modems(rows or [])[:max_rows]
             for modem in prepared:
                 modem['cmts'] = canonical_name
                 modem['cmts_ip'] = cmts_ip
@@ -1399,8 +1399,6 @@ def get_cmts_modems(cmts_name):
 
                 inventory_rows = inventory_resp.get('modems') or []
                 if not inventory_rows:
-                    if offset > 0:
-                        return _success_response([], inventory_resp, 'inventory', True)
                     empty_success_count += 1
                     continue
 
@@ -1422,9 +1420,13 @@ def get_cmts_modems(cmts_name):
         # Live base discovery is reserved for refresh=true or confirmed absence
         # from every persisted hostname/IP inventory key.
         client = PyPNMClient()
+        # Live collection must always request a complete generation. Reusing the
+        # browser page size here creates a truncated 200/500-row SNMP snapshot
+        # that cannot replenish persisted inventory and has no continuation
+        # contract. Page the complete live result only at this BFF boundary.
         live_query = {
             'cmts_ip': cmts_ip,
-            'limit': limit,
+            'limit': MAX_CM_MODEM_LIMIT,
             'enrich': enrich,
             'refresh': force_refresh,
             'cmts_hostname': canonical_name,
@@ -1436,11 +1438,28 @@ def get_cmts_modems(cmts_name):
             return _pypnm_error_response(None, 'PyPNM returned an invalid live modem response')
 
         if result.get('success'):
-            rows = _prepare_rows(result.get('modems') or [])
+            all_rows = _prepare_rows(
+                result.get('modems') or [], max_rows=MAX_CM_MODEM_LIMIT
+            )
+            total = len(all_rows)
+            rows = all_rows[offset:offset + limit]
+            next_offset = offset + len(rows)
+            has_more = next_offset < total
+            result.update({
+                'total': total,
+                'total_exact': True,
+                'offset': offset,
+                'limit': limit,
+                'has_more': has_more,
+                'next_offset': next_offset if has_more else None,
+            })
             result.setdefault('source', 'pypnm-live')
             logger.info(
-                "Retrieved %d modems from %s via PyPNM live query",
-                len(rows), canonical_name,
+                "Retrieved live modem page %d-%d of %d from %s via PyPNM",
+                offset,
+                next_offset,
+                total,
+                canonical_name,
             )
             return _success_response(rows, result, result.get('agent_id', 'agent'), False)
 

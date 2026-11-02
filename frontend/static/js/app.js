@@ -4040,7 +4040,6 @@ createApp({
 
         async _loadAllModemsInBackground(url, mapModem, loadToken) {
             try {
-                const pageSize = 500;
                 const modemsByMac = new Map();
                 for (const modem of (this.modems || [])) {
                     const norm = this.normalizeMacForMatch(modem?.mac_address || '');
@@ -4082,10 +4081,15 @@ createApp({
                     const totalLabel = Number.isFinite(Number(data.total)) ? data.total : '?';
                     this.liveModemSource = `Loading inventory ${visible.length}/${totalLabel} modems…`;
 
-                    hasMore = data.has_more === true;
-                    const nextOffset = Number(data.next_offset);
-                    offset = Number.isFinite(nextOffset)
-                        ? nextOffset
+                    if (typeof data.has_more !== 'boolean') {
+                        throw new Error('Inventory response is missing pagination metadata');
+                    }
+                    hasMore = data.has_more;
+                    const hasNextOffset = data.next_offset !== null
+                        && data.next_offset !== undefined
+                        && Number.isFinite(Number(data.next_offset));
+                    offset = hasNextOffset
+                        ? Number(data.next_offset)
                         : offset + rawModems.length;
                     if (hasMore && (!rawModems.length || offset <= 0)) {
                         throw new Error('Inventory pagination did not advance');
