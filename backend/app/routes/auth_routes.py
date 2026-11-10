@@ -467,7 +467,7 @@ def admin_set_cm_bulk_reset_enabled():
 
 
 @auth_bp.route("/cm-bulk-reset", methods=["GET"])
-@admin_required
+@login_required
 def cm_bulk_reset_page():
     if not is_cm_bulk_reset_enabled():
         abort(404)
@@ -475,7 +475,7 @@ def cm_bulk_reset_page():
         "cm_bulk_reset.html",
         base_path=current_app.config.get("APP_ROOT", ""),
         auth_username=session.get("username", ""),
-        auth_role=session.get("role", "admin"),
+        auth_role=session.get("role", "user"),
     )
 
 

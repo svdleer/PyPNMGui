@@ -29,6 +29,7 @@
     // ── Scope UI ────────────────────────────────────────────────
 
     const scopeType = byId('reset-scope-type');
+    if (!scopeType) return;
     const singleWrap = byId('scope-single-wrap');
     const cmtsWrap = byId('scope-cmts-wrap');
     const fnWrap = byId('scope-fn-wrap');

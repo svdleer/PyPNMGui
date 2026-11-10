@@ -40,11 +40,10 @@
                     </a>
                 </li>
                 {% endif %}
-                {% if auth_role == 'admin' %}
-                {% if cm_bulk_reset_enabled %}
+                {% if cm_bulk_reset_enabled and auth_role in ['admin', 'user'] %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'auth.cm_bulk_reset_page' %}active{% endif %}" href="[[ base_path ]]/cm-bulk-reset">
-                        <i class="bi bi-arrow-repeat me-1"></i>CM Reset
+                        <i class="bi bi-arrow-repeat me-1"></i>Bulk CM
                     </a>
                 </li>
                 {% endif %}
@@ -54,7 +53,6 @@
                         <i class="bi bi-terminal me-1"></i>Custom SNMP
                     </a>
                 </li>
-                {% endif %}
                 {% endif %}
                 {% if enable_topology %}
                 <li class="nav-item">

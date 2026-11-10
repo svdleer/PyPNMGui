@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}CM Bulk Reset - PyPNM{% endblock %}
+{% block title %}Bulk CM - PyPNM{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -17,17 +17,20 @@
      data-base-path="[[ base_path ]]"
      data-topology-scopes-enabled="[[ 'true' if topology_scopes_enabled else 'false' ]]">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>CM Bulk Reset</h4>
-        <span class="badge bg-warning text-dark">Admin Only</span>
+        <h4 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Bulk CM</h4>
+        {% if auth_role == 'admin' %}<span class="badge bg-warning text-dark">Admin Only Reset</span>{% endif %}
         <span class="badge bg-danger d-none" id="godmode-badge">GODMODE</span>
     </div>
 
+    {% if auth_role == 'admin' %}
     <div class="alert alert-info py-2" role="alert">
         <i class="bi bi-clock me-1"></i>
         <strong>Execution window:</strong> Resets only run between 01:00 and 06:00.
         Jobs submitted outside this window will be queued for the next maintenance window.
     </div>
+    {% endif %}
 
+    {% if auth_role == 'admin' %}
     <!-- Scope selector -->
     <div class="card mb-3">
         <div class="card-header bg-white">
@@ -140,13 +143,34 @@
             </div>
         </div>
     </div>
+    {% endif %}
+
+    <!-- Bulk CM Write Operations -->
+    <div class="card mb-3" id="cm-write-app">
+        <div class="card-header bg-white"><strong><i class="bi bi-pencil-square me-2"></i>Bulk CM Write Operations</strong></div>
+        <div class="card-body">
+            <div class="alert alert-warning py-2 small">Writes use the configured CM SNMP write community. The confirmation password is required for scheduling and starting and is never stored.</div>
+            <div class="row g-3">
+                <div class="col-md-3"><label class="form-label small fw-bold">Scope type</label><select class="form-select form-select-sm" id="write-scope-type"><option value="single">Single modem (MAC)</option><option value="cmts">Entire CMTS</option><option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Fiber node</option><option value="file">MAC list</option></select></div>
+                <div class="col-md-4" id="write-single-wrap"><label class="form-label small fw-bold">MAC address</label><input class="form-control form-control-sm" id="write-mac" placeholder="aa:bb:cc:dd:ee:ff"></div>
+                <div class="col-md-4 d-none" id="write-cmts-wrap"><label class="form-label small fw-bold">CMTS</label><select class="form-select form-select-sm" id="write-cmts"><option value="">Loading...</option></select></div>
+                <div class="col-md-4 d-none" id="write-fn-wrap"><label class="form-label small fw-bold">Fiber node</label><select class="form-select form-select-sm" id="write-fiber-node" disabled><option value="">Select CMTS first</option></select></div>
+                <div class="col-md-5 d-none" id="write-file-wrap"><label class="form-label small fw-bold">MAC list</label><textarea class="form-control form-control-sm" id="write-mac-list" rows="3" placeholder="One MAC per line"></textarea></div>
+            </div>
+            <hr><div class="d-flex justify-content-between align-items-center mb-2"><strong>Ordered SNMP SET operations</strong><button class="btn btn-sm btn-outline-primary" id="write-add-operation">Add operation</button></div>
+            <div id="write-operations"></div>
+            <div class="row g-3 mt-1 align-items-end"><div class="col-md-3"><label class="form-label small fw-bold">Delay before execution (seconds)</label><input type="number" min="0" max="86400" value="0" class="form-control form-control-sm" id="write-delay-seconds"></div><div class="col-md-3"><label class="form-label small fw-bold">Confirmation password</label><input type="password" autocomplete="off" class="form-control form-control-sm" id="write-plan-password"></div><div class="col-md-3"><button class="btn btn-primary btn-sm w-100" id="write-plan-btn">Schedule write job</button></div><div class="col-md-3"><button class="btn btn-success btn-sm w-100" id="write-run-btn">Run now</button></div></div>
+        </div>
+    </div>
+    <div class="card mb-3" id="write-jobs-card"><div class="card-header bg-white d-flex justify-content-between align-items-center"><strong>Write Jobs</strong><button class="btn btn-sm btn-outline-secondary" id="write-refresh-btn"><i class="bi bi-arrow-clockwise"></i></button></div><div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead class="table-light"><tr><th>Status</th><th>Scope</th><th>Targets</th><th>Operations</th><th>Scheduled</th><th>Actions</th></tr></thead><tbody id="write-jobs-body"><tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr></tbody></table></div></div>
+    <div class="card d-none" id="write-detail-card"><div class="card-header bg-white d-flex justify-content-between"><strong>Write Job Results</strong><span class="badge" id="write-detail-status"></span></div><div class="card-body"><div id="write-detail-meta" class="row g-2 mb-3"></div><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-light"><tr><th>MAC</th><th>IP</th><th>Op</th><th>OID</th><th>Type</th><th>State</th><th>Duration</th><th>Error</th></tr></thead><tbody id="write-results-body"></tbody></table></div></div></div>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script src="[[ asset_url('js/cm-bulk-reset.js') ]]" defer></script>
-
-<!-- Modal must be outside main content flow to avoid stacking context issues -->
+<script src="[[ asset_url('js/cm-bulk-snmp-write.js') ]]" defer></script>
+{% if auth_role == 'admin' %}
 <div class="modal fade" id="resetConfirmModal" tabindex="-1" aria-hidden="true" style="z-index:99999">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -176,4 +200,5 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}

@@ -1462,3 +1462,89 @@ def custom_snmp_mib_search():
 def custom_snmp_delete_all():
     gate = _require_custom_snmp()
     return gate or _proxy("DELETE", "/custom-snmp/jobs")
+
+
+# ── Bulk CM SNMP writes ──────────────────────────────────────
+
+
+def _require_cm_snmp_write():
+    if session.get("role") not in {"admin", "user"}:
+        return jsonify({"status": "error", "message": "Admin or user role required"}), 403
+    if not is_cm_bulk_reset_enabled():
+        return jsonify({"status": "error", "message": "Bulk CM is disabled"}), 404
+    return _require_topology_scopes()
+
+
+@api_bp.route('/admin/cm-snmp-write/options/cmts', methods=['GET'])
+def cm_write_cmts_options():
+    gate = _require_cm_snmp_write()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/cm-snmp-write/options/cmts", params=params)
+
+
+@api_bp.route('/admin/cm-snmp-write/options/fiber-nodes', methods=['GET'])
+def cm_write_fiber_node_options():
+    gate = _require_cm_snmp_write()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cmts", "limit"}}
+    return _proxy("GET", "/cm-snmp-write/options/fiber-nodes", params=params)
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs', methods=['GET'])
+def cm_write_jobs():
+    gate = _require_cm_snmp_write()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/cm-snmp-write/jobs", params=params)
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs/plan', methods=['POST'])
+def cm_write_plan():
+    gate = _require_cm_snmp_write()
+    if gate:
+        return gate
+    payload = dict(request.get_json(silent=True) or {})
+    payload["requested_by"] = session.get("username") or session.get("user") or "user"
+    return _proxy("POST", "/cm-snmp-write/jobs/plan", payload=payload)
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs/<public_id>', methods=['GET'])
+def cm_write_job(public_id):
+    gate = _require_cm_snmp_write()
+    return gate or _proxy("GET", f"/cm-snmp-write/jobs/{public_id}")
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs/<public_id>/start', methods=['POST'])
+def cm_write_start(public_id):
+    gate = _require_cm_snmp_write()
+    if gate:
+        return gate
+    scope_gate = _require_non_topology_job(f"/cm-snmp-write/jobs/{public_id}")
+    if scope_gate:
+        return scope_gate
+    return _proxy("POST", f"/cm-snmp-write/jobs/{public_id}/start", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs/<public_id>/cancel', methods=['POST'])
+def cm_write_cancel(public_id):
+    gate = _require_cm_snmp_write()
+    return gate or _proxy("POST", f"/cm-snmp-write/jobs/{public_id}/cancel")
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs/<public_id>', methods=['DELETE'])
+def cm_write_delete(public_id):
+    gate = _require_cm_snmp_write()
+    return gate or _proxy("DELETE", f"/cm-snmp-write/jobs/{public_id}")
+
+
+@api_bp.route('/admin/cm-snmp-write/jobs/<public_id>/results', methods=['GET'])
+def cm_write_results(public_id):
+    gate = _require_cm_snmp_write()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cursor", "limit"}}
+    return _proxy("GET", f"/cm-snmp-write/jobs/{public_id}/results", params=params)
