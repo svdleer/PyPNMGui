@@ -45,6 +45,7 @@
                         <option value="cmts">Entire CMTS</option>
                         <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Fiber node{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
                         <option value="file">Upload MAC file</option>
+                        <option value="cpe_address">CPE address</option>
                     </select>
                 </div>
 
@@ -76,6 +77,13 @@
                     <textarea class="form-control form-control-sm" id="reset-mac-list" rows="4"
                               placeholder="aa:bb:cc:dd:ee:ff&#10;11:22:33:44:55:66&#10;..."></textarea>
                     <div class="form-text">Or drag-drop / paste a .csv or .txt file</div>
+                </div>
+
+                <div class="col-md-5 d-none" id="scope-cpe-wrap">
+                    <label class="form-label small fw-bold">CPE addresses (one per line, CSV, or paste)</label>
+                    <textarea class="form-control form-control-sm" id="reset-cpe-list" rows="4"
+                              placeholder="192.0.2.10\n2001:db8::10\n..."></textarea>
+                    <div class="form-text">Each CPE address must map to one active parent modem in current PyPNM inventory.</div>
                 </div>
 
                 <div class="col-md-2 d-flex align-items-end">

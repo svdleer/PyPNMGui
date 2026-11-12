@@ -34,6 +34,7 @@
     const cmtsWrap = byId('scope-cmts-wrap');
     const fnWrap = byId('scope-fn-wrap');
     const fileWrap = byId('scope-file-wrap');
+    const cpeWrap = byId('scope-cpe-wrap');
 
     function updateScopeUI() {
         if (!topologyScopesEnabled && scopeType.value === 'fiber_node') {
@@ -44,6 +45,7 @@
         cmtsWrap.classList.toggle('d-none', type !== 'cmts' && type !== 'fiber_node');
         fnWrap.classList.toggle('d-none', !topologyScopesEnabled || type !== 'fiber_node');
         fileWrap.classList.toggle('d-none', type !== 'file');
+        cpeWrap.classList.toggle('d-none', type !== 'cpe_address');
     }
     scopeType.addEventListener('change', updateScopeUI);
 
@@ -116,6 +118,12 @@
             const macs = text.split(/[\n,;]+/).map(m => m.trim()).filter(Boolean);
             if (!macs.length) return alert('No valid MAC addresses found');
             scope.mac_list = macs;
+        } else if (type === 'cpe_address') {
+            const text = byId('reset-cpe-list').value.trim();
+            if (!text) return alert('Paste one CPE IPv4 or IPv6 address per line');
+            const addresses = text.split(/[\n,;]+/).map(value => value.trim()).filter(Boolean);
+            if (!addresses.length) return alert('No CPE addresses found');
+            scope.cpe_addresses = addresses;
         }
 
         this.disabled = true;
