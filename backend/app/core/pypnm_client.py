@@ -1396,6 +1396,19 @@ class PyPNMClient:
             logger.error(f"Error getting modems from CMTS {cmts_ip}: {e}")
             return {"success": False, "error": str(e)}
     
+    def get_ofdm_channel_power_6mhz(
+        self,
+        mac_address: str,
+        ip_address: str,
+        community: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get API-rendered DOCS-IF31 per-6MHz OFDM channel power."""
+        return self._post(
+            "/pnm/ds/ofdm/channel-power-6mhz",
+            {"modem_ip": ip_address, "mac_address": mac_address, **_snmp_fields(community)},
+            request_timeout=180,
+        )
+
     def health_check(self) -> bool:
         """Check if PyPNM server is reachable."""
         try:
@@ -1419,11 +1432,3 @@ def get_pypnm_client() -> PyPNMClient:
     if _pypnm_client is None:
         _pypnm_client = PyPNMClient()
     return _pypnm_client
-
-    def get_ofdm_channel_power_6mhz(self, mac_address: str, ip_address: str, community: Optional[str] = None) -> Dict[str, Any]:
-        """Get API-rendered DOCS-IF31 per-6MHz OFDM channel power."""
-        return self._post(
-            "/pnm/ds/ofdm/channel-power-6mhz",
-            {"modem_ip": ip_address, "mac_address": mac_address, **_snmp_fields(community)},
-            request_timeout=180,
-        )
