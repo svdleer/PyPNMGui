@@ -601,7 +601,9 @@ def pnm_measurement(measurement_type, mac_address):
     
     # Route to appropriate method
     try:
-        if measurement_type == 'rxmer':
+        if measurement_type == 'ofdm_channel_power_6mhz':
+            result = client.get_ofdm_channel_power_6mhz(mac_address, modem_ip, community)
+        elif measurement_type == 'rxmer':
             result = client.get_rxmer_capture(
                 mac_address, modem_ip, tftp_ip, community, 
                 tftp_ipv6="::1", output_type=output_type
@@ -5432,6 +5434,7 @@ class _ReportJobStore(dict[str, dict]):
 _report_jobs = _ReportJobStore()
 
 _REPORT_MEASUREMENT_LABELS = {
+    'ofdm_channel_power_6mhz': 'Downstream OFDM 6 MHz Channel Power',
     'rxmer': 'Downstream OFDM RxMER per Subcarrier',
     'spectrum': 'Downstream Full-Band Spectrum',
     'channel_estimation': 'Downstream OFDM Channel Estimation (Amplitude & Group Delay)',
@@ -5871,6 +5874,8 @@ def _run_pnm_report(job_id: str, data: dict, measurements: list):
             pngs = []
             if mtype == 'rxmer':
                 result = client.get_rxmer_capture(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
+            elif mtype == 'ofdm_channel_power_6mhz':
+                result = client.get_ofdm_channel_power_6mhz(mac_address, modem_ip, modem_write_community)
             elif mtype == 'spectrum':
                 result = client.get_spectrum_capture(mac_address, modem_ip, tftp_ip, modem_write_community, output_type='archive')
             elif mtype in {'channel_estimation', 'impulse_response'}:

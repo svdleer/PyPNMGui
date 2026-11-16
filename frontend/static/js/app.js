@@ -61,8 +61,8 @@ createApp({
             _dsPollTimer: null,
             _fbPollTimer: null,
             _pageLeaveHandler: null,
-            
-            // Search parameters
+            _ofdmPowerProgressTimer: null,
+            ofdmPowerProgress: { visible: false, pct: 0, label: '' },
             locale: GUI_LOCALE,
             messages: GUI_I18N,
             searchType: 'mac',
@@ -1339,6 +1339,10 @@ createApp({
             if (!this.loadingSystemInfo && !this.channelStatsLoading && !this.channelStats) {
                 console.log('[watcher] triggering loadSystemInfo()');
                 this.loadSystemInfo();
+            }
+            if (!this.runningTest) {
+                console.log('[watcher] refreshing OFDM 6 MHz channel power');
+                this.runOfdmChannelPower6Mhz();
             }
         },
     },
@@ -5298,6 +5302,10 @@ createApp({
             };
         },
 
+        async runOfdmChannelPower6Mhz() {
+            return this.runPnmMeasurement('ofdm_channel_power_6mhz');
+        },
+
         async runRxmerTest() {
             return this.runPnmMeasurement('rxmer');
         },
@@ -8234,6 +8242,7 @@ createApp({
         async runPnmMeasurement(measurementType) {
             if (!this.selectedModem) return;
             const typeNames = {
+                'ofdm_channel_power_6mhz': 'OFDM 6 MHz Channel Power',
                 'rxmer': 'RxMER',
                 'spectrum': 'Spectrum Analyzer',
                 'channel_estimation': 'Channel Estimation',
@@ -8245,7 +8254,13 @@ createApp({
             };
             const taskLabel = typeNames[measurementType] || measurementType;
             const { token, signal } = this._beginUiTask(taskLabel, measurementType);
-
+            if (measurementType === 'ofdm_channel_power_6mhz') {
+                if (this._ofdmPowerProgressTimer) clearInterval(this._ofdmPowerProgressTimer);
+                this.ofdmPowerProgress = { visible: true, pct: 5, label: 'Reading OFDM 6 MHz power tables…' };
+                this._ofdmPowerProgressTimer = setInterval(() => {
+                    if (this.ofdmPowerProgress.pct < 90) this.ofdmPowerProgress = { ...this.ofdmPowerProgress, pct: this.ofdmPowerProgress.pct + 1, label: 'Joining band frequencies and power values…' };
+                }, 700);
+            }
             // A new request owns the result area. Clear stale data immediately so a
             // failed/aborted request cannot leave another measurement or modem visible.
             this.showRawData = false;
@@ -8366,6 +8381,11 @@ createApp({
                 this.showError('Measurement Failed', error.message);
             } finally {
                 if (this._isTaskActive(token)) {
+                    if (measurementType === 'ofdm_channel_power_6mhz') {
+                        if (this._ofdmPowerProgressTimer) clearInterval(this._ofdmPowerProgressTimer);
+                        this.ofdmPowerProgress = { visible: true, pct: 100, label: 'OFDM 6 MHz power complete' };
+                        setTimeout(() => { if (this.ofdmPowerProgress.pct === 100) this.ofdmPowerProgress.visible = false; }, 2500);
+                    }
                     this.runningTest = false;
                     this.activeMeasurement = null;
                     this._activeTaskLabel = null;
@@ -8678,6 +8698,9 @@ createApp({
                         indices: magnitudes.map((_, index) => firstActiveIndex + index),
                     };
                 });
+            } else if (type === 'ofdm_channel_power_6mhz') {
+                normalized.channels = payload?.channels || [];
+                normalized.combined = payload?.combined || [];
             } else if (type === 'channel_estimation' || type === 'us_pre_eq') {
                 normalized.channels = analyses;
             } else if (type === 'modulation_profile') {
@@ -8797,6 +8820,8 @@ createApp({
                 else this.drawSpectrumFromChannels(normalized.payload);
             } else if (type === 'rxmer') {
                 this.drawRxmerCharts(normalized);
+            } else if (type === 'ofdm_channel_power_6mhz') {
+                this.drawOfdmChannelPowerCharts(normalized);
             } else if (type === 'channel_estimation') {
                 this.drawChannelEstimationCharts(normalized.channels || []);
             } else if (type === 'modulation_profile') {
@@ -8814,6 +8839,29 @@ createApp({
             }
         },
         
+        drawOfdmChannelPowerCharts(normalized) {
+            const container = document.getElementById('measurement-charts-container');
+            if (!container) return;
+            const render = (title, rows) => {
+                const block = document.createElement('div');
+                block.className = 'mb-4 border rounded p-3';
+                const heading = document.createElement('h6'); heading.textContent = title;
+                const img = document.createElement('img'); img.className = 'img-fluid border rounded'; img.alt = title;
+                const plot = (normalized.payload?.plots || []).find(p => String(p.name || '').toLowerCase().includes(title.toLowerCase().includes('all') ? 'combined' : `ifindex_${rows[0]?.ifindex}`));
+                if (plot?.data) img.src = `data:${plot.mime || 'image/png'};base64,${plot.data}`;
+                block.append(heading, img);
+                if (!plot) { const pre = document.createElement('pre'); pre.className='small bg-light p-2'; pre.textContent=JSON.stringify(rows,null,2); block.appendChild(pre); }
+                container.appendChild(block);
+            };
+            render('OFDM downstream channel power - all active channels', normalized.combined || []);
+            (normalized.channels || []).forEach(channel => render(`OFDM channel ifIndex ${channel.ifindex}`, channel.bands || []));
+            if (normalized.payload?.pdf_base64) {
+                const link = document.createElement('a'); link.className='btn btn-outline-primary btn-sm mb-3'; link.textContent='Download OFDM Channel Power PDF';
+                const bytes=Uint8Array.from(atob(normalized.payload.pdf_base64), c => c.charCodeAt(0));
+                link.href=URL.createObjectURL(new Blob([bytes], {type:'application/pdf'})); link.download='ofdm_channel_power.pdf'; container.prepend(link);
+            }
+        },
+
         drawImpulseResponseCharts(data) {
             const container = document.getElementById('measurement-charts-container');
             if (!container) return;

@@ -1819,8 +1819,8 @@
                                                     <label class="form-check-label small" for="rpt-chanest">Chan Est</label>
                                                 </div>
                                                 <div class="form-check form-check-inline mb-0">
-                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="fec_summary" id="rpt-fec" :disabled="!hasOfdmChannels">
-                                                    <label class="form-check-label small" for="rpt-fec">FEC</label>
+                                                    <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="ofdm_channel_power_6mhz" id="rpt-ofdm-power" :disabled="!hasOfdmChannels">
+                                                    <label class="form-check-label small" for="rpt-ofdm-power">6 MHz Power</label>
                                                 </div>
                                                 <div class="form-check form-check-inline mb-0">
                                                     <input class="form-check-input" type="checkbox" v-model="reportMeasurements" value="constellation" id="rpt-const" :disabled="!hasOfdmChannels">
@@ -1898,6 +1898,10 @@
                                                 <i class="bi bi-x-circle me-1"></i>Cancel
                                             </button>
                                         </div>
+                                        <div v-if="ofdmPowerProgress.visible" class="mb-2 p-2 rounded border border-warning-subtle bg-warning-subtle" role="status" aria-live="polite">
+                                            <div class="d-flex justify-content-between small mb-1"><strong>OFDM 6 MHz channel power</strong><span>{{ ofdmPowerProgress.label }} {{ ofdmPowerProgress.pct }}%</span></div>
+                                            <div class="progress" style="height: .65rem"><div class="progress-bar bg-warning" role="progressbar" :style="{width: ofdmPowerProgress.pct + '%'}" :aria-valuenow="ofdmPowerProgress.pct" aria-valuemin="0" aria-valuemax="100"></div></div>
+                                        </div>
                                         <div class="row g-2 mb-2">
                                             <div class="col-md-3">
                                                 <button @click="runSpectrumTest" class="btn btn-sm w-100" 
@@ -1928,17 +1932,17 @@
                                                 </button>
                                             </div>
                                             <div class="col-md-3">
-                                                <button @click="runModulationProfile" class="btn btn-sm w-100" 
-                                                        :class="activeMeasurement === 'modulation_profile' ? 'btn-info' : 'btn-outline-info'"
-                                                        :disabled="runningTest || !hasOfdmChannels"
-                                                        :title="!hasOfdmChannels ? 'Requires OFDM downstream' : ''">
-                                                    <span v-if="activeMeasurement === 'modulation_profile'" class="spinner-border spinner-border-sm me-1"></span>
-                                                    <i v-else class="bi bi-reception-4 me-1"></i>Mod Profile
-                                                    <i v-if="!hasOfdmChannels" class="bi bi-lock-fill ms-1 text-muted"></i>
+                                                <button @click="runOfdmChannelPower6Mhz" class="btn btn-sm w-100" :class="activeMeasurement === 'ofdm_channel_power_6mhz' ? 'btn-warning' : 'btn-outline-warning'" :disabled="runningTest || !hasOfdmChannels" title="Per-6 MHz OFDM downstream channel power">
+                                                    <span v-if="activeMeasurement === 'ofdm_channel_power_6mhz'" class="spinner-border spinner-border-sm me-1"></span>
+                                                    <i v-else class="bi bi-bar-chart-line me-1"></i>6 MHz Power
                                                 </button>
                                             </div>
-                                        </div>
-                                        <div class="row g-2">
+                                            <div class="col-md-3">
+                                                <button @click="runModulationProfile" class="btn btn-sm w-100" :class="activeMeasurement === 'modulation_profile' ? 'btn-info' : 'btn-outline-info'" :disabled="runningTest || !hasOfdmChannels" title="Requires OFDM downstream">
+                                                    <span v-if="activeMeasurement === 'modulation_profile'" class="spinner-border spinner-border-sm me-1"></span>
+                                                    <i v-else class="bi bi-reception-4 me-1"></i>Mod Profile
+                                                </button>
+                                            </div>
                                             <div class="col-md-3">
                                                 <button @click="runFecTest" class="btn btn-sm w-100" 
                                                         :class="activeMeasurement === 'fec_summary' ? 'btn-secondary' : 'btn-outline-secondary'"
