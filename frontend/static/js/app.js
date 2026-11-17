@@ -3074,6 +3074,12 @@ createApp({
                 return channel ? `IQ Constellation — Ch ${channel}` : 'IQ Constellation';
             } else if (cleanName.includes('preeq') || cleanName.includes('pre_eq')) {
                 return channel ? `Pre-Equalizer — Ch ${channel}` : 'Pre-Equalizer';
+            } else if (cleanName.includes('ofdm_channel_power_channel_')) {
+                const match = cleanName.match(/ofdm_channel_power_channel_(\d+)/i);
+                return match ? `DS OFDM 6 MHz Power — Ch ${match[1]}` : 'DS OFDM 6 MHz Power';
+            } else if (cleanName.includes('ofdm_channel_power_ifindex_')) {
+                const match = cleanName.match(/ofdm_channel_power_ifindex_(\d+)/i);
+                return match ? `DS OFDM 6 MHz Power — IfIndex ${match[1]}` : 'DS OFDM 6 MHz Power';
             }
 
             // Fallback: clean up underscores and title-case
@@ -8842,19 +8848,28 @@ createApp({
         drawOfdmChannelPowerCharts(normalized) {
             const container = document.getElementById('measurement-charts-container');
             if (!container) return;
-            const render = (title, rows) => {
+            const render = (title, rows, channelNumber = null, ifindex = null) => {
                 const block = document.createElement('div');
                 block.className = 'mb-4 border rounded p-3';
                 const heading = document.createElement('h6'); heading.textContent = title;
                 const img = document.createElement('img'); img.className = 'img-fluid border rounded'; img.alt = title;
-                const plot = (normalized.payload?.plots || []).find(p => String(p.name || '').toLowerCase().includes(title.toLowerCase().includes('all') ? 'combined' : `ifindex_${rows[0]?.ifindex}`));
+                const channelPlotKey = channelNumber != null
+                    ? `channel_${channelNumber}`
+                    : `ifindex_${ifindex}`;
+                const plot = (normalized.payload?.plots || []).find(p => String(p.name || '').toLowerCase().includes(
+                    title.toLowerCase().includes('all') ? 'combined' : channelPlotKey
+                ));
                 if (plot?.data) img.src = `data:${plot.mime || 'image/png'};base64,${plot.data}`;
                 block.append(heading, img);
                 if (!plot) { const pre = document.createElement('pre'); pre.className='small bg-light p-2'; pre.textContent=JSON.stringify(rows,null,2); block.appendChild(pre); }
                 container.appendChild(block);
             };
             render('OFDM downstream channel power - all active channels', normalized.combined || []);
-            (normalized.channels || []).forEach(channel => render(`OFDM channel ifIndex ${channel.ifindex}`, channel.bands || []));
+            (normalized.channels || []).forEach(channel => {
+                const channelNumber = channel.channel_id ?? channel.channel_number;
+                const label = channelNumber != null ? `Ch ${channelNumber}` : `ifIndex ${channel.ifindex}`;
+                render(`OFDM channel ${label}`, channel.bands || [], channelNumber, channel.ifindex);
+            });
             if (normalized.payload?.pdf_base64) {
                 const link = document.createElement('a'); link.className='btn btn-outline-primary btn-sm mb-3'; link.textContent='Download OFDM Channel Power PDF';
                 const bytes=Uint8Array.from(atob(normalized.payload.pdf_base64), c => c.charCodeAt(0));

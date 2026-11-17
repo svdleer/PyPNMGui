@@ -778,6 +778,15 @@ def pnm_measurement(measurement_type, mac_address):
                 "message": f"Unknown measurement type: {measurement_type}"
             }), 400
         
+        # The API-owned 6 MHz endpoint returns the canonical success envelope
+        # directly, including rendered plots and PDF data. Normalize it here so
+        # the legacy status-code handling below does not reject success=true.
+        if measurement_type == 'ofdm_channel_power_6mhz' and isinstance(result, dict):
+            if result.get('success') is not True:
+                return jsonify(result), 500
+            result.setdefault('status', 0)
+            return jsonify(result)
+
         # Handle archive (tar.gz) response - fetch matplotlib plots from PyPNM
         if requested_archive and isinstance(result, bytes):
             # Check if the "bytes" is actually a JSON error response
