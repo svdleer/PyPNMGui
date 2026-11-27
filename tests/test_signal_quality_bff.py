@@ -50,10 +50,12 @@ def env(monkeypatch: pytest.MonkeyPatch):
     app.secret_key = "test"
     app.register_blueprint(data_routes.api_bp, url_prefix="/api")
     calls: list[dict[str, Any]] = []
+    timeouts: list[Any] = []
     state = {"enabled": True, "topology": True, "response": FakeResponse(), "get_response": FakeResponse()}
 
     def fake_request(method, url, json=None, params=None, **kwargs):
         calls.append({"method": method, "url": url, "json": json, "params": params})
+        timeouts.append(kwargs.get("timeout"))
         return state["response"]
 
     def fake_get(url, params=None, **kwargs):
@@ -73,6 +75,7 @@ def env(monkeypatch: pytest.MonkeyPatch):
                 session["username"] = username
         return test_client
 
+    client.timeouts = timeouts  # type: ignore[attr-defined]
     return client, calls, state
 
 
@@ -109,6 +112,7 @@ def test_plan_forwards_payload_and_injects_requester(env) -> None:
     assert sent["method"] == "POST" and sent["url"] == f"{BASE}/jobs/plan"
     assert sent["json"]["requested_by"] == "alice"  # a client cannot spoof the requester
     assert sent["json"]["confirmation_password"] == "kensentme"
+    assert client.timeouts == [120]  # fiber-node scopes resolve slowly; do not cut them off at 30 s
 
 
 def test_fiber_node_scope_is_blocked_when_topology_disabled(env) -> None:

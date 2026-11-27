@@ -35,6 +35,127 @@
         const fiberNode = $('sq-scope-type').value === 'fiber_node';
         $('sq-fn-wrap').classList.toggle('d-none', !(topologyEnabled && fiberNode));
         if (!topologyEnabled && fiberNode) $('sq-scope-type').value = 'cmts';
+        if (topologyEnabled && fiberNode && loadedFor !== $('sq-cmts').value) loadFiberNodes();
+    }
+
+    // ── Fiber node picker: type part of a name, pick from the matches ─────
+    const MENU_LIMIT = 50;
+    let fiberNodes = [];          // [{name, modems_here, modems_total}] for the selected CMTS
+    let selectedNodes = [];       // chosen names, in the order they were added
+    let loadedFor = null;         // CMTS the list above belongs to
+    let fnPollTimer = null;
+    let fnLoadToken = 0;          // ignores answers for a CMTS that is no longer selected
+    let activeIndex = -1;
+
+    const nodeInfo = name => fiberNodes.find(n => n.name === name);
+
+    function setFnStatus(html, cls = 'text-muted') {
+        const el = $('sq-fn-status');
+        el.className = `form-text ${cls}`;
+        el.innerHTML = html;
+    }
+
+    function renderChips() {
+        $('sq-fn-chips').innerHTML = selectedNodes.map(name => `
+            <span class="badge text-bg-primary d-inline-flex align-items-center gap-1">${esc(name)}
+                <button type="button" class="btn-close btn-close-white" style="font-size:.5rem" data-remove="${esc(name)}" aria-label="Remove ${esc(name)}"></button>
+            </span>`).join('');
+        const modems = selectedNodes.reduce((sum, name) => sum + (nodeInfo(name)?.modems_here || 0), 0);
+        $('sq-fn-selected').textContent = selectedNodes.length
+            ? `${selectedNodes.length} fiber node${selectedNodes.length === 1 ? '' : 's'} selected, about ${modems.toLocaleString()} online modems` : '';
+    }
+
+    function matches() {
+        const term = $('sq-fn-search').value.trim().toLowerCase();
+        return fiberNodes.filter(n => !selectedNodes.includes(n.name) && n.name.toLowerCase().includes(term));
+    }
+
+    function renderMenu() {
+        const menu = $('sq-fn-menu');
+        const term = $('sq-fn-search').value.trim();
+        const found = matches();
+        if (!fiberNodes.length) { menu.classList.add('d-none'); return; }
+        const shown = found.slice(0, MENU_LIMIT);
+        activeIndex = Math.min(activeIndex, shown.length - 1);
+        const rows = shown.map((n, i) => `
+            <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between ${i === activeIndex ? 'active' : ''}"
+                    data-add="${esc(n.name)}" role="option">
+                <span>${esc(n.name)}</span><span class="${i === activeIndex ? '' : 'text-muted'} ms-3">${n.modems_here.toLocaleString()} modems</span>
+            </button>`);
+        if (term && found.length > 1) {
+            rows.unshift(`<button type="button" class="list-group-item list-group-item-action text-primary fw-semibold" data-add-all="1">
+                Add all ${found.length} matches for “${esc(term)}”</button>`);
+        }
+        if (found.length > MENU_LIMIT) rows.push(`<div class="list-group-item text-muted small">${found.length - MENU_LIMIT} more, keep typing to narrow down</div>`);
+        if (!found.length) rows.push(`<div class="list-group-item text-muted small">${term ? 'No fiber node matches' : 'All fiber nodes are selected'}</div>`);
+        menu.innerHTML = rows.join('');
+        menu.classList.remove('d-none');
+    }
+
+    function addNodes(names) {
+        names.filter(n => !selectedNodes.includes(n)).forEach(n => selectedNodes.push(n));
+        $('sq-fn-search').value = '';
+        activeIndex = -1;
+        renderChips();
+        renderMenu();
+        $('sq-fn-search').focus();
+    }
+
+    function removeNode(name) {
+        selectedNodes = selectedNodes.filter(n => n !== name);
+        renderChips();
+        renderMenu();
+    }
+
+    function resetPicker(placeholder) {
+        if (fnPollTimer) { clearTimeout(fnPollTimer); fnPollTimer = null; }
+        fiberNodes = []; selectedNodes = []; loadedFor = null; activeIndex = -1;
+        $('sq-fn-search').value = '';
+        $('sq-fn-search').disabled = true;
+        $('sq-fn-search').placeholder = placeholder;
+        $('sq-fn-menu').classList.add('d-none');
+        setFnStatus('');
+        renderChips();
+    }
+
+    async function loadFiberNodes() {
+        const cmts = $('sq-cmts').value;
+        const token = ++fnLoadToken;
+        resetPicker(cmts ? 'Loading fiber nodes...' : 'Select a CMTS first');
+        if (!cmts || !topologyEnabled) return;
+        const poll = async () => {
+            let data;
+            try {
+                data = await request('GET', `/options/fiber-nodes?cmts=${encodeURIComponent(cmts)}&limit=10000`);
+            } catch (error) {
+                if (token === fnLoadToken) setFnStatus(esc(error.message), 'text-danger');
+                return;
+            }
+            if (token !== fnLoadToken) return;   // another CMTS was selected meanwhile
+            if (data.available === false) {
+                $('sq-fn-search').placeholder = 'Not available';
+                setFnStatus(esc(data.message || 'Fiber node data is not available in this environment'), 'text-danger');
+                return;
+            }
+            fiberNodes = data.details || [];
+            loadedFor = cmts;
+            $('sq-fn-search').disabled = !fiberNodes.length;
+            $('sq-fn-search').placeholder = fiberNodes.length ? 'Type part of a fiber node name' : 'No fiber nodes yet';
+            renderChips();
+            const snapshot = data.snapshot_date ? ` Topology snapshot ${esc(String(data.snapshot_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'))}.` : '';
+            if (data.building) {
+                const spinner = '<span class="spinner-border spinner-border-sm me-1"></span>';
+                setFnStatus(fiberNodes.length
+                    ? `${spinner}Refreshing the list in the background.${snapshot}`
+                    : `${spinner}Building the fiber node list for this CMTS. The first time takes up to a minute...`);
+                fnPollTimer = setTimeout(poll, 3000);
+            } else if (data.error) {
+                setFnStatus(`Could not build the list: ${esc(data.error)}. It will be retried in a few minutes.`, 'text-danger');
+            } else {
+                setFnStatus(`${fiberNodes.length} fiber nodes belong to this CMTS (it serves most of their online modems).${snapshot}`);
+            }
+        };
+        await poll();
     }
 
     async function loadCmts() {
@@ -43,27 +164,11 @@
             (data.cmts || []).map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
     }
 
-    async function loadFiberNodes() {
-        const cmts = $('sq-cmts').value;
-        const select = $('sq-fiber-nodes');
-        if (!cmts || !topologyEnabled) { select.innerHTML = ''; return; }
-        select.disabled = true;
-        select.innerHTML = '<option>Loading...</option>';
-        try {
-            const data = await request('GET', `/options/fiber-nodes?cmts=${encodeURIComponent(cmts)}`);
-            select.innerHTML = (data.fiber_nodes || []).map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
-        } catch (error) {
-            select.innerHTML = `<option disabled>${esc(error.message)}</option>`;
-        } finally {
-            select.disabled = false;
-        }
-    }
-
     function readPlan() {
         const type = $('sq-scope-type').value;
         const cmts = $('sq-cmts').value;
         const scope = { type, cmts };
-        if (type === 'fiber_node') scope.fiber_nodes = [...$('sq-fiber-nodes').selectedOptions].map(o => o.value);
+        if (type === 'fiber_node') scope.fiber_nodes = [...selectedNodes];
         const start = $('sq-scheduled-start').value;
         return {
             scope,
@@ -213,7 +318,46 @@
     }
 
     $('sq-scope-type').addEventListener('change', updateScope);
-    $('sq-cmts').addEventListener('change', loadFiberNodes);
+    // Changing the CMTS always clears the chosen nodes: a node name is only meaningful under its CMTS.
+    $('sq-cmts').addEventListener('change', () => {
+        if ($('sq-scope-type').value === 'fiber_node') loadFiberNodes(); else resetPicker('Select a CMTS first');
+    });
+
+    const search = $('sq-fn-search');
+    $('sq-fn-box').addEventListener('click', () => { if (!search.disabled) { search.focus(); renderMenu(); } });
+    search.addEventListener('focus', renderMenu);
+    search.addEventListener('input', () => { activeIndex = -1; renderMenu(); });
+    search.addEventListener('keydown', event => {
+        const shown = matches().slice(0, MENU_LIMIT);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!shown.length) return;
+            activeIndex = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length;
+            renderMenu();
+            $('sq-fn-menu').querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            const pick = shown[activeIndex] || (shown.length === 1 || (search.value.trim() && shown.length) ? shown[0] : null);
+            if (pick) addNodes([pick.name]);
+        } else if (event.key === 'Escape') {
+            $('sq-fn-menu').classList.add('d-none');
+        } else if (event.key === 'Backspace' && !search.value && selectedNodes.length) {
+            removeNode(selectedNodes[selectedNodes.length - 1]);
+        }
+    });
+    $('sq-fn-menu').addEventListener('mousedown', event => event.preventDefault());   // keep focus in the input
+    $('sq-fn-menu').addEventListener('click', event => {
+        const single = event.target.closest('[data-add]');
+        if (single) return addNodes([single.dataset.add]);
+        if (event.target.closest('[data-add-all]')) addNodes(matches().map(n => n.name));
+    });
+    $('sq-fn-chips').addEventListener('click', event => {
+        const button = event.target.closest('[data-remove]');
+        if (button) { event.stopPropagation(); removeNode(button.dataset.remove); }
+    });
+    document.addEventListener('mousedown', event => {
+        if (!event.target.closest('#sq-fn-box, #sq-fn-menu')) $('sq-fn-menu').classList.add('d-none');
+    });
     $('sq-target-filter').addEventListener('change', () => selectedJob && selectJob(selectedJob));
     $('sq-refresh-btn').addEventListener('click', () => run(refreshJobs, 'Refresh'));
     $('sq-plan-btn').addEventListener('click', () => run(() => createJob(false), 'Schedule'));

@@ -6,7 +6,11 @@
     .sq-bar-wrap { width: 100%; min-width: 90px; height: 6px; background: #e9ecef; border-radius: 3px; overflow: hidden; }
     .sq-bar { height: 100%; min-width: 2px; background: linear-gradient(90deg, #0d6efd, #20c997); transition: width .3s; }
     .sq-bar-fail { background: linear-gradient(90deg, #dc3545, #fd7e14); }
-    #sq-fiber-nodes { min-height: 6.5rem; }
+    .d-contents { display: contents; }
+    .sq-fn-box { height: auto; min-height: 31px; cursor: text; }
+    .sq-fn-input { border: 0; outline: 0; flex: 1 1 10rem; min-width: 8rem; background: transparent; padding: 0; }
+    .sq-fn-menu { z-index: 1055; max-height: 280px; overflow-y: auto; }
+    .sq-fn-menu .list-group-item { padding: .25rem .6rem; font-size: .85rem; }
 </style>
 {% endblock %}
 {% block content %}
@@ -42,8 +46,17 @@
                     <select class="form-select form-select-sm" id="sq-cmts"><option value="">Loading...</option></select>
                 </div>
                 <div class="col-md-5 d-none" id="sq-fn-wrap">
-                    <label class="form-label small fw-bold" for="sq-fiber-nodes">Fiber nodes <span class="text-muted fw-normal">(Ctrl/Cmd-click for several)</span></label>
-                    <select class="form-select form-select-sm" id="sq-fiber-nodes" multiple></select>
+                    <label class="form-label small fw-bold" for="sq-fn-search">Fiber nodes <span class="text-muted fw-normal">(type part of a name)</span></label>
+                    <div class="position-relative">
+                        <div class="form-control form-control-sm d-flex flex-wrap align-items-center gap-1 sq-fn-box" id="sq-fn-box">
+                            <span class="d-contents" id="sq-fn-chips"></span>
+                            <input type="text" id="sq-fn-search" class="sq-fn-input" autocomplete="off" spellcheck="false"
+                                   placeholder="Select a CMTS first" disabled>
+                        </div>
+                        <div class="list-group position-absolute w-100 shadow-sm d-none sq-fn-menu" id="sq-fn-menu" role="listbox"></div>
+                    </div>
+                    <div class="form-text" id="sq-fn-status"></div>
+                    <div class="form-text fw-semibold" id="sq-fn-selected"></div>
                 </div>
 
                 <div class="col-md-2">

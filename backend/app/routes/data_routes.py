@@ -1594,7 +1594,10 @@ def signal_quality_plan():
         return gate
     payload = dict(request.get_json(silent=True) or {})
     payload["requested_by"] = session.get("username") or session.get("user") or "user"
-    return _proxy("POST", "/signal-quality/jobs/plan", payload=payload)
+    # Resolving a fiber-node scope joins the topology map and can take 10-20 s on
+    # production; the default 30 s proxy timeout would report a failure while the
+    # plan is still being created.
+    return _proxy("POST", "/signal-quality/jobs/plan", payload=payload, timeout=120)
 
 
 @api_bp.route('/admin/signal-quality/jobs/<public_id>', methods=['GET'])
