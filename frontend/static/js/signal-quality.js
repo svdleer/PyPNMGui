@@ -176,6 +176,7 @@
             window_end: $('sq-window-end').value,
             override_window: $('sq-override-window').checked,
             include_captures: $('sq-include-captures').checked,
+            modems_per_fiber_node: Number($('sq-per-node').value.trim() === '' ? NaN : $('sq-per-node').value),
             scheduled_start: start ? new Date(start).toISOString() : null,
             confirmation_password: $('sq-password').value,
         };
@@ -187,6 +188,12 @@
         if (plan.scope.type === 'fiber_node' && !plan.scope.fiber_nodes.length) throw new Error('Select at least one fiber node');
         if (!plan.window_start || !plan.window_end) throw new Error('Set the window start and end');
         if (plan.window_start === plan.window_end) throw new Error('Window start and end must differ');
+        if (!Number.isInteger(plan.modems_per_fiber_node) || plan.modems_per_fiber_node < 0 || plan.modems_per_fiber_node > 100000) {
+            throw new Error('Modems per fiber node must be a whole number from 0 to 100000 (0 = all)');
+        }
+        if (plan.modems_per_fiber_node === 0 && !confirm('0 means every modem in the selected scope. A whole CMTS can be tens of thousands of modems and take many nights. Continue?')) {
+            throw new Error('Cancelled');
+        }
         if (plan.override_window && !confirm('Override is on: the snapshot will run at any time, including busy hours. Continue?')) throw new Error('Cancelled');
     }
 
@@ -199,7 +206,11 @@
             await request('POST', `/jobs/${id}/start`, { confirmation_password: plan.confirmation_password, override_window: plan.override_window });
         }
         $('sq-password').value = '';
-        $('sq-plan-hint').textContent = `Planned ${created.job.targets_total} modems.`;
+        const planned = created.job;
+        $('sq-plan-hint').textContent = `Planned ${planned.targets_total.toLocaleString()} modems` +
+            (planned.fiber_nodes_planned ? ` in ${planned.fiber_nodes_planned.toLocaleString()} fiber nodes` : '') +
+            (planned.modems_per_fiber_node && planned.modems_available != null
+                ? ` (${planned.modems_per_fiber_node} per node, ${planned.modems_available.toLocaleString()} available).` : '.');
         await refreshJobs();
         await selectJob(id);
         startPolling();
@@ -214,8 +225,10 @@
         const done = job.targets_complete + job.targets_failed;
         const pct = total ? Math.round((done / total) * 100) : 0;
         const failPct = total ? Math.round((job.targets_failed / total) * 100) : 0;
-        const scope = job.scope_type === 'fiber_node'
-            ? `${esc(job.cmts)} / ${esc(job.fiber_nodes.join(', '))}` : esc(job.cmts);
+        const sample = job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per node` : 'all modems';
+        const scope = (job.scope_type === 'fiber_node'
+            ? `${esc(job.cmts)} / ${esc(job.fiber_nodes.join(', '))}` : esc(job.cmts)) +
+            ` <span class="text-muted small">(${sample})</span>`;
         const next = job.override_window ? '<span class="text-danger">any time (override)</span>'
             : job.next_window_open ? esc(when(job.next_window_open)) : '—';
         const canStart = ['scheduled', 'waiting_window'].includes(job.status);
@@ -292,6 +305,8 @@
             `Complete: <strong>${job.targets_complete}</strong>`,
             `<span class="text-danger">Failed: <strong>${job.targets_failed}</strong></span>`,
             `Pending: <strong>${job.targets_pending}</strong>`,
+            `Sample: <strong>${job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per fiber node` : 'all modems'}</strong>` +
+                (job.fiber_nodes_planned ? ` in ${job.fiber_nodes_planned.toLocaleString()} nodes` : ''),
             `Captures: <strong>${job.include_captures ? 'yes' : 'SNMP only'}</strong>`,
             `Started: ${esc(when(job.started_at))}`, `Finished: ${esc(when(job.finished_at))}`,
         ];

@@ -83,10 +83,15 @@
                 </div>
 
                 <div class="col-md-3">
+                    <label class="form-label small fw-bold" for="sq-per-node">Modems per fiber node <span class="text-muted fw-normal">(0 = all)</span></label>
+                    <input type="number" class="form-control form-control-sm" id="sq-per-node" value="10" min="0" max="100000" step="1" inputmode="numeric">
+                    <div class="form-text">A random sample from every fiber node. Use 0 to measure every modem.</div>
+                </div>
+                <div class="col-md-3">
                     <label class="form-label small fw-bold" for="sq-password">Confirmation password</label>
                     <input type="password" class="form-control form-control-sm" id="sq-password" autocomplete="off">
                 </div>
-                <div class="col-md-9 d-flex align-items-end gap-2">
+                <div class="col-md-6 d-flex align-items-end gap-2">
                     <button class="btn btn-primary btn-sm" id="sq-plan-btn"><i class="bi bi-calendar-check me-1"></i>Schedule</button>
                     <button class="btn btn-success btn-sm" id="sq-run-btn"><i class="bi bi-play-fill me-1"></i>Schedule and start now</button>
                     <span class="small text-muted" id="sq-plan-hint"></span>

@@ -106,12 +106,13 @@ def test_disabled_flag_hides_every_route(env) -> None:
 def test_plan_forwards_payload_and_injects_requester(env) -> None:
     client, calls, _ = env
     payload = {"scope": {"type": "cmts", "cmts": "ccap1"}, "window_start": "01:00", "window_end": "06:00",
-               "confirmation_password": "kensentme", "requested_by": "mallory"}
+               "modems_per_fiber_node": 10, "confirmation_password": "kensentme", "requested_by": "mallory"}
     assert client("user", "alice").post("/api/admin/signal-quality/jobs/plan", json=payload).status_code == 200
     sent = calls[0]
     assert sent["method"] == "POST" and sent["url"] == f"{BASE}/jobs/plan"
     assert sent["json"]["requested_by"] == "alice"  # a client cannot spoof the requester
     assert sent["json"]["confirmation_password"] == "kensentme"
+    assert sent["json"]["modems_per_fiber_node"] == 10  # the sample size reaches the API untouched
     assert client.timeouts == [120]  # fiber-node scopes resolve slowly; do not cut them off at 30 s
 
 
