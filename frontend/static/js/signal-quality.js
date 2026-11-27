@@ -221,7 +221,7 @@
         if (planned.modems_per_cmts) {
             const cards = planned.line_cards_planned || 0;
             $('sq-plan-hint').textContent = `Planned ${planned.targets_total.toLocaleString()} modems${available}` +
-                (cards > 1 ? `, spread over ${cards} line cards or MAC domains.` : '.');
+                (cards > 1 ? `, spread over ${cards} line cards.` : '.');
         } else {
             $('sq-plan-hint').textContent = `Planned ${planned.targets_total.toLocaleString()} modems` +
                 (planned.fiber_nodes_planned ? ` in ${planned.fiber_nodes_planned.toLocaleString()} fiber nodes` : '') +
@@ -242,7 +242,7 @@
         const done = job.targets_complete + job.targets_failed;
         const pct = total ? Math.round((done / total) * 100) : 0;
         const failPct = total ? Math.round((job.targets_failed / total) * 100) : 0;
-        const sample = job.modems_per_cmts ? `${job.modems_per_cmts} modems spread over line cards`
+        const sample = job.modems_per_cmts ? `${job.modems_per_cmts} modems${job.line_cards_planned > 1 ? ' over line cards' : ''}`
             : job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per node` : 'all modems';
         const scope = (job.scope_type === 'fiber_node'
             ? `${esc(job.cmts)} / ${esc(job.fiber_nodes.join(', '))}` : esc(job.cmts)) +
@@ -324,7 +324,8 @@
             `<span class="text-danger">Failed: <strong>${job.targets_failed}</strong></span>`,
             `Pending: <strong>${job.targets_pending}</strong>`,
             job.modems_per_cmts
-                ? `Sample: <strong>${job.modems_per_cmts} modems</strong> over ${job.line_cards_planned || 1} line card${job.line_cards_planned === 1 ? '' : 's'} or MAC domains`
+                ? `Sample: <strong>${job.modems_per_cmts} modems</strong>` +
+                    (job.line_cards_planned > 1 ? ` over ${job.line_cards_planned} line cards` : ' chosen at random')
                 : `Sample: <strong>${job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per fiber node` : 'all modems'}</strong>` +
                     (job.fiber_nodes_planned ? ` in ${job.fiber_nodes_planned.toLocaleString()} nodes` : ''),
             `Captures: <strong>${job.include_captures ? 'yes' : 'SNMP only'}</strong>`,
