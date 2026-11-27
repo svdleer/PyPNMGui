@@ -35,7 +35,10 @@
         const fiberNode = $('sq-scope-type').value === 'fiber_node';
         $('sq-fn-wrap').classList.toggle('d-none', !(topologyEnabled && fiberNode));
         if (!topologyEnabled && fiberNode) $('sq-scope-type').value = 'cmts';
-        if (topologyEnabled && fiberNode && loadedFor !== $('sq-cmts').value) loadFiberNodes();
+        const nodeScope = topologyEnabled && fiberNode;
+        $('sq-per-cmts-wrap').classList.toggle('d-none', nodeScope);
+        $('sq-per-node-wrap').classList.toggle('d-none', !nodeScope);
+        if (nodeScope && loadedFor !== $('sq-cmts').value) loadFiberNodes();
     }
 
     // ── Fiber node picker: type part of a name, pick from the matches ─────
@@ -170,16 +173,20 @@
         const scope = { type, cmts };
         if (type === 'fiber_node') scope.fiber_nodes = [...selectedNodes];
         const start = $('sq-scheduled-start').value;
-        return {
+        const amount = id => ($(id).value.trim() === '' ? NaN : Number($(id).value));
+        const plan = {
             scope,
             window_start: $('sq-window-start').value,
             window_end: $('sq-window-end').value,
             override_window: $('sq-override-window').checked,
             include_captures: $('sq-include-captures').checked,
-            modems_per_fiber_node: Number($('sq-per-node').value.trim() === '' ? NaN : $('sq-per-node').value),
             scheduled_start: start ? new Date(start).toISOString() : null,
             confirmation_password: $('sq-password').value,
         };
+        // A whole CMTS takes a small total spread over its line cards; fiber nodes take a count per node.
+        if (type === 'fiber_node') plan.modems_per_fiber_node = amount('sq-per-node');
+        else plan.modems_per_cmts = amount('sq-per-cmts');
+        return plan;
     }
 
     function validatePlan(plan) {
@@ -188,10 +195,13 @@
         if (plan.scope.type === 'fiber_node' && !plan.scope.fiber_nodes.length) throw new Error('Select at least one fiber node');
         if (!plan.window_start || !plan.window_end) throw new Error('Set the window start and end');
         if (plan.window_start === plan.window_end) throw new Error('Window start and end must differ');
-        if (!Number.isInteger(plan.modems_per_fiber_node) || plan.modems_per_fiber_node < 0 || plan.modems_per_fiber_node > 100000) {
+        if (plan.scope.type === 'cmts' && (!Number.isInteger(plan.modems_per_cmts) || plan.modems_per_cmts < 1 || plan.modems_per_cmts > 50)) {
+            throw new Error('Modems to poll must be a whole number from 1 to 50');
+        }
+        if (plan.scope.type === 'fiber_node' && (!Number.isInteger(plan.modems_per_fiber_node) || plan.modems_per_fiber_node < 0 || plan.modems_per_fiber_node > 100000)) {
             throw new Error('Modems per fiber node must be a whole number from 0 to 100000 (0 = all)');
         }
-        if (plan.modems_per_fiber_node === 0 && !confirm('0 means every modem in the selected scope. A whole CMTS can be tens of thousands of modems and take many nights. Continue?')) {
+        if (plan.scope.type === 'fiber_node' && plan.modems_per_fiber_node === 0 && !confirm('0 means every modem in the selected scope. A whole CMTS can be tens of thousands of modems and take many nights. Continue?')) {
             throw new Error('Cancelled');
         }
         if (plan.override_window && !confirm('Override is on: the snapshot will run at any time, including busy hours. Continue?')) throw new Error('Cancelled');
@@ -207,10 +217,17 @@
         }
         $('sq-password').value = '';
         const planned = created.job;
-        $('sq-plan-hint').textContent = `Planned ${planned.targets_total.toLocaleString()} modems` +
-            (planned.fiber_nodes_planned ? ` in ${planned.fiber_nodes_planned.toLocaleString()} fiber nodes` : '') +
-            (planned.modems_per_fiber_node && planned.modems_available != null
-                ? ` (${planned.modems_per_fiber_node} per node, ${planned.modems_available.toLocaleString()} available).` : '.');
+        const available = planned.modems_available != null ? ` of ${planned.modems_available.toLocaleString()} reachable` : '';
+        if (planned.modems_per_cmts) {
+            const cards = planned.line_cards_planned || 0;
+            $('sq-plan-hint').textContent = `Planned ${planned.targets_total.toLocaleString()} modems${available}` +
+                (cards > 1 ? `, spread over ${cards} line cards or MAC domains.` : '.');
+        } else {
+            $('sq-plan-hint').textContent = `Planned ${planned.targets_total.toLocaleString()} modems` +
+                (planned.fiber_nodes_planned ? ` in ${planned.fiber_nodes_planned.toLocaleString()} fiber nodes` : '') +
+                (planned.modems_per_fiber_node && planned.modems_available != null
+                    ? ` (${planned.modems_per_fiber_node} per node, ${planned.modems_available.toLocaleString()} available).` : '.');
+        }
         await refreshJobs();
         await selectJob(id);
         startPolling();
@@ -225,7 +242,8 @@
         const done = job.targets_complete + job.targets_failed;
         const pct = total ? Math.round((done / total) * 100) : 0;
         const failPct = total ? Math.round((job.targets_failed / total) * 100) : 0;
-        const sample = job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per node` : 'all modems';
+        const sample = job.modems_per_cmts ? `${job.modems_per_cmts} modems spread over line cards`
+            : job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per node` : 'all modems';
         const scope = (job.scope_type === 'fiber_node'
             ? `${esc(job.cmts)} / ${esc(job.fiber_nodes.join(', '))}` : esc(job.cmts)) +
             ` <span class="text-muted small">(${sample})</span>`;
@@ -305,8 +323,10 @@
             `Complete: <strong>${job.targets_complete}</strong>`,
             `<span class="text-danger">Failed: <strong>${job.targets_failed}</strong></span>`,
             `Pending: <strong>${job.targets_pending}</strong>`,
-            `Sample: <strong>${job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per fiber node` : 'all modems'}</strong>` +
-                (job.fiber_nodes_planned ? ` in ${job.fiber_nodes_planned.toLocaleString()} nodes` : ''),
+            job.modems_per_cmts
+                ? `Sample: <strong>${job.modems_per_cmts} modems</strong> over ${job.line_cards_planned || 1} line card${job.line_cards_planned === 1 ? '' : 's'} or MAC domains`
+                : `Sample: <strong>${job.modems_per_fiber_node ? `${job.modems_per_fiber_node} per fiber node` : 'all modems'}</strong>` +
+                    (job.fiber_nodes_planned ? ` in ${job.fiber_nodes_planned.toLocaleString()} nodes` : ''),
             `Captures: <strong>${job.include_captures ? 'yes' : 'SNMP only'}</strong>`,
             `Started: ${esc(when(job.started_at))}`, `Finished: ${esc(when(job.finished_at))}`,
         ];
