@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Signal Quality - PyPNM{% endblock %}
+{% block extra_head %}
+<style>
+    .sq-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    .sq-bar-wrap { width: 100%; min-width: 90px; height: 6px; background: #e9ecef; border-radius: 3px; overflow: hidden; }
+    .sq-bar { height: 100%; min-width: 2px; background: linear-gradient(90deg, #0d6efd, #20c997); transition: width .3s; }
+    .sq-bar-fail { background: linear-gradient(90deg, #dc3545, #fd7e14); }
+    #sq-fiber-nodes { min-height: 6.5rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" id="signal-quality-app"
+     data-base-path="[[ base_path ]]"
+     data-topology-scopes-enabled="[[ 'true' if topology_scopes_enabled else 'false' ]]">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0"><i class="bi bi-activity me-2"></i>Signal Quality</h4>
+        <span class="badge bg-info text-dark">Admin and User</span>
+    </div>
+
+    <div class="alert alert-info py-2 small" role="alert">
+        <i class="bi bi-clock me-1"></i>
+        Snapshots run in a low-traffic window (server local time, default 01:00&ndash;06:00) and continue the next night when a window ends.
+        Each snapshot collects, per modem: full-band capture (FBC), downstream receive power and SNR/MER (SC-QAM and OFDM),
+        upstream transmit power, the upstream channel plan and equalizer data. The package contains one CSV per measurement
+        sorted by MAC address, and PNM files with the MAC address in the file name.
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-white"><strong>Plan a snapshot</strong></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold" for="sq-scope-type">Scope</label>
+                    <select class="form-select form-select-sm" id="sq-scope-type">
+                        <option value="cmts">Entire CMTS</option>
+                        <option value="fiber_node" {% if not topology_scopes_enabled %}disabled{% endif %}>Fiber node{% if not topology_scopes_enabled %} (topology disabled){% endif %}</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold" for="sq-cmts">CMTS</label>
+                    <select class="form-select form-select-sm" id="sq-cmts"><option value="">Loading...</option></select>
+                </div>
+                <div class="col-md-5 d-none" id="sq-fn-wrap">
+                    <label class="form-label small fw-bold" for="sq-fiber-nodes">Fiber nodes <span class="text-muted fw-normal">(Ctrl/Cmd-click for several)</span></label>
+                    <select class="form-select form-select-sm" id="sq-fiber-nodes" multiple></select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold" for="sq-window-start">Window start</label>
+                    <input type="time" class="form-control form-control-sm" id="sq-window-start" value="01:00">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold" for="sq-window-end">Window end</label>
+                    <input type="time" class="form-control form-control-sm" id="sq-window-end" value="06:00">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold" for="sq-scheduled-start">Earliest start <span class="text-muted fw-normal">(optional)</span></label>
+                    <input type="datetime-local" class="form-control form-control-sm" id="sq-scheduled-start">
+                </div>
+                <div class="col-md-5 d-flex flex-column justify-content-end">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="sq-include-captures" checked>
+                        <label class="form-check-label small" for="sq-include-captures">Include PNM file captures (FBC, RxMER, OFDMA pre-EQ). Untick for a quick SNMP-only snapshot.</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="sq-override-window">
+                        <label class="form-check-label small text-danger" for="sq-override-window">Override window: run at any time, including busy hours.</label>
+                    </div>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold" for="sq-password">Confirmation password</label>
+                    <input type="password" class="form-control form-control-sm" id="sq-password" autocomplete="off">
+                </div>
+                <div class="col-md-9 d-flex align-items-end gap-2">
+                    <button class="btn btn-primary btn-sm" id="sq-plan-btn"><i class="bi bi-calendar-check me-1"></i>Schedule</button>
+                    <button class="btn btn-success btn-sm" id="sq-run-btn"><i class="bi bi-play-fill me-1"></i>Schedule and start now</button>
+                    <span class="small text-muted" id="sq-plan-hint"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong>Snapshots</strong>
+            <button class="btn btn-sm btn-outline-secondary" id="sq-refresh-btn"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead><tr><th>Status</th><th>Scope</th><th>Window</th><th>Next run</th><th style="min-width:160px">Progress</th><th>Package</th><th></th></tr></thead>
+                <tbody id="sq-jobs-body"><tr><td colspan="7" class="text-center text-muted py-3">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card d-none" id="sq-detail-card">
+        <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div><strong>Modems</strong> <span id="sq-detail-status"></span></div>
+            <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted mb-0" for="sq-target-filter">Show</label>
+                <select class="form-select form-select-sm" id="sq-target-filter" style="width:auto">
+                    <option value="">All</option>
+                    <option value="failed">Failed</option>
+                    <option value="complete">Complete</option>
+                    <option value="planned">Pending</option>
+                    <option value="running">Running</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body py-2 small" id="sq-detail-meta"></div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>MAC</th><th>IP</th><th>Fiber node</th><th>State</th><th>Error</th></tr></thead>
+                <tbody id="sq-targets-body"><tr><td colspan="5" class="text-muted">Select a snapshot</td></tr></tbody>
+            </table>
+        </div>
+        <div class="card-footer bg-white small text-muted" id="sq-targets-footer"></div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="[[ asset_url('js/signal-quality.js') ]]" defer></script>
+{% endblock %}

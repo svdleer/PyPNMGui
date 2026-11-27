@@ -20,6 +20,7 @@ from app.core.feature_flags import (
     is_network_rxmer_analytics_enabled,
     is_cm_bulk_reset_enabled,
     is_custom_snmp_enabled,
+    is_signal_quality_enabled,
     is_topology_scopes_enabled,
 )
 from . import api_bp
@@ -1548,3 +1549,93 @@ def cm_write_results(public_id):
         return gate
     params = {k: v for k, v in request.args.items() if k in {"cursor", "limit"}}
     return _proxy("GET", f"/cm-snmp-write/jobs/{public_id}/results", params=params)
+
+
+# ── Signal quality snapshots ─────────────────────────────────
+def _require_signal_quality():
+    if session.get("role") not in {"admin", "user"}:
+        return jsonify({"status": "error", "message": "Admin or user role required"}), 403
+    if not is_signal_quality_enabled():
+        return jsonify({"status": "error", "message": "Signal Quality is disabled"}), 404
+    return _require_topology_scopes()
+
+
+@api_bp.route('/admin/signal-quality/options/cmts', methods=['GET'])
+def signal_quality_cmts_options():
+    gate = _require_signal_quality()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/signal-quality/options/cmts", params=params)
+
+
+@api_bp.route('/admin/signal-quality/options/fiber-nodes', methods=['GET'])
+def signal_quality_fiber_node_options():
+    gate = _require_signal_quality()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cmts", "limit"}}
+    return _proxy("GET", "/signal-quality/options/fiber-nodes", params=params)
+
+
+@api_bp.route('/admin/signal-quality/jobs', methods=['GET'])
+def signal_quality_jobs():
+    gate = _require_signal_quality()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"limit"}}
+    return _proxy("GET", "/signal-quality/jobs", params=params)
+
+
+@api_bp.route('/admin/signal-quality/jobs/plan', methods=['POST'])
+def signal_quality_plan():
+    gate = _require_signal_quality()
+    if gate:
+        return gate
+    payload = dict(request.get_json(silent=True) or {})
+    payload["requested_by"] = session.get("username") or session.get("user") or "user"
+    return _proxy("POST", "/signal-quality/jobs/plan", payload=payload)
+
+
+@api_bp.route('/admin/signal-quality/jobs/<public_id>', methods=['GET'])
+def signal_quality_job(public_id):
+    gate = _require_signal_quality()
+    return gate or _proxy("GET", f"/signal-quality/jobs/{public_id}")
+
+
+@api_bp.route('/admin/signal-quality/jobs/<public_id>/start', methods=['POST'])
+def signal_quality_start(public_id):
+    gate = _require_signal_quality()
+    if gate:
+        return gate
+    scope_gate = _require_non_topology_job(f"/signal-quality/jobs/{public_id}")
+    if scope_gate:
+        return scope_gate
+    return _proxy("POST", f"/signal-quality/jobs/{public_id}/start", payload=request.get_json(silent=True) or {})
+
+
+@api_bp.route('/admin/signal-quality/jobs/<public_id>/cancel', methods=['POST'])
+def signal_quality_cancel(public_id):
+    gate = _require_signal_quality()
+    return gate or _proxy("POST", f"/signal-quality/jobs/{public_id}/cancel")
+
+
+@api_bp.route('/admin/signal-quality/jobs/<public_id>', methods=['DELETE'])
+def signal_quality_delete(public_id):
+    gate = _require_signal_quality()
+    return gate or _proxy("DELETE", f"/signal-quality/jobs/{public_id}")
+
+
+@api_bp.route('/admin/signal-quality/jobs/<public_id>/targets', methods=['GET'])
+def signal_quality_targets(public_id):
+    gate = _require_signal_quality()
+    if gate:
+        return gate
+    params = {k: v for k, v in request.args.items() if k in {"cursor", "limit", "state"}}
+    return _proxy("GET", f"/signal-quality/jobs/{public_id}/targets", params=params)
+
+
+@api_bp.route('/admin/signal-quality/jobs/<public_id>/download', methods=['GET'])
+def signal_quality_download(public_id):
+    gate = _require_signal_quality()
+    return gate or _stream_proxy(f"/signal-quality/jobs/{public_id}/download")

@@ -239,6 +239,29 @@
         </div>
     </div>
 
+    <!-- Signal Quality Feature -->
+    <div class="card mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong><i class="bi bi-activity me-2"></i>Signal Quality Snapshots</strong>
+            <span class="badge [[ 'bg-success' if signal_quality_enabled else 'bg-secondary' ]]">
+                Signal Quality: [[ 'Enabled' if signal_quality_enabled else 'Disabled' ]]
+            </span>
+        </div>
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <div class="fw-semibold">Scheduled per-CMTS / per-fiber-node signal quality reports</div>
+                <div class="small text-muted">Collects FBC, downstream power and SNR/MER, upstream transmit power and equalizer data during a low-traffic window and packages one CSV per measurement plus PNM files named by MAC address. Fiber Node scope is controlled by the topology setting below.</div>
+            </div>
+            <form method="post" action="[[ base_path ]]/admin/features/signal-quality">
+                <input type="hidden" name="enabled" value="[[ 'false' if signal_quality_enabled else 'true' ]]">
+                <button type="submit" class="btn btn-sm [[ 'btn-outline-danger' if signal_quality_enabled else 'btn-primary' ]]">
+                    <i class="bi [[ 'bi-toggle-off' if signal_quality_enabled else 'bi-toggle-on' ]] me-1"></i>
+                    [[ 'Disable' if signal_quality_enabled else 'Enable' ]]
+                </button>
+            </form>
+        </div>
+    </div>
+
     <!-- Topology-dependent Scope Feature -->
     <div class="card border-warning mb-3">
         <div class="card-header bg-white d-flex justify-content-between align-items-center">

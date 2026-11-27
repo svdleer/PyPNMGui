@@ -54,6 +54,13 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if signal_quality_enabled and auth_role in ['admin', 'user'] %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'auth.signal_quality_page' %}active{% endif %}" href="[[ base_path ]]/signal-quality">
+                        <i class="bi bi-activity me-1"></i>Signal Quality
+                    </a>
+                </li>
+                {% endif %}
                 {% if enable_topology %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.path.endswith('/topology') %}active{% endif %}" href="[[ base_path ]]/topology">

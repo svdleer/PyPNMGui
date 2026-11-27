@@ -15,10 +15,12 @@ from app.core.feature_flags import (
     NETWORK_RXMER_ANALYTICS_SETTING,
     CM_BULK_RESET_SETTING,
     CUSTOM_SNMP_SETTING,
+    SIGNAL_QUALITY_SETTING,
     TOPOLOGY_SCOPES_SETTING,
     is_network_rxmer_analytics_enabled,
     is_cm_bulk_reset_enabled,
     is_custom_snmp_enabled,
+    is_signal_quality_enabled,
     is_topology_scopes_enabled,
 )
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale, translate
@@ -409,6 +411,7 @@ def admin_page():
         network_rxmer_analytics_enabled=is_network_rxmer_analytics_enabled(),
         cm_bulk_reset_enabled=is_cm_bulk_reset_enabled(),
         custom_snmp_enabled=is_custom_snmp_enabled(),
+        signal_quality_enabled=is_signal_quality_enabled(),
         topology_scopes_enabled=is_topology_scopes_enabled(),
         data_store_backend="PyPNM",
         data_store_error=data_store_error,
@@ -493,6 +496,35 @@ def admin_set_custom_snmp_enabled():
     except Exception as exc:
         flash(f"Feature toggle failed: {exc}", "danger")
     return redirect(_prefixed(url_for("auth.admin_page")))
+
+
+@auth_bp.route("/admin/features/signal-quality", methods=["POST"])
+@admin_required
+def admin_set_signal_quality_enabled():
+    enabled = request.form.get("enabled") == "true"
+    try:
+        auth_db.set_setting(
+            SIGNAL_QUALITY_SETTING,
+            "true" if enabled else "false",
+            updated_by=session.get("username") or "admin",
+        )
+        flash(f"Signal Quality snapshots {'enabled' if enabled else 'disabled'}", "success")
+    except Exception as exc:
+        flash(f"Feature toggle failed: {exc}", "danger")
+    return redirect(_prefixed(url_for("auth.admin_page")))
+
+
+@auth_bp.route("/signal-quality", methods=["GET"])
+@login_required
+def signal_quality_page():
+    if not is_signal_quality_enabled() or session.get("role") not in {"admin", "user"}:
+        abort(404)
+    return render_template(
+        "signal_quality.html",
+        base_path=current_app.config.get("APP_ROOT", ""),
+        auth_username=session.get("username", ""),
+        auth_role=session.get("role", "user"),
+    )
 
 
 @auth_bp.route("/admin/features/topology-scopes", methods=["POST"])

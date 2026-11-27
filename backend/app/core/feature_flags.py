@@ -21,12 +21,14 @@ def _environment_setting_key(name: str) -> str:
 NETWORK_RXMER_ANALYTICS_SETTING = "network_rxmer_analytics_enabled"
 CM_BULK_RESET_SETTING = "cm_bulk_reset_enabled"
 CUSTOM_SNMP_SETTING = "custom_snmp_enabled"
+SIGNAL_QUALITY_SETTING = "signal_quality_enabled"
 # Only topology-dependent scopes need a lab-specific override.
 TOPOLOGY_SCOPES_SETTING = _environment_setting_key("topology_scopes_enabled")
 FEATURE_FLAG_DEFAULTS = {
     NETWORK_RXMER_ANALYTICS_SETTING: "false",
     CM_BULK_RESET_SETTING: "false",
     CUSTOM_SNMP_SETTING: "false",
+    SIGNAL_QUALITY_SETTING: "false",
     TOPOLOGY_SCOPES_SETTING: "false" if _IS_LAB else "true",
 }
 
@@ -55,6 +57,15 @@ def is_custom_snmp_enabled() -> bool:
         return auth_db.get_bool_setting(CUSTOM_SNMP_SETTING, default=False)
     except Exception as exc:
         logger.error("Unable to read Custom SNMP feature flag: %s", exc)
+        return False
+
+
+def is_signal_quality_enabled() -> bool:
+    """Return the persisted admin feature flag for Signal Quality snapshots."""
+    try:
+        return auth_db.get_bool_setting(SIGNAL_QUALITY_SETTING, default=False)
+    except Exception as exc:
+        logger.error("Unable to read Signal Quality feature flag: %s", exc)
         return False
 
 
